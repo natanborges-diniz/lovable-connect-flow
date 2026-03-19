@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useContatos, useCreateContato } from "@/hooks/useContatos";
 import { TipoContatoBadge } from "@/components/shared/StatusBadge";
@@ -26,92 +25,90 @@ export default function Contatos() {
   const { data: contatos, isLoading } = useContatos(filters);
 
   return (
-    <AppLayout>
-      <div className="p-6">
-        <PageHeader
-          title="Contatos"
-          description="Gerencie todos os contatos do CRM"
-          actions={
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Novo Contato</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Novo Contato</DialogTitle>
-                </DialogHeader>
-                <CreateContatoForm onSuccess={() => setDialogOpen(false)} />
-              </DialogContent>
-            </Dialog>
-          }
-        />
+    <>
+      <PageHeader
+        title="Contatos"
+        description="Gerencie todos os contatos do CRM"
+        actions={
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Novo Contato</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Novo Contato</DialogTitle>
+              </DialogHeader>
+              <CreateContatoForm onSuccess={() => setDialogOpen(false)} />
+            </DialogContent>
+          </Dialog>
+        }
+      />
 
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar contatos..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <Select value={tipoFilter} onValueChange={setTipoFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
-                  <SelectItem value="cliente">Cliente</SelectItem>
-                  <SelectItem value="fornecedor">Fornecedor</SelectItem>
-                  <SelectItem value="loja">Loja</SelectItem>
-                  <SelectItem value="colaborador">Colaborador</SelectItem>
-                </SelectContent>
-              </Select>
+      <Card className="shadow-card">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar contatos..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
             </div>
+            <Select value={tipoFilter} onValueChange={setTipoFilter}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos</SelectItem>
+                <SelectItem value="cliente">Cliente</SelectItem>
+                <SelectItem value="fornecedor">Fornecedor</SelectItem>
+                <SelectItem value="loja">Loja</SelectItem>
+                <SelectItem value="colaborador">Colaborador</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-            {isLoading ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
-            ) : !contatos?.length ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">Nenhum contato encontrado</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Telefone</TableHead>
-                    <TableHead>Tags</TableHead>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
+          ) : !contatos?.length ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">Nenhum contato encontrado</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Telefone</TableHead>
+                  <TableHead>Tags</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {contatos.map((contato) => (
+                  <TableRow key={contato.id}>
+                    <TableCell className="font-medium">{contato.nome}</TableCell>
+                    <TableCell><TipoContatoBadge tipo={contato.tipo} /></TableCell>
+                    <TableCell className="text-muted-foreground">{contato.email ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{contato.telefone ?? "—"}</TableCell>
+                    <TableCell>
+                      {contato.tags?.length ? (
+                        <div className="flex gap-1 flex-wrap">
+                          {contato.tags.map((tag) => (
+                            <span key={tag} className="text-xs bg-muted px-1.5 py-0.5 rounded">{tag}</span>
+                          ))}
+                        </div>
+                      ) : "—"}
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {contatos.map((contato) => (
-                    <TableRow key={contato.id}>
-                      <TableCell className="font-medium">{contato.nome}</TableCell>
-                      <TableCell><TipoContatoBadge tipo={contato.tipo} /></TableCell>
-                      <TableCell className="text-muted-foreground">{contato.email ?? "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{contato.telefone ?? "—"}</TableCell>
-                      <TableCell>
-                        {contato.tags?.length ? (
-                          <div className="flex gap-1 flex-wrap">
-                            {contato.tags.map((tag) => (
-                              <span key={tag} className="text-xs bg-muted px-1.5 py-0.5 rounded">{tag}</span>
-                            ))}
-                          </div>
-                        ) : "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </AppLayout>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
