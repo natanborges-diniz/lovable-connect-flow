@@ -14,7 +14,180 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      canais: {
+        Row: {
+          contato_id: string
+          created_at: string
+          id: string
+          identificador: string
+          metadata: Json | null
+          principal: boolean
+          tipo: Database["public"]["Enums"]["tipo_canal"]
+        }
+        Insert: {
+          contato_id: string
+          created_at?: string
+          id?: string
+          identificador: string
+          metadata?: Json | null
+          principal?: boolean
+          tipo: Database["public"]["Enums"]["tipo_canal"]
+        }
+        Update: {
+          contato_id?: string
+          created_at?: string
+          id?: string
+          identificador?: string
+          metadata?: Json | null
+          principal?: boolean
+          tipo?: Database["public"]["Enums"]["tipo_canal"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canais_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contatos: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          documento: string | null
+          email: string | null
+          id: string
+          metadata: Json | null
+          nome: string
+          tags: string[] | null
+          telefone: string | null
+          tipo: Database["public"]["Enums"]["tipo_contato"]
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          documento?: string | null
+          email?: string | null
+          id?: string
+          metadata?: Json | null
+          nome: string
+          tags?: string[] | null
+          telefone?: string | null
+          tipo?: Database["public"]["Enums"]["tipo_contato"]
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          documento?: string | null
+          email?: string | null
+          id?: string
+          metadata?: Json | null
+          nome?: string
+          tags?: string[] | null
+          telefone?: string | null
+          tipo?: Database["public"]["Enums"]["tipo_contato"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      eventos_crm: {
+        Row: {
+          contato_id: string
+          created_at: string
+          descricao: string | null
+          id: string
+          metadata: Json | null
+          referencia_id: string | null
+          referencia_tipo: string | null
+          tipo: string
+        }
+        Insert: {
+          contato_id: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          referencia_id?: string | null
+          referencia_tipo?: string | null
+          tipo: string
+        }
+        Update: {
+          contato_id?: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          referencia_id?: string | null
+          referencia_tipo?: string | null
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eventos_crm_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      solicitacoes: {
+        Row: {
+          assunto: string
+          canal_origem: Database["public"]["Enums"]["tipo_canal"]
+          classificacao_ia: Json | null
+          contato_id: string
+          created_at: string
+          descricao: string | null
+          id: string
+          metadata: Json | null
+          prioridade: Database["public"]["Enums"]["prioridade"]
+          status: Database["public"]["Enums"]["status_solicitacao"]
+          tipo: string | null
+          updated_at: string
+        }
+        Insert: {
+          assunto: string
+          canal_origem?: Database["public"]["Enums"]["tipo_canal"]
+          classificacao_ia?: Json | null
+          contato_id: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          prioridade?: Database["public"]["Enums"]["prioridade"]
+          status?: Database["public"]["Enums"]["status_solicitacao"]
+          tipo?: string | null
+          updated_at?: string
+        }
+        Update: {
+          assunto?: string
+          canal_origem?: Database["public"]["Enums"]["tipo_canal"]
+          classificacao_ia?: Json | null
+          contato_id?: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          prioridade?: Database["public"]["Enums"]["prioridade"]
+          status?: Database["public"]["Enums"]["status_solicitacao"]
+          tipo?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "solicitacoes_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +196,17 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      prioridade: "critica" | "alta" | "normal" | "baixa"
+      status_solicitacao:
+        | "aberta"
+        | "classificada"
+        | "em_atendimento"
+        | "aguardando_execucao"
+        | "concluida"
+        | "cancelada"
+        | "reaberta"
+      tipo_canal: "whatsapp" | "sistema" | "email" | "telefone"
+      tipo_contato: "cliente" | "fornecedor" | "loja" | "colaborador"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +333,19 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      prioridade: ["critica", "alta", "normal", "baixa"],
+      status_solicitacao: [
+        "aberta",
+        "classificada",
+        "em_atendimento",
+        "aguardando_execucao",
+        "concluida",
+        "cancelada",
+        "reaberta",
+      ],
+      tipo_canal: ["whatsapp", "sistema", "email", "telefone"],
+      tipo_contato: ["cliente", "fornecedor", "loja", "colaborador"],
+    },
   },
 } as const
