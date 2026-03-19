@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { Solicitacao, StatusSolicitacao, Prioridade } from "@/types/database";
 import { toast } from "sonner";
+import type { StatusSolicitacao, Prioridade, TipoCanal } from "@/types/database";
 
 export function useSolicitacoes(filters?: { status?: StatusSolicitacao; prioridade?: Prioridade; search?: string }) {
   return useQuery({
@@ -13,7 +13,7 @@ export function useSolicitacoes(filters?: { status?: StatusSolicitacao; priorida
       if (filters?.search) query = query.ilike("assunto", `%${filters.search}%`);
       const { data, error } = await query;
       if (error) throw error;
-      return data as (Solicitacao & { contato: { id: string; nome: string; tipo: string } })[];
+      return data;
     },
   });
 }
@@ -25,7 +25,7 @@ export function useSolicitacao(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase.from("solicitacoes").select("*, contato:contatos(*)").eq("id", id!).single();
       if (error) throw error;
-      return data as Solicitacao & { contato: any };
+      return data;
     },
   });
 }
@@ -33,8 +33,16 @@ export function useSolicitacao(id: string | undefined) {
 export function useCreateSolicitacao() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (solicitacao: Omit<Solicitacao, "id" | "created_at" | "updated_at" | "contato">) => {
-      const { data, error } = await supabase.from("solicitacoes").insert(solicitacao).select().single();
+    mutationFn: async (solicitacao: { contato_id: string; assunto: string; descricao?: string | null; tipo?: string | null; prioridade: Prioridade; canal_origem: TipoCanal; status?: StatusSolicitacao }) => {
+      const { data, error } = await supabase.from("solicitacoes").insert({
+        contato_id: solicitacao.contato_id,
+        assunto: solicitacao.assunto,
+        descricao: solicitacao.descricao,
+        tipo: solicitacao.tipo,
+        prioridade: solicitacao.prioridade,
+        canal_origem: solicitacao.canal_origem,
+        status: solicitacao.status ?? "aberta",
+      }).select().single();
       if (error) throw error;
       return data;
     },

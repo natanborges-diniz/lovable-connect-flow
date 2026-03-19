@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useContatos } from "@/hooks/useContatos";
+import { useContatos, useCreateContato } from "@/hooks/useContatos";
 import { TipoContatoBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { useCreateContato } from "@/hooks/useContatos";
 import type { TipoContato } from "@/types/database";
 
 export default function Contatos() {
@@ -135,9 +134,6 @@ function CreateContatoForm({ onSuccess }: { onSuccess: () => void }) {
         email: form.email || null,
         telefone: form.telefone || null,
         documento: form.documento || null,
-        metadata: {},
-        tags: [],
-        ativo: true,
       },
       { onSuccess }
     );

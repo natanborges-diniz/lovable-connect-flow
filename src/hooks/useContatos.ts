@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { Contato, TipoContato } from "@/types/database";
 import { toast } from "sonner";
+import type { TipoContato } from "@/types/database";
 
 export function useContatos(filters?: { tipo?: TipoContato; search?: string }) {
   return useQuery({
@@ -12,7 +12,7 @@ export function useContatos(filters?: { tipo?: TipoContato; search?: string }) {
       if (filters?.search) query = query.or(`nome.ilike.%${filters.search}%,email.ilike.%${filters.search}%,telefone.ilike.%${filters.search}%`);
       const { data, error } = await query;
       if (error) throw error;
-      return data as Contato[];
+      return data;
     },
   });
 }
@@ -24,7 +24,7 @@ export function useContato(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase.from("contatos").select("*").eq("id", id!).single();
       if (error) throw error;
-      return data as Contato;
+      return data;
     },
   });
 }
@@ -32,8 +32,16 @@ export function useContato(id: string | undefined) {
 export function useCreateContato() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (contato: Omit<Contato, "id" | "created_at" | "updated_at">) => {
-      const { data, error } = await supabase.from("contatos").insert(contato).select().single();
+    mutationFn: async (contato: { nome: string; tipo: TipoContato; email?: string | null; telefone?: string | null; documento?: string | null; tags?: string[]; ativo?: boolean }) => {
+      const { data, error } = await supabase.from("contatos").insert({
+        nome: contato.nome,
+        tipo: contato.tipo,
+        email: contato.email,
+        telefone: contato.telefone,
+        documento: contato.documento,
+        tags: contato.tags ?? [],
+        ativo: contato.ativo ?? true,
+      }).select().single();
       if (error) throw error;
       return data;
     },
@@ -50,7 +58,7 @@ export function useCreateContato() {
 export function useUpdateContato() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<Contato> & { id: string }) => {
+    mutationFn: async ({ id, ...updates }: { id: string; nome?: string; tipo?: TipoContato; email?: string | null; telefone?: string | null; documento?: string | null }) => {
       const { data, error } = await supabase.from("contatos").update(updates).eq("id", id).select().single();
       if (error) throw error;
       return data;

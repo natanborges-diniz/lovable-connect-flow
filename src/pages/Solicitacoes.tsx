@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Search } from "lucide-react";
-import type { StatusSolicitacao, Prioridade, TipoCanal } from "@/types/database";
+import type { StatusSolicitacao, Prioridade, TipoCanal, TipoContato } from "@/types/database";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -100,8 +100,8 @@ export default function Solicitacoes() {
                       <TableCell className="font-medium">{s.assunto}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm">{s.contato?.nome}</span>
-                          {s.contato?.tipo && <TipoContatoBadge tipo={s.contato.tipo as any} />}
+                          <span className="text-sm">{(s.contato as any)?.nome}</span>
+                          {(s.contato as any)?.tipo && <TipoContatoBadge tipo={(s.contato as any).tipo as TipoContato} />}
                         </div>
                       </TableCell>
                       <TableCell><StatusBadge status={s.status} /></TableCell>
@@ -118,7 +118,6 @@ export default function Solicitacoes() {
           </CardContent>
         </Card>
 
-        {/* Detail Dialog */}
         <Dialog open={!!detailId} onOpenChange={(open) => !open && setDetailId(null)}>
           <DialogContent className="max-w-lg">
             {detailItem && (
@@ -134,7 +133,7 @@ export default function Solicitacoes() {
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <span className="text-muted-foreground">Contato:</span>
-                      <p className="font-medium">{detailItem.contato?.nome}</p>
+                      <p className="font-medium">{(detailItem.contato as any)?.nome}</p>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Canal:</span>
@@ -157,8 +156,8 @@ export default function Solicitacoes() {
                       <p className="text-sm mt-1">{detailItem.descricao}</p>
                     </div>
                   )}
-                  <div className="flex gap-2 pt-2">
-                    <Label className="text-sm">Alterar status:</Label>
+                  <div className="flex items-center gap-2 pt-2">
+                    <Label className="text-sm whitespace-nowrap">Alterar status:</Label>
                     <Select
                       value={detailItem.status}
                       onValueChange={(v) => updateStatus.mutate({ id: detailItem.id, status: v as StatusSolicitacao })}
@@ -209,9 +208,6 @@ function CreateSolicitacaoForm({ onSuccess }: { onSuccess: () => void }) {
         tipo: form.tipo || null,
         prioridade: form.prioridade,
         canal_origem: form.canal_origem,
-        status: "aberta",
-        classificacao_ia: null,
-        metadata: {},
       },
       { onSuccess }
     );
