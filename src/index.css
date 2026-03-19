@@ -2,105 +2,223 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   INFOCO OPS Design System — Token Foundation
+   Aligned with INFOCO Optical Business family.
+   All colors MUST be HSL (without hsl() wrapper).
+   Usage: hsl(var(--token))
+   ============================================================ */
+
 @layer base {
   :root {
-    --background: 220 20% 97%;
-    --foreground: 220 25% 10%;
+    /* ── Brand ─────────────────────────────────────────────── */
+    --brand: 220 70% 50%;
+    --brand-foreground: 0 0% 100%;
+    --brand-soft: 220 70% 96%;
+    --brand-hover: 220 70% 44%;
+
+    /* ── Neutral ───────────────────────────────────────────── */
+    --neutral-50: 210 20% 98%;
+    --neutral-100: 210 17% 95%;
+    --neutral-200: 214 18% 91%;
+    --neutral-300: 213 14% 82%;
+    --neutral-400: 215 14% 64%;
+    --neutral-500: 215 16% 47%;
+    --neutral-600: 217 19% 35%;
+    --neutral-700: 218 22% 26%;
+    --neutral-800: 220 26% 14%;
+    --neutral-900: 222 47% 11%;
+
+    /* ── Semantic: Success ─────────────────────────────────── */
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 50% 95%;
+    --success-muted: 152 40% 80%;
+    --success-hover: 152 60% 34%;
+
+    /* ── Semantic: Warning ─────────────────────────────────── */
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 14%;
+    --warning-soft: 38 80% 95%;
+    --warning-muted: 38 60% 78%;
+    --warning-hover: 38 92% 42%;
+
+    /* ── Semantic: Danger ──────────────────────────────────── */
+    --danger: 0 72% 51%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 0 60% 96%;
+    --danger-muted: 0 50% 82%;
+    --danger-hover: 0 72% 44%;
+
+    /* ── Semantic: Info ────────────────────────────────────── */
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 217 80% 96%;
+    --info-muted: 217 60% 82%;
+    --info-hover: 217 91% 52%;
+
+    /* ── Focus ring ────────────────────────────────────────── */
+    --focus-ring: 220 70% 55%;
+    --focus-ring-offset: 0 0% 100%;
+
+    /* ── DataViz palette (8 chart colors) ──────────────────── */
+    --chart-1: 220 70% 50%;
+    --chart-2: 152 60% 40%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 280 60% 55%;
+    --chart-5: 0 72% 51%;
+    --chart-6: 190 80% 42%;
+    --chart-7: 340 65% 55%;
+    --chart-8: 30 80% 55%;
+
+    /* ── Surface / App Shell ───────────────────────────────── */
+    --app-bg: 210 20% 98%;
+    --surface: 0 0% 100%;
+    --surface-alt: 210 17% 95%;
+    --header-accent: 220 70% 50%;
+
+    /* ── Shadcn tokens ─────────────────────────────────────── */
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 25% 10%;
+    --card-foreground: 222.2 84% 4.9%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 25% 10%;
+    --popover-foreground: 222.2 84% 4.9%;
 
     --primary: 220 70% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 93%;
-    --secondary-foreground: 220 25% 20%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
 
-    --muted: 220 15% 93%;
-    --muted-foreground: 220 10% 46%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 220 15% 93%;
-    --accent-foreground: 220 25% 20%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
 
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
 
-    --success: 142 72% 29%;
-    --success-foreground: 0 0% 100%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 220 70% 55%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
+    --radius: 0.75rem;
 
-    --info: 199 89% 48%;
-    --info-foreground: 0 0% 100%;
-
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 220 70% 50%;
-
-    --radius: 0.5rem;
-
-    --sidebar-background: 220 25% 12%;
-    --sidebar-foreground: 220 10% 80%;
-    --sidebar-primary: 220 70% 55%;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 220 70% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 18%;
-    --sidebar-accent-foreground: 220 10% 90%;
-    --sidebar-border: 220 20% 20%;
+    --sidebar-accent: 220 70% 96%;
+    --sidebar-accent-foreground: 220 70% 44%;
+    --sidebar-border: 220 13% 91%;
     --sidebar-ring: 220 70% 55%;
-    --sidebar-muted: 220 15% 40%;
   }
 
   .dark {
-    --background: 220 25% 7%;
-    --foreground: 220 10% 93%;
+    /* ── Brand (dark) ───────────────────────────────────────── */
+    --brand: 220 70% 60%;
+    --brand-foreground: 0 0% 100%;
+    --brand-soft: 220 40% 16%;
+    --brand-hover: 220 70% 66%;
 
-    --card: 220 25% 10%;
-    --card-foreground: 220 10% 93%;
+    /* ── Neutral (dark) ────────────────────────────────────── */
+    --neutral-50: 220 20% 10%;
+    --neutral-100: 220 18% 13%;
+    --neutral-200: 218 18% 18%;
+    --neutral-300: 217 14% 28%;
+    --neutral-400: 215 14% 42%;
+    --neutral-500: 215 16% 57%;
+    --neutral-600: 213 14% 70%;
+    --neutral-700: 214 17% 82%;
+    --neutral-800: 210 17% 91%;
+    --neutral-900: 210 20% 96%;
 
-    --popover: 220 25% 10%;
-    --popover-foreground: 220 10% 93%;
+    /* ── Semantic (dark) ───────────────────────────────────── */
+    --success: 152 55% 48%;
+    --success-foreground: 152 60% 10%;
+    --success-soft: 152 30% 14%;
+    --success-muted: 152 30% 28%;
+    --success-hover: 152 55% 55%;
 
-    --primary: 220 70% 55%;
+    --warning: 38 85% 55%;
+    --warning-foreground: 38 92% 10%;
+    --warning-soft: 38 30% 14%;
+    --warning-muted: 38 30% 28%;
+    --warning-hover: 38 85% 62%;
+
+    --danger: 0 65% 55%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 0 30% 14%;
+    --danger-muted: 0 30% 28%;
+    --danger-hover: 0 65% 62%;
+
+    --info: 217 80% 65%;
+    --info-foreground: 217 91% 10%;
+    --info-soft: 217 30% 14%;
+    --info-muted: 217 30% 28%;
+    --info-hover: 217 80% 72%;
+
+    /* ── Focus ring (dark) ─────────────────────────────────── */
+    --focus-ring: 220 70% 65%;
+    --focus-ring-offset: 222.2 84% 4.9%;
+
+    /* ── DataViz (dark) ────────────────────────────────────── */
+    --chart-1: 220 70% 60%;
+    --chart-2: 152 55% 48%;
+    --chart-3: 38 85% 55%;
+    --chart-4: 280 55% 62%;
+    --chart-5: 0 65% 55%;
+    --chart-6: 190 70% 50%;
+    --chart-7: 340 60% 60%;
+    --chart-8: 30 75% 60%;
+
+    /* ── Surface / App Shell (dark) ────────────────────────── */
+    --app-bg: 222.2 84% 4.9%;
+    --surface: 222.2 84% 6%;
+    --surface-alt: 220 20% 10%;
+    --header-accent: 220 70% 60%;
+
+    /* ── Shadcn tokens (dark) ──────────────────────────────── */
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 6%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 220 70% 60%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 20% 18%;
-    --secondary-foreground: 220 10% 90%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 220 20% 18%;
-    --muted-foreground: 220 10% 55%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
 
-    --accent: 220 20% 18%;
-    --accent-foreground: 220 10% 90%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
 
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
 
-    --success: 142 60% 35%;
-    --success-foreground: 0 0% 100%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 220 70% 65%;
 
-    --warning: 38 80% 45%;
-    --warning-foreground: 0 0% 100%;
-
-    --info: 199 75% 45%;
-    --info-foreground: 0 0% 100%;
-
-    --border: 220 20% 18%;
-    --input: 220 20% 18%;
-    --ring: 220 70% 55%;
-
-    --sidebar-background: 220 30% 6%;
-    --sidebar-foreground: 220 10% 75%;
-    --sidebar-primary: 220 70% 55%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 220 70% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 25% 12%;
-    --sidebar-accent-foreground: 220 10% 90%;
-    --sidebar-border: 220 25% 12%;
-    --sidebar-ring: 220 70% 55%;
-    --sidebar-muted: 220 15% 40%;
+    --sidebar-accent: 220 30% 15%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 220 70% 60%;
   }
 }
 
@@ -111,6 +229,15 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* ── Global Visual utilities ──────────────────────────────── */
+@layer utilities {
+  .shadow-card {
+    box-shadow: 0 1px 3px 0 hsl(var(--foreground) / 0.04), 0 1px 2px -1px hsl(var(--foreground) / 0.04);
+  }
+  .shadow-card-hover {
+    box-shadow: 0 4px 12px -2px hsl(var(--foreground) / 0.08), 0 2px 6px -2px hsl(var(--foreground) / 0.04);
   }
 }
