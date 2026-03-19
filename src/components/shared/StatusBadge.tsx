@@ -3,27 +3,27 @@ import { cn } from "@/lib/utils";
 import type { StatusSolicitacao, Prioridade, TipoContato } from "@/types/database";
 
 const statusConfig: Record<StatusSolicitacao, { label: string; className: string }> = {
-  aberta: { label: "Aberta", className: "bg-info/15 text-info border-info/30" },
-  classificada: { label: "Classificada", className: "bg-primary/15 text-primary border-primary/30" },
-  em_atendimento: { label: "Em Atendimento", className: "bg-warning/15 text-warning border-warning/30" },
+  aberta: { label: "Aberta", className: "bg-info-soft text-info border-info-muted" },
+  classificada: { label: "Classificada", className: "bg-brand-soft text-brand border-brand/30" },
+  em_atendimento: { label: "Em Atendimento", className: "bg-warning-soft text-warning border-warning-muted" },
   aguardando_execucao: { label: "Aguardando Execução", className: "bg-muted text-muted-foreground border-border" },
-  concluida: { label: "Concluída", className: "bg-success/15 text-success border-success/30" },
-  cancelada: { label: "Cancelada", className: "bg-destructive/15 text-destructive border-destructive/30" },
-  reaberta: { label: "Reaberta", className: "bg-warning/15 text-warning border-warning/30" },
+  concluida: { label: "Concluída", className: "bg-success-soft text-success border-success-muted" },
+  cancelada: { label: "Cancelada", className: "bg-danger-soft text-danger border-danger-muted" },
+  reaberta: { label: "Reaberta", className: "bg-warning-soft text-warning border-warning-muted" },
 };
 
 const prioridadeConfig: Record<Prioridade, { label: string; className: string }> = {
-  critica: { label: "Crítica", className: "bg-destructive/15 text-destructive border-destructive/30" },
-  alta: { label: "Alta", className: "bg-warning/15 text-warning border-warning/30" },
+  critica: { label: "Crítica", className: "bg-danger-soft text-danger border-danger-muted" },
+  alta: { label: "Alta", className: "bg-warning-soft text-warning border-warning-muted" },
   normal: { label: "Normal", className: "bg-muted text-muted-foreground border-border" },
   baixa: { label: "Baixa", className: "bg-secondary text-secondary-foreground border-border" },
 };
 
 const tipoContatoConfig: Record<TipoContato, { label: string; className: string }> = {
-  cliente: { label: "Cliente", className: "bg-primary/15 text-primary border-primary/30" },
-  fornecedor: { label: "Fornecedor", className: "bg-info/15 text-info border-info/30" },
-  loja: { label: "Loja", className: "bg-success/15 text-success border-success/30" },
-  colaborador: { label: "Colaborador", className: "bg-warning/15 text-warning border-warning/30" },
+  cliente: { label: "Cliente", className: "bg-brand-soft text-brand border-brand/30" },
+  fornecedor: { label: "Fornecedor", className: "bg-info-soft text-info border-info-muted" },
+  loja: { label: "Loja", className: "bg-success-soft text-success border-success-muted" },
+  colaborador: { label: "Colaborador", className: "bg-warning-soft text-warning border-warning-muted" },
 };
 
 export function StatusBadge({ status }: { status: StatusSolicitacao }) {

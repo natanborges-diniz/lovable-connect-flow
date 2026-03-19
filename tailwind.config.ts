@@ -14,6 +14,84 @@ export default {
     },
     extend: {
       colors: {
+        /* ── App Shell ──────────────────────────────── */
+        "app-bg": "hsl(var(--app-bg))",
+        surface: {
+          DEFAULT: "hsl(var(--surface))",
+          alt: "hsl(var(--surface-alt))",
+        },
+
+        /* ── Brand ─────────────────────────────────── */
+        brand: {
+          DEFAULT: "hsl(var(--brand))",
+          foreground: "hsl(var(--brand-foreground))",
+          soft: "hsl(var(--brand-soft))",
+          hover: "hsl(var(--brand-hover))",
+        },
+
+        /* ── Neutral scale ─────────────────────────── */
+        neutral: {
+          50: "hsl(var(--neutral-50))",
+          100: "hsl(var(--neutral-100))",
+          200: "hsl(var(--neutral-200))",
+          300: "hsl(var(--neutral-300))",
+          400: "hsl(var(--neutral-400))",
+          500: "hsl(var(--neutral-500))",
+          600: "hsl(var(--neutral-600))",
+          700: "hsl(var(--neutral-700))",
+          800: "hsl(var(--neutral-800))",
+          900: "hsl(var(--neutral-900))",
+        },
+
+        /* ── Semantic: Success ─────────────────────── */
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+          soft: "hsl(var(--success-soft))",
+          muted: "hsl(var(--success-muted))",
+          hover: "hsl(var(--success-hover))",
+        },
+
+        /* ── Semantic: Warning ─────────────────────── */
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+          soft: "hsl(var(--warning-soft))",
+          muted: "hsl(var(--warning-muted))",
+          hover: "hsl(var(--warning-hover))",
+        },
+
+        /* ── Semantic: Danger ──────────────────────── */
+        danger: {
+          DEFAULT: "hsl(var(--danger))",
+          foreground: "hsl(var(--danger-foreground))",
+          soft: "hsl(var(--danger-soft))",
+          muted: "hsl(var(--danger-muted))",
+          hover: "hsl(var(--danger-hover))",
+        },
+
+        /* ── Semantic: Info ────────────────────────── */
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          foreground: "hsl(var(--info-foreground))",
+          soft: "hsl(var(--info-soft))",
+          muted: "hsl(var(--info-muted))",
+          hover: "hsl(var(--info-hover))",
+        },
+
+        /* ── DataViz (chart palette) ───────────────── */
+        chart: {
+          1: "hsl(var(--chart-1))",
+          2: "hsl(var(--chart-2))",
+          3: "hsl(var(--chart-3))",
+          4: "hsl(var(--chart-4))",
+          5: "hsl(var(--chart-5))",
+          6: "hsl(var(--chart-6))",
+          7: "hsl(var(--chart-7))",
+          8: "hsl(var(--chart-8))",
+        },
+
+        /* ── Existing shadcn tokens ────────────────── */
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -30,18 +108,6 @@ export default {
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
-        },
-        success: {
-          DEFAULT: "hsl(var(--success))",
-          foreground: "hsl(var(--success-foreground))",
-        },
-        warning: {
-          DEFAULT: "hsl(var(--warning))",
-          foreground: "hsl(var(--warning-foreground))",
-        },
-        info: {
-          DEFAULT: "hsl(var(--info))",
-          foreground: "hsl(var(--info-foreground))",
         },
         muted: {
           DEFAULT: "hsl(var(--muted))",
@@ -68,8 +134,23 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
-          muted: "hsl(var(--sidebar-muted))",
         },
+      },
+      ringColor: {
+        focus: "hsl(var(--focus-ring))",
+      },
+      ringOffsetColor: {
+        focus: "hsl(var(--focus-ring-offset))",
+      },
+      boxShadow: {
+        card: "0 1px 3px 0 hsl(var(--foreground) / 0.04), 0 1px 2px -1px hsl(var(--foreground) / 0.04)",
+        "card-hover": "0 4px 12px -2px hsl(var(--foreground) / 0.08), 0 2px 6px -2px hsl(var(--foreground) / 0.04)",
+      },
+      transitionDuration: {
+        DEFAULT: "180ms",
+      },
+      transitionTimingFunction: {
+        DEFAULT: "cubic-bezier(0.4, 0, 0.2, 1)",
       },
       borderRadius: {
         lg: "var(--radius)",

@@ -1,72 +1,118 @@
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  ChevronLeft,
-  ChevronRight,
+  LayoutDashboard, Users, FileText, BarChart3, Search as SearchIcon,
+  Plus, List, Clock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { NavLink } from "@/components/NavLink";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import type { ModuleKey } from "./AppLayout";
 
-const navItems = [
-  { label: "Dashboard", icon: LayoutDashboard, path: "/" },
-  { label: "Contatos", icon: Users, path: "/contatos" },
-  { label: "Solicitações", icon: FileText, path: "/solicitacoes" },
-];
+interface AppSidebarProps {
+  activeModule: ModuleKey;
+}
 
-export function AppSidebar() {
+interface MenuItem {
+  title: string;
+  url: string;
+  icon: React.ElementType;
+}
+
+interface MenuSection {
+  label: string;
+  items: MenuItem[];
+}
+
+const moduleMenus: Record<ModuleKey, MenuSection[]> = {
+  dashboard: [
+    {
+      label: "Visão Geral",
+      items: [
+        { title: "Dashboard", url: "/", icon: LayoutDashboard },
+      ],
+    },
+  ],
+  crm: [
+    {
+      label: "Contatos",
+      items: [
+        { title: "Todos os Contatos", url: "/crm", icon: Users },
+      ],
+    },
+  ],
+  solicitacoes: [
+    {
+      label: "Solicitações",
+      items: [
+        { title: "Todas as Solicitações", url: "/solicitacoes", icon: FileText },
+      ],
+    },
+  ],
+};
+
+export function AppSidebar({ activeModule }: AppSidebarProps) {
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
   const location = useLocation();
-  const [collapsed, setCollapsed] = useState(false);
+  const sections = moduleMenus[activeModule] || [];
+
+  if (sections.length === 0 || sections.every(s => s.items.length === 0)) {
+    return null;
+  }
 
   return (
-    <aside
-      className={cn(
-        "flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-200",
-        collapsed ? "w-16" : "w-60"
-      )}
-    >
-      <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
-        {!collapsed && (
-          <span className="text-sm font-bold tracking-wide text-sidebar-primary-foreground bg-sidebar-primary px-2 py-0.5 rounded">
-            OPS
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setCollapsed(!collapsed)}
-          className="h-8 w-8 text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent"
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-        </Button>
-      </div>
+    <Sidebar collapsible="icon" className="border-r">
+      <SidebarContent className="pt-2">
+        {sections.map((section) => (
+          <SidebarGroup key={section.label}>
+            {!collapsed && (
+              <SidebarGroupLabel className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                {section.label}
+              </SidebarGroupLabel>
+            )}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {section.items.map((item) => {
+                  const isActive = location.pathname === item.url;
 
-      <nav className="flex-1 py-3 px-2 space-y-1">
-        {navItems.map((item) => {
-          const isActive =
-            item.path === "/"
-              ? location.pathname === "/"
-              : location.pathname.startsWith(item.path);
-
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
-          );
-        })}
-      </nav>
-    </aside>
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        tooltip={collapsed ? item.title : undefined}
+                      >
+                        <NavLink
+                          to={item.url}
+                          end
+                          className={cn(
+                            "flex items-center gap-3 transition-colors duration-150 relative",
+                            isActive && "border-l-2 border-primary pl-[10px]"
+                          )}
+                          activeClassName="bg-brand-soft text-primary font-medium"
+                        >
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          {!collapsed && <span className="truncate">{item.title}</span>}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
+      </SidebarContent>
+    </Sidebar>
   );
 }
