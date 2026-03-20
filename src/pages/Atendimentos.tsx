@@ -12,11 +12,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Search, MessageSquare, Send, Eye } from "lucide-react";
+import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import type { StatusAtendimento } from "@/types/database";
 
 export default function Atendimentos() {
@@ -114,6 +115,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
 
   const [msgText, setMsgText] = useState("");
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
+  const [resumo, setResumo] = useState<string | null>(atendimento?.metadata?.resumo_ia || null);
+  const [resumoLoading, setResumoLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
@@ -189,6 +192,45 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
               <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
             </div>
           ))
+        )}
+      </div>
+
+      {/* Resumo IA */}
+      <div className="border-t pt-2 space-y-2">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-medium flex items-center gap-1.5">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            Resumo IA
+          </h4>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-xs"
+            disabled={resumoLoading || !mensagens?.length}
+            onClick={async () => {
+              setResumoLoading(true);
+              try {
+                const { data, error } = await supabase.functions.invoke("summarize-atendimento", {
+                  body: { atendimento_id: id },
+                });
+                if (error) throw error;
+                if (data.error) throw new Error(data.error);
+                setResumo(data.resumo);
+                toast.success("Resumo gerado com sucesso");
+              } catch (e: any) {
+                toast.error("Erro ao gerar resumo: " + e.message);
+              } finally {
+                setResumoLoading(false);
+              }
+            }}
+          >
+            {resumoLoading ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Gerando...</> : <><FileText className="h-3 w-3 mr-1" /> Gerar Resumo</>}
+          </Button>
+        </div>
+        {resumo && (
+          <div className="bg-muted/50 rounded-lg p-3 text-xs whitespace-pre-wrap text-muted-foreground">
+            {resumo}
+          </div>
         )}
       </div>
 

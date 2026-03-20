@@ -11,10 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Search, Sparkles, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import type { StatusSolicitacao, Prioridade, TipoCanal, TipoContato } from "@/types/database";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function Solicitacoes() {
   const [search, setSearch] = useState("");
@@ -154,6 +158,10 @@ export default function Solicitacoes() {
                     <p className="text-sm mt-1">{detailItem.descricao}</p>
                   </div>
                 )}
+
+                {/* Classificação IA */}
+                <ClassificacaoIA solicitacaoId={detailItem.id} classificacao={(detailItem as any).classificacao_ia} />
+
                 <div className="flex items-center gap-2 pt-2">
                   <Label className="text-sm whitespace-nowrap">Alterar status:</Label>
                   <Select
@@ -265,5 +273,53 @@ function CreateSolicitacaoForm({ onSuccess }: { onSuccess: () => void }) {
         {createSolicitacao.isPending ? "Criando..." : "Criar Solicitação"}
       </Button>
     </form>
+  );
+}
+
+function ClassificacaoIA({ solicitacaoId, classificacao }: { solicitacaoId: string; classificacao: any }) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(classificacao);
+  const queryClient = useQueryClient();
+
+  const handleClassify = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("classify-solicitacao", {
+        body: { solicitacao_id: solicitacaoId },
+      });
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      setResult(data.classificacao);
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
+      toast.success("Classificação IA concluída");
+    } catch (e: any) {
+      toast.error("Erro na classificação: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border-t pt-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-medium flex items-center gap-1.5">
+          <Sparkles className="h-4 w-4 text-primary" />
+          Classificação IA
+        </h4>
+        <Button size="sm" variant="outline" onClick={handleClassify} disabled={loading} className="h-7 text-xs">
+          {loading ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Classificando...</> : "Classificar com IA"}
+        </Button>
+      </div>
+      {result && (
+        <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="outline" className="bg-brand-soft text-brand">{result.tipo}</Badge>
+            <Badge variant="outline">{result.prioridade}</Badge>
+            <Badge variant="outline" className="bg-info-soft text-info">Confiança: {Math.round((result.confianca || 0) * 100)}%</Badge>
+          </div>
+          {result.justificativa && <p className="text-xs text-muted-foreground">{result.justificativa}</p>}
+        </div>
+      )}
+    </div>
   );
 }
