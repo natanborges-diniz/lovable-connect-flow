@@ -60,8 +60,8 @@ export default function Configuracoes() {
   });
 
   const createFila = useMutation({
-    mutationFn: async (fila: { setor_id: string; nome: string; tipo: string; descricao?: string; sla_minutos?: number }) => {
-      const { error } = await supabase.from("filas").insert(fila);
+    mutationFn: async (fila: { setor_id: string; nome: string; tipo: "atendimento" | "execucao"; descricao?: string; sla_minutos?: number }) => {
+      const { error } = await supabase.from("filas").insert([fila]);
       if (error) throw error;
     },
     onSuccess: () => {
