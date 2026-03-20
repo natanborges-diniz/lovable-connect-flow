@@ -4,13 +4,14 @@ import { TopNavigation } from "./TopNavigation";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
-export type ModuleKey = "dashboard" | "crm" | "solicitacoes" | "atendimentos" | "tarefas";
+export type ModuleKey = "dashboard" | "crm" | "solicitacoes" | "atendimentos" | "tarefas" | "configuracoes";
 
 export const moduleFromPath = (pathname: string): ModuleKey => {
   if (pathname.startsWith("/crm")) return "crm";
   if (pathname.startsWith("/solicitacoes")) return "solicitacoes";
   if (pathname.startsWith("/atendimentos")) return "atendimentos";
   if (pathname.startsWith("/tarefas")) return "tarefas";
+  if (pathname.startsWith("/configuracoes")) return "configuracoes";
   return "dashboard";
 };
 

@@ -1,6 +1,6 @@
 import { useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Users, FileText, MessageSquare, ListTodo,
+  LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
   Search as SearchIcon, Plus, List, Clock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -71,6 +71,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "Tarefas",
       items: [
         { title: "Todas as Tarefas", url: "/tarefas", icon: ListTodo },
+      ],
+    },
+  ],
+  configuracoes: [
+    {
+      label: "Configurações",
+      items: [
+        { title: "Setores e Filas", url: "/configuracoes", icon: Settings },
       ],
     },
   ],
