@@ -1,6 +1,6 @@
 import { useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Users, FileText, MessageSquare, ListTodo,
+  LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
   Search as SearchIcon, Plus, List, Clock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
