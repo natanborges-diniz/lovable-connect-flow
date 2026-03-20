@@ -190,7 +190,7 @@ export default function Configuracoes() {
         {/* WhatsApp Integration */}
         <Card className="shadow-card">
           <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">📱 Integração WhatsApp</CardTitle>
+            <CardTitle className="text-lg flex items-center gap-2">📱 Integração WhatsApp (API Oficial Meta)</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
@@ -201,17 +201,30 @@ export default function Configuracoes() {
                   Copiar
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">Cole esta URL no campo "Callback URL" do Meta Business Manager.</p>
             </div>
-            <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
-              <p className="font-medium">Como configurar:</p>
-              <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-                <li>No painel do <strong>Evolution API</strong> ou <strong>Z-API</strong>, configure um novo webhook</li>
-                <li>Cole a URL acima como endpoint de destino</li>
-                <li>Selecione o evento <strong>messages.upsert</strong> (ou equivalente)</li>
-                <li>Salve a configuração e envie uma mensagem de teste</li>
+
+            <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-3">
+              <p className="font-medium">Como configurar na API Oficial do WhatsApp:</p>
+              <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
+                <li>Acesse o <strong>Meta Business Manager</strong> → <strong>WhatsApp</strong> → <strong>Configuração</strong></li>
+                <li>Em <strong>Webhook</strong>, clique em <strong>Editar</strong></li>
+                <li>Cole a <strong>URL do Webhook</strong> acima no campo "Callback URL"</li>
+                <li>No campo <strong>"Verify Token"</strong>, cole o mesmo token que você cadastrou como secret (<code>WHATSAPP_VERIFY_TOKEN</code>)</li>
+                <li>Clique em <strong>Verificar e salvar</strong> — a Meta enviará um GET para validar</li>
+                <li>Inscreva-se no campo <strong>"messages"</strong> para receber mensagens</li>
               </ol>
+            </div>
+
+            <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
+              <p className="font-medium">Secrets configurados:</p>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>✅ <code>WHATSAPP_VERIFY_TOKEN</code> — Token de verificação do webhook</li>
+                <li>✅ <code>WHATSAPP_ACCESS_TOKEN</code> — Token permanente (System User Token)</li>
+                <li>✅ <code>WHATSAPP_PHONE_NUMBER_ID</code> — ID do número no Meta Business</li>
+              </ul>
               <p className="text-xs text-muted-foreground mt-2">
-                O sistema aceita payloads dos formatos Evolution API, Z-API e formato genérico (from/body).
+                Também aceita payloads de Evolution API e Z-API como fallback.
               </p>
             </div>
           </CardContent>
