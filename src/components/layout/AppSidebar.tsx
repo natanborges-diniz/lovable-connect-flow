@@ -74,6 +74,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       ],
     },
   ],
+  configuracoes: [
+    {
+      label: "Configurações",
+      items: [
+        { title: "Setores e Filas", url: "/configuracoes", icon: Settings },
+      ],
+    },
+  ],
 };
 
 export function AppSidebar({ activeModule }: AppSidebarProps) {
