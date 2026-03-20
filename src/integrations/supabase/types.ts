@@ -14,6 +14,73 @@ export type Database = {
   }
   public: {
     Tables: {
+      atendimentos: {
+        Row: {
+          atendente_nome: string | null
+          canal: Database["public"]["Enums"]["tipo_canal"]
+          contato_id: string
+          created_at: string
+          fila_id: string | null
+          fim_at: string | null
+          id: string
+          inicio_at: string | null
+          metadata: Json | null
+          solicitacao_id: string
+          status: Database["public"]["Enums"]["status_atendimento"]
+          updated_at: string
+        }
+        Insert: {
+          atendente_nome?: string | null
+          canal?: Database["public"]["Enums"]["tipo_canal"]
+          contato_id: string
+          created_at?: string
+          fila_id?: string | null
+          fim_at?: string | null
+          id?: string
+          inicio_at?: string | null
+          metadata?: Json | null
+          solicitacao_id: string
+          status?: Database["public"]["Enums"]["status_atendimento"]
+          updated_at?: string
+        }
+        Update: {
+          atendente_nome?: string | null
+          canal?: Database["public"]["Enums"]["tipo_canal"]
+          contato_id?: string
+          created_at?: string
+          fila_id?: string | null
+          fim_at?: string | null
+          id?: string
+          inicio_at?: string | null
+          metadata?: Json | null
+          solicitacao_id?: string
+          status?: Database["public"]["Enums"]["status_atendimento"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "atendimentos_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "atendimentos_fila_id_fkey"
+            columns: ["fila_id"]
+            isOneToOne: false
+            referencedRelation: "filas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "atendimentos_solicitacao_id_fkey"
+            columns: ["solicitacao_id"]
+            isOneToOne: false
+            referencedRelation: "solicitacoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       canais: {
         Row: {
           contato_id: string
@@ -48,6 +115,41 @@ export type Database = {
             columns: ["contato_id"]
             isOneToOne: false
             referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      checklist_items: {
+        Row: {
+          concluido: boolean
+          created_at: string
+          id: string
+          ordem: number
+          tarefa_id: string
+          titulo: string
+        }
+        Insert: {
+          concluido?: boolean
+          created_at?: string
+          id?: string
+          ordem?: number
+          tarefa_id: string
+          titulo: string
+        }
+        Update: {
+          concluido?: boolean
+          created_at?: string
+          id?: string
+          ordem?: number
+          tarefa_id?: string
+          titulo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checklist_items_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "tarefas"
             referencedColumns: ["id"]
           },
         ]
@@ -135,6 +237,121 @@ export type Database = {
           },
         ]
       }
+      filas: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          descricao: string | null
+          id: string
+          metadata: Json | null
+          nome: string
+          setor_id: string
+          sla_minutos: number | null
+          tipo: Database["public"]["Enums"]["tipo_fila"]
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          nome: string
+          setor_id: string
+          sla_minutos?: number | null
+          tipo: Database["public"]["Enums"]["tipo_fila"]
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          nome?: string
+          setor_id?: string
+          sla_minutos?: number | null
+          tipo?: Database["public"]["Enums"]["tipo_fila"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "filas_setor_id_fkey"
+            columns: ["setor_id"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mensagens: {
+        Row: {
+          atendimento_id: string
+          conteudo: string
+          created_at: string
+          direcao: Database["public"]["Enums"]["direcao_mensagem"]
+          id: string
+          metadata: Json | null
+          remetente_nome: string | null
+        }
+        Insert: {
+          atendimento_id: string
+          conteudo: string
+          created_at?: string
+          direcao?: Database["public"]["Enums"]["direcao_mensagem"]
+          id?: string
+          metadata?: Json | null
+          remetente_nome?: string | null
+        }
+        Update: {
+          atendimento_id?: string
+          conteudo?: string
+          created_at?: string
+          direcao?: Database["public"]["Enums"]["direcao_mensagem"]
+          id?: string
+          metadata?: Json | null
+          remetente_nome?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mensagens_atendimento_id_fkey"
+            columns: ["atendimento_id"]
+            isOneToOne: false
+            referencedRelation: "atendimentos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      setores: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          descricao: string | null
+          id: string
+          metadata: Json | null
+          nome: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          nome: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          metadata?: Json | null
+          nome?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       solicitacoes: {
         Row: {
           assunto: string
@@ -188,6 +405,69 @@ export type Database = {
           },
         ]
       }
+      tarefas: {
+        Row: {
+          concluida_at: string | null
+          created_at: string
+          descricao: string | null
+          fila_id: string | null
+          id: string
+          metadata: Json | null
+          prazo_at: string | null
+          prioridade: Database["public"]["Enums"]["prioridade"]
+          responsavel_nome: string | null
+          solicitacao_id: string | null
+          status: Database["public"]["Enums"]["status_tarefa"]
+          titulo: string
+          updated_at: string
+        }
+        Insert: {
+          concluida_at?: string | null
+          created_at?: string
+          descricao?: string | null
+          fila_id?: string | null
+          id?: string
+          metadata?: Json | null
+          prazo_at?: string | null
+          prioridade?: Database["public"]["Enums"]["prioridade"]
+          responsavel_nome?: string | null
+          solicitacao_id?: string | null
+          status?: Database["public"]["Enums"]["status_tarefa"]
+          titulo: string
+          updated_at?: string
+        }
+        Update: {
+          concluida_at?: string | null
+          created_at?: string
+          descricao?: string | null
+          fila_id?: string | null
+          id?: string
+          metadata?: Json | null
+          prazo_at?: string | null
+          prioridade?: Database["public"]["Enums"]["prioridade"]
+          responsavel_nome?: string | null
+          solicitacao_id?: string | null
+          status?: Database["public"]["Enums"]["status_tarefa"]
+          titulo?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tarefas_fila_id_fkey"
+            columns: ["fila_id"]
+            isOneToOne: false
+            referencedRelation: "filas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tarefas_solicitacao_id_fkey"
+            columns: ["solicitacao_id"]
+            isOneToOne: false
+            referencedRelation: "solicitacoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -196,7 +476,9 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      direcao_mensagem: "inbound" | "outbound" | "internal"
       prioridade: "critica" | "alta" | "normal" | "baixa"
+      status_atendimento: "aguardando" | "em_atendimento" | "encerrado"
       status_solicitacao:
         | "aberta"
         | "classificada"
@@ -205,8 +487,10 @@ export type Database = {
         | "concluida"
         | "cancelada"
         | "reaberta"
+      status_tarefa: "pendente" | "em_andamento" | "concluida" | "cancelada"
       tipo_canal: "whatsapp" | "sistema" | "email" | "telefone"
       tipo_contato: "cliente" | "fornecedor" | "loja" | "colaborador"
+      tipo_fila: "atendimento" | "execucao"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -334,7 +618,9 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      direcao_mensagem: ["inbound", "outbound", "internal"],
       prioridade: ["critica", "alta", "normal", "baixa"],
+      status_atendimento: ["aguardando", "em_atendimento", "encerrado"],
       status_solicitacao: [
         "aberta",
         "classificada",
@@ -344,8 +630,10 @@ export const Constants = {
         "cancelada",
         "reaberta",
       ],
+      status_tarefa: ["pendente", "em_andamento", "concluida", "cancelada"],
       tipo_canal: ["whatsapp", "sistema", "email", "telefone"],
       tipo_contato: ["cliente", "fornecedor", "loja", "colaborador"],
+      tipo_fila: ["atendimento", "execucao"],
     },
   },
 } as const
