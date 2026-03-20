@@ -11,10 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Search, Sparkles, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import type { StatusSolicitacao, Prioridade, TipoCanal, TipoContato } from "@/types/database";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function Solicitacoes() {
   const [search, setSearch] = useState("");
