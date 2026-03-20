@@ -1,1 +1,10 @@
 project_id = "kvggebtnqmxydtwaumqz"
+
+[functions.classify-solicitacao]
+verify_jwt = false
+
+[functions.summarize-atendimento]
+verify_jwt = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false
