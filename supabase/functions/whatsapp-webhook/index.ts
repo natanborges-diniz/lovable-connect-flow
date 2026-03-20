@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -18,14 +17,12 @@ serve(async (req) => {
     const mode = url.searchParams.get("hub.mode");
     const token = url.searchParams.get("hub.verify_token");
     const challenge = url.searchParams.get("hub.challenge");
-
     const VERIFY_TOKEN = Deno.env.get("WHATSAPP_VERIFY_TOKEN");
 
     if (mode === "subscribe" && token === VERIFY_TOKEN) {
       console.log("Webhook verified successfully");
       return new Response(challenge, { status: 200, headers: corsHeaders });
     }
-
     return new Response("Forbidden", { status: 403, headers: corsHeaders });
   }
 
@@ -36,9 +33,8 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const body = await req.json();
-
-    // Try to normalize from all supported formats
     const message = normalizeWebhookPayload(body);
+
     if (!message) {
       return new Response(JSON.stringify({ status: "ignored", reason: "Unsupported message type or format" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -48,7 +44,7 @@ serve(async (req) => {
     const { phone, senderName, text, messageId, source } = message;
     console.log(`Message received via ${source} from ${phone}: ${text.substring(0, 50)}`);
 
-    // 1. Find or create contato by phone
+    // 1. Find or create contato
     let { data: contato } = await supabase
       .from("contatos")
       .select("*")
@@ -58,24 +54,21 @@ serve(async (req) => {
     if (!contato) {
       const { data: newContato, error: createErr } = await supabase
         .from("contatos")
-        .insert({
-          nome: senderName || phone,
-          tipo: "cliente",
-          telefone: phone,
-        })
+        .insert({ nome: senderName || phone, tipo: "cliente", telefone: phone })
         .select()
         .single();
       if (createErr) throw createErr;
       contato = newContato;
     }
 
-    // 2. Find or create canal
+    // 2. Find or create canal (with provedor)
     let { data: canal } = await supabase
       .from("canais")
       .select("*")
       .eq("contato_id", contato.id)
       .eq("tipo", "whatsapp")
       .eq("identificador", phone)
+      .eq("provedor", source)
       .single();
 
     if (!canal) {
@@ -84,6 +77,7 @@ serve(async (req) => {
         tipo: "whatsapp",
         identificador: phone,
         principal: true,
+        provedor: source,
       });
     }
 
@@ -93,6 +87,7 @@ serve(async (req) => {
       .select("id")
       .eq("contato_id", contato.id)
       .eq("canal", "whatsapp")
+      .eq("canal_provedor", source)
       .neq("status", "encerrado")
       .order("created_at", { ascending: false })
       .limit(1)
@@ -123,6 +118,7 @@ serve(async (req) => {
           contato_id: contato.id,
           canal: "whatsapp",
           status: "aguardando",
+          canal_provedor: source,
         })
         .select()
         .single();
@@ -133,19 +129,20 @@ serve(async (req) => {
       await supabase.from("eventos_crm").insert({
         contato_id: contato.id,
         tipo: "solicitacao_criada",
-        descricao: `Nova solicitação via WhatsApp: ${text.substring(0, 100)}`,
+        descricao: `Nova solicitação via WhatsApp (${source}): ${text.substring(0, 100)}`,
         referencia_tipo: "solicitacao",
         referencia_id: solicitacao.id,
       });
     }
 
-    // 4. Save message
+    // 4. Save message with provedor
     await supabase.from("mensagens").insert({
       atendimento_id: atendimentoId,
       direcao: "inbound",
       conteudo: text,
       remetente_nome: senderName || contato.nome,
       metadata: { whatsapp_message_id: messageId, source },
+      provedor: source,
     });
 
     // 5. Mark as read (Meta official API only)
@@ -174,50 +171,12 @@ async function markAsRead(messageId: string) {
   try {
     await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        status: "read",
-        message_id: messageId,
-      }),
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: messageId }),
     });
   } catch (e) {
     console.error("Failed to mark as read:", e);
   }
-}
-
-// ─── Send message via Meta Graph API (utility for future use) ───
-export async function sendWhatsAppMessage(to: string, text: string) {
-  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-  if (!accessToken || !phoneNumberId) {
-    throw new Error("WhatsApp credentials not configured");
-  }
-
-  const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "text",
-      text: { preview_url: false, body: text },
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`WhatsApp API error: ${err}`);
-  }
-
-  return res.json();
 }
 
 // ─── Normalize webhook payloads ───
@@ -238,11 +197,8 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         if (change.field !== "messages") continue;
         const value = change.value;
         if (!value?.messages?.length) continue;
-
         const msg = value.messages[0];
-        // Only handle text messages for now
         if (msg.type !== "text") continue;
-
         const contactInfo = value.contacts?.[0];
         return {
           phone: msg.from,
@@ -253,7 +209,6 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         };
       }
     }
-    // Status updates or non-message events — acknowledge but ignore
     return null;
   }
 
@@ -280,7 +235,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     };
   }
 
-  // ── Generic (from/body) ──
+  // ── Generic ──
   if (body.from && body.body) {
     return {
       phone: body.from.replace(/\D/g, ""),

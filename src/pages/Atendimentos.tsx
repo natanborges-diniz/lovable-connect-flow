@@ -198,6 +198,11 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         <div className="flex items-center gap-2 flex-wrap">
           <AtendimentoStatusBadge status={atendimento.status} />
           <Badge variant="outline" className="capitalize">{atendimento.canal}</Badge>
+          {atendimento.canal_provedor && (
+            <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-amber-500/50 text-amber-600")}>
+              {atendimento.canal_provedor === "meta_official" ? "Oficial" : atendimento.canal_provedor === "evolution_api" ? "Evolution" : "Z-API"}
+            </Badge>
+          )}
           {atendimento.contato?.nome && <span className="text-sm text-muted-foreground">• {atendimento.contato.nome}</span>}
           <div className="ml-auto flex items-center gap-2">
             <Label className="text-xs">Status:</Label>
