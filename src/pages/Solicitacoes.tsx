@@ -158,6 +158,10 @@ export default function Solicitacoes() {
                     <p className="text-sm mt-1">{detailItem.descricao}</p>
                   </div>
                 )}
+
+                {/* Classificação IA */}
+                <ClassificacaoIA solicitacaoId={detailItem.id} classificacao={(detailItem as any).classificacao_ia} />
+
                 <div className="flex items-center gap-2 pt-2">
                   <Label className="text-sm whitespace-nowrap">Alterar status:</Label>
                   <Select
