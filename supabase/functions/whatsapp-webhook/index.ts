@@ -7,8 +7,29 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
 
+  // ─── GET: Meta Webhook Verification ───
+  if (req.method === "GET") {
+    const url = new URL(req.url);
+    const mode = url.searchParams.get("hub.mode");
+    const token = url.searchParams.get("hub.verify_token");
+    const challenge = url.searchParams.get("hub.challenge");
+
+    const VERIFY_TOKEN = Deno.env.get("WHATSAPP_VERIFY_TOKEN");
+
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      console.log("Webhook verified successfully");
+      return new Response(challenge, { status: 200, headers: corsHeaders });
+    }
+
+    return new Response("Forbidden", { status: 403, headers: corsHeaders });
+  }
+
+  // ─── POST: Incoming Messages ───
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -16,8 +37,7 @@ serve(async (req) => {
 
     const body = await req.json();
 
-    // Support multiple webhook formats (Evolution API, Z-API, etc.)
-    // Normalize to a common format
+    // Try to normalize from all supported formats
     const message = normalizeWebhookPayload(body);
     if (!message) {
       return new Response(JSON.stringify({ status: "ignored", reason: "Unsupported message type or format" }), {
@@ -25,7 +45,8 @@ serve(async (req) => {
       });
     }
 
-    const { phone, senderName, text, messageId } = message;
+    const { phone, senderName, text, messageId, source } = message;
+    console.log(`Message received via ${source} from ${phone}: ${text.substring(0, 50)}`);
 
     // 1. Find or create contato by phone
     let { data: contato } = await supabase
@@ -66,7 +87,7 @@ serve(async (req) => {
       });
     }
 
-    // 3. Find open atendimento for this contato or create solicitação + atendimento
+    // 3. Find open atendimento or create solicitação + atendimento
     let { data: atendimentoAberto } = await supabase
       .from("atendimentos")
       .select("id")
@@ -82,7 +103,6 @@ serve(async (req) => {
     if (atendimentoAberto) {
       atendimentoId = atendimentoAberto.id;
     } else {
-      // Create new solicitação
       const { data: solicitacao, error: solErr } = await supabase
         .from("solicitacoes")
         .insert({
@@ -96,7 +116,6 @@ serve(async (req) => {
         .single();
       if (solErr) throw solErr;
 
-      // Create atendimento
       const { data: atendimento, error: atErr } = await supabase
         .from("atendimentos")
         .insert({
@@ -111,7 +130,6 @@ serve(async (req) => {
 
       atendimentoId = atendimento.id;
 
-      // Create CRM event
       await supabase.from("eventos_crm").insert({
         contato_id: contato.id,
         tipo: "solicitacao_criada",
@@ -127,8 +145,13 @@ serve(async (req) => {
       direcao: "inbound",
       conteudo: text,
       remetente_nome: senderName || contato.nome,
-      metadata: { whatsapp_message_id: messageId },
+      metadata: { whatsapp_message_id: messageId, source },
     });
+
+    // 5. Mark as read (Meta official API only)
+    if (source === "meta_official" && messageId) {
+      await markAsRead(messageId);
+    }
 
     return new Response(JSON.stringify({ status: "ok", atendimento_id: atendimentoId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -142,15 +165,99 @@ serve(async (req) => {
   }
 });
 
+// ─── Mark message as read via Meta Graph API ───
+async function markAsRead(messageId: string) {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!accessToken || !phoneNumberId) return;
+
+  try {
+    await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: messageId,
+      }),
+    });
+  } catch (e) {
+    console.error("Failed to mark as read:", e);
+  }
+}
+
+// ─── Send message via Meta Graph API (utility for future use) ───
+export async function sendWhatsAppMessage(to: string, text: string) {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!accessToken || !phoneNumberId) {
+    throw new Error("WhatsApp credentials not configured");
+  }
+
+  const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "text",
+      text: { preview_url: false, body: text },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`WhatsApp API error: ${err}`);
+  }
+
+  return res.json();
+}
+
+// ─── Normalize webhook payloads ───
 interface NormalizedMessage {
   phone: string;
   senderName: string;
   text: string;
   messageId: string;
+  source: "meta_official" | "evolution_api" | "z_api" | "generic";
 }
 
 function normalizeWebhookPayload(body: any): NormalizedMessage | null {
-  // Evolution API format
+  // ── Meta Official Cloud API ──
+  if (body.object === "whatsapp_business_account" && body.entry) {
+    for (const entry of body.entry) {
+      const changes = entry.changes || [];
+      for (const change of changes) {
+        if (change.field !== "messages") continue;
+        const value = change.value;
+        if (!value?.messages?.length) continue;
+
+        const msg = value.messages[0];
+        // Only handle text messages for now
+        if (msg.type !== "text") continue;
+
+        const contactInfo = value.contacts?.[0];
+        return {
+          phone: msg.from,
+          senderName: contactInfo?.profile?.name || msg.from,
+          text: msg.text?.body || "",
+          messageId: msg.id || "",
+          source: "meta_official",
+        };
+      }
+    }
+    // Status updates or non-message events — acknowledge but ignore
+    return null;
+  }
+
+  // ── Evolution API ──
   if (body.data?.key?.remoteJid) {
     const phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
     return {
@@ -158,26 +265,29 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
       senderName: body.data.pushName || phone,
       text: body.data.message?.conversation || body.data.message?.extendedTextMessage?.text || "",
       messageId: body.data.key.id || "",
+      source: "evolution_api",
     };
   }
 
-  // Z-API format
+  // ── Z-API ──
   if (body.phone) {
     return {
       phone: body.phone.replace(/\D/g, ""),
       senderName: body.senderName || body.phone,
       text: body.text?.message || body.message || "",
       messageId: body.messageId || body.zapiMessageId || "",
+      source: "z_api",
     };
   }
 
-  // Generic/simple format
+  // ── Generic (from/body) ──
   if (body.from && body.body) {
     return {
       phone: body.from.replace(/\D/g, ""),
       senderName: body.senderName || body.from,
       text: body.body,
       messageId: body.id || "",
+      source: "generic",
     };
   }
 
