@@ -23,6 +23,8 @@ export interface Canal {
   tipo: TipoCanal;
   identificador: string;
   principal: boolean;
+  provedor: string;
+  ativo: boolean;
   metadata: Record<string, unknown>;
   created_at: string;
 }
@@ -90,6 +92,7 @@ export interface Atendimento {
   contato_id: string;
   status: StatusAtendimento;
   canal: TipoCanal;
+  canal_provedor: string;
   atendente_nome: string | null;
   inicio_at: string | null;
   fim_at: string | null;
@@ -107,6 +110,7 @@ export interface Mensagem {
   direcao: DirecaoMensagem;
   conteudo: string;
   remetente_nome: string | null;
+  provedor: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 }
