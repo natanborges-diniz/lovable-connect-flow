@@ -58,6 +58,22 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       ],
     },
   ],
+  atendimentos: [
+    {
+      label: "Atendimentos",
+      items: [
+        { title: "Todos os Atendimentos", url: "/atendimentos", icon: MessageSquare },
+      ],
+    },
+  ],
+  tarefas: [
+    {
+      label: "Tarefas",
+      items: [
+        { title: "Todas as Tarefas", url: "/tarefas", icon: ListTodo },
+      ],
+    },
+  ],
 };
 
 export function AppSidebar({ activeModule }: AppSidebarProps) {
