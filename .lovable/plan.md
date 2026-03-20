@@ -1,62 +1,36 @@
 
 
-## Plano: Adotar o Design System INFOCO e criar identidade "INFOCO OPS"
+## Plano: Migrar webhook para API oficial do WhatsApp (Meta Cloud API)
 
-### Nome do App
+### O que muda
 
-**INFOCO OPS** — Plataforma de Comunicação e Operações, parte da família [Infoco Optical Business](/projects/e140a688-5bbc-4d93-93ab-3e3a1e60171e).
+O webhook atual aceita payloads de Evolution API e Z-API. Vamos adaptá-lo para o formato oficial da Meta, que exige:
 
-Naming pattern da família:
-- **INFOCO** (marca-mãe) — Gestão Operacional / BI
-- **INFOCO OPS** (este app) — Comunicação, Atendimento e Tarefas
+1. **Verificação GET** — A Meta envia um GET com `hub.verify_token` para validar o endpoint. O webhook precisa responder com `hub.challenge`.
+2. **Formato POST diferente** — O payload da Meta vem em `entry[].changes[].value.messages[]` com estrutura própria.
+3. **Envio de mensagens** — Para responder, usa-se `POST https://graph.facebook.com/v21.0/{phone_number_id}/messages` com token de acesso.
 
----
+### Arquivos afetados
 
-### O que será feito
-
-**1. Design System — Migrar para os tokens INFOCO**
-
-Substituir completamente o `index.css` e `tailwind.config.ts` para adotar o design system do INFOCO Optical Business:
-- Tokens de brand (HSL 220 70% 50%), neutral scale (50-900), semantic colors (success, warning, danger, info) com variantes soft/muted/hover
-- Tokens de superfície: `app-bg`, `surface`, `surface-alt`, `header-accent`
-- Focus ring, DataViz palette (8 chart colors)
-- Dark mode completo
-- Utilitários `shadow-card` e `shadow-card-hover`
-- Border radius `0.75rem`
-
-**2. Layout — Migrar para o padrão TopNavigation + Sidebar contextual**
-
-Adotar a mesma arquitetura de layout do INFOCO:
-- **TopNavigation** fixa no topo com logo "INFOCO OPS", tabs de módulos (Dashboard, CRM, Solicitações, Tarefas, Configurações) e área de usuário
-- **AppSidebar** contextual usando o componente `SidebarProvider` do shadcn, com menus que mudam conforme o módulo ativo
-- **AppLayout** com `<Outlet />` para rotas aninhadas
-- Remover o sidebar fixo lateral atual
-
-**3. Branding**
-
-- Atualizar `index.html` com titulo "INFOCO OPS | Plataforma de Comunicação e Operações"
-- Manter a mesma paleta de cores do INFOCO (brand blue 220)
-
-**4. Páginas — Adaptar ao novo layout**
-
-- Dashboard, Contatos e Solicitações passam a usar o novo `AppLayout` com `<Outlet />`
-- Rotas reorganizadas: `/` (Dashboard), `/crm` (Contatos), `/solicitacoes`
-
----
-
-### Detalhes Técnicos
-
-| Arquivo | Ação |
+| Arquivo | Alteração |
 |---|---|
-| `src/index.css` | Substituir integralmente pelos tokens INFOCO (brand, neutral, semantic, surface, dataviz, dark mode) |
-| `tailwind.config.ts` | Substituir integralmente pela config INFOCO (brand, neutral, success/warning/danger/info com variantes, chart, shadow, ring, transitions) |
-| `src/components/layout/TopNavigation.tsx` | Criar — header fixo com logo, tabs de módulos, área de usuário |
-| `src/components/layout/AppSidebar.tsx` | Reescrever — usar SidebarProvider do shadcn, menus contextuais por módulo |
-| `src/components/layout/AppLayout.tsx` | Reescrever — SidebarProvider + TopNavigation + Sidebar + Outlet |
-| `src/App.tsx` | Reorganizar rotas com layout aninhado |
-| `index.html` | Atualizar titulo e meta tags para INFOCO OPS |
-| `src/pages/Dashboard.tsx` | Remover `<AppLayout>` wrapper (agora via route) |
-| `src/pages/Contatos.tsx` | Remover `<AppLayout>` wrapper, rota muda para `/crm` |
-| `src/pages/Solicitacoes.tsx` | Remover `<AppLayout>` wrapper |
-| `src/components/shared/StatusBadge.tsx` | Atualizar cores para usar tokens semantic (danger, warning, success, info) |
+| `supabase/functions/whatsapp-webhook/index.ts` | Reescrever para suportar verificação GET + payload oficial da Meta (manter compatibilidade com Evolution/Z-API como fallback) |
+| `src/pages/Configuracoes.tsx` | Adicionar campos para configurar `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID`; atualizar instruções |
+
+### Detalhes técnicos
+
+**Webhook (Edge Function):**
+- `GET`: Validar `hub.verify_token` e retornar `hub.challenge`
+- `POST`: Parsear `entry[].changes[].value.messages[]`, extrair `from`, `text.body`, `id`
+- Manter o fallback para Evolution/Z-API no `normalizeWebhookPayload`
+- Adicionar função para envio de respostas via Graph API (para uso futuro)
+
+**Secrets necessários:**
+- `WHATSAPP_VERIFY_TOKEN` — token arbitrário para verificação do webhook
+- `WHATSAPP_ACCESS_TOKEN` — token permanente da Meta
+- `WHATSAPP_PHONE_NUMBER_ID` — ID do número no Meta Business
+
+**Configurações (Frontend):**
+- Atualizar instruções na seção WhatsApp com passos para configurar no Meta Business Manager
+- Exibir URL do webhook para colar no painel da Meta
 
