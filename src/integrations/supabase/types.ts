@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           atendente_nome: string | null
           canal: Database["public"]["Enums"]["tipo_canal"]
+          canal_provedor: string | null
           contato_id: string
           created_at: string
           fila_id: string | null
@@ -32,6 +33,7 @@ export type Database = {
         Insert: {
           atendente_nome?: string | null
           canal?: Database["public"]["Enums"]["tipo_canal"]
+          canal_provedor?: string | null
           contato_id: string
           created_at?: string
           fila_id?: string | null
@@ -46,6 +48,7 @@ export type Database = {
         Update: {
           atendente_nome?: string | null
           canal?: Database["public"]["Enums"]["tipo_canal"]
+          canal_provedor?: string | null
           contato_id?: string
           created_at?: string
           fila_id?: string | null
@@ -83,30 +86,36 @@ export type Database = {
       }
       canais: {
         Row: {
+          ativo: boolean | null
           contato_id: string
           created_at: string
           id: string
           identificador: string
           metadata: Json | null
           principal: boolean
+          provedor: string | null
           tipo: Database["public"]["Enums"]["tipo_canal"]
         }
         Insert: {
+          ativo?: boolean | null
           contato_id: string
           created_at?: string
           id?: string
           identificador: string
           metadata?: Json | null
           principal?: boolean
+          provedor?: string | null
           tipo: Database["public"]["Enums"]["tipo_canal"]
         }
         Update: {
+          ativo?: boolean | null
           contato_id?: string
           created_at?: string
           id?: string
           identificador?: string
           metadata?: Json | null
           principal?: boolean
+          provedor?: string | null
           tipo?: Database["public"]["Enums"]["tipo_canal"]
         }
         Relationships: [
@@ -292,6 +301,7 @@ export type Database = {
           direcao: Database["public"]["Enums"]["direcao_mensagem"]
           id: string
           metadata: Json | null
+          provedor: string | null
           remetente_nome: string | null
         }
         Insert: {
@@ -301,6 +311,7 @@ export type Database = {
           direcao?: Database["public"]["Enums"]["direcao_mensagem"]
           id?: string
           metadata?: Json | null
+          provedor?: string | null
           remetente_nome?: string | null
         }
         Update: {
@@ -310,6 +321,7 @@ export type Database = {
           direcao?: Database["public"]["Enums"]["direcao_mensagem"]
           id?: string
           metadata?: Json | null
+          provedor?: string | null
           remetente_nome?: string | null
         }
         Relationships: [
