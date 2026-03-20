@@ -195,6 +195,45 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         )}
       </div>
 
+      {/* Resumo IA */}
+      <div className="border-t pt-2 space-y-2">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-medium flex items-center gap-1.5">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            Resumo IA
+          </h4>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-xs"
+            disabled={resumoLoading || !mensagens?.length}
+            onClick={async () => {
+              setResumoLoading(true);
+              try {
+                const { data, error } = await supabase.functions.invoke("summarize-atendimento", {
+                  body: { atendimento_id: id },
+                });
+                if (error) throw error;
+                if (data.error) throw new Error(data.error);
+                setResumo(data.resumo);
+                toast.success("Resumo gerado com sucesso");
+              } catch (e: any) {
+                toast.error("Erro ao gerar resumo: " + e.message);
+              } finally {
+                setResumoLoading(false);
+              }
+            }}
+          >
+            {resumoLoading ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Gerando...</> : <><FileText className="h-3 w-3 mr-1" /> Gerar Resumo</>}
+          </Button>
+        </div>
+        {resumo && (
+          <div className="bg-muted/50 rounded-lg p-3 text-xs whitespace-pre-wrap text-muted-foreground">
+            {resumo}
+          </div>
+        )}
+      </div>
+
       <div className="flex items-end gap-2">
         <div className="flex-1 space-y-1">
           <div className="flex gap-1">
