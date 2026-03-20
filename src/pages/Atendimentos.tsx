@@ -1,0 +1,216 @@
+import { useState, useRef, useEffect } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
+import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
+import { AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Search, MessageSquare, Send, Eye } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import type { StatusAtendimento } from "@/types/database";
+
+export default function Atendimentos() {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("todos");
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  const filters = {
+    search: search || undefined,
+    status: statusFilter !== "todos" ? (statusFilter as StatusAtendimento) : undefined,
+  };
+
+  const { data: atendimentos, isLoading } = useAtendimentos(filters);
+  const updateStatus = useUpdateAtendimentoStatus();
+
+  return (
+    <>
+      <PageHeader title="Atendimentos" description="Sessões de comunicação vinculadas às solicitações" />
+
+      <Card className="shadow-card">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Buscar por atendente..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos</SelectItem>
+                <SelectItem value="aguardando">Aguardando</SelectItem>
+                <SelectItem value="em_atendimento">Em Atendimento</SelectItem>
+                <SelectItem value="encerrado">Encerrado</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
+          ) : !atendimentos?.length ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">Nenhum atendimento encontrado</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Solicitação</TableHead>
+                  <TableHead>Contato</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Canal</TableHead>
+                  <TableHead>Atendente</TableHead>
+                  <TableHead>Data</TableHead>
+                  <TableHead className="w-10"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {atendimentos.map((a: any) => (
+                  <TableRow key={a.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(a.id)}>
+                    <TableCell className="font-medium">{a.solicitacao?.assunto ?? "—"}</TableCell>
+                    <TableCell>{a.contato?.nome ?? "—"}</TableCell>
+                    <TableCell><AtendimentoStatusBadge status={a.status} /></TableCell>
+                    <TableCell className="text-muted-foreground capitalize">{a.canal}</TableCell>
+                    <TableCell className="text-muted-foreground">{a.atendente_nome ?? "Não atribuído"}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {format(new Date(a.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setDetailId(a.id); }}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!detailId} onOpenChange={(open) => !open && setDetailId(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          {detailId && <AtendimentoDetail id={detailId} onStatusChange={(status) => updateStatus.mutate({ id: detailId, status })} />}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange: (s: StatusAtendimento) => void }) {
+  const { data: mensagens, refetch } = useMensagens(id);
+  const createMensagem = useCreateMensagem();
+  const { data: atendimentos } = useAtendimentos();
+  const atendimento = atendimentos?.find((a: any) => a.id === id) as any;
+
+  const [msgText, setMsgText] = useState("");
+  const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Realtime subscription
+  useEffect(() => {
+    const channel = supabase
+      .channel(`mensagens-${id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens", filter: `atendimento_id=eq.${id}` }, () => {
+        refetch();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [id, refetch]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [mensagens]);
+
+  const handleSend = () => {
+    if (!msgText.trim()) return;
+    createMensagem.mutate({
+      atendimento_id: id,
+      conteudo: msgText.trim(),
+      direcao: msgDirecao,
+      remetente_nome: "Operador",
+    });
+    setMsgText("");
+  };
+
+  const direcaoColors: Record<string, string> = {
+    inbound: "bg-muted text-foreground",
+    outbound: "bg-primary text-primary-foreground",
+    internal: "bg-warning-soft text-warning border border-warning-muted",
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <MessageSquare className="h-5 w-5" />
+          {atendimento?.solicitacao?.assunto ?? "Atendimento"}
+        </DialogTitle>
+      </DialogHeader>
+
+      {atendimento && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <AtendimentoStatusBadge status={atendimento.status} />
+          <Badge variant="outline" className="capitalize">{atendimento.canal}</Badge>
+          {atendimento.contato?.nome && <span className="text-sm text-muted-foreground">• {atendimento.contato.nome}</span>}
+          <div className="ml-auto flex items-center gap-2">
+            <Label className="text-xs">Status:</Label>
+            <Select value={atendimento.status} onValueChange={(v) => onStatusChange(v as StatusAtendimento)}>
+              <SelectTrigger className="w-40 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="aguardando">Aguardando</SelectItem>
+                <SelectItem value="em_atendimento">Em Atendimento</SelectItem>
+                <SelectItem value="encerrado">Encerrado</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      <div ref={scrollRef} className="flex-1 overflow-auto min-h-[200px] max-h-[400px] space-y-2 p-3 bg-app-bg rounded-lg border">
+        {!mensagens?.length ? (
+          <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
+        ) : (
+          mensagens.map((m: any) => (
+            <div key={m.id} className={cn("max-w-[80%] rounded-lg px-3 py-2 text-sm", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
+              {m.remetente_nome && <p className="text-xs font-medium opacity-70 mb-0.5">{m.remetente_nome} {m.direcao === "internal" && "• nota interna"}</p>}
+              <p className="whitespace-pre-wrap">{m.conteudo}</p>
+              <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="flex items-end gap-2">
+        <div className="flex-1 space-y-1">
+          <div className="flex gap-1">
+            <Button variant={msgDirecao === "outbound" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("outbound")}>Resposta</Button>
+            <Button variant={msgDirecao === "internal" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("internal")}>Nota Interna</Button>
+          </div>
+          <Textarea
+            value={msgText}
+            onChange={(e) => setMsgText(e.target.value)}
+            placeholder={msgDirecao === "internal" ? "Nota interna (não visível ao contato)..." : "Digite sua mensagem..."}
+            rows={2}
+            className="resize-none"
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          />
+        </div>
+        <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending} size="icon" className="h-10 w-10">
+          <Send className="h-4 w-4" />
+        </Button>
+      </div>
+    </>
+  );
+}
