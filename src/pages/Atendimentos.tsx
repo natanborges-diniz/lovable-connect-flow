@@ -274,8 +274,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
           />
         </div>
-        <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending} size="icon" className="h-10 w-10">
-          <Send className="h-4 w-4" />
+        <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending || sendingOutbound} size="icon" className="h-10 w-10">
+          {sendingOutbound ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
       </div>
     </>
