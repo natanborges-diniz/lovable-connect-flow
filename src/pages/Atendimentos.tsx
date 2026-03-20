@@ -117,6 +117,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
   const [resumo, setResumo] = useState<string | null>(atendimento?.metadata?.resumo_ia || null);
   const [resumoLoading, setResumoLoading] = useState(false);
+  const [sendingOutbound, setSendingOutbound] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
@@ -134,15 +135,39 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [mensagens]);
 
-  const handleSend = () => {
-    if (!msgText.trim()) return;
-    createMensagem.mutate({
-      atendimento_id: id,
-      conteudo: msgText.trim(),
-      direcao: msgDirecao,
-      remetente_nome: "Operador",
-    });
-    setMsgText("");
+  const handleSend = async () => {
+    const texto = msgText.trim();
+    if (!texto) return;
+
+    try {
+      if (msgDirecao === "outbound" && atendimento?.canal === "whatsapp") {
+        setSendingOutbound(true);
+        const { data, error } = await supabase.functions.invoke("send-whatsapp", {
+          body: {
+            atendimento_id: id,
+            texto,
+            remetente_nome: "Operador",
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        toast.success("Mensagem enviada ao WhatsApp com sucesso");
+      } else {
+        await createMensagem.mutateAsync({
+          atendimento_id: id,
+          conteudo: texto,
+          direcao: msgDirecao,
+          remetente_nome: "Operador",
+        });
+      }
+
+      setMsgText("");
+    } catch (e: any) {
+      toast.error("Falha ao enviar mensagem: " + (e?.message || "Erro desconhecido"));
+    } finally {
+      setSendingOutbound(false);
+    }
   };
 
   const direcaoColors: Record<string, string> = {
