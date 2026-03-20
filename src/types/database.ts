@@ -110,6 +110,7 @@ export interface Mensagem {
   direcao: DirecaoMensagem;
   conteudo: string;
   remetente_nome: string | null;
+  provedor: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 }
