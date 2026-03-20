@@ -1,7 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { StatusSolicitacao, Prioridade, TipoContato } from "@/types/database";
-
+import type { StatusSolicitacao, Prioridade, TipoContato, StatusAtendimento, StatusTarefa } from "@/types/database";
 const statusConfig: Record<StatusSolicitacao, { label: string; className: string }> = {
   aberta: { label: "Aberta", className: "bg-info-soft text-info border-info-muted" },
   classificada: { label: "Classificada", className: "bg-brand-soft text-brand border-brand/30" },
@@ -38,5 +37,28 @@ export function PrioridadeBadge({ prioridade }: { prioridade: Prioridade }) {
 
 export function TipoContatoBadge({ tipo }: { tipo: TipoContato }) {
   const config = tipoContatoConfig[tipo];
+  return <Badge variant="outline" className={cn("text-xs font-medium", config.className)}>{config.label}</Badge>;
+}
+
+const atendimentoStatusConfig: Record<StatusAtendimento, { label: string; className: string }> = {
+  aguardando: { label: "Aguardando", className: "bg-warning-soft text-warning border-warning-muted" },
+  em_atendimento: { label: "Em Atendimento", className: "bg-info-soft text-info border-info-muted" },
+  encerrado: { label: "Encerrado", className: "bg-muted text-muted-foreground border-border" },
+};
+
+export function AtendimentoStatusBadge({ status }: { status: StatusAtendimento }) {
+  const config = atendimentoStatusConfig[status];
+  return <Badge variant="outline" className={cn("text-xs font-medium", config.className)}>{config.label}</Badge>;
+}
+
+const tarefaStatusConfig: Record<StatusTarefa, { label: string; className: string }> = {
+  pendente: { label: "Pendente", className: "bg-warning-soft text-warning border-warning-muted" },
+  em_andamento: { label: "Em Andamento", className: "bg-info-soft text-info border-info-muted" },
+  concluida: { label: "Concluída", className: "bg-success-soft text-success border-success-muted" },
+  cancelada: { label: "Cancelada", className: "bg-danger-soft text-danger border-danger-muted" },
+};
+
+export function TarefaStatusBadge({ status }: { status: StatusTarefa }) {
+  const config = tarefaStatusConfig[status];
   return <Badge variant="outline" className={cn("text-xs font-medium", config.className)}>{config.label}</Badge>;
 }
