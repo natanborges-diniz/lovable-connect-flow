@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Users, FileText, BarChart3, Search as SearchIcon,
-  Plus, List, Clock
+  LayoutDashboard, Users, FileText, MessageSquare, ListTodo,
+  Search as SearchIcon, Plus, List, Clock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
