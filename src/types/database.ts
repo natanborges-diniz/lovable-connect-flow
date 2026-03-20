@@ -23,6 +23,8 @@ export interface Canal {
   tipo: TipoCanal;
   identificador: string;
   principal: boolean;
+  provedor: string;
+  ativo: boolean;
   metadata: Record<string, unknown>;
   created_at: string;
 }
