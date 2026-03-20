@@ -11,6 +11,7 @@ export const moduleFromPath = (pathname: string): ModuleKey => {
   if (pathname.startsWith("/solicitacoes")) return "solicitacoes";
   if (pathname.startsWith("/atendimentos")) return "atendimentos";
   if (pathname.startsWith("/tarefas")) return "tarefas";
+  if (pathname.startsWith("/configuracoes")) return "configuracoes";
   return "dashboard";
 };
 
