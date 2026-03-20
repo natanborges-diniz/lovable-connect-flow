@@ -1,36 +1,71 @@
 
 
-## Plano: Migrar webhook para API oficial do WhatsApp (Meta Cloud API)
+## Plano Revisado: Arquitetura Dual-Number com Roteamento por Origem
 
-### O que muda
+### Regras de negócio (consolidadas)
 
-O webhook atual aceita payloads de Evolution API e Z-API. Vamos adaptá-lo para o formato oficial da Meta, que exige:
+1. **Mensagem chega por qualquer número** → responde pelo MESMO número/provedor que recebeu
+2. **Atendimento aberto existe** → continua nele, no mesmo provedor
+3. **API oficial só é usada proativamente** → quando o sistema/operador inicia conversa nova (sem histórico aberto) via template
+4. **Transparente para operadores** → mesma interface, mesma lógica, badge indica provedor mas operador não escolhe
+5. **Sem cruzamento de números** → se o cliente escreveu no não-oficial, resposta vai pelo não-oficial; se escreveu no oficial, vai pelo oficial
 
-1. **Verificação GET** — A Meta envia um GET com `hub.verify_token` para validar o endpoint. O webhook precisa responder com `hub.challenge`.
-2. **Formato POST diferente** — O payload da Meta vem em `entry[].changes[].value.messages[]` com estrutura própria.
-3. **Envio de mensagens** — Para responder, usa-se `POST https://graph.facebook.com/v21.0/{phone_number_id}/messages` com token de acesso.
+### Alterações no banco de dados
 
-### Arquivos afetados
+**Migração 1 — Novos campos:**
 
-| Arquivo | Alteração |
-|---|---|
-| `supabase/functions/whatsapp-webhook/index.ts` | Reescrever para suportar verificação GET + payload oficial da Meta (manter compatibilidade com Evolution/Z-API como fallback) |
-| `src/pages/Configuracoes.tsx` | Adicionar campos para configurar `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID`; atualizar instruções |
+```sql
+-- canais: identificar provedor
+ALTER TABLE canais ADD COLUMN provedor text DEFAULT 'meta_official';
+ALTER TABLE canais ADD COLUMN ativo boolean DEFAULT true;
 
-### Detalhes técnicos
+-- atendimentos: saber por qual provedor a conversa acontece
+ALTER TABLE atendimentos ADD COLUMN canal_provedor text DEFAULT 'meta_official';
 
-**Webhook (Edge Function):**
-- `GET`: Validar `hub.verify_token` e retornar `hub.challenge`
-- `POST`: Parsear `entry[].changes[].value.messages[]`, extrair `from`, `text.body`, `id`
-- Manter o fallback para Evolution/Z-API no `normalizeWebhookPayload`
-- Adicionar função para envio de respostas via Graph API (para uso futuro)
+-- mensagens: rastrear provedor por mensagem
+ALTER TABLE mensagens ADD COLUMN provedor text;
+```
 
-**Secrets necessários:**
-- `WHATSAPP_VERIFY_TOKEN` — token arbitrário para verificação do webhook
-- `WHATSAPP_ACCESS_TOKEN` — token permanente da Meta
-- `WHATSAPP_PHONE_NUMBER_ID` — ID do número no Meta Business
+### Alterações nas Edge Functions
 
-**Configurações (Frontend):**
-- Atualizar instruções na seção WhatsApp com passos para configurar no Meta Business Manager
-- Exibir URL do webhook para colar no painel da Meta
+**`whatsapp-webhook/index.ts`:**
+- Ao criar canal, gravar `provedor` baseado no `source` (evolution_api, z_api, meta_official)
+- Ao criar atendimento, gravar `canal_provedor` = source da mensagem
+- Ao salvar mensagem, gravar `provedor` = source
+
+**`send-whatsapp/index.ts`:**
+- Ler `canal_provedor` do atendimento
+- Se `meta_official` → envia via Graph API (como hoje)
+- Se `evolution_api` → envia via Evolution API (requer secrets: `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME`)
+- Se `z_api` → envia via Z-API (requer secrets: `ZAPI_INSTANCE_ID`, `ZAPI_TOKEN`, `ZAPI_URL`)
+- Salva mensagem com `provedor` correspondente
+
+**Nova função `send-whatsapp-template/index.ts`:**
+- Para disparos proativos do sistema (assuntos novos sem histórico)
+- Sempre usa API oficial Meta
+- Recebe `contato_id`, `template_name`, `template_params`
+- Cria solicitação + atendimento com `canal_provedor = 'meta_official'`
+
+### Alterações no Frontend
+
+**`Atendimentos.tsx`:**
+- Exibir badge do provedor (ex: "Oficial" / "Evolution") — visual apenas
+- Botão "Iniciar conversa" para contatos sem atendimento aberto → chama `send-whatsapp-template`
+- `handleSend` não muda — já chama `send-whatsapp`, que agora roteia automaticamente
+
+### Secrets necessários (novos)
+
+- `EVOLUTION_API_URL` — URL da instância Evolution API
+- `EVOLUTION_API_KEY` — Chave da Evolution API
+- `EVOLUTION_INSTANCE_NAME` — Nome da instância Evolution
+
+### Ordem de implementação
+
+1. Migração do banco (3 campos novos)
+2. Atualizar `whatsapp-webhook` para gravar `canal_provedor` e `provedor`
+3. Atualizar `send-whatsapp` com roteamento por provedor (Meta vs Evolution)
+4. Solicitar secrets da Evolution API
+5. Criar `send-whatsapp-template` para disparos oficiais
+6. Atualizar frontend (badge + botão iniciar conversa)
+7. Atualizar types em `src/types/database.ts`
 
