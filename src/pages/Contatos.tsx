@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Search, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import type { TipoContato } from "@/types/database";
+import type { TipoContato, EstagioFunil } from "@/types/database";
 
 export default function Contatos() {
   const [search, setSearch] = useState("");
