@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { StatusSolicitacao, Prioridade, TipoContato, StatusAtendimento, StatusTarefa } from "@/types/database";
+import type { StatusSolicitacao, Prioridade, TipoContato, StatusAtendimento, StatusTarefa, EstagioFunil } from "@/types/database";
 const statusConfig: Record<StatusSolicitacao, { label: string; className: string }> = {
   aberta: { label: "Aberta", className: "bg-info-soft text-info border-info-muted" },
   classificada: { label: "Classificada", className: "bg-brand-soft text-brand border-brand/30" },
