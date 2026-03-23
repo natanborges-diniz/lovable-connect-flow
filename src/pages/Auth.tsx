@@ -70,6 +70,27 @@ function LoginForm() {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Entrando...</> : "Entrar"}
           </Button>
+          <Button
+            type="button"
+            variant="link"
+            className="w-full text-sm text-muted-foreground"
+            onClick={async () => {
+              if (!email) {
+                toast.error("Digite seu e-mail primeiro");
+                return;
+              }
+              const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: `${window.location.origin}/reset-password`,
+              });
+              if (error) {
+                toast.error(error.message);
+              } else {
+                toast.success("E-mail de recuperação enviado! Verifique sua caixa de entrada.");
+              }
+            }}
+          >
+            Esqueci minha senha
+          </Button>
         </form>
       </CardContent>
     </Card>
