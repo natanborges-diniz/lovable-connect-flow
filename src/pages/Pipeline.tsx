@@ -320,6 +320,10 @@ export default function Pipeline() {
                                                 <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-primary/50 text-primary">
                                                   <Bot className="h-2.5 w-2.5" /> IA
                                                 </Badge>
+                                              ) : atInfo.modo === "hibrido" ? (
+                                                <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-yellow-500/50 text-yellow-600 dark:text-yellow-400">
+                                                  <Sparkles className="h-2.5 w-2.5" /> IA Monitorando
+                                                </Badge>
                                               ) : (
                                                 <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-warning/50 text-warning">
                                                   <User className="h-2.5 w-2.5" /> Humano

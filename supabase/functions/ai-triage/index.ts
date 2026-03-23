@@ -35,11 +35,15 @@ serve(async (req) => {
       .eq("id", atendimento_id)
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
+
+    // Skip only if modo is "humano" (fully human). Accept "ia" and "hibrido".
     if (atendimento.modo === "humano") {
       return new Response(JSON.stringify({ status: "skipped", reason: "modo humano" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const isHibrido = atendimento.modo === "hibrido";
 
     // 2. Load prompt from configuracoes_ia
     const { data: promptConfig } = await supabase
@@ -48,7 +52,7 @@ serve(async (req) => {
       .eq("chave", "prompt_atendimento")
       .single();
     const systemPrompt = promptConfig?.valor || "Você é um assistente de atendimento ao cliente.";
-    console.log(`Prompt loaded: ${systemPrompt.length} chars, updated_at: ${promptConfig?.updated_at || 'default'}`);
+    console.log(`Prompt loaded: ${systemPrompt.length} chars, modo: ${atendimento.modo}`);
 
     // 3. Load last 20 messages for context
     const { data: msgs } = await supabase
@@ -63,16 +67,14 @@ serve(async (req) => {
       content: m.conteudo,
     }));
 
-    // Count inbound messages to determine conversation maturity
     const inboundCount = (msgs || []).filter((m: any) => m.direcao === "inbound").length;
 
-    // Extract info already sent in outbound messages to prevent repetition
     const outboundMessages = (msgs || []).filter((m: any) => m.direcao === "outbound").map((m: any) => m.conteudo);
     const alreadySentSummary = outboundMessages.length > 0
       ? outboundMessages.join("\n---\n")
       : "Nenhuma mensagem enviada ainda.";
 
-    // 4. Load pipeline columns and setores for classification context
+    // 4. Load pipeline columns and setores
     const { data: colunas } = await supabase
       .from("pipeline_colunas")
       .select("id, nome")
@@ -87,7 +89,68 @@ serve(async (req) => {
     const colunasNomes = (colunas || []).map((c: any) => c.nome).join(", ");
     const setoresNomes = (setores || []).map((s: any) => s.nome).join(", ");
 
-    // 5. Call Lovable AI with SEPARATED system messages for better adherence
+    // 5. Build system messages
+    const systemMessages: any[] = [
+      // Message 1: Business rules (HIGHEST PRIORITY)
+      {
+        role: "system",
+        content: `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}\n\nREGRA DE TERMINOLOGIA (OBRIGATÓRIA): Ao se referir a atendimento por uma pessoa real, use SEMPRE e EXCLUSIVAMENTE o termo "Consultor especializado". NUNCA use "atendente", "operador", "humano", "agente" ou qualquer sinônimo. Sempre "Consultor especializado".`,
+      },
+      // Message 2: Anti-repetition
+      {
+        role: "system",
+        content: `REGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita endereço, horário, telefone, ou QUALQUER informação já presente nas mensagens anteriores.\n- Releia TODO o histórico ANTES de gerar a resposta.\n- Se o cliente perguntar algo já respondido, diga "Conforme mencionei anteriormente..." de forma BREVE.\n- Respostas devem ser CURTAS e DIRETAS.\n\nINFORMAÇÕES JÁ ENVIADAS NESTA CONVERSA (NÃO REPITA NADA DISTO):\n${alreadySentSummary}`,
+      },
+    ];
+
+    // Message 2.5: Hybrid mode context (if applicable)
+    if (isHibrido) {
+      systemMessages.push({
+        role: "system",
+        content: `CONTEXTO MODO HÍBRIDO:\nUm Consultor especializado foi solicitado anteriormente mas ainda não assumiu a conversa. Você continua respondendo normalmente — trate qualquer assunto dentro do seu escopo com a mesma qualidade.\n\nCOMPORTAMENTO:\n- Se o cliente trouxer um assunto NOVO que você consegue resolver, responda naturalmente como se estivesse no modo normal.\n- Se o cliente insistir no assunto que gerou a solicitação do Consultor especializado, ou surgir algo fora do seu escopo, reforce que o Consultor especializado já foi acionado.\n- A cada resposta, REAVALIE se o cliente ainda precisa de um Consultor especializado considerando o histórico completo da conversa.\n- Se a questão original foi sanada ou o cliente mudou completamente de assunto para algo que você resolve, indique que não precisa mais do Consultor especializado (ainda_precisa_humano = false).`,
+      });
+    }
+
+    // Chat history
+    systemMessages.push(...chatHistory);
+
+    // Message 3: Classification instructions
+    systemMessages.push({
+      role: "system",
+      content: `INSTRUÇÕES DE CLASSIFICAÇÃO (uso interno, não mostrar ao cliente):\n- Você DEVE usar a ferramenta 'classify_and_respond' para responder.\n- Colunas disponíveis no pipeline: ${colunasNomes}\n- Setores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de Consultor especializado).\n- Só mova para colunas específicas após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano".\n- TERMINOLOGIA: em respostas ao cliente, SEMPRE diga "Consultor especializado". NUNCA "atendente", "operador", "humano" ou "agente".${isHibrido ? '\n- O atendimento está em MODO HÍBRIDO. Reavalie se ainda_precisa_humano é true ou false.' : ''}`,
+    });
+
+    // 6. Build tool definition with ainda_precisa_humano field
+    const toolProperties: any = {
+      resposta: {
+        type: "string",
+        description: "Texto de resposta para enviar ao cliente via WhatsApp. REGRAS: 1) NUNCA repita dados já enviados. 2) Respostas CURTAS e DIRETAS. 3) Siga as regras de atendimento. 4) Use SEMPRE 'Consultor especializado' — NUNCA 'atendente', 'operador', 'humano' ou 'agente'.",
+      },
+      intencao: {
+        type: "string",
+        enum: ["orcamento", "status", "reclamacao", "parceria", "compras", "marketing", "agendamento", "informacoes", "outro"],
+        description: "Classificação da intenção do cliente",
+      },
+      precisa_humano: {
+        type: "boolean",
+        description: "true se a IA não consegue resolver e precisa de intervenção de um Consultor especializado",
+      },
+      ainda_precisa_humano: {
+        type: "boolean",
+        description: "Reavaliação contínua: o cliente AINDA precisa de um Consultor especializado? Considere o histórico completo. Se a questão original foi sanada ou o cliente mudou de assunto para algo dentro do seu escopo, retorne false. Se ainda há pendência que só um Consultor especializado pode resolver, retorne true.",
+      },
+      pipeline_coluna_sugerida: {
+        type: "string",
+        description: "Nome exato da coluna do pipeline para onde mover o contato",
+      },
+      setor_sugerido: {
+        type: "string",
+        description: "Nome do setor interno para rotear (se aplicável, senão string vazia)",
+      },
+    };
+
+    const requiredFields = ["resposta", "intencao", "precisa_humano", "ainda_precisa_humano", "pipeline_coluna_sugerida"];
+
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -96,25 +159,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
-        messages: [
-          // Message 1: Business rules from configurable prompt (HIGHEST PRIORITY)
-          {
-            role: "system",
-            content: `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}`,
-          },
-          // Message 2: Anti-repetition with explicit list of what was already said
-          {
-            role: "system",
-            content: `REGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita endereço, horário, telefone, ou QUALQUER informação já presente nas mensagens anteriores.\n- Releia TODO o histórico ANTES de gerar a resposta.\n- Se o cliente perguntar algo já respondido, diga "Conforme mencionei anteriormente..." de forma BREVE.\n- Respostas devem ser CURTAS e DIRETAS.\n\nINFORMAÇÕES JÁ ENVIADAS NESTA CONVERSA (NÃO REPITA NADA DISTO):\n${alreadySentSummary}`,
-          },
-          // Chat history
-          ...chatHistory,
-          // Message 3: Classification instructions (internal, lower priority)
-          {
-            role: "system",
-            content: `INSTRUÇÕES DE CLASSIFICAÇÃO (uso interno, não mostrar ao cliente):\n- Você DEVE usar a ferramenta 'classify_and_respond' para responder.\n- Colunas disponíveis no pipeline: ${colunasNomes}\n- Setores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de humano).\n- Só mova para colunas específicas após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano".`,
-          },
-        ],
+        messages: systemMessages,
         tools: [
           {
             type: "function",
@@ -123,30 +168,8 @@ serve(async (req) => {
               description: "Classifica a intenção do cliente e gera a resposta",
               parameters: {
                 type: "object",
-                properties: {
-                  resposta: {
-                    type: "string",
-                    description: "Texto de resposta para enviar ao cliente via WhatsApp. REGRAS OBRIGATÓRIAS: 1) NUNCA repita endereço, horário, telefone ou dados já enviados no histórico. 2) Se a informação já foi dita, responda 'Conforme mencionei...' de forma breve. 3) Respostas CURTAS e DIRETAS. 4) Siga rigorosamente as regras de atendimento do system prompt.",
-                  },
-                  intencao: {
-                    type: "string",
-                    enum: ["orcamento", "status", "reclamacao", "parceria", "compras", "marketing", "agendamento", "informacoes", "outro"],
-                    description: "Classificação da intenção do cliente",
-                  },
-                  precisa_humano: {
-                    type: "boolean",
-                    description: "true se a IA não consegue resolver e precisa de intervenção humana",
-                  },
-                  pipeline_coluna_sugerida: {
-                    type: "string",
-                    description: "Nome exato da coluna do pipeline para onde mover o contato",
-                  },
-                  setor_sugerido: {
-                    type: "string",
-                    description: "Nome do setor interno para rotear (se aplicável, senão string vazia)",
-                  },
-                },
-                required: ["resposta", "intencao", "precisa_humano", "pipeline_coluna_sugerida"],
+                properties: toolProperties,
+                required: requiredFields,
                 additionalProperties: false,
               },
             },
@@ -180,11 +203,11 @@ serve(async (req) => {
     if (!toolCall) throw new Error("AI did not return a tool call response");
 
     const result = JSON.parse(toolCall.function.arguments);
-    const { resposta, intencao, precisa_humano, pipeline_coluna_sugerida, setor_sugerido } = result;
+    const { resposta, intencao, precisa_humano, ainda_precisa_humano, pipeline_coluna_sugerida, setor_sugerido } = result;
 
-    console.log(`AI Triage: intencao=${intencao}, humano=${precisa_humano}, coluna=${pipeline_coluna_sugerida}, setor=${setor_sugerido}`);
+    console.log(`AI Triage: intencao=${intencao}, precisa_humano=${precisa_humano}, ainda_precisa=${ainda_precisa_humano}, coluna=${pipeline_coluna_sugerida}, setor=${setor_sugerido}, modo=${atendimento.modo}`);
 
-    // 6. Send response via send-whatsapp
+    // 7. Send response via send-whatsapp
     const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
       method: "POST",
       headers: {
@@ -203,19 +226,46 @@ serve(async (req) => {
       console.error("Failed to send WhatsApp response:", errBody);
     }
 
-    // 7. Move contato to pipeline column (conservative: only move if precisa_humano or conversation is mature)
+    // 8. Determine new modo based on hybrid logic
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
+    let newModo: string | null = null;
 
-    if (precisa_humano) {
+    if (isHibrido) {
+      // In hybrid mode: check if AI resolved the issue
+      if (ainda_precisa_humano === false) {
+        // AI resolved it, revert to full IA mode
+        newModo = "ia";
+        console.log("Hybrid → IA: AI resolved the pending issue");
+      }
+      // If still needs human, keep hibrido (no change needed)
+    } else if (precisa_humano) {
+      // First escalation: go to hibrido (not humano)
+      newModo = "hibrido";
+      console.log("IA → Híbrido: escalation triggered, AI continues monitoring");
+    }
+
+    // Update modo if changed
+    if (newModo) {
+      await supabase
+        .from("atendimentos")
+        .update({ modo: newModo })
+        .eq("id", atendimento_id);
+    }
+
+    // 9. Pipeline column movement
+    if (precisa_humano || (isHibrido && ainda_precisa_humano !== false)) {
       const humanoColuna = colunas?.find((c: any) => c.nome === "Atendimento Humano");
       if (humanoColuna) contatoUpdates.pipeline_coluna_id = humanoColuna.id;
+    } else if (isHibrido && ainda_precisa_humano === false) {
+      // Reverted from hybrid: move to suggested column
+      const targetColuna = colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
+      if (targetColuna) contatoUpdates.pipeline_coluna_id = targetColuna.id;
     } else if (inboundCount >= 3 || pipeline_coluna_sugerida === "Novo Contato") {
-      // Only move after enough context, or if AI explicitly says "Novo Contato"
       const targetColuna = colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
       if (targetColuna) contatoUpdates.pipeline_coluna_id = targetColuna.id;
     }
 
-    // 8. Route to setor if suggested
+    // 10. Route to setor if suggested
     if (setor_sugerido) {
       const matchedSetor = setores?.find((s: any) => s.nome.toLowerCase() === setor_sugerido.toLowerCase());
       if (matchedSetor) {
@@ -229,20 +279,20 @@ serve(async (req) => {
       .update(contatoUpdates)
       .eq("id", contatoIdToUpdate);
 
-    // 9. If needs human, update atendimento modo
-    if (precisa_humano) {
-      await supabase
-        .from("atendimentos")
-        .update({ modo: "humano" })
-        .eq("id", atendimento_id);
-    }
+    // 11. Log CRM event
+    const modoDesc = newModo === "hibrido"
+      ? "Escalado para Consultor especializado (IA continua monitorando)."
+      : newModo === "ia"
+      ? "IA resolveu a pendência, Consultor especializado não é mais necessário."
+      : precisa_humano
+      ? "Encaminhado para Consultor especializado."
+      : `Movido para "${pipeline_coluna_sugerida}".`;
 
-    // 10. Log CRM event
     await supabase.from("eventos_crm").insert({
       contato_id: contatoIdToUpdate,
       tipo: "triagem_ia",
-      descricao: `IA classificou como "${intencao}". ${precisa_humano ? "Encaminhado para atendimento humano." : `Movido para "${pipeline_coluna_sugerida}".`}`,
-      metadata: { intencao, precisa_humano, pipeline_coluna_sugerida, setor_sugerido },
+      descricao: `IA classificou como "${intencao}". ${modoDesc}`,
+      metadata: { intencao, precisa_humano, ainda_precisa_humano, pipeline_coluna_sugerida, setor_sugerido, modo: newModo || atendimento.modo },
       referencia_tipo: "atendimento",
       referencia_id: atendimento_id,
     });
@@ -251,8 +301,10 @@ serve(async (req) => {
       status: "ok",
       intencao,
       precisa_humano,
+      ainda_precisa_humano,
       pipeline_coluna_sugerida,
       setor_sugerido,
+      modo: newModo || atendimento.modo,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

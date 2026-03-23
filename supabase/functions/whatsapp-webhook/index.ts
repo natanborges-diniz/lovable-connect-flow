@@ -155,7 +155,7 @@ serve(async (req) => {
     }
 
     // 6. Trigger AI triage (fire-and-forget) if mode is 'ia'
-    if (atendimentoModo === "ia") {
+    if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
       triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, supabase, atendimentoId, contato.id, phone, text).catch(
         (e) => console.error("AI triage trigger failed:", e)
       );
