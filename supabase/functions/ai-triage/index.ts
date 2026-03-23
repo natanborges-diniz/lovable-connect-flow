@@ -48,6 +48,7 @@ serve(async (req) => {
       .eq("chave", "prompt_atendimento")
       .single();
     const systemPrompt = promptConfig?.valor || "Você é um assistente de atendimento ao cliente.";
+    console.log(`Prompt loaded: ${systemPrompt.length} chars, updated_at: ${promptConfig?.updated_at || 'default'}`);
 
     // 3. Load last 20 messages for context
     const { data: msgs } = await supabase
