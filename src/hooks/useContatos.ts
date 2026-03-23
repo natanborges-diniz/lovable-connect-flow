@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { TipoContato, EstagioFunil } from "@/types/database";
 
-export function useContatos(filters?: { tipo?: TipoContato; search?: string }) {
+export function useContatos(filters?: { tipo?: TipoContato; search?: string; estagio?: EstagioFunil }) {
   return useQuery({
     queryKey: ["contatos", filters],
     queryFn: async () => {
