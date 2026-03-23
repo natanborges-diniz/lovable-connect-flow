@@ -48,6 +48,7 @@ serve(async (req) => {
       .eq("chave", "prompt_atendimento")
       .single();
     const systemPrompt = promptConfig?.valor || "Você é um assistente de atendimento ao cliente.";
+    console.log(`Prompt loaded: ${systemPrompt.length} chars, updated_at: ${promptConfig?.updated_at || 'default'}`);
 
     // 3. Load last 20 messages for context
     const { data: msgs } = await supabase
@@ -92,7 +93,7 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `${systemPrompt}\n\n---\nINSTRUÇÕES INTERNAS (não mostrar ao cliente):\nVocê DEVE usar a ferramenta 'classify_and_respond' para responder. Sempre classifique a intenção e forneça uma resposta.\nColunas disponíveis no pipeline: ${colunasNomes}\nSetores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n\nIMPORTANTE sobre classificação:\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de humano).\n- Só mova para colunas específicas (Orçamento, Reclamações, etc.) após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano" independente do número de mensagens.\n- Na dúvida, mantenha na coluna atual até ter mais contexto.`,
+            content: `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}\n\n---\nINSTRUÇÕES DE CLASSIFICAÇÃO (uso interno, não mostrar ao cliente):\n- Você DEVE usar a ferramenta 'classify_and_respond' para responder.\n- Colunas disponíveis no pipeline: ${colunasNomes}\n- Setores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de humano).\n- Só mova para colunas específicas após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano".\n\nLEMBRETE: As REGRAS DE ATENDIMENTO acima são obrigatórias. Respostas curtas, sem repetição, tom natural.`,
           },
           ...chatHistory,
         ],
