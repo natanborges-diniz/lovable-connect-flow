@@ -173,6 +173,7 @@ export type Database = {
           id: string
           metadata: Json | null
           nome: string
+          pipeline_coluna_id: string | null
           tags: string[] | null
           telefone: string | null
           tipo: Database["public"]["Enums"]["tipo_contato"]
@@ -188,6 +189,7 @@ export type Database = {
           id?: string
           metadata?: Json | null
           nome: string
+          pipeline_coluna_id?: string | null
           tags?: string[] | null
           telefone?: string | null
           tipo?: Database["public"]["Enums"]["tipo_contato"]
@@ -203,13 +205,22 @@ export type Database = {
           id?: string
           metadata?: Json | null
           nome?: string
+          pipeline_coluna_id?: string | null
           tags?: string[] | null
           telefone?: string | null
           tipo?: Database["public"]["Enums"]["tipo_contato"]
           ultimo_contato_at?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "contatos_pipeline_coluna_id_fkey"
+            columns: ["pipeline_coluna_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_colunas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       eventos_crm: {
         Row: {
@@ -339,6 +350,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      pipeline_colunas: {
+        Row: {
+          ativo: boolean
+          cor: string
+          created_at: string
+          id: string
+          nome: string
+          ordem: number
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          cor?: string
+          created_at?: string
+          id?: string
+          nome: string
+          ordem?: number
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          cor?: string
+          created_at?: string
+          id?: string
+          nome?: string
+          ordem?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
