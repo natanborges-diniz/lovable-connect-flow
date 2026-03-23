@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useContatos, useUpdateContato } from "@/hooks/useContatos";
 import {
@@ -35,6 +35,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useQuery } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 const COR_OPTIONS = [
@@ -50,6 +51,21 @@ export default function Pipeline() {
   const [search, setSearch] = useState("");
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunas, isLoading: loadingColunas } = usePipelineColunas();
+  const queryClient = useQueryClient();
+
+  // Realtime: auto-refresh when contatos or atendimentos change
+  useEffect(() => {
+    const channel = supabase
+      .channel("pipeline-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "contatos" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["contatos"] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "atendimentos" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
 
   // Fetch active atendimentos to show IA/Humano mode on cards
   const { data: atendimentosAtivos } = useQuery({
