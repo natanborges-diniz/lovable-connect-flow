@@ -1,128 +1,56 @@
 
 
-## Plano Unificado: Assistente IA com Triagem, Roteamento por Setor, Prompt Configurável e Modo Homologação
+## Plano: Forçar IA a respeitar o prompt (anti-repetição e regras de conduta)
 
-### Visão Geral
+### Diagnóstico
 
-Cada mensagem WhatsApp recebida é processada automaticamente pelo assistente IA, que responde ao cliente em tempo real, classifica a intenção, move o contato para a coluna correta do Pipeline e roteia para o setor interno adequado. O operador só intervém quando o card chega na coluna "Atendimento Humano".
+O prompt está sendo carregado do banco e enviado à IA. Porém:
+1. **Tool calling reduz aderência ao system prompt** -- o modelo foca em preencher os campos da ferramenta e "esquece" regras do system prompt
+2. **Bloco de texto muito longo** -- regras de negócio, anti-repetição e classificação estão misturadas num único system message
+3. **O campo `resposta` da tool não reforça as regras** -- a descrição diz apenas "Texto de resposta para enviar ao cliente"
 
-```text
-WhatsApp → Webhook → Verifica modo (ia/humano)
-                   → Verifica homologação (telefone na whitelist?)
-                   → ai-triage (Lovable AI / Gemini)
-                       → Resposta automática via send-whatsapp
-                       → Classifica intenção
-                       → Move card no Pipeline
-                       → Roteia para setor interno
-                       → Se necessário → Coluna "Atendimento Humano"
+### Solução (3 mudanças na Edge Function `ai-triage`)
+
+**1. Reforçar regras na descrição do campo `resposta` da tool**
+
+Atualizar a `description` do campo `resposta` no schema da ferramenta para incluir regras críticas diretamente:
+
+```
+"Texto de resposta para enviar ao cliente via WhatsApp. 
+REGRAS OBRIGATÓRIAS:
+- NUNCA repita endereço, horário, telefone ou dados já enviados no histórico.
+- Se a informação já foi dita, responda 'Conforme mencionei...' de forma breve.
+- Respostas CURTAS e DIRETAS.
+- Siga rigorosamente as regras de atendimento do system prompt."
 ```
 
----
+**2. Injetar resumo do que já foi dito como contexto explícito**
 
-### Etapa 1 -- Migration SQL
+Antes de chamar a IA, analisar o histórico de mensagens outbound e criar uma lista de "informações já enviadas" (endereços, horários, telefones mencionados). Adicionar isso como um bloco no system prompt:
 
-**Tabela `configuracoes_ia`**
-- `id`, `chave` (text unique), `valor` (text), `updated_at`
-- Seed: `chave = 'prompt_atendimento'` com prompt completo das Óticas Diniz
-- Seed: `chave = 'modo_homologacao'`, `valor = 'true'`
-- RLS: authenticated ALL
+```
+INFORMAÇÕES JÁ ENVIADAS NESTA CONVERSA (NÃO REPITA):
+- [lista extraída do histórico de mensagens outbound]
+```
 
-**Tabela `contatos_homologacao`**
-- `id`, `telefone` (text unique), `descricao` (text), `ativo` (boolean default true), `created_at`
-- RLS: authenticated ALL
+**3. Separar system prompt em mensagens distintas**
 
-**Coluna `setor_destino` em `contatos`**
-- uuid nullable, referência para `setores.id`
-- Quando a IA classifica um contato em um setor, grava aqui; nas próximas mensagens, roteia direto
+Em vez de um único system message gigante, usar múltiplas mensagens de sistema/contexto para dar mais peso às regras:
+- Mensagem 1 (system): Regras de atendimento do prompt configurável
+- Mensagem 2 (system): Regra anti-repetição + lista do que já foi dito
+- Histórico da conversa
+- Mensagem final (system): Instruções de classificação (internas)
 
-**Coluna `modo` em `atendimentos`**
-- text default `'ia'` (valores: `ia` | `humano`)
-- Quando operador envia mensagem manual, muda para `humano` e a IA para de responder
-
-**Seed de colunas expandidas no Pipeline**
-- Novo Contato, Orçamento, Informações Gerais, Reclamações, Parcerias, Compras, Marketing, Agendamento, Atendimento Humano, Fechado
-- INSERT respeitando colunas já existentes (Lead, Qualificado, Proposta, Fechado permanecem se já criadas)
-
----
-
-### Etapa 2 -- Configurações: Prompt IA + Modo Homologação
-
-Na página `Configuracoes.tsx`, adicionar dois novos cards:
-
-**Card "Prompt do Assistente IA"**
-- Textarea grande com o prompt atual (carregado de `configuracoes_ia` onde `chave = 'prompt_atendimento'`)
-- Botão Salvar, contagem de caracteres
-
-**Card "Modo Homologação"**
-- Switch ON/OFF (lê/grava `configuracoes_ia` onde `chave = 'modo_homologacao'`)
-- Badge visual "HOMOLOGAÇÃO ATIVA" quando ON
-- Lista de telefones de teste (CRUD na tabela `contatos_homologacao`)
-- Quando OFF: IA responde para todos os contatos
-
----
-
-### Etapa 3 -- Edge Function `ai-triage`
-
-- Recebe `atendimento_id` e mensagem do cliente
-- Busca prompt da tabela `configuracoes_ia`
-- Busca últimas 20 mensagens do atendimento para contexto
-- Busca colunas do pipeline e setores ativos
-- Chama Lovable AI Gateway (`google/gemini-3-flash-preview`) com tool calling para extrair:
-  - `resposta`: texto para enviar ao cliente
-  - `intencao`: orcamento | status | reclamacao | parceria | compras | marketing | agendamento | informacoes | outro
-  - `precisa_humano`: boolean
-  - `setor_sugerido`: nome do setor (match com tabela `setores`)
-  - `pipeline_coluna_sugerida`: nome da coluna destino
-- Envia resposta via `send-whatsapp` (usando o provedor correto do atendimento)
-- Atualiza `contatos.pipeline_coluna_id`, `contatos.setor_destino`, `contatos.ultimo_contato_at`
-- Salva mensagem outbound na tabela `mensagens`
-- Registra evento no `eventos_crm`
-
----
-
-### Etapa 4 -- Atualizar `whatsapp-webhook`
-
-Após salvar mensagem inbound:
-1. Verifica `atendimentos.modo`: se `humano` → não chama IA
-2. Se `modo = ia`, verifica homologação:
-   - Busca `configuracoes_ia` onde `chave = 'modo_homologacao'`
-   - Se `valor = 'true'`: verifica se telefone está em `contatos_homologacao` com `ativo = true`
-   - Se NÃO está na whitelist → salva mensagem normalmente, sem resposta automática
-   - Se ESTÁ ou homologação desligada → chama `ai-triage` (fire-and-forget)
-3. Verifica `contatos.setor_destino`: se existir, usa para influenciar roteamento
-
----
-
-### Etapa 5 -- Indicadores visuais no Pipeline
-
-- Badge "IA" ou "Humano" nos cards (baseado em `atendimentos.modo`)
-- Badge do setor destino quando atribuído
-- Intenção classificada visível no card (metadata ou campo)
-- Indicação de última interação (`ultimo_contato_at`)
-
----
-
-### Etapa 6 -- Toggle IA/Humano nos Atendimentos
-
-- Na tela de Atendimentos, botão para alternar modo IA ↔ Humano
-- Quando operador envia mensagem manual no chat, automaticamente muda para `humano`
-- Botão "Retomar IA" para voltar ao modo automático
-
----
-
-### Componentes alterados
+### Componente alterado
 
 | Componente | Ação |
 |---|---|
-| Migration SQL | Criar `configuracoes_ia`, `contatos_homologacao`, adicionar `setor_destino` em contatos, `modo` em atendimentos, seed colunas |
-| `supabase/functions/ai-triage/index.ts` | Criar (nova edge function) |
-| `supabase/functions/whatsapp-webhook/index.ts` | Adicionar verificação de modo + homologação + chamada ao ai-triage |
-| `src/pages/Configuracoes.tsx` | Cards: Prompt IA + Modo Homologação |
-| `src/pages/Pipeline.tsx` | Badges de modo/setor/intenção nos cards |
-| `src/pages/Atendimentos.tsx` | Toggle IA/humano |
-| `src/hooks/useContatos.ts` | Suportar `setor_destino` |
+| `supabase/functions/ai-triage/index.ts` | Reestruturar mensagens, reforçar descrição da tool, extrair contexto do histórico |
 
-### Sobre o modelo de IA
+### Resultado esperado
 
-O plano usa Lovable AI (`LOVABLE_API_KEY` já configurada) com Gemini. Se no futuro preferir migrar para o assistente OpenAI existente, basta cadastrar `OPENAI_API_KEY` e adaptar a edge function -- a arquitetura permanece a mesma.
+A IA vai parar de repetir informações porque:
+- As regras anti-repetição estão na **descrição da ferramenta** (onde o modelo presta mais atenção)
+- O histórico do que já foi dito é **explicitamente listado** (o modelo não precisa inferir)
+- As instruções estão **separadas por prioridade** em vez de misturadas
 
