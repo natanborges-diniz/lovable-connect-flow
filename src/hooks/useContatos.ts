@@ -33,10 +33,11 @@ export function useContato(id: string | undefined) {
 export function useCreateContato() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (contato: { nome: string; tipo: TipoContato; email?: string | null; telefone?: string | null; documento?: string | null; tags?: string[]; ativo?: boolean }) => {
+    mutationFn: async (contato: { nome: string; tipo: TipoContato; estagio?: EstagioFunil; email?: string | null; telefone?: string | null; documento?: string | null; tags?: string[]; ativo?: boolean }) => {
       const { data, error } = await supabase.from("contatos").insert({
         nome: contato.nome,
         tipo: contato.tipo,
+        estagio: contato.estagio ?? "lead",
         email: contato.email,
         telefone: contato.telefone,
         documento: contato.documento,
