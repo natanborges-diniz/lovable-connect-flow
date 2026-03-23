@@ -121,6 +121,22 @@ export default function Pipeline() {
 
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
+
+    // Column reorder
+    if (result.type === "COLUMN") {
+      const sortedColunas = [...contatosByColuna];
+      const [moved] = sortedColunas.splice(result.source.index, 1);
+      sortedColunas.splice(result.destination.index, 0, moved);
+      // Update ordem for each column
+      sortedColunas.forEach((col, idx) => {
+        if (col.ordem !== idx) {
+          updateColuna.mutate({ id: col.id, ordem: idx });
+        }
+      });
+      return;
+    }
+
+    // Card move between columns
     const contatoId = result.draggableId;
     const destColunaId = result.destination.droppableId;
     if (destColunaId === "sem-coluna") return;
@@ -182,11 +198,24 @@ export default function Pipeline() {
         <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
       ) : (
         <DragDropContext onDragEnd={onDragEnd}>
-          <div className="flex gap-4 overflow-x-auto pb-4" style={{ minHeight: "60vh" }}>
-            {contatosByColuna.map((coluna) => {
+          <Droppable droppableId="columns" direction="horizontal" type="COLUMN">
+            {(colsProvided) => (
+              <div
+                ref={colsProvided.innerRef}
+                {...colsProvided.droppableProps}
+                className="flex gap-4 overflow-x-auto pb-4"
+                style={{ minHeight: "60vh" }}
+              >
+            {contatosByColuna.map((coluna, colIndex) => {
               const isHumano = isAtendimentoHumano(coluna.nome);
               return (
-                <div key={coluna.id} className="flex-shrink-0 w-72">
+                <Draggable key={coluna.id} draggableId={`col-${coluna.id}`} index={colIndex}>
+                  {(colDragProvided, colDragSnapshot) => (
+                <div
+                  ref={colDragProvided.innerRef}
+                  {...colDragProvided.draggableProps}
+                  className={cn("flex-shrink-0 w-72", colDragSnapshot.isDragging && "opacity-80")}
+                >
                   <Card
                     className={cn(
                       "border-t-4",
@@ -195,7 +224,7 @@ export default function Pipeline() {
                         : `border-t-${coluna.cor}`
                     )}
                   >
-                    <CardHeader className="pb-2 pt-3 px-3">
+                    <CardHeader className="pb-2 pt-3 px-3 cursor-grab active:cursor-grabbing" {...colDragProvided.dragHandleProps}>
                       <div className="flex items-center justify-between gap-1">
                         {editingColuna === coluna.id ? (
                           <div className="flex items-center gap-1 flex-1">
@@ -342,6 +371,8 @@ export default function Pipeline() {
                     </Droppable>
                   </Card>
                 </div>
+                  )}
+                </Draggable>
               );
             })}
 
@@ -407,7 +438,10 @@ export default function Pipeline() {
                 </Card>
               </div>
             )}
+            {colsProvided.placeholder}
           </div>
+            )}
+          </Droppable>
         </DragDropContext>
       )}
 
