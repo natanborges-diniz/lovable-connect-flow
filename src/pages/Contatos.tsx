@@ -199,6 +199,19 @@ function ContatoForm({ onSuccess, initialData }: { onSuccess: () => void; initia
           </SelectContent>
         </Select>
       </div>
+      <div className="space-y-2">
+        <Label>Estágio do Funil</Label>
+        <Select value={form.estagio} onValueChange={(v) => setForm({ ...form, estagio: v as EstagioFunil })}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="lead">Lead</SelectItem>
+            <SelectItem value="qualificado">Qualificado</SelectItem>
+            <SelectItem value="proposta">Proposta</SelectItem>
+            <SelectItem value="fechado">Fechado</SelectItem>
+            <SelectItem value="perdido">Perdido</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
           <Label>Email</Label>
