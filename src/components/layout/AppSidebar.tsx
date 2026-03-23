@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
-  Search as SearchIcon, Plus, List, Clock
+  Search as SearchIcon, Plus, List, Clock, Kanban
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
