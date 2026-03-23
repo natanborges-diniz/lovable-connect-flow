@@ -203,6 +203,24 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
               {atendimento.canal_provedor === "meta_official" ? "Oficial" : atendimento.canal_provedor === "evolution_api" ? "Evolution" : "Z-API"}
             </Badge>
           )}
+          {/* Modo IA/Humano badge + toggle */}
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[10px] cursor-pointer select-none",
+              (atendimento as any).modo === "ia"
+                ? "border-primary/50 text-primary hover:bg-primary/10"
+                : "border-warning/50 text-warning hover:bg-warning/10"
+            )}
+            onClick={async () => {
+              const newModo = (atendimento as any).modo === "ia" ? "humano" : "ia";
+              const { error } = await supabase.from("atendimentos").update({ modo: newModo } as any).eq("id", id);
+              if (error) { toast.error("Erro: " + error.message); return; }
+              toast.success(newModo === "ia" ? "Modo IA reativado" : "Modo humano ativado");
+            }}
+          >
+            {(atendimento as any).modo === "ia" ? "🤖 IA" : "👤 Humano"} (clique p/ alternar)
+          </Badge>
           {atendimento.contato?.nome && <span className="text-sm text-muted-foreground">• {atendimento.contato.nome}</span>}
           <div className="ml-auto flex items-center gap-2">
             <Label className="text-xs">Status:</Label>
