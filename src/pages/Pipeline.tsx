@@ -438,7 +438,10 @@ export default function Pipeline() {
                 </Card>
               </div>
             )}
+            {colsProvided.placeholder}
           </div>
+            )}
+          </Droppable>
         </DragDropContext>
       )}
 
