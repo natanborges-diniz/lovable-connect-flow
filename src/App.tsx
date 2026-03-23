@@ -31,8 +31,8 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/crm" element={<Contatos />} />
-              <Route path="/crm/pipeline" element={<Pipeline />} />
+              <Route path="/crm" element={<Pipeline />} />
+              <Route path="/crm/contatos" element={<Contatos />} />
               <Route path="/solicitacoes" element={<Solicitacoes />} />
               <Route path="/atendimentos" element={<Atendimentos />} />
               <Route path="/tarefas" element={<Tarefas />} />
