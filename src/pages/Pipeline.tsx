@@ -198,11 +198,24 @@ export default function Pipeline() {
         <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
       ) : (
         <DragDropContext onDragEnd={onDragEnd}>
-          <div className="flex gap-4 overflow-x-auto pb-4" style={{ minHeight: "60vh" }}>
-            {contatosByColuna.map((coluna) => {
+          <Droppable droppableId="columns" direction="horizontal" type="COLUMN">
+            {(colsProvided) => (
+              <div
+                ref={colsProvided.innerRef}
+                {...colsProvided.droppableProps}
+                className="flex gap-4 overflow-x-auto pb-4"
+                style={{ minHeight: "60vh" }}
+              >
+            {contatosByColuna.map((coluna, colIndex) => {
               const isHumano = isAtendimentoHumano(coluna.nome);
               return (
-                <div key={coluna.id} className="flex-shrink-0 w-72">
+                <Draggable key={coluna.id} draggableId={`col-${coluna.id}`} index={colIndex}>
+                  {(colDragProvided, colDragSnapshot) => (
+                <div
+                  ref={colDragProvided.innerRef}
+                  {...colDragProvided.draggableProps}
+                  className={cn("flex-shrink-0 w-72", colDragSnapshot.isDragging && "opacity-80")}
+                >
                   <Card
                     className={cn(
                       "border-t-4",
