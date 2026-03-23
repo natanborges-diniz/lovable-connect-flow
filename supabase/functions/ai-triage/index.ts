@@ -111,8 +111,16 @@ serve(async (req) => {
       });
     }
 
-    // Chat history
-    systemMessages.push(...chatHistory);
+    // Chat history (excluding the last inbound message, which will be highlighted separately)
+    const lastInboundIndex = chatHistory.length - 1 - [...chatHistory].reverse().findIndex(m => m.role === "user");
+    const historyWithoutLast = lastInboundIndex >= 0 && lastInboundIndex < chatHistory.length
+      ? chatHistory.filter((_: any, i: number) => i !== lastInboundIndex)
+      : chatHistory;
+    const currentMessage = lastInboundIndex >= 0 && lastInboundIndex < chatHistory.length
+      ? chatHistory[lastInboundIndex].content
+      : mensagem_texto || "";
+
+    systemMessages.push(...historyWithoutLast);
 
     // Message 3: Classification instructions
     systemMessages.push({
