@@ -50,6 +50,20 @@ export default function Pipeline() {
   const [search, setSearch] = useState("");
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunas, isLoading: loadingColunas } = usePipelineColunas();
+
+  // Fetch active atendimentos to show IA/Humano mode on cards
+  const { data: atendimentosAtivos } = useQuery({
+    queryKey: ["atendimentos_modos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("atendimentos")
+        .select("contato_id, modo")
+        .neq("status", "encerrado");
+      if (error) throw error;
+      return data as { contato_id: string; modo: string }[];
+    },
+  });
+  const modoByContato = new Map((atendimentosAtivos || []).map((a) => [a.contato_id, a.modo]));
   const updateContato = useUpdateContato();
   const createColuna = useCreatePipelineColuna();
   const updateColuna = useUpdatePipelineColuna();
