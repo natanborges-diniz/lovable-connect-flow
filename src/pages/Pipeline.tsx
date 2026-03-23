@@ -246,7 +246,20 @@ export default function Pipeline() {
                                       <GripVertical className="h-4 w-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <p className="font-medium text-sm truncate">{contato.nome}</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <p className="font-medium text-sm truncate">{contato.nome}</p>
+                                        {modoByContato.has(contato.id) && (
+                                          modoByContato.get(contato.id) === "ia" ? (
+                                            <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-primary/50 text-primary">
+                                              <Bot className="h-2.5 w-2.5" /> IA
+                                            </Badge>
+                                          ) : (
+                                            <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-warning/50 text-warning">
+                                              <User className="h-2.5 w-2.5" /> Humano
+                                            </Badge>
+                                          )
+                                        )}
+                                      </div>
                                       <TipoContatoBadge tipo={contato.tipo} />
                                     </div>
                                   </div>
