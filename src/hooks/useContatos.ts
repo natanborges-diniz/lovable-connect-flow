@@ -9,6 +9,7 @@ export function useContatos(filters?: { tipo?: TipoContato; search?: string; est
     queryFn: async () => {
       let query = supabase.from("contatos").select("*").order("created_at", { ascending: false });
       if (filters?.tipo) query = query.eq("tipo", filters.tipo);
+      if (filters?.estagio) query = query.eq("estagio", filters.estagio);
       if (filters?.search) query = query.or(`nome.ilike.%${filters.search}%,email.ilike.%${filters.search}%,telefone.ilike.%${filters.search}%`);
       const { data, error } = await query;
       if (error) throw error;
