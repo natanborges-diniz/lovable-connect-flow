@@ -66,6 +66,12 @@ serve(async (req) => {
     // Count inbound messages to determine conversation maturity
     const inboundCount = (msgs || []).filter((m: any) => m.direcao === "inbound").length;
 
+    // Extract info already sent in outbound messages to prevent repetition
+    const outboundMessages = (msgs || []).filter((m: any) => m.direcao === "outbound").map((m: any) => m.conteudo);
+    const alreadySentSummary = outboundMessages.length > 0
+      ? outboundMessages.join("\n---\n")
+      : "Nenhuma mensagem enviada ainda.";
+
     // 4. Load pipeline columns and setores for classification context
     const { data: colunas } = await supabase
       .from("pipeline_colunas")
@@ -81,7 +87,7 @@ serve(async (req) => {
     const colunasNomes = (colunas || []).map((c: any) => c.nome).join(", ");
     const setoresNomes = (setores || []).map((s: any) => s.nome).join(", ");
 
-    // 5. Call Lovable AI with tool calling
+    // 5. Call Lovable AI with SEPARATED system messages for better adherence
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -91,11 +97,23 @@ serve(async (req) => {
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: [
+          // Message 1: Business rules from configurable prompt (HIGHEST PRIORITY)
           {
             role: "system",
-            content: `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}\n\n---\nREGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita informações que já foram ditas em mensagens anteriores nesta conversa.\n- Releia o histórico abaixo ANTES de responder. Se o endereço, horário, telefone ou qualquer dado já foi enviado, NÃO envie novamente.\n- Se o cliente perguntar algo que já foi respondido, diga algo como "Conforme mencionei anteriormente..." e seja breve.\n- Respostas devem ser CURTAS e DIRETAS, sem repetir blocos de texto.\n\n---\nINSTRUÇÕES DE CLASSIFICAÇÃO (uso interno, não mostrar ao cliente):\n- Você DEVE usar a ferramenta 'classify_and_respond' para responder.\n- Colunas disponíveis no pipeline: ${colunasNomes}\n- Setores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de humano).\n- Só mova para colunas específicas após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano".`,
+            content: `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}`,
           },
+          // Message 2: Anti-repetition with explicit list of what was already said
+          {
+            role: "system",
+            content: `REGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita endereço, horário, telefone, ou QUALQUER informação já presente nas mensagens anteriores.\n- Releia TODO o histórico ANTES de gerar a resposta.\n- Se o cliente perguntar algo já respondido, diga "Conforme mencionei anteriormente..." de forma BREVE.\n- Respostas devem ser CURTAS e DIRETAS.\n\nINFORMAÇÕES JÁ ENVIADAS NESTA CONVERSA (NÃO REPITA NADA DISTO):\n${alreadySentSummary}`,
+          },
+          // Chat history
           ...chatHistory,
+          // Message 3: Classification instructions (internal, lower priority)
+          {
+            role: "system",
+            content: `INSTRUÇÕES DE CLASSIFICAÇÃO (uso interno, não mostrar ao cliente):\n- Você DEVE usar a ferramenta 'classify_and_respond' para responder.\n- Colunas disponíveis no pipeline: ${colunasNomes}\n- Setores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de humano).\n- Só mova para colunas específicas após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano".`,
+          },
         ],
         tools: [
           {
