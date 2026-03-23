@@ -62,6 +62,9 @@ serve(async (req) => {
       content: m.conteudo,
     }));
 
+    // Count inbound messages to determine conversation maturity
+    const inboundCount = (msgs || []).filter((m: any) => m.direcao === "inbound").length;
+
     // 4. Load pipeline columns and setores for classification context
     const { data: colunas } = await supabase
       .from("pipeline_colunas")
