@@ -47,6 +47,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "Contatos",
       items: [
         { title: "Todos os Contatos", url: "/crm", icon: Users },
+        { title: "Pipeline de Vendas", url: "/crm/pipeline", icon: Kanban },
       ],
     },
   ],
