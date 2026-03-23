@@ -11,8 +11,9 @@ import { TipoContatoBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
-  Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical,
+  Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -33,6 +34,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
 const COR_OPTIONS = [
   { value: "muted-foreground", label: "Cinza" },
@@ -47,6 +50,20 @@ export default function Pipeline() {
   const [search, setSearch] = useState("");
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunas, isLoading: loadingColunas } = usePipelineColunas();
+
+  // Fetch active atendimentos to show IA/Humano mode on cards
+  const { data: atendimentosAtivos } = useQuery({
+    queryKey: ["atendimentos_modos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("atendimentos")
+        .select("contato_id, modo")
+        .neq("status", "encerrado");
+      if (error) throw error;
+      return data as { contato_id: string; modo: string }[];
+    },
+  });
+  const modoByContato = new Map((atendimentosAtivos || []).map((a) => [a.contato_id, a.modo]));
   const updateContato = useUpdateContato();
   const createColuna = useCreatePipelineColuna();
   const updateColuna = useUpdatePipelineColuna();
@@ -229,7 +246,20 @@ export default function Pipeline() {
                                       <GripVertical className="h-4 w-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <p className="font-medium text-sm truncate">{contato.nome}</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <p className="font-medium text-sm truncate">{contato.nome}</p>
+                                        {modoByContato.has(contato.id) && (
+                                          modoByContato.get(contato.id) === "ia" ? (
+                                            <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-primary/50 text-primary">
+                                              <Bot className="h-2.5 w-2.5" /> IA
+                                            </Badge>
+                                          ) : (
+                                            <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-warning/50 text-warning">
+                                              <User className="h-2.5 w-2.5" /> Humano
+                                            </Badge>
+                                          )
+                                        )}
+                                      </div>
                                       <TipoContatoBadge tipo={contato.tipo} />
                                     </div>
                                   </div>

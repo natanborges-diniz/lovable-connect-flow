@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,10 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Building2, GitBranch, Trash2 } from "lucide-react";
+import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+
+// ─── Hooks ───
 
 function useSetores() {
   return useQuery({
@@ -38,6 +40,37 @@ function useFilas(setorId?: string) {
     },
   });
 }
+
+function useConfigIA(chave: string) {
+  return useQuery({
+    queryKey: ["configuracoes_ia", chave],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("configuracoes_ia" as any)
+        .select("*")
+        .eq("chave", chave)
+        .single();
+      if (error) throw error;
+      return data as any;
+    },
+  });
+}
+
+function useContatosHomologacao() {
+  return useQuery({
+    queryKey: ["contatos_homologacao"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contatos_homologacao" as any)
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+}
+
+// ─── Main Component ───
 
 export default function Configuracoes() {
   const [setorDialog, setSetorDialog] = useState(false);
@@ -92,9 +125,15 @@ export default function Configuracoes() {
 
   return (
     <>
-      <PageHeader title="Configurações" description="Gerencie setores, filas e integrações" />
+      <PageHeader title="Configurações" description="Gerencie setores, filas, IA e integrações" />
 
       <div className="grid gap-6">
+        {/* Prompt IA */}
+        <PromptIACard />
+
+        {/* Modo Homologação */}
+        <HomologacaoCard />
+
         {/* Setores */}
         <Card className="shadow-card">
           <CardHeader className="flex flex-row items-center justify-between">
@@ -190,7 +229,7 @@ export default function Configuracoes() {
         {/* WhatsApp Integration */}
         <Card className="shadow-card">
           <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">📱 Integração WhatsApp (API Oficial Meta)</CardTitle>
+            <CardTitle className="text-lg flex items-center gap-2">📱 Integração WhatsApp</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
@@ -201,31 +240,6 @@ export default function Configuracoes() {
                   Copiar
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Cole esta URL no campo "Callback URL" do Meta Business Manager.</p>
-            </div>
-
-            <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-3">
-              <p className="font-medium">Como configurar na API Oficial do WhatsApp:</p>
-              <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
-                <li>Acesse o <strong>Meta Business Manager</strong> → <strong>WhatsApp</strong> → <strong>Configuração</strong></li>
-                <li>Em <strong>Webhook</strong>, clique em <strong>Editar</strong></li>
-                <li>Cole a <strong>URL do Webhook</strong> acima no campo "Callback URL"</li>
-                <li>No campo <strong>"Verify Token"</strong>, cole o mesmo token que você cadastrou como secret (<code>WHATSAPP_VERIFY_TOKEN</code>)</li>
-                <li>Clique em <strong>Verificar e salvar</strong> — a Meta enviará um GET para validar</li>
-                <li>Inscreva-se no campo <strong>"messages"</strong> para receber mensagens</li>
-              </ol>
-            </div>
-
-            <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
-              <p className="font-medium">Secrets configurados:</p>
-              <ul className="space-y-1 text-muted-foreground">
-                <li>✅ <code>WHATSAPP_VERIFY_TOKEN</code> — Token de verificação do webhook</li>
-                <li>✅ <code>WHATSAPP_ACCESS_TOKEN</code> — Token permanente (System User Token)</li>
-                <li>✅ <code>WHATSAPP_PHONE_NUMBER_ID</code> — ID do número no Meta Business</li>
-              </ul>
-              <p className="text-xs text-muted-foreground mt-2">
-                Também aceita payloads de Evolution API e Z-API como fallback.
-              </p>
             </div>
           </CardContent>
         </Card>
@@ -233,6 +247,211 @@ export default function Configuracoes() {
     </>
   );
 }
+
+// ─── Prompt IA Card ───
+
+function PromptIACard() {
+  const { data: config, isLoading } = useConfigIA("prompt_atendimento");
+  const [valor, setValor] = useState("");
+  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (config?.valor) setValor(config.valor);
+  }, [config]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("configuracoes_ia" as any)
+        .update({ valor } as any)
+        .eq("chave", "prompt_atendimento");
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["configuracoes_ia", "prompt_atendimento"] });
+      toast.success("Prompt salvo com sucesso");
+    } catch (e: any) {
+      toast.error("Erro ao salvar: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="shadow-card">
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Bot className="h-5 w-5" /> Prompt do Assistente IA
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Carregando...</p>
+        ) : (
+          <>
+            <Textarea
+              value={valor}
+              onChange={(e) => setValor(e.target.value)}
+              rows={12}
+              className="font-mono text-xs"
+              placeholder="Cole aqui o prompt do assistente IA..."
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{valor.length} caracteres</span>
+              <Button onClick={handleSave} disabled={saving || valor === config?.valor} size="sm">
+                {saving ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Salvando...</> : "Salvar Prompt"}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Modo Homologação Card ───
+
+function HomologacaoCard() {
+  const { data: config, isLoading: loadingConfig } = useConfigIA("modo_homologacao");
+  const { data: telefones, isLoading: loadingTel } = useContatosHomologacao();
+  const [novoTelefone, setNovoTelefone] = useState("");
+  const [novaDescricao, setNovaDescricao] = useState("");
+  const queryClient = useQueryClient();
+
+  const isAtivo = config?.valor === "true";
+
+  const toggleModo = async (ativo: boolean) => {
+    const { error } = await supabase
+      .from("configuracoes_ia" as any)
+      .update({ valor: ativo ? "true" : "false" } as any)
+      .eq("chave", "modo_homologacao");
+    if (error) {
+      toast.error("Erro ao atualizar: " + error.message);
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["configuracoes_ia", "modo_homologacao"] });
+    toast.success(ativo ? "Modo homologação ativado" : "Modo produção ativado — IA responde para todos");
+  };
+
+  const addTelefone = async () => {
+    if (!novoTelefone.trim()) return;
+    const { error } = await supabase
+      .from("contatos_homologacao" as any)
+      .insert({ telefone: novoTelefone.trim(), descricao: novaDescricao.trim() || null } as any);
+    if (error) {
+      toast.error("Erro: " + error.message);
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["contatos_homologacao"] });
+    setNovoTelefone("");
+    setNovaDescricao("");
+    toast.success("Telefone de teste adicionado");
+  };
+
+  const removeTelefone = async (id: string) => {
+    const { error } = await supabase
+      .from("contatos_homologacao" as any)
+      .delete()
+      .eq("id", id);
+    if (error) {
+      toast.error("Erro: " + error.message);
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["contatos_homologacao"] });
+  };
+
+  if (loadingConfig) return null;
+
+  return (
+    <Card className="shadow-card">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5" /> Modo Homologação
+          </CardTitle>
+          <div className="flex items-center gap-3">
+            {isAtivo && (
+              <Badge variant="outline" className="bg-warning-soft text-warning border-warning-muted">
+                HOMOLOGAÇÃO ATIVA
+              </Badge>
+            )}
+            {!isAtivo && (
+              <Badge variant="outline" className="bg-success-soft text-success border-success">
+                PRODUÇÃO
+              </Badge>
+            )}
+            <Switch checked={isAtivo} onCheckedChange={toggleModo} />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          {isAtivo
+            ? "A IA só responde automaticamente para os telefones listados abaixo. Demais contatos recebem mensagens normalmente mas sem resposta automática."
+            : "A IA responde automaticamente para todos os contatos. Ative o modo homologação para testar com números específicos."}
+        </p>
+
+        {isAtivo && (
+          <>
+            <div className="flex items-end gap-2">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs">Telefone</Label>
+                <Input
+                  value={novoTelefone}
+                  onChange={(e) => setNovoTelefone(e.target.value)}
+                  placeholder="5511999999999"
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs">Descrição</Label>
+                <Input
+                  value={novaDescricao}
+                  onChange={(e) => setNovaDescricao(e.target.value)}
+                  placeholder="Ex: Celular do Natan"
+                />
+              </div>
+              <Button size="sm" onClick={addTelefone} disabled={!novoTelefone.trim()}>
+                <Plus className="h-4 w-4 mr-1" /> Adicionar
+              </Button>
+            </div>
+
+            {loadingTel ? (
+              <p className="text-sm text-muted-foreground">Carregando...</p>
+            ) : !telefones?.length ? (
+              <p className="text-sm text-muted-foreground text-center py-2">Nenhum telefone de teste cadastrado</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Telefone</TableHead>
+                    <TableHead>Descrição</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {telefones.map((t: any) => (
+                    <TableRow key={t.id}>
+                      <TableCell className="font-mono text-sm">{t.telefone}</TableCell>
+                      <TableCell className="text-muted-foreground">{t.descricao || "—"}</TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeTelefone(t.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Forms ───
 
 function CreateSetorForm({ onSubmit, loading }: { onSubmit: (data: { nome: string; descricao?: string }) => void; loading: boolean }) {
   const [nome, setNome] = useState("");
