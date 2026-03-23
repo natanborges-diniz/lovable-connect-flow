@@ -92,7 +92,7 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `${systemPrompt}\n\n---\nINSTRUÇÕES INTERNAS (não mostrar ao cliente):\nVocê DEVE usar a ferramenta 'classify_and_respond' para responder. Sempre classifique a intenção e forneça uma resposta.\nColunas disponíveis no pipeline: ${colunasNomes}\nSetores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}`,
+            content: `${systemPrompt}\n\n---\nINSTRUÇÕES INTERNAS (não mostrar ao cliente):\nVocê DEVE usar a ferramenta 'classify_and_respond' para responder. Sempre classifique a intenção e forneça uma resposta.\nColunas disponíveis no pipeline: ${colunasNomes}\nSetores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n\nIMPORTANTE sobre classificação:\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de humano).\n- Só mova para colunas específicas (Orçamento, Reclamações, etc.) após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano" independente do número de mensagens.\n- Na dúvida, mantenha na coluna atual até ter mais contexto.`,
           },
           ...chatHistory,
         ],
