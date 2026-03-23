@@ -166,6 +166,7 @@ function ContatoForm({ onSuccess, initialData }: { onSuccess: () => void; initia
     const payload = {
       nome: form.nome,
       tipo: form.tipo,
+      estagio: form.estagio,
       email: form.email || null,
       telefone: form.telefone || null,
       documento: form.documento || null,
