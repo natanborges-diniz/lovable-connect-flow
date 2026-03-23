@@ -59,7 +59,7 @@ export function useCreateContato() {
 export function useUpdateContato() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string; nome?: string; tipo?: TipoContato; email?: string | null; telefone?: string | null; documento?: string | null }) => {
+    mutationFn: async ({ id, ...updates }: { id: string; nome?: string; tipo?: TipoContato; estagio?: EstagioFunil; email?: string | null; telefone?: string | null; documento?: string | null }) => {
       const { data, error } = await supabase.from("contatos").update(updates).eq("id", id).select().single();
       if (error) throw error;
       return data;
