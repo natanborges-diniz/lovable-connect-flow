@@ -224,7 +224,7 @@ export default function Pipeline() {
                         : `border-t-${coluna.cor}`
                     )}
                   >
-                    <CardHeader className="pb-2 pt-3 px-3">
+                    <CardHeader className="pb-2 pt-3 px-3 cursor-grab active:cursor-grabbing" {...colDragProvided.dragHandleProps}>
                       <div className="flex items-center justify-between gap-1">
                         {editingColuna === coluna.id ? (
                           <div className="flex items-center gap-1 flex-1">
