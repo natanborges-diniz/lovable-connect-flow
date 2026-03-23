@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useContatos, useCreateContato, useUpdateContato } from "@/hooks/useContatos";
-import { TipoContatoBadge } from "@/components/shared/StatusBadge";
+import { TipoContatoBadge, EstagioFunilBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
