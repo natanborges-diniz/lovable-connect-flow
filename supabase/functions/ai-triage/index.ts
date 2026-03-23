@@ -126,7 +126,7 @@ serve(async (req) => {
                 properties: {
                   resposta: {
                     type: "string",
-                    description: "Texto de resposta para enviar ao cliente via WhatsApp. Deve seguir as regras do prompt.",
+                    description: "Texto de resposta para enviar ao cliente via WhatsApp. REGRAS OBRIGATÓRIAS: 1) NUNCA repita endereço, horário, telefone ou dados já enviados no histórico. 2) Se a informação já foi dita, responda 'Conforme mencionei...' de forma breve. 3) Respostas CURTAS e DIRETAS. 4) Siga rigorosamente as regras de atendimento do system prompt.",
                   },
                   intencao: {
                     type: "string",
