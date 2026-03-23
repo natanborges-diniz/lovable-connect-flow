@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
@@ -17,6 +17,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { StatusAtendimento } from "@/types/database";
 
@@ -32,6 +33,21 @@ export default function Atendimentos() {
 
   const { data: atendimentos, isLoading } = useAtendimentos(filters);
   const updateStatus = useUpdateAtendimentoStatus();
+  const queryClient = useQueryClient();
+
+  // Realtime: auto-refresh list when atendimentos or mensagens change
+  useEffect(() => {
+    const channel = supabase
+      .channel("atendimentos-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "atendimentos" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["atendimentos"] });
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["atendimentos"] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
 
   return (
     <>
