@@ -62,6 +62,9 @@ serve(async (req) => {
       content: m.conteudo,
     }));
 
+    // Count inbound messages to determine conversation maturity
+    const inboundCount = (msgs || []).filter((m: any) => m.direcao === "inbound").length;
+
     // 4. Load pipeline columns and setores for classification context
     const { data: colunas } = await supabase
       .from("pipeline_colunas")
@@ -89,7 +92,7 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `${systemPrompt}\n\n---\nINSTRUÇÕES INTERNAS (não mostrar ao cliente):\nVocê DEVE usar a ferramenta 'classify_and_respond' para responder. Sempre classifique a intenção e forneça uma resposta.\nColunas disponíveis no pipeline: ${colunasNomes}\nSetores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}`,
+            content: `${systemPrompt}\n\n---\nINSTRUÇÕES INTERNAS (não mostrar ao cliente):\nVocê DEVE usar a ferramenta 'classify_and_respond' para responder. Sempre classifique a intenção e forneça uma resposta.\nColunas disponíveis no pipeline: ${colunasNomes}\nSetores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n\nIMPORTANTE sobre classificação:\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de humano).\n- Só mova para colunas específicas (Orçamento, Reclamações, etc.) após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano" independente do número de mensagens.\n- Na dúvida, mantenha na coluna atual até ter mais contexto.`,
           },
           ...chatHistory,
         ],
@@ -181,14 +184,16 @@ serve(async (req) => {
       console.error("Failed to send WhatsApp response:", errBody);
     }
 
-    // 7. Move contato to pipeline column
-    const targetColuna = precisa_humano
-      ? colunas?.find((c: any) => c.nome === "Atendimento Humano")
-      : colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
-
+    // 7. Move contato to pipeline column (conservative: only move if precisa_humano or conversation is mature)
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
-    if (targetColuna) {
-      contatoUpdates.pipeline_coluna_id = targetColuna.id;
+
+    if (precisa_humano) {
+      const humanoColuna = colunas?.find((c: any) => c.nome === "Atendimento Humano");
+      if (humanoColuna) contatoUpdates.pipeline_coluna_id = humanoColuna.id;
+    } else if (inboundCount >= 3 || pipeline_coluna_sugerida === "Novo Contato") {
+      // Only move after enough context, or if AI explicitly says "Novo Contato"
+      const targetColuna = colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
+      if (targetColuna) contatoUpdates.pipeline_coluna_id = targetColuna.id;
     }
 
     // 8. Route to setor if suggested
