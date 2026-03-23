@@ -26,6 +26,7 @@ export type Database = {
           id: string
           inicio_at: string | null
           metadata: Json | null
+          modo: string
           solicitacao_id: string
           status: Database["public"]["Enums"]["status_atendimento"]
           updated_at: string
@@ -41,6 +42,7 @@ export type Database = {
           id?: string
           inicio_at?: string | null
           metadata?: Json | null
+          modo?: string
           solicitacao_id: string
           status?: Database["public"]["Enums"]["status_atendimento"]
           updated_at?: string
@@ -56,6 +58,7 @@ export type Database = {
           id?: string
           inicio_at?: string | null
           metadata?: Json | null
+          modo?: string
           solicitacao_id?: string
           status?: Database["public"]["Enums"]["status_atendimento"]
           updated_at?: string
@@ -163,6 +166,27 @@ export type Database = {
           },
         ]
       }
+      configuracoes_ia: {
+        Row: {
+          chave: string
+          id: string
+          updated_at: string
+          valor: string
+        }
+        Insert: {
+          chave: string
+          id?: string
+          updated_at?: string
+          valor?: string
+        }
+        Update: {
+          chave?: string
+          id?: string
+          updated_at?: string
+          valor?: string
+        }
+        Relationships: []
+      }
       contatos: {
         Row: {
           ativo: boolean
@@ -174,6 +198,7 @@ export type Database = {
           metadata: Json | null
           nome: string
           pipeline_coluna_id: string | null
+          setor_destino: string | null
           tags: string[] | null
           telefone: string | null
           tipo: Database["public"]["Enums"]["tipo_contato"]
@@ -190,6 +215,7 @@ export type Database = {
           metadata?: Json | null
           nome: string
           pipeline_coluna_id?: string | null
+          setor_destino?: string | null
           tags?: string[] | null
           telefone?: string | null
           tipo?: Database["public"]["Enums"]["tipo_contato"]
@@ -206,6 +232,7 @@ export type Database = {
           metadata?: Json | null
           nome?: string
           pipeline_coluna_id?: string | null
+          setor_destino?: string | null
           tags?: string[] | null
           telefone?: string | null
           tipo?: Database["public"]["Enums"]["tipo_contato"]
@@ -220,7 +247,38 @@ export type Database = {
             referencedRelation: "pipeline_colunas"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "contatos_setor_destino_fkey"
+            columns: ["setor_destino"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      contatos_homologacao: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          descricao: string | null
+          id: string
+          telefone: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          telefone: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          telefone?: string
+        }
+        Relationships: []
       }
       eventos_crm: {
         Row: {
