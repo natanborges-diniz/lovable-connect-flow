@@ -121,6 +121,22 @@ export default function Pipeline() {
 
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
+
+    // Column reorder
+    if (result.type === "COLUMN") {
+      const sortedColunas = [...contatosByColuna];
+      const [moved] = sortedColunas.splice(result.source.index, 1);
+      sortedColunas.splice(result.destination.index, 0, moved);
+      // Update ordem for each column
+      sortedColunas.forEach((col, idx) => {
+        if (col.ordem !== idx) {
+          updateColuna.mutate({ id: col.id, ordem: idx });
+        }
+      });
+      return;
+    }
+
+    // Card move between columns
     const contatoId = result.draggableId;
     const destColunaId = result.destination.droppableId;
     if (destColunaId === "sem-coluna") return;
