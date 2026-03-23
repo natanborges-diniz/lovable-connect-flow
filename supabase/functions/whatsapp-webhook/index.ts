@@ -84,7 +84,7 @@ serve(async (req) => {
     // 3. Find open atendimento or create solicitação + atendimento
     let { data: atendimentoAberto } = await supabase
       .from("atendimentos")
-      .select("id")
+      .select("id, modo")
       .eq("contato_id", contato.id)
       .eq("canal", "whatsapp")
       .eq("canal_provedor", source)
@@ -94,9 +94,11 @@ serve(async (req) => {
       .single();
 
     let atendimentoId: string;
+    let atendimentoModo: string;
 
     if (atendimentoAberto) {
       atendimentoId = atendimentoAberto.id;
+      atendimentoModo = (atendimentoAberto as any).modo || "ia";
     } else {
       const { data: solicitacao, error: solErr } = await supabase
         .from("solicitacoes")
@@ -119,12 +121,14 @@ serve(async (req) => {
           canal: "whatsapp",
           status: "aguardando",
           canal_provedor: source,
+          modo: "ia",
         })
         .select()
         .single();
       if (atErr) throw atErr;
 
       atendimentoId = atendimento.id;
+      atendimentoModo = "ia";
 
       await supabase.from("eventos_crm").insert({
         contato_id: contato.id,
@@ -147,7 +151,14 @@ serve(async (req) => {
 
     // 5. Mark as read (Meta official API only)
     if (source === "meta_official" && messageId) {
-      await markAsRead(messageId);
+      markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
+    }
+
+    // 6. Trigger AI triage (fire-and-forget) if mode is 'ia'
+    if (atendimentoModo === "ia") {
+      triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, supabase, atendimentoId, contato.id, phone, text).catch(
+        (e) => console.error("AI triage trigger failed:", e)
+      );
     }
 
     return new Response(JSON.stringify({ status: "ok", atendimento_id: atendimentoId }), {
@@ -162,21 +173,65 @@ serve(async (req) => {
   }
 });
 
+// ─── Trigger AI Triage with homologação check ───
+async function triggerAiTriage(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  supabase: any,
+  atendimentoId: string,
+  contatoId: string,
+  phone: string,
+  text: string
+) {
+  // Check homologação mode
+  const { data: modoConfig } = await supabase
+    .from("configuracoes_ia")
+    .select("valor")
+    .eq("chave", "modo_homologacao")
+    .single();
+
+  if (modoConfig?.valor === "true") {
+    // Check if phone is in whitelist
+    const cleanPhone = phone.replace(/\D/g, "");
+    const { data: whitelist } = await supabase
+      .from("contatos_homologacao")
+      .select("id")
+      .eq("telefone", cleanPhone)
+      .eq("ativo", true)
+      .limit(1);
+
+    if (!whitelist?.length) {
+      console.log(`Homologação: phone ${cleanPhone} not in whitelist, skipping AI`);
+      return;
+    }
+  }
+
+  // Call ai-triage
+  await fetch(`${supabaseUrl}/functions/v1/ai-triage`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      atendimento_id: atendimentoId,
+      contato_id: contatoId,
+      mensagem_texto: text,
+    }),
+  });
+}
+
 // ─── Mark message as read via Meta Graph API ───
 async function markAsRead(messageId: string) {
   const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
   const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
   if (!accessToken || !phoneNumberId) return;
 
-  try {
-    await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: messageId }),
-    });
-  } catch (e) {
-    console.error("Failed to mark as read:", e);
-  }
+  await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: messageId }),
+  });
 }
 
 // ─── Normalize webhook payloads ───
