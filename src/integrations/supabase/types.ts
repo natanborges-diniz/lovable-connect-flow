@@ -169,12 +169,14 @@ export type Database = {
           created_at: string
           documento: string | null
           email: string | null
+          estagio: Database["public"]["Enums"]["estagio_funil"]
           id: string
           metadata: Json | null
           nome: string
           tags: string[] | null
           telefone: string | null
           tipo: Database["public"]["Enums"]["tipo_contato"]
+          ultimo_contato_at: string | null
           updated_at: string
         }
         Insert: {
@@ -182,12 +184,14 @@ export type Database = {
           created_at?: string
           documento?: string | null
           email?: string | null
+          estagio?: Database["public"]["Enums"]["estagio_funil"]
           id?: string
           metadata?: Json | null
           nome: string
           tags?: string[] | null
           telefone?: string | null
           tipo?: Database["public"]["Enums"]["tipo_contato"]
+          ultimo_contato_at?: string | null
           updated_at?: string
         }
         Update: {
@@ -195,12 +199,14 @@ export type Database = {
           created_at?: string
           documento?: string | null
           email?: string | null
+          estagio?: Database["public"]["Enums"]["estagio_funil"]
           id?: string
           metadata?: Json | null
           nome?: string
           tags?: string[] | null
           telefone?: string | null
           tipo?: Database["public"]["Enums"]["tipo_contato"]
+          ultimo_contato_at?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -533,6 +539,7 @@ export type Database = {
     }
     Enums: {
       direcao_mensagem: "inbound" | "outbound" | "internal"
+      estagio_funil: "lead" | "qualificado" | "proposta" | "fechado" | "perdido"
       prioridade: "critica" | "alta" | "normal" | "baixa"
       status_atendimento: "aguardando" | "em_atendimento" | "encerrado"
       status_solicitacao:
@@ -675,6 +682,7 @@ export const Constants = {
   public: {
     Enums: {
       direcao_mensagem: ["inbound", "outbound", "internal"],
+      estagio_funil: ["lead", "qualificado", "proposta", "fechado", "perdido"],
       prioridade: ["critica", "alta", "normal", "baixa"],
       status_atendimento: ["aguardando", "em_atendimento", "encerrado"],
       status_solicitacao: [

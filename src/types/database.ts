@@ -1,4 +1,5 @@
 export type TipoContato = 'cliente' | 'fornecedor' | 'loja' | 'colaborador';
+export type EstagioFunil = 'lead' | 'qualificado' | 'proposta' | 'fechado' | 'perdido';
 export type TipoCanal = 'whatsapp' | 'sistema' | 'email' | 'telefone';
 export type StatusSolicitacao = 'aberta' | 'classificada' | 'em_atendimento' | 'aguardando_execucao' | 'concluida' | 'cancelada' | 'reaberta';
 export type Prioridade = 'critica' | 'alta' | 'normal' | 'baixa';
@@ -7,12 +8,14 @@ export interface Contato {
   id: string;
   nome: string;
   tipo: TipoContato;
+  estagio: EstagioFunil;
   documento: string | null;
   email: string | null;
   telefone: string | null;
   metadata: Record<string, unknown>;
   tags: string[];
   ativo: boolean;
+  ultimo_contato_at: string | null;
   created_at: string;
   updated_at: string;
 }

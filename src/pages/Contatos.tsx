@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useContatos, useCreateContato, useUpdateContato } from "@/hooks/useContatos";
-import { TipoContatoBadge } from "@/components/shared/StatusBadge";
+import { TipoContatoBadge, EstagioFunilBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Search, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import type { TipoContato } from "@/types/database";
+import type { TipoContato, EstagioFunil } from "@/types/database";
 
 export default function Contatos() {
   const [search, setSearch] = useState("");
@@ -99,6 +99,7 @@ export default function Contatos() {
                 <TableRow>
                   <TableHead>Nome</TableHead>
                   <TableHead>Tipo</TableHead>
+                  <TableHead>Estágio</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Telefone</TableHead>
                   <TableHead>Tags</TableHead>
@@ -110,6 +111,7 @@ export default function Contatos() {
                   <TableRow key={contato.id}>
                     <TableCell className="font-medium">{contato.nome}</TableCell>
                     <TableCell><TipoContatoBadge tipo={contato.tipo} /></TableCell>
+                    <TableCell><EstagioFunilBadge estagio={contato.estagio} /></TableCell>
                     <TableCell className="text-muted-foreground">{contato.email ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{contato.telefone ?? "—"}</TableCell>
                     <TableCell>
@@ -153,6 +155,7 @@ function ContatoForm({ onSuccess, initialData }: { onSuccess: () => void; initia
   const [form, setForm] = useState({
     nome: initialData?.nome ?? "",
     tipo: (initialData?.tipo ?? "cliente") as TipoContato,
+    estagio: (initialData?.estagio ?? "lead") as EstagioFunil,
     email: initialData?.email ?? "",
     telefone: initialData?.telefone ?? "",
     documento: initialData?.documento ?? "",
@@ -163,6 +166,7 @@ function ContatoForm({ onSuccess, initialData }: { onSuccess: () => void; initia
     const payload = {
       nome: form.nome,
       tipo: form.tipo,
+      estagio: form.estagio,
       email: form.email || null,
       telefone: form.telefone || null,
       documento: form.documento || null,
@@ -192,6 +196,19 @@ function ContatoForm({ onSuccess, initialData }: { onSuccess: () => void; initia
             <SelectItem value="fornecedor">Fornecedor</SelectItem>
             <SelectItem value="loja">Loja</SelectItem>
             <SelectItem value="colaborador">Colaborador</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>Estágio do Funil</Label>
+        <Select value={form.estagio} onValueChange={(v) => setForm({ ...form, estagio: v as EstagioFunil })}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="lead">Lead</SelectItem>
+            <SelectItem value="qualificado">Qualificado</SelectItem>
+            <SelectItem value="proposta">Proposta</SelectItem>
+            <SelectItem value="fechado">Fechado</SelectItem>
+            <SelectItem value="perdido">Perdido</SelectItem>
           </SelectContent>
         </Select>
       </div>

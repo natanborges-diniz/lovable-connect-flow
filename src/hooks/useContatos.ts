@@ -1,14 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import type { TipoContato } from "@/types/database";
+import type { TipoContato, EstagioFunil } from "@/types/database";
 
-export function useContatos(filters?: { tipo?: TipoContato; search?: string }) {
+export function useContatos(filters?: { tipo?: TipoContato; search?: string; estagio?: EstagioFunil }) {
   return useQuery({
     queryKey: ["contatos", filters],
     queryFn: async () => {
       let query = supabase.from("contatos").select("*").order("created_at", { ascending: false });
       if (filters?.tipo) query = query.eq("tipo", filters.tipo);
+      if (filters?.estagio) query = query.eq("estagio", filters.estagio);
       if (filters?.search) query = query.or(`nome.ilike.%${filters.search}%,email.ilike.%${filters.search}%,telefone.ilike.%${filters.search}%`);
       const { data, error } = await query;
       if (error) throw error;
@@ -32,10 +33,11 @@ export function useContato(id: string | undefined) {
 export function useCreateContato() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (contato: { nome: string; tipo: TipoContato; email?: string | null; telefone?: string | null; documento?: string | null; tags?: string[]; ativo?: boolean }) => {
+    mutationFn: async (contato: { nome: string; tipo: TipoContato; estagio?: EstagioFunil; email?: string | null; telefone?: string | null; documento?: string | null; tags?: string[]; ativo?: boolean }) => {
       const { data, error } = await supabase.from("contatos").insert({
         nome: contato.nome,
         tipo: contato.tipo,
+        estagio: contato.estagio ?? "lead",
         email: contato.email,
         telefone: contato.telefone,
         documento: contato.documento,
@@ -58,7 +60,7 @@ export function useCreateContato() {
 export function useUpdateContato() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string; nome?: string; tipo?: TipoContato; email?: string | null; telefone?: string | null; documento?: string | null }) => {
+    mutationFn: async ({ id, ...updates }: { id: string; nome?: string; tipo?: TipoContato; estagio?: EstagioFunil; email?: string | null; telefone?: string | null; documento?: string | null }) => {
       const { data, error } = await supabase.from("contatos").update(updates).eq("id", id).select().single();
       if (error) throw error;
       return data;

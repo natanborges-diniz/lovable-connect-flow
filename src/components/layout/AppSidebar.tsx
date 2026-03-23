@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
-  Search as SearchIcon, Plus, List, Clock
+  Search as SearchIcon, Plus, List, Clock, Kanban
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -47,6 +47,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "Contatos",
       items: [
         { title: "Todos os Contatos", url: "/crm", icon: Users },
+        { title: "Pipeline de Vendas", url: "/crm/pipeline", icon: Kanban },
       ],
     },
   ],

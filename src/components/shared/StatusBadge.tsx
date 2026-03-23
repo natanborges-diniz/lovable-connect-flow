@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { StatusSolicitacao, Prioridade, TipoContato, StatusAtendimento, StatusTarefa } from "@/types/database";
+import type { StatusSolicitacao, Prioridade, TipoContato, StatusAtendimento, StatusTarefa, EstagioFunil } from "@/types/database";
 const statusConfig: Record<StatusSolicitacao, { label: string; className: string }> = {
   aberta: { label: "Aberta", className: "bg-info-soft text-info border-info-muted" },
   classificada: { label: "Classificada", className: "bg-brand-soft text-brand border-brand/30" },
@@ -60,5 +60,18 @@ const tarefaStatusConfig: Record<StatusTarefa, { label: string; className: strin
 
 export function TarefaStatusBadge({ status }: { status: StatusTarefa }) {
   const config = tarefaStatusConfig[status];
+  return <Badge variant="outline" className={cn("text-xs font-medium", config.className)}>{config.label}</Badge>;
+}
+
+const estagioFunilConfig: Record<EstagioFunil, { label: string; className: string }> = {
+  lead: { label: "Lead", className: "bg-muted text-muted-foreground border-border" },
+  qualificado: { label: "Qualificado", className: "bg-info-soft text-info border-info-muted" },
+  proposta: { label: "Proposta", className: "bg-warning-soft text-warning border-warning-muted" },
+  fechado: { label: "Fechado", className: "bg-success-soft text-success border-success-muted" },
+  perdido: { label: "Perdido", className: "bg-danger-soft text-danger border-danger-muted" },
+};
+
+export function EstagioFunilBadge({ estagio }: { estagio: EstagioFunil }) {
+  const config = estagioFunilConfig[estagio];
   return <Badge variant="outline" className={cn("text-xs font-medium", config.className)}>{config.label}</Badge>;
 }

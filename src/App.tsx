@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Contatos from "./pages/Contatos";
+import Pipeline from "./pages/Pipeline";
 import Solicitacoes from "./pages/Solicitacoes";
 import Atendimentos from "./pages/Atendimentos";
 import Tarefas from "./pages/Tarefas";
@@ -29,6 +30,7 @@ const App = () => (
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/crm" element={<Contatos />} />
+              <Route path="/crm/pipeline" element={<Pipeline />} />
               <Route path="/solicitacoes" element={<Solicitacoes />} />
               <Route path="/atendimentos" element={<Atendimentos />} />
               <Route path="/tarefas" element={<Tarefas />} />
