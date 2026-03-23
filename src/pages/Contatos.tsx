@@ -111,6 +111,7 @@ export default function Contatos() {
                   <TableRow key={contato.id}>
                     <TableCell className="font-medium">{contato.nome}</TableCell>
                     <TableCell><TipoContatoBadge tipo={contato.tipo} /></TableCell>
+                    <TableCell><EstagioFunilBadge estagio={contato.estagio} /></TableCell>
                     <TableCell className="text-muted-foreground">{contato.email ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{contato.telefone ?? "—"}</TableCell>
                     <TableCell>
