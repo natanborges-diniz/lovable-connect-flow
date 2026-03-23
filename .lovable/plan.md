@@ -1,71 +1,53 @@
 
 
-## Plano Revisado: Arquitetura Dual-Number com Roteamento por Origem
+## Plano: Conectar Evolution API (Railway) ao Sistema
 
-### Regras de negócio (consolidadas)
+### Situação atual
+A Evolution API está rodada no Railway com 3 serviços online (Redis, Evolution API, Postgres). Falta configurar a instância WhatsApp, o webhook e os secrets.
 
-1. **Mensagem chega por qualquer número** → responde pelo MESMO número/provedor que recebeu
-2. **Atendimento aberto existe** → continua nele, no mesmo provedor
-3. **API oficial só é usada proativamente** → quando o sistema/operador inicia conversa nova (sem histórico aberto) via template
-4. **Transparente para operadores** → mesma interface, mesma lógica, badge indica provedor mas operador não escolhe
-5. **Sem cruzamento de números** → se o cliente escreveu no não-oficial, resposta vai pelo não-oficial; se escreveu no oficial, vai pelo oficial
+### Passos para configuração (manual no Railway/Evolution)
 
-### Alterações no banco de dados
+**1. Obter a URL pública da Evolution API**
+- No Railway, clique no serviço "Evolution API" → Settings → Networking → copie o domínio público (ex: `evolution-api-production-0a3...up.railway.app`)
 
-**Migração 1 — Novos campos:**
+**2. Criar instância WhatsApp na Evolution**
+- Fazer POST para `https://{SUA_URL}/instance/create`:
+```json
+{
+  "instanceName": "crm-whatsapp",
+  "qrcode": true,
+  "integration": "WHATSAPP-BAILEYS"
+}
+```
+- Header: `apikey: {SUA_GLOBAL_API_KEY}` (definida nas env vars do Railway)
 
-```sql
--- canais: identificar provedor
-ALTER TABLE canais ADD COLUMN provedor text DEFAULT 'meta_official';
-ALTER TABLE canais ADD COLUMN ativo boolean DEFAULT true;
+**3. Conectar o número (escanear QR Code)**
+- GET `https://{SUA_URL}/instance/connect/crm-whatsapp`
+- Escanear o QR Code com o celular do número não-oficial
 
--- atendimentos: saber por qual provedor a conversa acontece
-ALTER TABLE atendimentos ADD COLUMN canal_provedor text DEFAULT 'meta_official';
-
--- mensagens: rastrear provedor por mensagem
-ALTER TABLE mensagens ADD COLUMN provedor text;
+**4. Configurar o Webhook apontando para o sistema**
+- POST `https://{SUA_URL}/webhook/set/crm-whatsapp`:
+```json
+{
+  "url": "https://kvggebtnqmxydtwaumqz.supabase.co/functions/v1/whatsapp-webhook",
+  "webhook_by_events": false,
+  "events": ["MESSAGES_UPSERT"]
+}
 ```
 
-### Alterações nas Edge Functions
+### Passos no Lovable (implementação)
 
-**`whatsapp-webhook/index.ts`:**
-- Ao criar canal, gravar `provedor` baseado no `source` (evolution_api, z_api, meta_official)
-- Ao criar atendimento, gravar `canal_provedor` = source da mensagem
-- Ao salvar mensagem, gravar `provedor` = source
+**5. Cadastrar 3 secrets no projeto:**
+- `EVOLUTION_API_URL` → URL pública do Railway
+- `EVOLUTION_API_KEY` → Global API Key configurada no Railway
+- `EVOLUTION_INSTANCE_NAME` → `crm-whatsapp`
 
-**`send-whatsapp/index.ts`:**
-- Ler `canal_provedor` do atendimento
-- Se `meta_official` → envia via Graph API (como hoje)
-- Se `evolution_api` → envia via Evolution API (requer secrets: `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME`)
-- Se `z_api` → envia via Z-API (requer secrets: `ZAPI_INSTANCE_ID`, `ZAPI_TOKEN`, `ZAPI_URL`)
-- Salva mensagem com `provedor` correspondente
+**6. Nenhuma alteração de código necessária**
+- O `whatsapp-webhook` já reconhece payloads da Evolution API
+- O `send-whatsapp` já roteia por `canal_provedor = evolution_api`
 
-**Nova função `send-whatsapp-template/index.ts`:**
-- Para disparos proativos do sistema (assuntos novos sem histórico)
-- Sempre usa API oficial Meta
-- Recebe `contato_id`, `template_name`, `template_params`
-- Cria solicitação + atendimento com `canal_provedor = 'meta_official'`
-
-### Alterações no Frontend
-
-**`Atendimentos.tsx`:**
-- Exibir badge do provedor (ex: "Oficial" / "Evolution") — visual apenas
-- Botão "Iniciar conversa" para contatos sem atendimento aberto → chama `send-whatsapp-template`
-- `handleSend` não muda — já chama `send-whatsapp`, que agora roteia automaticamente
-
-### Secrets necessários (novos)
-
-- `EVOLUTION_API_URL` — URL da instância Evolution API
-- `EVOLUTION_API_KEY` — Chave da Evolution API
-- `EVOLUTION_INSTANCE_NAME` — Nome da instância Evolution
-
-### Ordem de implementação
-
-1. Migração do banco (3 campos novos)
-2. Atualizar `whatsapp-webhook` para gravar `canal_provedor` e `provedor`
-3. Atualizar `send-whatsapp` com roteamento por provedor (Meta vs Evolution)
-4. Solicitar secrets da Evolution API
-5. Criar `send-whatsapp-template` para disparos oficiais
-6. Atualizar frontend (badge + botão iniciar conversa)
-7. Atualizar types em `src/types/database.ts`
+### Ordem
+1. Você configura passos 1-4 no Railway/Evolution
+2. Eu cadastro os 3 secrets (passo 5)
+3. Testamos enviando uma mensagem pelo número não-oficial
 
