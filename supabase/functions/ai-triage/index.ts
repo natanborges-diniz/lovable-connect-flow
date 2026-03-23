@@ -111,8 +111,16 @@ serve(async (req) => {
       });
     }
 
-    // Chat history
-    systemMessages.push(...chatHistory);
+    // Chat history (excluding the last inbound message, which will be highlighted separately)
+    const lastInboundIndex = chatHistory.length - 1 - [...chatHistory].reverse().findIndex(m => m.role === "user");
+    const historyWithoutLast = lastInboundIndex >= 0 && lastInboundIndex < chatHistory.length
+      ? chatHistory.filter((_: any, i: number) => i !== lastInboundIndex)
+      : chatHistory;
+    const currentMessage = lastInboundIndex >= 0 && lastInboundIndex < chatHistory.length
+      ? chatHistory[lastInboundIndex].content
+      : mensagem_texto || "";
+
+    systemMessages.push(...historyWithoutLast);
 
     // Message 3: Classification instructions
     systemMessages.push({
@@ -120,7 +128,14 @@ serve(async (req) => {
       content: `INSTRUÇÕES DE CLASSIFICAÇÃO (uso interno, não mostrar ao cliente):\n- Você DEVE usar a ferramenta 'classify_and_respond' para responder.\n- Colunas disponíveis no pipeline: ${colunasNomes}\n- Setores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de Consultor especializado).\n- Só mova para colunas específicas após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano".\n- TERMINOLOGIA: em respostas ao cliente, SEMPRE diga "Consultor especializado". NUNCA "atendente", "operador", "humano" ou "agente".${isHibrido ? '\n- O atendimento está em MODO HÍBRIDO. Reavalie se ainda_precisa_humano é true ou false.' : ''}`,
     });
 
-    // 6. Build tool definition with ainda_precisa_humano field
+    // Message 4: Highlight the CURRENT message the AI must respond to
+    if (currentMessage) {
+      systemMessages.push({
+        role: "user",
+        content: `MENSAGEM ATUAL DO CLIENTE (responda especificamente a esta mensagem):\n\n${currentMessage}`,
+      });
+    }
+
     const toolProperties: any = {
       resposta: {
         type: "string",
@@ -158,7 +173,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-pro",
         messages: systemMessages,
         tools: [
           {
