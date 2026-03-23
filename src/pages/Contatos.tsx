@@ -155,6 +155,7 @@ function ContatoForm({ onSuccess, initialData }: { onSuccess: () => void; initia
   const [form, setForm] = useState({
     nome: initialData?.nome ?? "",
     tipo: (initialData?.tipo ?? "cliente") as TipoContato,
+    estagio: (initialData?.estagio ?? "lead") as EstagioFunil,
     email: initialData?.email ?? "",
     telefone: initialData?.telefone ?? "",
     documento: initialData?.documento ?? "",
