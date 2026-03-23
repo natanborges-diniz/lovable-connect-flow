@@ -1,40 +1,30 @@
 
 
-## Plano Atualizado: Modo Híbrido Inteligente + Terminologia "Consultor Especializado"
+## Diagnóstico: IA "alucinada" e não responde ao contexto do cliente
 
-### Mudança adicional
+### Problema identificado
 
-Em toda comunicação da IA com o cliente, o atendente humano deve ser referenciado **exclusivamente** como **"Consultor especializado"**. Nunca "atendente", "operador", "humano", "agente" etc.
+Analisando os logs, a IA classifica tudo como `precisa_humano=true` e `ainda_precisa=true` sem realmente processar o conteúdo das mensagens. Dois problemas técnicos causam isso:
 
-Isso se aplica a:
-- Prompt do modo híbrido (quando IA informa que um humano foi acionado)
-- Qualquer resposta gerada pela IA que mencione escalação
-- Descrição do campo `resposta` na tool
+1. **Modelo fraco para a tarefa**: O modelo `google/gemini-3-flash-preview` é rápido mas tem baixa capacidade de raciocínio com múltiplos system prompts + tool calling. Ele "preenche os campos da ferramenta" sem ler o contexto real.
 
-### Mudanças completas
+2. **Mensagem atual não está destacada**: O histórico de chat é injetado como mensagens user/assistant, mas a mensagem ATUAL do cliente não é diferenciada das anteriores. A IA não sabe qual é a mensagem que precisa responder.
+
+### Solução (2 mudanças no `ai-triage/index.ts`)
+
+**1. Trocar o modelo para `google/gemini-2.5-pro`**
+
+Modelo com raciocínio muito superior, melhor aderência a instruções e capacidade de analisar contexto real. É o equivalente ao GPT que o usuário menciona como "muito melhor".
+
+**2. Destacar a mensagem atual do cliente**
+
+Após o chat history, adicionar uma mensagem explícita: `"MENSAGEM ATUAL DO CLIENTE (responda a esta): [texto]"` para que o modelo saiba exatamente o que precisa responder.
 
 | Arquivo | Alteração |
 |---|---|
-| `supabase/functions/ai-triage/index.ts` | 1) Aceitar `modo === "hibrido"` (não pular). 2) Prompt híbrido: "Um Consultor especializado foi solicitado...". 3) Adicionar campo `ainda_precisa_humano` na tool. 4) Se `false`, reverter modo para `"ia"`. 5) Na escalação, usar `"hibrido"` em vez de `"humano"`. 6) Em TODAS as instruções/prompts, substituir "atendente"/"humano" por "Consultor especializado". 7) Adicionar regra explícita no system prompt: "NUNCA use os termos 'atendente', 'operador', 'humano' ou 'agente'. Use SEMPRE 'Consultor especializado'." |
-| `supabase/functions/whatsapp-webhook/index.ts` | Disparar `ai-triage` também quando `modo === "hibrido"` |
-| `src/pages/Pipeline.tsx` | Badge "IA Monitorando" (amarelo) para cards em modo híbrido |
+| `supabase/functions/ai-triage/index.ts` | 1) Trocar modelo de `gemini-3-flash-preview` para `gemini-2.5-pro`. 2) Extrair a última mensagem inbound do histórico e adicioná-la como mensagem user destacada após as instruções de classificação, garantindo que a IA saiba exatamente o que responder. |
 
-### Prompt híbrido (trecho)
+### Resultado esperado
 
-> "Um Consultor especializado foi solicitado anteriormente mas ainda não assumiu. Você continua respondendo normalmente — trate qualquer assunto dentro do seu escopo. REGRA DE TERMINOLOGIA: ao mencionar atendimento humano, use SEMPRE o termo 'Consultor especializado'. NUNCA diga 'atendente', 'operador', 'humano' ou 'agente'."
-
-### Fluxo
-
-```text
-Cliente envia msg → IA responde (modo "ia")
-  ↓ IA detecta necessidade de humano
-Modo → "hibrido", card → coluna Atendimento Humano
-IA diz: "Vou acionar um Consultor especializado para te ajudar..."
-  ↓ Cliente pergunta algo novo dentro do escopo
-IA responde normalmente + reavalia: ainda_precisa_humano?
-  ↓ false → modo volta para "ia"
-  ↓ true → mantém híbrido
-  ↓ Operador envia mensagem manual
-Modo → "humano", IA para completamente
-```
+A IA vai de fato ler e analisar o que o cliente diz, respondendo com relevância ao conteúdo da mensagem em vez de ignorar e repetir padrões genéricos.
 
