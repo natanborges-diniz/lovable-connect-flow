@@ -8,12 +8,14 @@ export interface Contato {
   id: string;
   nome: string;
   tipo: TipoContato;
+  estagio: EstagioFunil;
   documento: string | null;
   email: string | null;
   telefone: string | null;
   metadata: Record<string, unknown>;
   tags: string[];
   ativo: boolean;
+  ultimo_contato_at: string | null;
   created_at: string;
   updated_at: string;
 }
