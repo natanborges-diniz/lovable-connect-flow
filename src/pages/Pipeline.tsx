@@ -371,6 +371,8 @@ export default function Pipeline() {
                     </Droppable>
                   </Card>
                 </div>
+                  )}
+                </Draggable>
               );
             })}
 
