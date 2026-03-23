@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useContatos, useCreateContato } from "@/hooks/useContatos";
+import { useContatos, useCreateContato, useUpdateContato } from "@/hooks/useContatos";
 import { TipoContatoBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import type { TipoContato } from "@/types/database";
@@ -16,6 +16,8 @@ export default function Contatos() {
   const [search, setSearch] = useState("");
   const [tipoFilter, setTipoFilter] = useState<string>("todos");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingContato, setEditingContato] = useState<any>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const filters = {
     search: search || undefined,
@@ -38,11 +40,28 @@ export default function Contatos() {
               <DialogHeader>
                 <DialogTitle>Novo Contato</DialogTitle>
               </DialogHeader>
-              <CreateContatoForm onSuccess={() => setDialogOpen(false)} />
+              <ContatoForm onSuccess={() => setDialogOpen(false)} />
             </DialogContent>
           </Dialog>
         }
       />
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Contato</DialogTitle>
+          </DialogHeader>
+          {editingContato && (
+            <ContatoForm
+              initialData={editingContato}
+              onSuccess={() => {
+                setEditDialogOpen(false);
+                setEditingContato(null);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Card className="shadow-card">
         <CardContent className="pt-6">
@@ -83,6 +102,7 @@ export default function Contatos() {
                   <TableHead>Email</TableHead>
                   <TableHead>Telefone</TableHead>
                   <TableHead>Tags</TableHead>
+                  <TableHead className="w-12"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -101,6 +121,19 @@ export default function Contatos() {
                         </div>
                       ) : "—"}
                     </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setEditingContato(contato);
+                          setEditDialogOpen(true);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -112,29 +145,37 @@ export default function Contatos() {
   );
 }
 
-function CreateContatoForm({ onSuccess }: { onSuccess: () => void }) {
+function ContatoForm({ onSuccess, initialData }: { onSuccess: () => void; initialData?: any }) {
   const createContato = useCreateContato();
+  const updateContato = useUpdateContato();
+  const isEditing = !!initialData;
+
   const [form, setForm] = useState({
-    nome: "",
-    tipo: "cliente" as TipoContato,
-    email: "",
-    telefone: "",
-    documento: "",
+    nome: initialData?.nome ?? "",
+    tipo: (initialData?.tipo ?? "cliente") as TipoContato,
+    email: initialData?.email ?? "",
+    telefone: initialData?.telefone ?? "",
+    documento: initialData?.documento ?? "",
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createContato.mutate(
-      {
-        nome: form.nome,
-        tipo: form.tipo,
-        email: form.email || null,
-        telefone: form.telefone || null,
-        documento: form.documento || null,
-      },
-      { onSuccess }
-    );
+    const payload = {
+      nome: form.nome,
+      tipo: form.tipo,
+      email: form.email || null,
+      telefone: form.telefone || null,
+      documento: form.documento || null,
+    };
+
+    if (isEditing) {
+      updateContato.mutate({ id: initialData.id, ...payload }, { onSuccess });
+    } else {
+      createContato.mutate(payload, { onSuccess });
+    }
   };
+
+  const isPending = isEditing ? updateContato.isPending : createContato.isPending;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -168,8 +209,8 @@ function CreateContatoForm({ onSuccess }: { onSuccess: () => void }) {
         <Label>Documento (CPF/CNPJ)</Label>
         <Input value={form.documento} onChange={(e) => setForm({ ...form, documento: e.target.value })} />
       </div>
-      <Button type="submit" className="w-full" disabled={createContato.isPending}>
-        {createContato.isPending ? "Criando..." : "Criar Contato"}
+      <Button type="submit" className="w-full" disabled={isPending}>
+        {isPending ? (isEditing ? "Salvando..." : "Criando...") : (isEditing ? "Salvar Alterações" : "Criar Contato")}
       </Button>
     </form>
   );
