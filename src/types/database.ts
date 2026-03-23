@@ -1,4 +1,5 @@
 export type TipoContato = 'cliente' | 'fornecedor' | 'loja' | 'colaborador';
+export type EstagioFunil = 'lead' | 'qualificado' | 'proposta' | 'fechado' | 'perdido';
 export type TipoCanal = 'whatsapp' | 'sistema' | 'email' | 'telefone';
 export type StatusSolicitacao = 'aberta' | 'classificada' | 'em_atendimento' | 'aguardando_execucao' | 'concluida' | 'cancelada' | 'reaberta';
 export type Prioridade = 'critica' | 'alta' | 'normal' | 'baixa';
