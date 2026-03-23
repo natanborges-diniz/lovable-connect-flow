@@ -184,14 +184,16 @@ serve(async (req) => {
       console.error("Failed to send WhatsApp response:", errBody);
     }
 
-    // 7. Move contato to pipeline column
-    const targetColuna = precisa_humano
-      ? colunas?.find((c: any) => c.nome === "Atendimento Humano")
-      : colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
-
+    // 7. Move contato to pipeline column (conservative: only move if precisa_humano or conversation is mature)
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
-    if (targetColuna) {
-      contatoUpdates.pipeline_coluna_id = targetColuna.id;
+
+    if (precisa_humano) {
+      const humanoColuna = colunas?.find((c: any) => c.nome === "Atendimento Humano");
+      if (humanoColuna) contatoUpdates.pipeline_coluna_id = humanoColuna.id;
+    } else if (inboundCount >= 3 || pipeline_coluna_sugerida === "Novo Contato") {
+      // Only move after enough context, or if AI explicitly says "Novo Contato"
+      const targetColuna = colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
+      if (targetColuna) contatoUpdates.pipeline_coluna_id = targetColuna.id;
     }
 
     // 8. Route to setor if suggested
