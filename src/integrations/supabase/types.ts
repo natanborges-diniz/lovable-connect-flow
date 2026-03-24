@@ -187,6 +187,36 @@ export type Database = {
         }
         Relationships: []
       }
+      conhecimento_ia: {
+        Row: {
+          ativo: boolean
+          categoria: string
+          conteudo: Json
+          created_at: string
+          id: string
+          titulo: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          categoria?: string
+          conteudo?: Json
+          created_at?: string
+          id?: string
+          titulo: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          categoria?: string
+          conteudo?: Json
+          created_at?: string
+          id?: string
+          titulo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       contatos: {
         Row: {
           ativo: boolean
