@@ -59,6 +59,46 @@ serve(async (req) => {
       .select("categoria, titulo, conteudo")
       .eq("ativo", true);
 
+    // 3b. Load few-shot examples
+    const { data: exemplos } = await supabase
+      .from("ia_exemplos")
+      .select("categoria, pergunta, resposta_ideal")
+      .eq("ativo", true)
+      .limit(20);
+
+    // 3c. Load recent negative feedbacks as anti-examples
+    const { data: antiExemplos } = await supabase
+      .from("ia_feedbacks")
+      .select("motivo, resposta_corrigida")
+      .eq("avaliacao", "negativo")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    let fewShotBlock = "";
+    if (exemplos && exemplos.length > 0) {
+      const grouped: Record<string, string[]> = {};
+      for (const ex of exemplos) {
+        const cat = (ex.categoria || "geral").toUpperCase();
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(`Cliente: "${ex.pergunta}"\nResposta ideal: "${ex.resposta_ideal}"`);
+      }
+      const sections = Object.entries(grouped)
+        .map(([cat, items]) => `[${cat}]\n${items.join("\n\n")}`)
+        .join("\n\n");
+      fewShotBlock = `\n\nEXEMPLOS DE RESPOSTAS APROVADAS (use como referência de tom e qualidade — NÃO copie literalmente, adapte ao contexto):\n\n${sections}`;
+    }
+
+    let antiExemploBlock = "";
+    if (antiExemplos && antiExemplos.length > 0) {
+      const items = antiExemplos
+        .filter((f: any) => f.motivo)
+        .map((f: any) => `- Erro: ${f.motivo}${f.resposta_corrigida ? `\n  Correção: ${f.resposta_corrigida}` : ""}`)
+        .join("\n");
+      if (items) {
+        antiExemploBlock = `\n\nERROS RECENTES DA IA (EVITE REPETIR ESTES PADRÕES):\n${items}`;
+      }
+    }
+
     let knowledgeBlock = "";
     if (conhecimentos && conhecimentos.length > 0) {
       const grouped: Record<string, string[]> = {};
