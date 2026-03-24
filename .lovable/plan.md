@@ -55,3 +55,30 @@ Cliente envia foto via WhatsApp
 - Tool `consultar_status_pedido`: Buscar status por CPF ou OS
 - Tool `agendar_visita`: Registrar intenção de visita à loja
 - Suporte a áudio: transcrição via Whisper antes de enviar ao agente
+
+---
+
+## Plano: Sistema de Aprendizado e Melhoria Contínua da IA
+
+### Status: ✅ Implementado
+
+### Componentes criados/alterados
+
+| Componente | Status |
+|---|---|
+| Migração SQL (`ia_feedbacks` + `ia_exemplos`) | ✅ |
+| `supabase/functions/ai-triage/index.ts` (few-shot + anti-exemplos + temperature 0 + anti-alucinação) | ✅ |
+| `src/components/atendimentos/MessageFeedback.tsx` (👍/👎 nas mensagens da IA) | ✅ |
+| `src/components/configuracoes/LearningCard.tsx` (gestão de exemplos + métricas) | ✅ |
+| `src/pages/Configuracoes.tsx` (integração do LearningCard) | ✅ |
+
+### Capacidades implementadas
+
+| Capacidade | Descrição |
+|---|---|
+| Feedback loop | Consultores avaliam respostas da IA com 👍/👎 + correção |
+| Few-shot learning | Exemplos modelo injetados no contexto da IA |
+| Anti-exemplos | Erros recentes carregados para evitar repetição |
+| Anti-alucinação | temperature=0, regra "nunca invente", fallback explícito |
+| Dashboard métricas | Taxa de acerto, feedbacks positivos/negativos |
+| Promoção de feedbacks | Correções podem virar exemplos modelo com 1 clique |
