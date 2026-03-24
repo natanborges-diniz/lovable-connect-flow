@@ -463,7 +463,7 @@ serve(async (req) => {
           tools: TOOLS,
           tool_choice: "required",
           temperature: 0.1,
-          max_tokens: 500,
+          max_completion_tokens: 500,
         }),
       });
 
