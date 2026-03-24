@@ -68,6 +68,41 @@ serve(async (req) => {
       } else if (texto === "3") {
         updateSessao = { fluxo: "consulta_cpf", etapa: "cpf", dados: {} };
         resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):";
+      } else if (texto === "4") {
+        // ─── Confirmar Comparecimento ───
+        updateSessao = { fluxo: "confirmar_comparecimento", etapa: "listar", dados: {} };
+        // Fetch today's pending appointments for this store
+        const today = new Date();
+        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
+
+        const cleanLojaTel = (loja_info?.telefone || "").replace(/\D/g, "");
+        const { data: agendamentosHoje } = await supabase
+          .from("agendamentos")
+          .select("id, contato_id, data_horario, loja_nome, status, contato:contatos(nome)")
+          .eq("loja_telefone", cleanLojaTel)
+          .in("status", ["agendado", "confirmado"])
+          .gte("data_horario", todayStart)
+          .lt("data_horario", todayEnd)
+          .order("data_horario", { ascending: true });
+
+        if (!agendamentosHoje?.length) {
+          resposta = "📋 Não há agendamentos pendentes para hoje.\n\nDigite *menu* para voltar.";
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        } else {
+          let lista = "📋 *Agendamentos de Hoje*\n\n";
+          const agMap: Record<string, string> = {};
+          agendamentosHoje.forEach((ag: any, i: number) => {
+            const dt = new Date(ag.data_horario);
+            const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+            const nomeCliente = ag.contato?.nome || "Cliente";
+            lista += `${i + 1}️⃣ ${nomeCliente} — ${hora}\n`;
+            agMap[String(i + 1)] = ag.id;
+          });
+          lista += "\nDigite o *número* do agendamento para confirmar.";
+          resposta = lista;
+          updateSessao = { fluxo: "confirmar_comparecimento", etapa: "selecionar", dados: { agendamentos: agMap } };
+        }
       } else {
         resposta = buildMenu(nomeLoja);
       }
