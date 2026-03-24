@@ -1,82 +1,90 @@
 
+Objetivo: refazer o fluxo de atendimento para ficar confiável, previsível e sem repetição, validando o caso real do número de homologação.
 
-## Plano: Corrigir Assistente IA — Repetição e Falha de Escalonamento
+## Diagnóstico profundo (com base nas 2 últimas mensagens)
 
-### Diagnóstico (análise do histórico real)
+1) Conversa real (últimas 2 entradas):
+- Cliente: “outra chance pra você me atender bem”
+- IA: “Se precisar de mais informações ou quiser agendar uma visita, estou por aqui!”
+- Cliente: “quero falar de outra coisa”
+- IA: “Entendi! Se precisar de mais informações ou quiser agendar uma visita, estou por aqui.”
 
-Analisei o diálogo do número de homologação `5511963268878`. Os problemas encontrados:
+2) Causa raiz crítica (bug estrutural, não prompt):
+- O `ai-triage` busca histórico com `order(created_at asc).limit(30)`.
+- Esse atendimento tem **137 mensagens**.
+- Resultado: a IA está lendo as **30 mais antigas**, não as recentes.
+- Prova: janela usada termina em 23/03 21:28, enquanto as últimas mensagens são 24/03 18:08.
+- Impacto: a IA praticamente não “vê” o diálogo atual e entra em resposta genérica repetitiva.
 
-| Problema | O que aconteceu |
-|---|---|
-| **Repetição idêntica** | A IA enviou a MESMA resposta (endereço Itapevi + horário) duas vezes seguidas |
-| **Ignorou pedido de consultor** | Cliente disse "quero falar com consultor" → IA respondeu com endereço de loja em vez de acionar `solicitar_humano` |
-| **Classificação errada** | "quero saber sobre lentes" foi classificada como `informacoes` e respondida com endereço |
-| **Knowledge base vazia** | `knowledge: 0` nos logs — sem dados de produtos/lentes, a IA só tem os endereços do prompt e usa como resposta padrão |
+3) Causas adicionais:
+- Base de conhecimento, exemplos e anti-exemplos estão vazios (`KB:0 | Exemplos:0 | Anti:0`), reduzindo precisão.
+- Não existe validação pós-modelo para bloquear resposta genérica/repetida antes de enviar.
+- Em modo híbrido, falta política de retomada clara para “mudei de assunto”.
 
-### Causas raiz
+## Plano de refatoração robusta (sem remendo)
 
-1. **Sem knowledge base**: A tabela `conhecimento_ia` está vazia. Sem dados de produtos, a IA só consegue citar endereços e horários que estão no prompt
-2. **Tool selection fraca**: A descrição das tools não deixa claro QUANDO usar `solicitar_humano` — a IA escolhe `classify_and_respond` para tudo
-3. **Anti-repetição ineficaz**: O `alreadySentSummary` injeta TODO o texto das respostas anteriores, mas o modelo ignora essa massa de texto
-4. **Prompt com dados demais**: Endereços de 10+ lojas no prompt fazem a IA gravitar para essa informação como "resposta segura"
+### Fase 1 — Corrigir motor de contexto (bloqueador principal)
+1. Ajustar carregamento de histórico no `ai-triage`:
+- Buscar `order desc limit N` (ex: 60), depois inverter para ordem cronológica.
+- Garantir que a mensagem inbound atual esteja sempre no contexto final.
+2. Adicionar janela híbrida:
+- Últimas 20 mensagens verbatim + resumo curto das anteriores (quando conversa longa).
+3. Revisar `extractSentTopics`:
+- Extrair só de janela recente (não de conversa inteira), para evitar “proibição global” de temas.
 
-### Solução (4 frentes)
+### Fase 2 — Orquestração determinística antes do modelo
+4. Criar roteador de intenção pré-LLM (regras explícitas):
+- Escalonamento humano (já existe bypass): manter e ampliar.
+- “Troca de assunto” (`outro assunto`, `falar de outra coisa`) => resposta obrigatória de clarificação (“Perfeito, sobre qual tema: orçamento, pedido, produtos, financeiro?”), sem texto genérico.
+5. Definir política de modo híbrido:
+- Se já escalado e cliente manda mensagem ambígua, IA deve captar intenção com pergunta objetiva (não CTA de visita).
 
-#### 1. Detecção de keywords antes da IA
+### Fase 3 — Geração com contrato rígido + guardrails
+6. Trocar para arquitetura de “dupla validação”:
+- Modelo gera via tool estruturada.
+- Validador local rejeita resposta se:
+  - bater em blacklist (“se precisar...”, “estou por aqui...” etc),
+  - for muito similar às 3 últimas saídas,
+  - não avançar a conversa (sem pergunta útil/ação).
+- Se rejeitar: 1 tentativa de regeneração com correção; se falhar, fallback determinístico curto.
+7. Fortalecer schema da tool `responder`:
+- Campos obrigatórios: `resposta`, `intencao`, `coluna_pipeline`, `proximo_passo` (pergunta objetiva ou ação).
+- Sem `proximo_passo`, não envia.
 
-Adicionar pré-processamento no `ai-triage`: se a mensagem contém keywords explícitas de escalonamento ("falar com consultor", "atendente humano", "pessoa real", etc.), forçar a tool `solicitar_humano` sem depender do GPT.
+### Fase 4 — Modelo e stack (mais forte e estável)
+8. Migrar o `ai-triage` para o gateway de IA da plataforma (não depender de chamada direta externa):
+- Modelo recomendado para qualidade máxima: `openai/gpt-5`.
+- Fallback operacional: `openai/gpt-5-mini`.
+- `temperature` baixa (0–0.2), foco em consistência.
+9. Manter tools + classificação por coluna, mas com validação de output antes do envio ao WhatsApp.
 
-```text
-Keywords de escalonamento → bypass OpenAI → solicitar_humano direto
-```
+### Fase 5 — Dados mínimos para precisão real
+10. Criar seed mínimo obrigatório de conhecimento:
+- produtos/lentes/fluxos financeiros/status.
+- Sem esse seed, ativar “modo restrito” (pergunta de clarificação + escalonamento quando necessário), sem inventar resposta.
 
-#### 2. Melhorar descrições das tools
+### Fase 6 — Observabilidade + rollout seguro
+11. Log de decisão estruturado em `eventos_crm.metadata`:
+- `history_window_range`, `validator_flags`, `fallback_reason`, `intent_router_hit`.
+12. Rollout em 2 etapas:
+- etapa A: só número homologado;
+- etapa B: produção após checklist de aceite.
 
-Atualizar as descrições para serem mais prescritivas:
+## Critérios de aceite (incluindo “as duas últimas”)
+- Caso 1: “outra chance pra você me atender bem” → IA responde com pergunta objetiva de tema (não “se precisar...”).
+- Caso 2: “quero falar de outra coisa” → IA muda contexto e oferece opções de assunto, sem repetir visita/endereço.
+- Conversa com >100 mensagens continua coerente com mensagens recentes.
+- Se cliente pedir humano, escalonamento imediato continua 100% funcional.
+- Nenhuma resposta enviada sem passar no validador anti-repetição/anti-genérico.
 
-- `classify_and_respond`: Adicionar "NÃO use esta tool se o cliente pedir explicitamente para falar com um consultor ou pessoa real"
-- `solicitar_humano`: Adicionar "Use OBRIGATORIAMENTE quando o cliente pedir para falar com pessoa real, consultor, atendente"
-- Todas as tools: Reforçar "NUNCA repita informações já enviadas"
+## Detalhes técnicos (arquivos e mudanças)
+- `supabase/functions/ai-triage/index.ts`
+  - refatorar loader de histórico (desc + reverse + janela),
+  - adicionar roteador pré-LLM,
+  - adicionar validador pós-LLM,
+  - reforçar contrato de tool e fallback determinístico.
+- Migração SQL (se necessário):
+  - índice em `mensagens(atendimento_id, created_at desc)` para histórico longo.
+- Sem mexer em autenticação nem em arquivos auto-gerados.
 
-#### 3. Anti-repetição robusta
-
-Em vez de injetar todo o texto das respostas anteriores (que o modelo ignora), criar um **resumo estruturado** das informações já compartilhadas:
-
-```text
-INFORMAÇÕES JÁ COMPARTILHADAS (PROIBIDO REPETIR):
-- ✅ Endereço loja Itapevi: já informado
-- ✅ Horário Itapevi: já informado
-- ✅ Sugestão agendamento: já feita
-```
-
-Extrair tópicos-chave das mensagens outbound em vez de colar o texto inteiro.
-
-#### 4. Fallback inteligente para knowledge base vazia
-
-Se o cliente pergunta sobre um tema (ex: "lentes") e não há dados na `conhecimento_ia`, a IA deve:
-- Reconhecer que não tem dados detalhados
-- Oferecer os valores base do prompt (R$198 visão simples, R$298 multifocal)
-- Sugerir enviar foto da receita para orçamento personalizado
-- NÃO pular para endereço de loja como resposta padrão
-
-Adicionar instrução explícita: "Se o cliente perguntar sobre produtos e você não encontrar detalhes na BASE DE CONHECIMENTO, use os valores base das REGRAS DE ATENDIMENTO. NUNCA responda com endereço de loja quando o cliente pergunta sobre produtos."
-
-### Componentes alterados
-
-| Componente | Ação |
-|---|---|
-| `ai-triage/index.ts` | Pre-check keywords escalonamento, melhorar tool descriptions, refatorar anti-repetição, adicionar fallback para KB vazia |
-
-### Resultado esperado
-
-```text
-"quero saber sobre lentes"
-  → IA responde sobre lentes (valores base) + sugere enviar receita
-  (NÃO endereço de loja)
-
-"quero falar com consultor"
-  → keyword detectada → solicitar_humano → modo híbrido
-  → "Já acionei um Consultor especializado..."
-  (NÃO endereço de loja)
-```
-
+Resultado esperado: atendimento deixa de “ficar burro” em conversas longas, passa a responder com contexto atual e comportamento previsível, robusto e auditável.
