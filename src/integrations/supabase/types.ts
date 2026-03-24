@@ -431,6 +431,66 @@ export type Database = {
           },
         ]
       }
+      ia_exemplos: {
+        Row: {
+          ativo: boolean | null
+          categoria: string
+          created_at: string | null
+          id: string
+          pergunta: string
+          resposta_ideal: string
+        }
+        Insert: {
+          ativo?: boolean | null
+          categoria?: string
+          created_at?: string | null
+          id?: string
+          pergunta: string
+          resposta_ideal: string
+        }
+        Update: {
+          ativo?: boolean | null
+          categoria?: string
+          created_at?: string | null
+          id?: string
+          pergunta?: string
+          resposta_ideal?: string
+        }
+        Relationships: []
+      }
+      ia_feedbacks: {
+        Row: {
+          atendimento_id: string
+          avaliacao: string
+          avaliador_id: string | null
+          created_at: string | null
+          id: string
+          mensagem_id: string
+          motivo: string | null
+          resposta_corrigida: string | null
+        }
+        Insert: {
+          atendimento_id: string
+          avaliacao: string
+          avaliador_id?: string | null
+          created_at?: string | null
+          id?: string
+          mensagem_id: string
+          motivo?: string | null
+          resposta_corrigida?: string | null
+        }
+        Update: {
+          atendimento_id?: string
+          avaliacao?: string
+          avaliador_id?: string | null
+          created_at?: string | null
+          id?: string
+          mensagem_id?: string
+          motivo?: string | null
+          resposta_corrigida?: string | null
+        }
+        Relationships: []
+      }
       mensagens: {
         Row: {
           atendimento_id: string
