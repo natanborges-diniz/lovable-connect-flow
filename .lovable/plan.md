@@ -1,30 +1,115 @@
 
 
-## Diagnóstico: IA "alucinada" e não responde ao contexto do cliente
+## Plano Unificado: OpenAI Responses API + Knowledge Base
 
-### Problema identificado
+### Resumo
 
-Analisando os logs, a IA classifica tudo como `precisa_humano=true` e `ainda_precisa=true` sem realmente processar o conteúdo das mensagens. Dois problemas técnicos causam isso:
+Duas mudanças coordenadas na mesma implementação:
+1. Migrar o `ai-triage` do Lovable AI Gateway (Gemini) para a **OpenAI Responses API**
+2. Criar tabela `conhecimento_ia` e injetá-la como contexto na IA
+3. Card de gestão da Knowledge Base em Configurações
 
-1. **Modelo fraco para a tarefa**: O modelo `google/gemini-3-flash-preview` é rápido mas tem baixa capacidade de raciocínio com múltiplos system prompts + tool calling. Ele "preenche os campos da ferramenta" sem ler o contexto real.
+### 1. Migração SQL — Tabela `conhecimento_ia`
 
-2. **Mensagem atual não está destacada**: O histórico de chat é injetado como mensagens user/assistant, mas a mensagem ATUAL do cliente não é diferenciada das anteriores. A IA não sabe qual é a mensagem que precisa responder.
+```sql
+CREATE TABLE public.conhecimento_ia (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  categoria text NOT NULL DEFAULT 'produtos',
+  titulo text NOT NULL,
+  conteudo jsonb NOT NULL DEFAULT '{}',
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 
-### Solução (2 mudanças no `ai-triage/index.ts`)
+ALTER TABLE public.conhecimento_ia ENABLE ROW LEVEL SECURITY;
 
-**1. Trocar o modelo para `google/gemini-2.5-pro`**
+CREATE POLICY "Authenticated users can manage conhecimento_ia"
+  ON public.conhecimento_ia FOR ALL TO authenticated
+  USING (true) WITH CHECK (true);
 
-Modelo com raciocínio muito superior, melhor aderência a instruções e capacidade de analisar contexto real. É o equivalente ao GPT que o usuário menciona como "muito melhor".
+CREATE TRIGGER update_conhecimento_ia_updated_at
+  BEFORE UPDATE ON public.conhecimento_ia
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+```
 
-**2. Destacar a mensagem atual do cliente**
+### 2. Edge Function `ai-triage/index.ts`
 
-Após o chat history, adicionar uma mensagem explícita: `"MENSAGEM ATUAL DO CLIENTE (responda a esta): [texto]"` para que o modelo saiba exatamente o que precisa responder.
+**Mudanças:**
 
-| Arquivo | Alteração |
+| Aspecto | Antes | Depois |
+|---|---|---|
+| API | Lovable AI Gateway (`ai.gateway.lovable.dev`) | OpenAI Responses API (`api.openai.com/v1/responses`) |
+| Auth | `LOVABLE_API_KEY` | `OPENAI_API_KEY` |
+| Modelo | `google/gemini-2.5-pro` | `gpt-4o` |
+| Formato request | `messages` + `tools` + `tool_choice` | `instructions` + `input` + `tools` + `tool_choice` |
+| Formato response | `choices[0].message.tool_calls[0]` | `output[].type === "function_call"` |
+| Knowledge Base | Não existia | Carrega `conhecimento_ia` e injeta no `instructions` |
+
+**Estrutura da chamada:**
+
+```text
+POST https://api.openai.com/v1/responses
+{
+  "model": "gpt-4o",
+  "instructions": "[prompt do banco] + [regras anti-repetição] + [knowledge base] + [modo híbrido se aplicável]",
+  "input": [
+    ...histórico de chat,
+    { "role": "user", "content": "MENSAGEM ATUAL: ..." }
+  ],
+  "tools": [{ "type": "function", "name": "classify_and_respond", ... }],
+  "tool_choice": "required"
+}
+```
+
+**Parsing da resposta:**
+```typescript
+const functionCall = aiData.output.find(item => item.type === "function_call");
+const result = JSON.parse(functionCall.arguments);
+```
+
+**Knowledge Base no instructions:**
+- Carrega todos os registros ativos de `conhecimento_ia`
+- Agrupa por categoria
+- Injeta como bloco no `instructions`:
+```
+BASE DE CONHECIMENTO (consulte para responder sobre produtos/serviços):
+
+[PRODUTOS]
+{conteúdo JSON}
+
+[POLÍTICAS]
+{conteúdo JSON}
+```
+
+**Toda a lógica preservada:** modo híbrido, anti-repetição, terminologia "Consultor especializado", pipeline, setores.
+
+### 3. UI — Card "Base de Conhecimento" em `Configuracoes.tsx`
+
+Novo card com:
+- Botão "Novo Item" abrindo dialog com: categoria (select: produtos/serviços/políticas/FAQ), título, textarea para colar JSON
+- Tabela listando itens: título, categoria, badge ativo/inativo, toggle, botão excluir
+- Preview do conteúdo JSON (primeiras linhas truncadas)
+
+### Componentes alterados
+
+| Componente | Ação |
 |---|---|
-| `supabase/functions/ai-triage/index.ts` | 1) Trocar modelo de `gemini-3-flash-preview` para `gemini-2.5-pro`. 2) Extrair a última mensagem inbound do histórico e adicioná-la como mensagem user destacada após as instruções de classificação, garantindo que a IA saiba exatamente o que responder. |
+| Migração SQL | Criar tabela `conhecimento_ia` com RLS |
+| `supabase/functions/ai-triage/index.ts` | Reescrever: OpenAI Responses API + injeção de knowledge base |
+| `supabase/config.toml` | Adicionar config para `ai-triage` com `verify_jwt = false` |
+| `src/pages/Configuracoes.tsx` | Novo card "Base de Conhecimento" |
 
-### Resultado esperado
+### Fluxo completo
 
-A IA vai de fato ler e analisar o que o cliente diz, respondendo com relevância ao conteúdo da mensagem em vez de ignorar e repetir padrões genéricos.
+```text
+ai-triage recebe mensagem
+  ↓ carrega prompt (configuracoes_ia)
+  ↓ carrega conhecimento_ia (WHERE ativo = true)
+  ↓ monta instructions (prompt + knowledge + anti-repetição + híbrido)
+  ↓ monta input (histórico + mensagem atual destacada)
+  ↓ chama OpenAI Responses API com function calling
+  ↓ parse output → classify_and_respond
+  ↓ envia resposta, atualiza pipeline, loga evento
+```
 
