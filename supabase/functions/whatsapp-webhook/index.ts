@@ -195,6 +195,31 @@ serve(async (req) => {
   }
 });
 
+// ─── Trigger Bot Lojas ───
+async function triggerBotLojas(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  atendimentoId: string,
+  contatoId: string,
+  phone: string,
+  text: string,
+  lojaInfo: any
+) {
+  await fetch(`${supabaseUrl}/functions/v1/bot-lojas`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      atendimento_id: atendimentoId,
+      contato_id: contatoId,
+      mensagem_texto: text,
+      loja_info: lojaInfo,
+    }),
+  });
+}
+
 // ─── Trigger AI Triage with homologação check ───
 async function triggerAiTriage(
   supabaseUrl: string,
