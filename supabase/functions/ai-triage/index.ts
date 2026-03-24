@@ -776,12 +776,39 @@ function jsonResponse(data: any, status = 200) {
 }
 
 async function sendWhatsApp(supabaseUrl: string, serviceKey: string, atendimentoId: string, texto: string) {
-  const res = await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ atendimento_id: atendimentoId, texto, remetente_nome: "Assistente IA" }),
-  });
-  if (!res.ok) console.error("[SEND] WhatsApp error:", await res.text());
+  const maxAttempts = 3;
+  let lastError = "unknown error";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort("send_whatsapp_timeout"), 15000);
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ atendimento_id: atendimentoId, texto, remetente_nome: "Assistente IA" }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (res.ok) return;
+
+      const body = await res.text();
+      lastError = `status=${res.status} body=${(body || "<empty>").slice(0, 500)}`;
+      console.error(`[SEND] WhatsApp error (attempt ${attempt}/${maxAttempts}): ${lastError}`);
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+      console.error(`[SEND] WhatsApp exception (attempt ${attempt}/${maxAttempts}): ${lastError}`);
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
+
+  throw new Error(`send-whatsapp failed after ${maxAttempts} attempts: ${lastError}`);
 }
 
 async function logEvent(supabase: any, contatoId: string, atendimentoId: string, tipo: string, msg: string) {

@@ -74,6 +74,40 @@ serve(async (req) => {
   }
 });
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort("request_timeout"), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function readResponseBody(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
+function bodyToString(body: any): string {
+  if (body === null || body === undefined) return "<empty>";
+  if (typeof body === "string") return body;
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return String(body);
+  }
+}
+
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ─── Meta Official Graph API ───
 async function sendViaMeta(phone: string, text: string) {
   const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
@@ -82,7 +116,7 @@ async function sendViaMeta(phone: string, text: string) {
     throw new Error("Meta WhatsApp credentials not configured (WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID)");
   }
 
-  const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -94,9 +128,9 @@ async function sendViaMeta(phone: string, text: string) {
     }),
   });
 
-  const result = await res.json();
+  const result = await readResponseBody(res);
   if (!res.ok) {
-    throw new Error(`Meta API error: ${JSON.stringify(result.error?.message || result)}`);
+    throw new Error(`Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`);
   }
   return result;
 }
@@ -111,20 +145,47 @@ async function sendViaEvolution(phone: string, text: string) {
     throw new Error("Evolution API credentials not configured (EVOLUTION_API_URL / EVOLUTION_API_KEY / EVOLUTION_INSTANCE_NAME)");
   }
 
-  const res = await fetch(`${apiUrl}/message/sendText/${instanceName}`, {
-    method: "POST",
-    headers: { apikey: apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      number: phone,
-      text: text,
-    }),
-  });
+  const maxAttempts = 3;
+  let lastError = "unknown error";
 
-  const result = await res.json();
-  if (!res.ok) {
-    throw new Error(`Evolution API error: ${JSON.stringify(result)}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetchWithTimeout(`${apiUrl}/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: { apikey: apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          number: phone,
+          text,
+        }),
+      }, 20000);
+
+      const result = await readResponseBody(res);
+      if (!res.ok) {
+        lastError = `status=${res.status} body=${bodyToString(result)}`;
+        console.error(`[EVOLUTION] Send failed (attempt ${attempt}/${maxAttempts}): ${lastError}`);
+
+        if (res.status >= 500 && attempt < maxAttempts) {
+          await sleep(500 * attempt);
+          continue;
+        }
+
+        throw new Error(`Evolution API error: ${lastError}`);
+      }
+
+      return result;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      lastError = message;
+      console.error(`[EVOLUTION] Send exception (attempt ${attempt}/${maxAttempts}): ${message}`);
+
+      if (attempt < maxAttempts) {
+        await sleep(500 * attempt);
+        continue;
+      }
+    }
   }
-  return result;
+
+  throw new Error(`Evolution API error after ${maxAttempts} attempts: ${lastError}`);
 }
 
 // ─── Z-API ───
@@ -137,15 +198,15 @@ async function sendViaZApi(phone: string, text: string) {
     throw new Error("Z-API credentials not configured (ZAPI_URL / ZAPI_TOKEN / ZAPI_INSTANCE_ID)");
   }
 
-  const res = await fetch(`${zapiUrl}/instances/${zapiInstanceId}/token/${zapiToken}/send-text`, {
+  const res = await fetchWithTimeout(`${zapiUrl}/instances/${zapiInstanceId}/token/${zapiToken}/send-text`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone, message: text }),
   });
 
-  const result = await res.json();
+  const result = await readResponseBody(res);
   if (!res.ok) {
-    throw new Error(`Z-API error: ${JSON.stringify(result)}`);
+    throw new Error(`Z-API error (status ${res.status}): ${bodyToString(result)}`);
   }
   return result;
 }
