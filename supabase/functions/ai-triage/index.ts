@@ -702,6 +702,48 @@ serve(async (req) => {
           descricao: `Receita: OD ${args.olho_direito.esferico} OE ${args.olho_esquerdo.esferico} — ${args.tipo_lente}`,
           metadata: args, referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
+      } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
+        resposta = args.resposta;
+        intencao = "agendamento";
+        pipeline_coluna = "Agendamento";
+
+        // Find loja telephone
+        const lojaMatch = lojas.find((l: any) => l.nome_loja.toLowerCase() === (args.loja_nome || "").toLowerCase());
+
+        // If reagendar, mark old agendamento as reagendado
+        if (fn === "reagendar_visita") {
+          const oldNoShow = agendamentosAtivos.find((a: any) => a.status === "no_show" || a.status === "recuperacao");
+          if (oldNoShow) {
+            await supabase.from("agendamentos").update({ status: "reagendado" }).eq("id", oldNoShow.id);
+          }
+        }
+
+        // Create new agendamento via agendar-cliente function
+        try {
+          await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contato_id: contatoId,
+              atendimento_id,
+              loja_nome: args.loja_nome,
+              loja_telefone: lojaMatch?.telefone || null,
+              data_horario: args.data_horario,
+              observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
+            }),
+          });
+        } catch (e) {
+          console.error("[TOOL] agendar-cliente call failed:", e);
+        }
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: fn === "reagendar_visita" ? "reagendamento_visita" : "agendamento_visita",
+          descricao: `${fn === "reagendar_visita" ? "Reagendamento" : "Agendamento"}: ${args.loja_nome} em ${args.data_horario}`,
+          metadata: args,
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+        });
       }
     }
 
