@@ -113,7 +113,7 @@ serve(async (req) => {
       knowledgeBlock = `\n\nBASE DE CONHECIMENTO (consulte para responder sobre produtos, serviços, políticas e FAQ):\n\n${sections}`;
     }
 
-    console.log(`Prompt loaded: ${systemPrompt.length} chars, knowledge items: ${conhecimentos?.length || 0}, modo: ${atendimento.modo}`);
+    console.log(`Prompt loaded: ${systemPrompt.length} chars, knowledge: ${conhecimentos?.length || 0}, exemplos: ${exemplos?.length || 0}, anti: ${antiExemplos?.length || 0}, modo: ${atendimento.modo}`);
 
     // 4. Load last 20 messages for context (including media)
     const { data: msgs } = await supabase
