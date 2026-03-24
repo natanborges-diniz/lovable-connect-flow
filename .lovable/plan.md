@@ -1,13 +1,7 @@
 
 
+
 ## Plano Unificado: OpenAI Responses API + Knowledge Base
-
-### Resumo
-
-Duas mudanças coordenadas na mesma implementação:
-1. Migrar o `ai-triage` do Lovable AI Gateway (Gemini) para a **OpenAI Responses API**
-2. Criar tabela `conhecimento_ia` e injetá-la como contexto na IA
-3. Card de gestão da Knowledge Base em Configurações
 
 ### Status: ✅ Implementado
 
@@ -17,28 +11,47 @@ Duas mudanças coordenadas na mesma implementação:
 
 ### Status: ✅ Implementado
 
+---
+
+## Plano: Suporte a Imagens no WhatsApp + Assistente Autônomo
+
+### Status: ✅ Implementado
+
 ### Componentes criados/alterados
 
 | Componente | Status |
 |---|---|
-| Migração SQL (`telefones_lojas` + `bot_sessoes`) | ✅ |
-| `supabase/functions/bot-lojas/index.ts` | ✅ |
-| `supabase/functions/whatsapp-webhook/index.ts` (roteamento) | ✅ |
-| `supabase/config.toml` | ✅ |
-| `src/components/configuracoes/TelefonesLojasCard.tsx` | ✅ |
-| `src/pages/Configuracoes.tsx` (integração do card) | ✅ |
-| Secrets: `OPTICAL_BUSINESS_URL`, `INTERNAL_SERVICE_SECRET` | ✅ |
+| Migração SQL (`tipo_conteudo` + bucket `whatsapp-media`) | ✅ |
+| `supabase/functions/whatsapp-webhook/index.ts` (captura de imagens multi-provedor) | ✅ |
+| `supabase/functions/ai-triage/index.ts` (agente autônomo multimodal) | ✅ |
 
-### Fluxo implementado
+### Capacidades implementadas
+
+| Capacidade | Descrição |
+|---|---|
+| Receber imagens | Meta (Graph API download), Evolution API (URL direta), Z-API |
+| Storage | Bucket `whatsapp-media` público com organização por atendimento |
+| Vision/Multimodal | GPT-4o interpreta imagens no histórico de chat |
+| Tool: classify_and_respond | Classificação e resposta padrão (já existia) |
+| Tool: interpretar_receita | Extrai dados de receita oftalmológica (grau, eixo, adição, tipo lente) |
+| Tool: solicitar_humano | Escalonamento com contexto para Consultor especializado |
+
+### Fluxo de imagem
 
 ```text
-Loja envia msg via WhatsApp
-  ↓ webhook consulta telefones_lojas
-  ↓ telefone identificado → roteia para bot-lojas (não ai-triage)
-  ↓ contato.tipo atualizado para "loja"
-  ↓ bot envia menu: 1️⃣ Gerar Link de Pagamento
-  ↓ coleta: valor → descrição → parcelas → cliente → confirmação
-  ↓ chama payment-links no Optical Business via X-Service-Key
-  ↓ devolve link na conversa
-  ↓ cria solicitação tipo "link_pagamento" no pipeline Financeiro
+Cliente envia foto via WhatsApp
+  ↓ webhook detecta tipo (image/document/audio/video)
+  ↓ baixa mídia via Graph API (Meta) ou URL direta (Evolution)
+  ↓ salva no bucket whatsapp-media/{atendimento_id}/{message_id}.ext
+  ↓ grava mensagem com tipo_conteudo e media_url no metadata
+  ↓ ai-triage monta input multimodal (image_url + texto)
+  ↓ GPT-4o escolhe tool adequada (interpretar_receita ou classify_and_respond)
+  ↓ executa ação e responde ao cliente
 ```
+
+### Próximas evoluções planejadas
+
+- Tool `gerar_orcamento`: Criar orçamento baseado em receita + tabela de preços
+- Tool `consultar_status_pedido`: Buscar status por CPF ou OS
+- Tool `agendar_visita`: Registrar intenção de visita à loja
+- Suporte a áudio: transcrição via Whisper antes de enviar ao agente
