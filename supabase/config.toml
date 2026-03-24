@@ -1,5 +1,8 @@
 project_id = "kvggebtnqmxydtwaumqz"
 
+[functions.ai-triage]
+verify_jwt = false
+
 [functions.classify-solicitacao]
 verify_jwt = false
 
