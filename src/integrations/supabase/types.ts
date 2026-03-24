@@ -441,6 +441,7 @@ export type Database = {
           metadata: Json | null
           provedor: string | null
           remetente_nome: string | null
+          tipo_conteudo: string
         }
         Insert: {
           atendimento_id: string
@@ -451,6 +452,7 @@ export type Database = {
           metadata?: Json | null
           provedor?: string | null
           remetente_nome?: string | null
+          tipo_conteudo?: string
         }
         Update: {
           atendimento_id?: string
@@ -461,6 +463,7 @@ export type Database = {
           metadata?: Json | null
           provedor?: string | null
           remetente_nome?: string | null
+          tipo_conteudo?: string
         }
         Relationships: [
           {
