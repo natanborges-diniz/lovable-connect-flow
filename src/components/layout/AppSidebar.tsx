@@ -51,6 +51,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       ],
     },
   ],
+  financeiro: [
+    {
+      label: "Financeiro",
+      items: [
+        { title: "Pipeline Financeiro", url: "/financeiro", icon: DollarSign },
+      ],
+    },
+  ],
   solicitacoes: [
     {
       label: "Solicitações",
