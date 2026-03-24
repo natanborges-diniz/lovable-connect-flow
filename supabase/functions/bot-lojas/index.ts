@@ -356,15 +356,26 @@ async function createFinanceiroSolicitacao(
       .single();
 
     let colunaId: string | null = null;
+
     if (financeiroSetor) {
-      const { data: coluna } = await supabase
+      const { data: colunasAtivas } = await supabase
         .from("pipeline_colunas")
-        .select("id")
+        .select("id, nome, ordem")
         .eq("setor_id", financeiroSetor.id)
-        .eq("nome", params.coluna_nome)
         .eq("ativo", true)
-        .single();
-      colunaId = coluna?.id || null;
+        .order("ordem", { ascending: true });
+
+      const activeCols = (colunasAtivas || []) as Array<{ id: string; nome: string; ordem: number }>;
+
+      const nomesPrioritarios = [
+        params.coluna_nome,
+        ...(params.tipo === "link_pagamento" ? ["Link Enviado", "Novo"] : []),
+        ...(params.tipo === "boleto" ? ["Solicitação de Boleto", "Boleto Enviado"] : []),
+        ...(params.tipo === "consulta_cpf" ? ["Consulta CPF"] : []),
+      ];
+
+      const colunaEncontrada = activeCols.find((c) => nomesPrioritarios.includes(c.nome));
+      colunaId = colunaEncontrada?.id || activeCols[0]?.id || null;
     }
 
     const { data: solicitacao } = await supabase
