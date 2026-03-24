@@ -74,10 +74,10 @@ export default function PipelineFinanceiro() {
       const colIds = (cols || []).map((c: any) => c.id);
       if (colIds.length === 0) return [];
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase
         .from("solicitacoes")
-        .select("*, contato:contatos(id, nome, telefone, tipo)")
-        .in("pipeline_coluna_id" as any, colIds)
+        .select("*, contato:contatos(id, nome, telefone, tipo)") as any)
+        .in("pipeline_coluna_id", colIds)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
