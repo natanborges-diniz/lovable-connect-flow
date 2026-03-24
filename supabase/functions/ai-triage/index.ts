@@ -327,7 +327,7 @@ serve(async (req) => {
       {
         type: "function",
         name: "classify_and_respond",
-        description: "Classifica a intenção do cliente e gera a resposta. Use como ferramenta padrão para responder mensagens de texto.",
+        description: "Classifica a intenção do cliente e gera a resposta. Use como ferramenta padrão para responder mensagens de texto. PROIBIÇÕES: 1) NÃO use esta tool se o cliente pedir para falar com consultor, atendente ou pessoa real — use solicitar_humano. 2) NUNCA responda com endereço de loja quando o cliente pergunta sobre produtos/preços. 3) NUNCA repita informações já compartilhadas na conversa.",
         parameters: {
           type: "object",
           properties: {
