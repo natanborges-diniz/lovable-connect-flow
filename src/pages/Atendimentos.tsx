@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
