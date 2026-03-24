@@ -146,10 +146,105 @@ serve(async (req) => {
 
     const inboundCount = (msgs || []).filter((m: any) => m.direcao === "inbound").length;
 
+    // ── KEYWORD ESCALATION PRE-CHECK ──
+    const lastInboundMsg = mensagem_texto || "";
+    const escalationKeywords = [
+      "falar com consultor", "falar com atendente", "falar com humano", "falar com pessoa",
+      "atendente humano", "consultor especializado", "quero um consultor", "quero falar com alguem",
+      "quero falar com alguém", "pessoa real", "atendimento humano", "falar com gente",
+      "preciso de ajuda humana", "nao quero robo", "não quero robô", "me transfira",
+      "transferir para atendente", "quero atendente"
+    ];
+    const msgLower = lastInboundMsg.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const forceEscalation = escalationKeywords.some(kw => {
+      const kwNorm = kw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return msgLower.includes(kwNorm);
+    });
+
+    if (forceEscalation) {
+      console.log("KEYWORD ESCALATION: forcing solicitar_humano bypass");
+
+      const respostaEscalacao = "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Enquanto isso, se tiver alguma dúvida rápida, estou à disposição! 😊";
+
+      // Send response
+      await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          atendimento_id,
+          texto: respostaEscalacao,
+          remetente_nome: "Assistente IA",
+        }),
+      });
+
+      // Update modo to hibrido
+      if (!isHibrido) {
+        await supabase.from("atendimentos").update({ modo: "hibrido" }).eq("id", atendimento_id);
+      }
+
+      // Move to Atendimento Humano column
+      const { data: colunasEsc } = await supabase
+        .from("pipeline_colunas")
+        .select("id, nome")
+        .eq("nome", "Atendimento Humano")
+        .eq("ativo", true)
+        .single();
+
+      const contatoEscUpdates: any = { ultimo_contato_at: new Date().toISOString() };
+      if (colunasEsc) contatoEscUpdates.pipeline_coluna_id = colunasEsc.id;
+      await supabase.from("contatos").update(contatoEscUpdates).eq("id", contatoIdToUpdate);
+
+      // Log CRM event
+      await supabase.from("eventos_crm").insert({
+        contato_id: contatoIdToUpdate,
+        tipo: "escalonamento_humano",
+        descricao: "Cliente solicitou explicitamente falar com Consultor especializado (keyword detection)",
+        metadata: { trigger: "keyword", mensagem: lastInboundMsg },
+        referencia_tipo: "atendimento",
+        referencia_id: atendimento_id,
+      });
+
+      return new Response(JSON.stringify({
+        status: "ok",
+        tools_used: ["solicitar_humano_keyword"],
+        intencao: "escalonamento",
+        precisa_humano: true,
+        ainda_precisa_humano: true,
+        pipeline_coluna_sugerida: "Atendimento Humano",
+        setor_sugerido: "",
+        modo: "hibrido",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ── STRUCTURED ANTI-REPETITION ──
     const outboundMessages = (msgs || []).filter((m: any) => m.direcao === "outbound").map((m: any) => m.conteudo);
-    const alreadySentSummary = outboundMessages.length > 0
-      ? outboundMessages.join("\n---\n")
-      : "Nenhuma mensagem enviada ainda.";
+    const extractTopics = (texts: string[]): string[] => {
+      const topics: string[] = [];
+      const allText = texts.join(" ").toLowerCase();
+      const patterns: [RegExp, string][] = [
+        [/endere[çc]o|rua |av\.|avenida |n[úu]mero/i, "Endereço de loja"],
+        [/hor[áa]rio|funciona|abre|fecha|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo/i, "Horário de funcionamento"],
+        [/telefone|\(\d{2}\)|\d{4,5}-\d{4}/i, "Telefone de contato"],
+        [/whatsapp/i, "WhatsApp"],
+        [/agend|visita|marcar/i, "Sugestão de agendamento/visita"],
+        [/pre[çc]o|valor|r\$|reais|custo|or[çc]amento/i, "Informação de preço/orçamento"],
+        [/lente|[óo]culos|arma[çc][ãa]o|receita/i, "Informação sobre produtos ópticos"],
+        [/consultor|especializado|humano|atendente/i, "Menção a Consultor especializado"],
+      ];
+      for (const [regex, label] of patterns) {
+        if (regex.test(allText)) topics.push(label);
+      }
+      return topics;
+    };
+    const topicsAlreadySent = extractTopics(outboundMessages);
+    const alreadySentSummary = topicsAlreadySent.length > 0
+      ? topicsAlreadySent.map(t => `- ✅ ${t}: já informado`).join("\n")
+      : "Nenhuma informação enviada ainda.";
 
     // 5. Load pipeline columns and setores
     const { data: colunas } = await supabase
