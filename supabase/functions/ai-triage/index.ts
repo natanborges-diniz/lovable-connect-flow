@@ -242,6 +242,42 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "agendar_visita",
+      description: "Agenda uma visita do cliente a uma loja. Use quando o cliente quer visitar uma loja e já definiu loja, data e horário.",
+      parameters: {
+        type: "object",
+        properties: {
+          loja_nome: { type: "string", description: "Nome da loja escolhida." },
+          data_horario: { type: "string", description: "Data e hora no formato ISO 8601 (ex: 2026-03-25T14:00:00-03:00)." },
+          observacoes: { type: "string", description: "Observações adicionais sobre a visita." },
+          resposta: { type: "string", description: "Mensagem confirmando o agendamento ao cliente." },
+        },
+        required: ["loja_nome", "data_horario", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "reagendar_visita",
+      description: "Reagenda uma visita de um cliente que teve no-show. Use quando o cliente deseja remarcar após não ter comparecido.",
+      parameters: {
+        type: "object",
+        properties: {
+          loja_nome: { type: "string", description: "Nome da loja para o novo agendamento." },
+          data_horario: { type: "string", description: "Nova data e hora ISO 8601." },
+          observacoes: { type: "string" },
+          resposta: { type: "string", description: "Mensagem confirmando o reagendamento." },
+        },
+        required: ["loja_nome", "data_horario", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════
