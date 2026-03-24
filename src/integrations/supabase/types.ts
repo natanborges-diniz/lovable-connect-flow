@@ -87,6 +87,39 @@ export type Database = {
           },
         ]
       }
+      bot_sessoes: {
+        Row: {
+          atendimento_id: string
+          created_at: string | null
+          dados: Json | null
+          etapa: string
+          fluxo: string
+          id: string
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          atendimento_id: string
+          created_at?: string | null
+          dados?: Json | null
+          etapa?: string
+          fluxo?: string
+          id?: string
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          atendimento_id?: string
+          created_at?: string | null
+          dados?: Json | null
+          etapa?: string
+          fluxo?: string
+          id?: string
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       canais: {
         Row: {
           ativo: boolean | null
@@ -658,6 +691,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      telefones_lojas: {
+        Row: {
+          ativo: boolean | null
+          cod_empresa: string | null
+          created_at: string | null
+          departamento: string | null
+          id: string
+          nome_loja: string
+          telefone: string
+        }
+        Insert: {
+          ativo?: boolean | null
+          cod_empresa?: string | null
+          created_at?: string | null
+          departamento?: string | null
+          id?: string
+          nome_loja: string
+          telefone: string
+        }
+        Update: {
+          ativo?: boolean | null
+          cod_empresa?: string | null
+          created_at?: string | null
+          departamento?: string | null
+          id?: string
+          nome_loja?: string
+          telefone?: string
+        }
+        Relationships: []
       }
     }
     Views: {
