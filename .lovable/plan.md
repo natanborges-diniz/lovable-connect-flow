@@ -1,20 +1,20 @@
+## Sistema de Agendamentos — Implementado ✅
 
+### O que foi feito
 
-## Correção: `max_tokens` incompatível com modelo
+1. **Tabela `agendamentos`** — completa com status, flags de lembrete/cobrança, confirmação de loja
+2. **Colunas `horario_abertura`, `horario_fechamento`, `endereco`** em `telefones_lojas`
+3. **Setor + Pipeline "Agendamentos"** — colunas: Agendado, Confirmado, Atendido, No-Show, Recuperação, Reagendado, Abandonado, Cancelado
+4. **Secret `WHATSAPP_BUSINESS_ACCOUNT_ID`** configurado
+5. **Edge function `agendar-cliente`** — cria agendamento + envia confirmação WhatsApp
+6. **Edge function `agendamentos-cron`** — a cada 15min: lembretes, cobrança à loja, detecção no-show, recuperação
+7. **Edge function `manage-whatsapp-templates`** — CRUD de templates Meta via Graph API
+8. **Bot Lojas opção 4** — confirmar comparecimento do cliente
+9. **AI Triage** — contexto de lojas injetado, tools `agendar_visita` e `reagendar_visita`, contexto de no-show para recuperação inteligente
+10. **Frontend** — Pipeline Agendamentos (Kanban), rota `/agendamentos`, módulo na navegação
 
-O erro nos logs é claro:
+### Próximos passos
 
-```
-"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
-```
-
-O modelo `openai/gpt-5` (via gateway) exige `max_completion_tokens` em vez de `max_tokens`.
-
-### Mudança
-
-**Arquivo**: `supabase/functions/ai-triage/index.ts` (linha 466)
-
-Trocar `max_tokens: 500` por `max_completion_tokens: 500`.
-
-Correção de uma linha. Sem outras alterações necessárias.
-
+- Cadastrar endereços e horários das lojas em Configurações
+- Criar e submeter templates Meta: `confirmacao_agendamento`, `lembrete_agendamento`, `noshow_reagendamento`
+- Testar fluxo completo: agendamento → lembrete → confirmação loja → no-show → recuperação
