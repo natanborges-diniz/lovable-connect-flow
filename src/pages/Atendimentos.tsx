@@ -263,7 +263,12 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             <div key={m.id} className={cn("max-w-[80%] rounded-lg px-3 py-2 text-sm", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
               {m.remetente_nome && <p className="text-xs font-medium opacity-70 mb-0.5">{m.remetente_nome} {m.direcao === "internal" && "• nota interna"}</p>}
               <p className="whitespace-pre-wrap">{m.conteudo}</p>
-              <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
+                {m.direcao === "outbound" && m.remetente_nome === "Assistente IA" && (
+                  <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
+                )}
+              </div>
             </div>
           ))
         )}

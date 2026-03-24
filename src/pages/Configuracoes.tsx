@@ -137,6 +137,9 @@ export default function Configuracoes() {
         {/* Knowledge Base */}
         <KnowledgeBaseCard />
 
+        {/* Aprendizado da IA */}
+        <LearningCard />
+
         {/* Telefones de Lojas */}
         <TelefonesLojasCard />
 
