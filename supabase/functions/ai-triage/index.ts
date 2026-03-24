@@ -352,6 +352,7 @@ serve(async (req) => {
         input,
         tools,
         tool_choice: "required",
+        temperature: 0,
       }),
     });
 
