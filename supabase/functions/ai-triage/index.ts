@@ -177,10 +177,10 @@ Em vez disso: faça uma PERGUNTA relevante ao cliente ou ofereça uma informaç�
 
   // SECTION 3: Anti-repetition (structured)
   if (opts.sentTopics.length > 0) {
-    sections.push(`# INFORMAÇÕES JÁ ENVIADAS (NÃO REPITA)
-${opts.sentTopics.map((t) => `- ${t}`).join("\n")}
+    sections.push(`# INFORMAÇÕES JÁ ENVIADAS (PROIBIDO REPETIR)
+${opts.sentTopics.map((t) => `- ❌ ${t}: JÁ INFORMADO — NÃO REPITA`).join("\n")}
 
-Se o cliente perguntar algo já informado acima, diga brevemente "Conforme mencionei" sem repetir os dados.`);
+REGRA ABSOLUTA: Se o cliente perguntar algo já listado acima, diga "Como já mencionei" e MUDE para um assunto novo ou faça uma pergunta diferente. NUNCA repita os mesmos dados.`);
   }
 
   // SECTION 4: Knowledge base
