@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
+import PipelineFinanceiro from "./pages/PipelineFinanceiro";
 import Solicitacoes from "./pages/Solicitacoes";
 import Atendimentos from "./pages/Atendimentos";
 import Tarefas from "./pages/Tarefas";
