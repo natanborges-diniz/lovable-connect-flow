@@ -391,7 +391,7 @@ serve(async (req) => {
         model: "gpt-4o",
         messages,
         tools: TOOLS,
-        tool_choice: "auto",
+        tool_choice: "required",
         temperature: 0,
         max_tokens: 500,
       }),
