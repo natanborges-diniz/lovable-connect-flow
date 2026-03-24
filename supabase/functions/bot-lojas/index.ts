@@ -211,6 +211,52 @@ serve(async (req) => {
         });
       }
     }
+    // ─── Confirmar Comparecimento ───
+    else if (fluxo === "confirmar_comparecimento") {
+      if (etapa === "selecionar") {
+        const agMap = (dados as any).agendamentos || {};
+        const agId = agMap[texto];
+        if (!agId) {
+          resposta = "⚠️ Número inválido. Digite o número do agendamento da lista ou *menu* para voltar.";
+        } else {
+          // Get client name for confirmation
+          const { data: agData } = await supabase
+            .from("agendamentos")
+            .select("contato_id, contato:contatos(nome)")
+            .eq("id", agId)
+            .single();
+          const clienteNome = (agData as any)?.contato?.nome || "Cliente";
+          resposta = `O cliente *${clienteNome}* compareceu?\n\nResponda *SIM* ou *NÃO*.`;
+          updateSessao = { etapa: "confirmar_presenca", dados: { ...dados, agendamento_id: agId, cliente_nome: clienteNome } };
+        }
+      } else if (etapa === "confirmar_presenca") {
+        const agId = (dados as any).agendamento_id;
+        const clienteNome = (dados as any).cliente_nome || "Cliente";
+
+        if (textoLower === "sim" || textoLower === "s") {
+          await supabase.from("agendamentos").update({
+            status: "atendido",
+            loja_confirmou_presenca: true,
+          }).eq("id", agId);
+
+          resposta = `✅ Comparecimento de *${clienteNome}* confirmado!\n\nDigite *menu* para nova operação.`;
+          updateSessao = { status: "concluido" };
+        } else if (textoLower === "nao" || textoLower === "não" || textoLower === "n") {
+          await supabase.from("agendamentos").update({
+            status: "no_show",
+            loja_confirmou_presenca: false,
+          }).eq("id", agId);
+
+          resposta = `❌ No-show registrado para *${clienteNome}*. O sistema irá acionar o plano de recuperação automaticamente.\n\nDigite *menu* para nova operação.`;
+          updateSessao = { status: "concluido" };
+        } else {
+          resposta = "Responda *SIM* ou *NÃO*.";
+        }
+      } else {
+        resposta = "⚠️ Etapa não reconhecida. Digite *menu* para recomeçar.";
+        updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+      }
+    }
     // ─── Fallback ───
     else {
       resposta = buildMenu(nomeLoja);
