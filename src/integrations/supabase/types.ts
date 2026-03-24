@@ -480,6 +480,7 @@ export type Database = {
           id: string
           nome: string
           ordem: number
+          setor_id: string | null
           updated_at: string
         }
         Insert: {
@@ -489,6 +490,7 @@ export type Database = {
           id?: string
           nome: string
           ordem?: number
+          setor_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -498,9 +500,18 @@ export type Database = {
           id?: string
           nome?: string
           ordem?: number
+          setor_id?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_colunas_setor_id_fkey"
+            columns: ["setor_id"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -586,6 +597,7 @@ export type Database = {
           descricao: string | null
           id: string
           metadata: Json | null
+          pipeline_coluna_id: string | null
           prioridade: Database["public"]["Enums"]["prioridade"]
           status: Database["public"]["Enums"]["status_solicitacao"]
           tipo: string | null
@@ -600,6 +612,7 @@ export type Database = {
           descricao?: string | null
           id?: string
           metadata?: Json | null
+          pipeline_coluna_id?: string | null
           prioridade?: Database["public"]["Enums"]["prioridade"]
           status?: Database["public"]["Enums"]["status_solicitacao"]
           tipo?: string | null
@@ -614,6 +627,7 @@ export type Database = {
           descricao?: string | null
           id?: string
           metadata?: Json | null
+          pipeline_coluna_id?: string | null
           prioridade?: Database["public"]["Enums"]["prioridade"]
           status?: Database["public"]["Enums"]["status_solicitacao"]
           tipo?: string | null
@@ -625,6 +639,13 @@ export type Database = {
             columns: ["contato_id"]
             isOneToOne: false
             referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "solicitacoes_pipeline_coluna_id_fkey"
+            columns: ["pipeline_coluna_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_colunas"
             referencedColumns: ["id"]
           },
         ]
