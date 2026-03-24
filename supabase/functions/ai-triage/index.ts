@@ -413,7 +413,7 @@ serve(async (req) => {
       {
         type: "function",
         name: "solicitar_humano",
-        description: "Escalona o atendimento para um Consultor especializado quando a IA detecta que não pode resolver. Forneça contexto completo.",
+        description: "Use OBRIGATORIAMENTE quando o cliente pedir para falar com pessoa real, consultor, atendente, ou qualquer sinônimo. Também use quando a IA não consegue resolver a demanda ou o cliente demonstra frustração/insatisfação com as respostas automáticas. PRIORIDADE MÁXIMA sobre classify_and_respond quando há pedido explícito de atendimento humano.",
         parameters: {
           type: "object",
           properties: {
