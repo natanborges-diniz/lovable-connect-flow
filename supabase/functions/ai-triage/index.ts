@@ -424,9 +424,10 @@ serve(async (req) => {
     const toolCalls = choice.message?.tool_calls || [];
 
     if (toolCalls.length === 0) {
-      // Model responded with plain text (no tool call) — use it as response
+      // Model responded with plain text despite tool_choice=required — use as resposta
       resposta = choice.message?.content || "";
-      console.log("AI responded without tool call (plain text)");
+      intencao = "outro";
+      console.log("WARNING: AI responded without tool call despite required — using plain text fallback");
     }
 
     for (const tc of toolCalls) {
