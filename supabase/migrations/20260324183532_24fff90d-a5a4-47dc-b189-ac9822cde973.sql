@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_mensagens_atendimento_created_desc ON public.mensagens (atendimento_id, created_at DESC);
