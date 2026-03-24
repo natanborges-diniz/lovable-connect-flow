@@ -224,7 +224,28 @@ async function triggerBotLojas(
   });
 }
 
-// ─── Trigger AI Triage with homologação check ───
+// ─── Check homologação mode (centralized) ───
+async function isHomologacaoBlocked(supabase: any, phone: string): Promise<boolean> {
+  const { data: modoConfig } = await supabase
+    .from("configuracoes_ia")
+    .select("valor")
+    .eq("chave", "modo_homologacao")
+    .single();
+
+  if (modoConfig?.valor !== "true") return false;
+
+  const cleanPhone = phone.replace(/\D/g, "");
+  const { data: whitelist } = await supabase
+    .from("contatos_homologacao")
+    .select("id")
+    .eq("telefone", cleanPhone)
+    .eq("ativo", true)
+    .limit(1);
+
+  return !whitelist?.length;
+}
+
+// ─── Trigger AI Triage ───
 async function triggerAiTriage(
   supabaseUrl: string,
   serviceRoleKey: string,
@@ -234,30 +255,6 @@ async function triggerAiTriage(
   phone: string,
   text: string
 ) {
-  // Check homologação mode
-  const { data: modoConfig } = await supabase
-    .from("configuracoes_ia")
-    .select("valor")
-    .eq("chave", "modo_homologacao")
-    .single();
-
-  if (modoConfig?.valor === "true") {
-    // Check if phone is in whitelist
-    const cleanPhone = phone.replace(/\D/g, "");
-    const { data: whitelist } = await supabase
-      .from("contatos_homologacao")
-      .select("id")
-      .eq("telefone", cleanPhone)
-      .eq("ativo", true)
-      .limit(1);
-
-    if (!whitelist?.length) {
-      console.log(`Homologação: phone ${cleanPhone} not in whitelist, skipping AI`);
-      return;
-    }
-  }
-
-  // Call ai-triage
   await fetch(`${supabaseUrl}/functions/v1/ai-triage`, {
     method: "POST",
     headers: {
