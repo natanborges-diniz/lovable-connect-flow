@@ -161,7 +161,19 @@ ${opts.businessRules}
 1. NUNCA invente informações. Se não sabe, diga que vai encaminhar para um Consultor especializado.
 2. NUNCA invente preços, endereços, horários ou dados que não estejam abaixo.
 3. Responda SOMENTE com base nas informações fornecidas neste contexto.
-4. Respostas CURTAS: máximo 3 frases. Sem repetir saudações.`);
+4. Respostas CURTAS: máximo 3 frases. Sem repetir saudações.
+5. NUNCA responda com frases genéricas como "Se precisar estou por aqui" ou "Se tiver dúvidas me avise". Sempre avance a conversa com uma pergunta ou informação nova.
+6. Se o cliente mudar de assunto, SIGA o novo assunto. Não insista no anterior.
+7. SEMPRE use a tool "responder" para classificar. NUNCA responda em texto livre.`);
+
+  // SECTION 2b: Anti-generic responses
+  sections.push(`# RESPOSTAS PROIBIDAS (NUNCA USE ESSAS FRASES)
+- "Entendi! Se precisar de mais informações..."
+- "Se precisar estou por aqui"
+- "Estou à disposição"
+- "Se tiver alguma dúvida, me avise"
+- Qualquer variação dessas frases genéricas de encerramento
+Em vez disso: faça uma PERGUNTA relevante ao cliente ou ofereça uma informação NOVA.`);
 
   // SECTION 3: Anti-repetition (structured)
   if (opts.sentTopics.length > 0) {
