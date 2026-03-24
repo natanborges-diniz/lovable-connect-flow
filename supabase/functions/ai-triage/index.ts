@@ -177,6 +177,14 @@ serve(async (req) => {
       instructions += knowledgeBlock;
     }
 
+    if (fewShotBlock) {
+      instructions += fewShotBlock;
+    }
+
+    if (antiExemploBlock) {
+      instructions += antiExemploBlock;
+    }
+
     if (isHibrido) {
       instructions += `\n\nCONTEXTO MODO HÍBRIDO:\nUm Consultor especializado foi solicitado anteriormente mas ainda não assumiu a conversa. Você continua respondendo normalmente — trate qualquer assunto dentro do seu escopo com a mesma qualidade.\n\nCOMPORTAMENTO:\n- Se o cliente trouxer um assunto NOVO que você consegue resolver, responda naturalmente como se estivesse no modo normal.\n- Se o cliente insistir no assunto que gerou a solicitação do Consultor especializado, ou surgir algo fora do seu escopo, reforce que o Consultor especializado já foi acionado.\n- A cada resposta, REAVALIE se o cliente ainda precisa de um Consultor especializado considerando o histórico completo da conversa.\n- Se a questão original foi sanada ou o cliente mudou completamente de assunto para algo que você resolve, indique que não precisa mais do Consultor especializado (ainda_precisa_humano = false).`;
     }
