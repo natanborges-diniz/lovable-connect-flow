@@ -51,7 +51,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
   if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor/.test(n)) {
     return {
       resposta:
-        "Perfeito! Posso te ajudar com orçamento de lentes/óculos. Você já tem receita? Se quiser, me envie uma foto da receita que te explico as melhores opções.",
+        "Boa! Me manda uma foto da sua receita que eu já te passo os valores certinhos. Se ainda não tem receita, posso te orientar também 😉",
       intencao: "orcamento",
       pipeline_coluna: inboundCount >= 3 ? "Orçamento" : "Novo Contato",
       precisa_humano: false,
@@ -60,7 +60,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 
   if (/status|pedido|entrega|retirada|retirar|pronto/.test(n)) {
     return {
-      resposta: "Claro! Para eu verificar seu pedido, me informe seu nome completo e, se tiver, o número do pedido.",
+      resposta: "Vou verificar pra você! Me passa seu nome completo ou o número da OS que eu consulto aqui rapidinho.",
       intencao: "status",
       pipeline_coluna: "Acompanhamento",
       precisa_humano: false,
@@ -69,7 +69,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 
   if (/pagamento|financeiro|boleto|pix|cart[aã]o|parcel/.test(n)) {
     return {
-      resposta: "Perfeito, posso ajudar no financeiro. Você quer suporte com forma de pagamento, link de pagamento ou parcelamento?",
+      resposta: "Tranquilo! Me explica melhor o que precisa no financeiro — é sobre parcelamento, segunda via de boleto ou outra coisa?",
       intencao: "outro",
       pipeline_coluna: "Financeiro",
       precisa_humano: false,
@@ -78,7 +78,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 
   if (/^oi\b|^ol[aá]\b|bom dia|boa tarde|boa noite/.test(n)) {
     return {
-      resposta: "Olá! Te ajudo agora 😊 Você quer orçamento de lentes/óculos, status de pedido, financeiro ou outro tema?",
+      resposta: "Oi! Tudo bem? Me conta no que posso te ajudar 😊",
       intencao: "outro",
       pipeline_coluna: "Novo Contato",
       precisa_humano: false,
@@ -87,7 +87,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 
   if (isHibrido) {
     return {
-      resposta: "Vamos focar no que você precisa agora: orçamento, pedido, financeiro ou outro tema? Me diz em uma frase e eu resolvo com você.",
+      resposta: "Opa, me conta o que precisa que eu te ajudo agora mesmo!",
       intencao: "outro",
       pipeline_coluna: "Novo Contato",
       precisa_humano: false,
@@ -95,7 +95,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
   }
 
   return {
-    resposta: "Para te ajudar com precisão, me diga o tema principal: orçamento, pedido, financeiro, loja ou receita.",
+    resposta: "Me conta o que tá precisando que eu resolvo pra você!",
     intencao: "outro",
     pipeline_coluna: "Novo Contato",
     precisa_humano: false,
@@ -353,9 +353,9 @@ function extractSentTopics(outboundTexts: string[]): string[] {
 
 // Deterministic fallback responses
 const DETERMINISTIC_FALLBACKS: Record<string, string> = {
-  subject_change: "Claro! Sobre qual tema você gostaria de falar?\n\n📋 *Orçamento de lentes*\n📦 *Status de pedido*\n💳 *Financeiro/pagamento*\n🏪 *Informações sobre lojas*\n📸 *Enviar receita para análise*\n\nÉ só escolher ou me dizer com suas palavras! 😊",
-  validator_failed: "Para te atender melhor, me conta: qual é a sua principal necessidade hoje? Orçamento, dúvida sobre produto, status de pedido ou outro tema?",
-  no_response: "Me conta um pouco mais sobre o que você precisa para eu conseguir te ajudar da melhor forma!",
+  subject_change: "Sem problemas! Me diz sobre o que quer falar agora que eu te ajudo 😊",
+  validator_failed: "Conta pra mim com mais detalhes o que você precisa que eu te dou um retorno certeiro!",
+  no_response: "Opa, me conta o que tá precisando!",
 };
 
 // ═══════════════════════════════════════════
