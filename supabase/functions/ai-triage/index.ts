@@ -474,6 +474,8 @@ serve(async (req) => {
     const allMsgs = (msgsRes.data || []).reverse();
     const colunas = colRes.data || [];
     const setores = setRes.data || [];
+    const lojas = lojasRes.data || [];
+    const agendamentosAtivos = agendRes.data || [];
 
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
@@ -493,6 +495,35 @@ serve(async (req) => {
       knowledgeStr = Object.entries(grouped).map(([cat, items]) => `## ${cat}\n${items.join("\n")}`).join("\n\n");
     }
 
+    // Inject lojas into knowledge
+    if (lojas.length > 0) {
+      knowledgeStr += "\n\n## LOJAS DISPONÍVEIS\n";
+      for (const l of lojas) {
+        const parts = [`**${l.nome_loja}**`];
+        if (l.endereco) parts.push(l.endereco);
+        if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
+        if (l.telefone) parts.push(`Tel: ${l.telefone}`);
+        if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
+        knowledgeStr += `- ${parts.join(" | ")}\n`;
+      }
+    }
+
+    // Inject active appointments context
+    let agendamentoCtx = "";
+    if (agendamentosAtivos.length > 0) {
+      agendamentoCtx = "\n\n# AGENDAMENTOS DESTE CLIENTE\n";
+      for (const ag of agendamentosAtivos) {
+        const dt = new Date(ag.data_horario);
+        const dataStr = dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+        const horaStr = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        agendamentoCtx += `- ${ag.loja_nome} em ${dataStr} às ${horaStr} — Status: ${ag.status}${ag.observacoes ? ` (${ag.observacoes})` : ""}\n`;
+      }
+      const hasNoShow = agendamentosAtivos.some((a: any) => a.status === "no_show" || a.status === "recuperacao");
+      if (hasNoShow) {
+        agendamentoCtx += "\n⚠️ O cliente tem no-show recente. Seja empático, entenda o motivo. Se ele demonstra interesse, use reagendar_visita. Se não quer mais, encerre com elegância.";
+      }
+    }
+
     let examplesStr = "";
     if (exemplos.length > 0) {
       examplesStr = exemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
@@ -505,7 +536,7 @@ serve(async (req) => {
 
     const systemPrompt = buildSystemPrompt({
       businessRules,
-      knowledge: knowledgeStr,
+      knowledge: knowledgeStr + agendamentoCtx,
       examples: examplesStr,
       antiExamples: antiStr,
       sentTopics,
@@ -513,7 +544,7 @@ serve(async (req) => {
       setoresNomes: setores.map((s: any) => s.nome).join(", "),
       inboundCount,
       isHibrido,
-      hasKnowledge: conhecimentos.length > 0,
+      hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
     });
 
     // ── 6. BUILD MESSAGES — use last 20 from the 60 loaded ──
