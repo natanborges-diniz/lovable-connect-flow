@@ -242,6 +242,42 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "agendar_visita",
+      description: "Agenda uma visita do cliente a uma loja. Use quando o cliente quer visitar uma loja e já definiu loja, data e horário.",
+      parameters: {
+        type: "object",
+        properties: {
+          loja_nome: { type: "string", description: "Nome da loja escolhida." },
+          data_horario: { type: "string", description: "Data e hora no formato ISO 8601 (ex: 2026-03-25T14:00:00-03:00)." },
+          observacoes: { type: "string", description: "Observações adicionais sobre a visita." },
+          resposta: { type: "string", description: "Mensagem confirmando o agendamento ao cliente." },
+        },
+        required: ["loja_nome", "data_horario", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "reagendar_visita",
+      description: "Reagenda uma visita de um cliente que teve no-show. Use quando o cliente deseja remarcar após não ter comparecido.",
+      parameters: {
+        type: "object",
+        properties: {
+          loja_nome: { type: "string", description: "Nome da loja para o novo agendamento." },
+          data_horario: { type: "string", description: "Nova data e hora ISO 8601." },
+          observacoes: { type: "string" },
+          resposta: { type: "string", description: "Mensagem confirmando o reagendamento." },
+        },
+        required: ["loja_nome", "data_horario", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════
@@ -415,18 +451,19 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, kbRes, exRes, antiRes, msgsRes, colRes, setRes] = await Promise.all([
+    const [promptRes, kbRes, exRes, antiRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
       supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(10),
       supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(3),
-      // PHASE 1 FIX: fetch LAST 60 messages (desc), then reverse
       supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
         .limit(60),
       supabase.from("pipeline_colunas").select("id, nome").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
+      supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento").eq("ativo", true),
+      supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
@@ -437,6 +474,8 @@ serve(async (req) => {
     const allMsgs = (msgsRes.data || []).reverse();
     const colunas = colRes.data || [];
     const setores = setRes.data || [];
+    const lojas = lojasRes.data || [];
+    const agendamentosAtivos = agendRes.data || [];
 
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
@@ -456,6 +495,35 @@ serve(async (req) => {
       knowledgeStr = Object.entries(grouped).map(([cat, items]) => `## ${cat}\n${items.join("\n")}`).join("\n\n");
     }
 
+    // Inject lojas into knowledge
+    if (lojas.length > 0) {
+      knowledgeStr += "\n\n## LOJAS DISPONÍVEIS\n";
+      for (const l of lojas) {
+        const parts = [`**${l.nome_loja}**`];
+        if (l.endereco) parts.push(l.endereco);
+        if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
+        if (l.telefone) parts.push(`Tel: ${l.telefone}`);
+        if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
+        knowledgeStr += `- ${parts.join(" | ")}\n`;
+      }
+    }
+
+    // Inject active appointments context
+    let agendamentoCtx = "";
+    if (agendamentosAtivos.length > 0) {
+      agendamentoCtx = "\n\n# AGENDAMENTOS DESTE CLIENTE\n";
+      for (const ag of agendamentosAtivos) {
+        const dt = new Date(ag.data_horario);
+        const dataStr = dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+        const horaStr = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        agendamentoCtx += `- ${ag.loja_nome} em ${dataStr} às ${horaStr} — Status: ${ag.status}${ag.observacoes ? ` (${ag.observacoes})` : ""}\n`;
+      }
+      const hasNoShow = agendamentosAtivos.some((a: any) => a.status === "no_show" || a.status === "recuperacao");
+      if (hasNoShow) {
+        agendamentoCtx += "\n⚠️ O cliente tem no-show recente. Seja empático, entenda o motivo. Se ele demonstra interesse, use reagendar_visita. Se não quer mais, encerre com elegância.";
+      }
+    }
+
     let examplesStr = "";
     if (exemplos.length > 0) {
       examplesStr = exemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
@@ -468,7 +536,7 @@ serve(async (req) => {
 
     const systemPrompt = buildSystemPrompt({
       businessRules,
-      knowledge: knowledgeStr,
+      knowledge: knowledgeStr + agendamentoCtx,
       examples: examplesStr,
       antiExamples: antiStr,
       sentTopics,
@@ -476,7 +544,7 @@ serve(async (req) => {
       setoresNomes: setores.map((s: any) => s.nome).join(", "),
       inboundCount,
       isHibrido,
-      hasKnowledge: conhecimentos.length > 0,
+      hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
     });
 
     // ── 6. BUILD MESSAGES — use last 20 from the 60 loaded ──
@@ -633,6 +701,48 @@ serve(async (req) => {
           contato_id: contatoId, tipo: "receita_interpretada",
           descricao: `Receita: OD ${args.olho_direito.esferico} OE ${args.olho_esquerdo.esferico} — ${args.tipo_lente}`,
           metadata: args, referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+      } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
+        resposta = args.resposta;
+        intencao = "agendamento";
+        pipeline_coluna = "Agendamento";
+
+        // Find loja telephone
+        const lojaMatch = lojas.find((l: any) => l.nome_loja.toLowerCase() === (args.loja_nome || "").toLowerCase());
+
+        // If reagendar, mark old agendamento as reagendado
+        if (fn === "reagendar_visita") {
+          const oldNoShow = agendamentosAtivos.find((a: any) => a.status === "no_show" || a.status === "recuperacao");
+          if (oldNoShow) {
+            await supabase.from("agendamentos").update({ status: "reagendado" }).eq("id", oldNoShow.id);
+          }
+        }
+
+        // Create new agendamento via agendar-cliente function
+        try {
+          await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contato_id: contatoId,
+              atendimento_id,
+              loja_nome: args.loja_nome,
+              loja_telefone: lojaMatch?.telefone || null,
+              data_horario: args.data_horario,
+              observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
+            }),
+          });
+        } catch (e) {
+          console.error("[TOOL] agendar-cliente call failed:", e);
+        }
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: fn === "reagendar_visita" ? "reagendamento_visita" : "agendamento_visita",
+          descricao: `${fn === "reagendar_visita" ? "Reagendamento" : "Agendamento"}: ${args.loja_nome} em ${args.data_horario}`,
+          metadata: args,
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
         });
       }
     }

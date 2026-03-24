@@ -4,9 +4,10 @@ import { TopNavigation } from "./TopNavigation";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
-export type ModuleKey = "dashboard" | "crm" | "financeiro" | "solicitacoes" | "atendimentos" | "tarefas" | "configuracoes";
+export type ModuleKey = "dashboard" | "crm" | "financeiro" | "agendamentos" | "solicitacoes" | "atendimentos" | "tarefas" | "configuracoes";
 
 export const moduleFromPath = (pathname: string): ModuleKey => {
+  if (pathname.startsWith("/agendamentos")) return "agendamentos";
   if (pathname.startsWith("/financeiro")) return "financeiro";
   if (pathname.startsWith("/crm")) return "crm";
   if (pathname.startsWith("/solicitacoes")) return "solicitacoes";

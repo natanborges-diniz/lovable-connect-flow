@@ -20,3 +20,12 @@ verify_jwt = false
 
 [functions.send-whatsapp-template]
 verify_jwt = false
+
+[functions.agendar-cliente]
+verify_jwt = false
+
+[functions.agendamentos-cron]
+verify_jwt = false
+
+[functions.manage-whatsapp-templates]
+verify_jwt = false
