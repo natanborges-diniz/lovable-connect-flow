@@ -40,6 +40,68 @@ function matchesSubjectChange(msg: string): boolean {
   return SUBJECT_CHANGE_KEYWORDS.some((kw) => n.includes(norm(kw)));
 }
 
+function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean): {
+  resposta: string;
+  intencao: string;
+  pipeline_coluna: string;
+  precisa_humano: boolean;
+} {
+  const n = norm(msg);
+
+  if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor/.test(n)) {
+    return {
+      resposta:
+        "Perfeito! Posso te ajudar com orçamento de lentes/óculos. Você já tem receita? Se quiser, me envie uma foto da receita que te explico as melhores opções.",
+      intencao: "orcamento",
+      pipeline_coluna: inboundCount >= 3 ? "Orçamento" : "Novo Contato",
+      precisa_humano: false,
+    };
+  }
+
+  if (/status|pedido|entrega|retirada|retirar|pronto/.test(n)) {
+    return {
+      resposta: "Claro! Para eu verificar seu pedido, me informe seu nome completo e, se tiver, o número do pedido.",
+      intencao: "status",
+      pipeline_coluna: "Acompanhamento",
+      precisa_humano: false,
+    };
+  }
+
+  if (/pagamento|financeiro|boleto|pix|cart[aã]o|parcel/.test(n)) {
+    return {
+      resposta: "Perfeito, posso ajudar no financeiro. Você quer suporte com forma de pagamento, link de pagamento ou parcelamento?",
+      intencao: "outro",
+      pipeline_coluna: "Financeiro",
+      precisa_humano: false,
+    };
+  }
+
+  if (/^oi\b|^ol[aá]\b|bom dia|boa tarde|boa noite/.test(n)) {
+    return {
+      resposta: "Olá! Te ajudo agora 😊 Você quer orçamento de lentes/óculos, status de pedido, financeiro ou outro tema?",
+      intencao: "outro",
+      pipeline_coluna: "Novo Contato",
+      precisa_humano: false,
+    };
+  }
+
+  if (isHibrido) {
+    return {
+      resposta: "Vamos focar no que você precisa agora: orçamento, pedido, financeiro ou outro tema? Me diz em uma frase e eu resolvo com você.",
+      intencao: "outro",
+      pipeline_coluna: "Novo Contato",
+      precisa_humano: false,
+    };
+  }
+
+  return {
+    resposta: "Para te ajudar com precisão, me diga o tema principal: orçamento, pedido, financeiro, loja ou receita.",
+    intencao: "outro",
+    pipeline_coluna: "Novo Contato",
+    precisa_humano: false,
+  };
+}
+
 // ═══════════════════════════════════════════
 // PHASE 3 — POST-LLM VALIDATOR (GUARDRAILS)
 // ═══════════════════════════════════════════
@@ -462,7 +524,7 @@ serve(async (req) => {
           messages: callMessages,
           tools: TOOLS,
           tool_choice: "required",
-          max_completion_tokens: 500,
+          max_completion_tokens: 1200,
         }),
       });
 
@@ -487,6 +549,9 @@ serve(async (req) => {
     }
 
     let choice = aiResult.data?.choices?.[0];
+    console.log(
+      `[AI] finish_reason=${choice?.finish_reason || "unknown"} | tool_calls=${choice?.message?.tool_calls?.length || 0} | content_len=${(choice?.message?.content || "").length}`,
+    );
     if (!choice) throw new Error("No choice from AI");
 
     // ── 8. PROCESS TOOL CALLS ──
@@ -500,8 +565,19 @@ serve(async (req) => {
     const toolCalls = choice.message?.tool_calls || [];
 
     if (toolCalls.length === 0) {
-      resposta = choice.message?.content || "";
-      console.log("[WARN] No tool call despite required — plain text fallback");
+      const plainContent = (choice.message?.content || "").trim();
+      if (plainContent) {
+        resposta = plainContent;
+        validatorFlags.push("no_tool_plain_text");
+      } else {
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido);
+        resposta = fallback.resposta;
+        intencao = fallback.intencao;
+        pipeline_coluna = fallback.pipeline_coluna;
+        precisa_humano = fallback.precisa_humano;
+        validatorFlags.push("no_tool_deterministic");
+      }
+      console.log("[WARN] No tool call despite required — deterministic fallback applied");
     }
 
     for (const tc of toolCalls) {
@@ -612,8 +688,12 @@ serve(async (req) => {
     }
 
     if (!resposta) {
-      resposta = DETERMINISTIC_FALLBACKS.no_response;
-      validatorFlags.push("empty_response_fallback");
+      const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido);
+      resposta = fallback.resposta;
+      intencao = fallback.intencao;
+      pipeline_coluna = fallback.pipeline_coluna;
+      precisa_humano = fallback.precisa_humano;
+      validatorFlags.push("empty_response_deterministic");
     }
 
     // ── 10. SEND RESPONSE ──
