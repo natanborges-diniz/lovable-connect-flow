@@ -3,9 +3,233 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ── ESCALATION KEYWORDS (hard-coded safety net) ──
+const ESCALATION_KEYWORDS = [
+  "falar com consultor", "falar com atendente", "falar com humano",
+  "falar com pessoa", "atendente humano", "quero um consultor",
+  "quero falar com alguem", "quero falar com alguém", "pessoa real",
+  "atendimento humano", "falar com gente", "preciso de ajuda humana",
+  "nao quero robo", "não quero robô", "me transfira",
+  "transferir para atendente", "quero atendente", "consultor especializado",
+];
+
+function normalizeText(t: string): string {
+  return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function matchesEscalation(msg: string): boolean {
+  const norm = normalizeText(msg);
+  return ESCALATION_KEYWORDS.some((kw) => norm.includes(normalizeText(kw)));
+}
+
+// ── TOOLS (minimal, clean descriptions) ──
+const TOOLS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "responder",
+      description:
+        "Responde ao cliente com texto e classifica a intenção. NÃO use se o cliente pedir para falar com uma pessoa.",
+      parameters: {
+        type: "object",
+        properties: {
+          resposta: {
+            type: "string",
+            description: "Texto curto e direto para o cliente. Máximo 3 frases.",
+          },
+          intencao: {
+            type: "string",
+            enum: [
+              "orcamento", "status", "reclamacao", "parceria", "compras",
+              "marketing", "agendamento", "informacoes", "receita_oftalmologica", "outro",
+            ],
+          },
+          coluna_pipeline: {
+            type: "string",
+            description: "Coluna do pipeline para mover o contato.",
+          },
+          setor: {
+            type: "string",
+            description: "Setor interno, se aplicável.",
+          },
+        },
+        required: ["resposta", "intencao", "coluna_pipeline"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "escalar_consultor",
+      description:
+        "Transfere para Consultor especializado. Use quando: o cliente pede pessoa real, a IA não sabe responder, ou há frustração.",
+      parameters: {
+        type: "object",
+        properties: {
+          motivo: { type: "string", description: "Razão do escalonamento." },
+          resposta: {
+            type: "string",
+            description: "Mensagem informando o cliente que um Consultor foi acionado.",
+          },
+          setor: { type: "string", description: "Setor se identificável." },
+        },
+        required: ["motivo", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "interpretar_receita",
+      description:
+        "Extrai dados de foto de receita oftalmológica enviada pelo cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          olho_direito: {
+            type: "object",
+            properties: {
+              esferico: { type: "string" },
+              cilindrico: { type: "string" },
+              eixo: { type: "string" },
+              adicao: { type: "string" },
+            },
+            required: ["esferico"],
+            additionalProperties: false,
+          },
+          olho_esquerdo: {
+            type: "object",
+            properties: {
+              esferico: { type: "string" },
+              cilindrico: { type: "string" },
+              eixo: { type: "string" },
+              adicao: { type: "string" },
+            },
+            required: ["esferico"],
+            additionalProperties: false,
+          },
+          tipo_lente: {
+            type: "string",
+            enum: ["visao_simples", "bifocal", "multifocal", "progressiva"],
+          },
+          observacoes: { type: "string" },
+          resposta: {
+            type: "string",
+            description: "Mensagem confirmando dados extraídos e próximos passos.",
+          },
+        },
+        required: ["olho_direito", "olho_esquerdo", "tipo_lente", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
+// ── BUILD SYSTEM PROMPT ──
+function buildSystemPrompt(opts: {
+  businessRules: string;
+  knowledge: string;
+  examples: string;
+  antiExamples: string;
+  sentTopics: string[];
+  colunasNomes: string;
+  setoresNomes: string;
+  inboundCount: number;
+  isHibrido: boolean;
+  hasKnowledge: boolean;
+}): string {
+  const sections: string[] = [];
+
+  // SECTION 1: Identity + business rules (TOP PRIORITY)
+  sections.push(`# IDENTIDADE
+Você é o Assistente Virtual da Óticas Diniz. Seu objetivo é atender clientes pelo WhatsApp de forma rápida, precisa e humana.
+
+# REGRAS DE ATENDIMENTO
+${opts.businessRules}
+
+# TERMINOLOGIA OBRIGATÓRIA
+- Para se referir a uma pessoa real, diga SEMPRE "Consultor especializado". NUNCA "atendente", "operador", "humano".`);
+
+  // SECTION 2: Anti-hallucination
+  sections.push(`# REGRAS DE PRECISÃO
+1. NUNCA invente informações. Se não sabe, diga que vai encaminhar para um Consultor especializado.
+2. NUNCA invente preços, endereços, horários ou dados que não estejam abaixo.
+3. Responda SOMENTE com base nas informações fornecidas neste contexto.
+4. Respostas CURTAS: máximo 3 frases. Sem repetir saudações.`);
+
+  // SECTION 3: Anti-repetition (structured)
+  if (opts.sentTopics.length > 0) {
+    sections.push(`# INFORMAÇÕES JÁ ENVIADAS (NÃO REPITA)
+${opts.sentTopics.map((t) => `- ${t}`).join("\n")}
+
+Se o cliente perguntar algo já informado acima, diga brevemente "Conforme mencionei" sem repetir os dados.`);
+  }
+
+  // SECTION 4: Knowledge base
+  if (opts.knowledge) {
+    sections.push(`# BASE DE CONHECIMENTO\n${opts.knowledge}`);
+  }
+
+  // SECTION 5: Fallback for empty KB
+  if (!opts.hasKnowledge) {
+    sections.push(`# FALLBACK (SEM BASE DE CONHECIMENTO DETALHADA)
+- Para perguntas sobre produtos, use os valores das REGRAS DE ATENDIMENTO acima.
+- Sugira que o cliente envie foto da receita para orçamento personalizado.
+- NUNCA responda pergunta sobre produtos com endereço de loja.`);
+  }
+
+  // SECTION 6: Few-shot examples
+  if (opts.examples) {
+    sections.push(`# EXEMPLOS DE REFERÊNCIA\n${opts.examples}`);
+  }
+  if (opts.antiExamples) {
+    sections.push(`# ERROS A EVITAR\n${opts.antiExamples}`);
+  }
+
+  // SECTION 7: Pipeline routing
+  sections.push(`# CLASSIFICAÇÃO (uso interno)
+Colunas disponíveis: ${opts.colunasNomes}
+Setores: ${opts.setoresNomes || "nenhum"}
+Mensagem nº ${opts.inboundCount} do cliente.
+${opts.inboundCount < 3 ? 'Use coluna "Novo Contato" até 3ª mensagem (exceto escalonamento).' : "Mova para a coluna mais adequada à intenção."}`);
+
+  // SECTION 8: Hybrid mode
+  if (opts.isHibrido) {
+    sections.push(`# MODO HÍBRIDO ATIVO
+Consultor já foi solicitado mas ainda não respondeu. Continue atendendo normalmente.
+Se resolver a dúvida do cliente, informe que não precisa mais do Consultor.`);
+  }
+
+  return sections.join("\n\n");
+}
+
+// ── EXTRACT ALREADY-SENT TOPICS ──
+function extractSentTopics(outboundTexts: string[]): string[] {
+  const all = outboundTexts.join(" ").toLowerCase();
+  const topics: string[] = [];
+  const checks: [RegExp, string][] = [
+    [/endere[çc]o|rua |av\.|avenida/i, "Endereço de loja"],
+    [/hor[áa]rio|funciona|abre|fecha/i, "Horário de funcionamento"],
+    [/telefone|\(\d{2}\)|\d{4,5}-\d{4}/i, "Telefone"],
+    [/agend|visita|marcar/i, "Agendamento"],
+    [/pre[çc]o|valor|r\$|or[çc]amento/i, "Preço/orçamento"],
+    [/lente|[óo]culos|arma[çc]/i, "Produtos ópticos"],
+    [/consultor|especializado/i, "Consultor acionado"],
+    [/receita/i, "Receita mencionada"],
+  ];
+  for (const [re, label] of checks) {
+    if (re.test(all)) topics.push(label);
+  }
+  return topics;
+}
+
+// ── MAIN ──
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -16,10 +240,10 @@ serve(async (req) => {
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
   if (!OPENAI_API_KEY) {
-    return new Response(JSON.stringify({ error: "OPENAI_API_KEY is not configured" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: "OPENAI_API_KEY not configured" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -28,7 +252,7 @@ serve(async (req) => {
     const { atendimento_id, mensagem_texto, contato_id, media } = await req.json();
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
-    // 1. Load atendimento
+    // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
       .from("atendimentos")
       .select("id, contato_id, canal, canal_provedor, modo")
@@ -37,407 +261,127 @@ serve(async (req) => {
     if (atErr || !atendimento) throw new Error("Atendimento not found");
 
     if (atendimento.modo === "humano") {
-      return new Response(JSON.stringify({ status: "skipped", reason: "modo humano" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ status: "skipped", reason: "modo humano" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const isHibrido = atendimento.modo === "hibrido";
-    const contatoIdToUpdate = contato_id || atendimento.contato_id;
+    const contatoId = contato_id || atendimento.contato_id;
 
-    // 2. Load prompt from configuracoes_ia
-    const { data: promptConfig } = await supabase
-      .from("configuracoes_ia")
-      .select("valor")
-      .eq("chave", "prompt_atendimento")
-      .single();
-    const systemPrompt = promptConfig?.valor || "Você é um assistente de atendimento ao cliente.";
+    // ── 2. LOAD ALL DATA IN PARALLEL ──
+    const [promptRes, kbRes, exRes, antiRes, msgsRes, colRes, setRes] = await Promise.all([
+      supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
+      supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
+      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(10),
+      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(3),
+      supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata").eq("atendimento_id", atendimento_id).order("created_at", { ascending: true }).limit(30),
+      supabase.from("pipeline_colunas").select("id, nome").eq("ativo", true).order("ordem"),
+      supabase.from("setores").select("id, nome").eq("ativo", true),
+    ]);
 
-    // 3. Load knowledge base
-    const { data: conhecimentos } = await supabase
-      .from("conhecimento_ia")
-      .select("categoria, titulo, conteudo")
-      .eq("ativo", true);
+    const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
+    const conhecimentos = kbRes.data || [];
+    const exemplos = exRes.data || [];
+    const antiFeedbacks = antiRes.data || [];
+    const msgs = msgsRes.data || [];
+    const colunas = colRes.data || [];
+    const setores = setRes.data || [];
 
-    // 3b. Load few-shot examples
-    const { data: exemplos } = await supabase
-      .from("ia_exemplos")
-      .select("categoria, pergunta, resposta_ideal")
-      .eq("ativo", true)
-      .limit(20);
+    const inboundCount = msgs.filter((m: any) => m.direcao === "inbound").length;
+    const outboundTexts = msgs.filter((m: any) => m.direcao === "outbound").map((m: any) => m.conteudo);
 
-    // 3c. Load recent negative feedbacks as anti-examples
-    const { data: antiExemplos } = await supabase
-      .from("ia_feedbacks")
-      .select("motivo, resposta_corrigida")
-      .eq("avaliacao", "negativo")
-      .order("created_at", { ascending: false })
-      .limit(5);
-
-    let fewShotBlock = "";
-    if (exemplos && exemplos.length > 0) {
-      const grouped: Record<string, string[]> = {};
-      for (const ex of exemplos) {
-        const cat = (ex.categoria || "geral").toUpperCase();
-        if (!grouped[cat]) grouped[cat] = [];
-        grouped[cat].push(`Cliente: "${ex.pergunta}"\nResposta ideal: "${ex.resposta_ideal}"`);
-      }
-      const sections = Object.entries(grouped)
-        .map(([cat, items]) => `[${cat}]\n${items.join("\n\n")}`)
-        .join("\n\n");
-      fewShotBlock = `\n\nEXEMPLOS DE RESPOSTAS APROVADAS (use como referência de tom e qualidade — NÃO copie literalmente, adapte ao contexto):\n\n${sections}`;
+    // ── 3. KEYWORD ESCALATION BYPASS ──
+    const currentMsg = mensagem_texto || "";
+    if (matchesEscalation(currentMsg)) {
+      console.log("KEYWORD ESCALATION BYPASS");
+      return await handleEscalation(
+        supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+        atendimento_id, contatoId, currentMsg, colunas, isHibrido, "keyword"
+      );
     }
 
-    let antiExemploBlock = "";
-    if (antiExemplos && antiExemplos.length > 0) {
-      const items = antiExemplos
-        .filter((f: any) => f.motivo)
-        .map((f: any) => `- Erro: ${f.motivo}${f.resposta_corrigida ? `\n  Correção: ${f.resposta_corrigida}` : ""}`)
+    // ── 4. BUILD CONTEXT ──
+    const sentTopics = extractSentTopics(outboundTexts);
+
+    // Knowledge block
+    let knowledgeStr = "";
+    if (conhecimentos.length > 0) {
+      const grouped: Record<string, string[]> = {};
+      for (const k of conhecimentos) {
+        const cat = (k.categoria || "geral").toUpperCase();
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(`**${k.titulo}**: ${JSON.stringify(k.conteudo)}`);
+      }
+      knowledgeStr = Object.entries(grouped)
+        .map(([cat, items]) => `## ${cat}\n${items.join("\n")}`)
+        .join("\n\n");
+    }
+
+    // Examples block
+    let examplesStr = "";
+    if (exemplos.length > 0) {
+      examplesStr = exemplos
+        .map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`)
         .join("\n");
-      if (items) {
-        antiExemploBlock = `\n\nERROS RECENTES DA IA (EVITE REPETIR ESTES PADRÕES):\n${items}`;
-      }
     }
 
-    let knowledgeBlock = "";
-    if (conhecimentos && conhecimentos.length > 0) {
-      const grouped: Record<string, string[]> = {};
-      for (const item of conhecimentos) {
-        const cat = (item.categoria || "geral").toUpperCase();
-        if (!grouped[cat]) grouped[cat] = [];
-        grouped[cat].push(`### ${item.titulo}\n${JSON.stringify(item.conteudo, null, 2)}`);
-      }
-      const sections = Object.entries(grouped)
-        .map(([cat, items]) => `[${cat}]\n${items.join("\n\n")}`)
-        .join("\n\n");
-      knowledgeBlock = `\n\nBASE DE CONHECIMENTO (consulte para responder sobre produtos, serviços, políticas e FAQ):\n\n${sections}`;
+    // Anti-examples block
+    let antiStr = "";
+    if (antiFeedbacks.length > 0) {
+      antiStr = antiFeedbacks
+        .filter((f: any) => f.motivo)
+        .map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`)
+        .join("\n");
     }
 
-    console.log(`Prompt loaded: ${systemPrompt.length} chars, knowledge: ${conhecimentos?.length || 0}, exemplos: ${exemplos?.length || 0}, anti: ${antiExemplos?.length || 0}, modo: ${atendimento.modo}`);
+    const systemPrompt = buildSystemPrompt({
+      businessRules,
+      knowledge: knowledgeStr,
+      examples: examplesStr,
+      antiExamples: antiStr,
+      sentTopics,
+      colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+      setoresNomes: setores.map((s: any) => s.nome).join(", "),
+      inboundCount,
+      isHibrido,
+      hasKnowledge: conhecimentos.length > 0,
+    });
 
-    // 4. Load last 20 messages for context (including media)
-    const { data: msgs } = await supabase
-      .from("mensagens")
-      .select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
-      .eq("atendimento_id", atendimento_id)
-      .order("created_at", { ascending: true })
-      .limit(20);
+    console.log(
+      `Prompt: ${systemPrompt.length} chars | KB: ${conhecimentos.length} | Exemplos: ${exemplos.length} | Anti: ${antiFeedbacks.length} | Modo: ${atendimento.modo} | Msgs: ${msgs.length} | Topics sent: ${sentTopics.join(", ") || "none"}`
+    );
 
-    // Build multimodal chat history
-    const chatHistory: any[] = [];
-    for (const m of (msgs || [])) {
+    // ── 5. BUILD MESSAGES (Chat Completions format) ──
+    const messages: any[] = [{ role: "system", content: systemPrompt }];
+
+    // Add conversation history (last 20 messages)
+    const recentMsgs = msgs.slice(-20);
+    for (const m of recentMsgs) {
       const role = m.direcao === "inbound" ? "user" : "assistant";
-      const mediaUrl = (m.metadata as any)?.media_url;
-      const tipoConteudo = (m as any).tipo_conteudo || "text";
+      if (m.direcao === "internal") continue; // skip internal notes
 
-      if (tipoConteudo === "image" && mediaUrl) {
-        // Multimodal: image + optional caption
+      const mediaUrl = (m.metadata as any)?.media_url;
+      const tipo = (m as any).tipo_conteudo || "text";
+
+      if (tipo === "image" && mediaUrl && role === "user") {
         const content: any[] = [
           { type: "image_url", image_url: { url: mediaUrl, detail: "high" } },
         ];
         if (m.conteudo && m.conteudo !== "[image]") {
           content.push({ type: "text", text: m.conteudo });
         }
-        chatHistory.push({ role, content });
+        messages.push({ role, content });
       } else {
-        chatHistory.push({ role, content: m.conteudo });
+        // For assistant messages, prefix with name to track
+        const prefix = role === "assistant" && m.remetente_nome === "Operador" ? "[Operador] " : "";
+        messages.push({ role, content: prefix + m.conteudo });
       }
     }
 
-    const inboundCount = (msgs || []).filter((m: any) => m.direcao === "inbound").length;
-
-    // ── KEYWORD ESCALATION PRE-CHECK ──
-    const lastInboundMsg = mensagem_texto || "";
-    const escalationKeywords = [
-      "falar com consultor", "falar com atendente", "falar com humano", "falar com pessoa",
-      "atendente humano", "consultor especializado", "quero um consultor", "quero falar com alguem",
-      "quero falar com alguém", "pessoa real", "atendimento humano", "falar com gente",
-      "preciso de ajuda humana", "nao quero robo", "não quero robô", "me transfira",
-      "transferir para atendente", "quero atendente"
-    ];
-    const msgLower = lastInboundMsg.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const forceEscalation = escalationKeywords.some(kw => {
-      const kwNorm = kw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return msgLower.includes(kwNorm);
-    });
-
-    if (forceEscalation) {
-      console.log("KEYWORD ESCALATION: forcing solicitar_humano bypass");
-
-      const respostaEscalacao = "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Enquanto isso, se tiver alguma dúvida rápida, estou à disposição! 😊";
-
-      // Send response
-      await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          atendimento_id,
-          texto: respostaEscalacao,
-          remetente_nome: "Assistente IA",
-        }),
-      });
-
-      // Update modo to hibrido
-      if (!isHibrido) {
-        await supabase.from("atendimentos").update({ modo: "hibrido" }).eq("id", atendimento_id);
-      }
-
-      // Move to Atendimento Humano column
-      const { data: colunasEsc } = await supabase
-        .from("pipeline_colunas")
-        .select("id, nome")
-        .eq("nome", "Atendimento Humano")
-        .eq("ativo", true)
-        .single();
-
-      const contatoEscUpdates: any = { ultimo_contato_at: new Date().toISOString() };
-      if (colunasEsc) contatoEscUpdates.pipeline_coluna_id = colunasEsc.id;
-      await supabase.from("contatos").update(contatoEscUpdates).eq("id", contatoIdToUpdate);
-
-      // Log CRM event
-      await supabase.from("eventos_crm").insert({
-        contato_id: contatoIdToUpdate,
-        tipo: "escalonamento_humano",
-        descricao: "Cliente solicitou explicitamente falar com Consultor especializado (keyword detection)",
-        metadata: { trigger: "keyword", mensagem: lastInboundMsg },
-        referencia_tipo: "atendimento",
-        referencia_id: atendimento_id,
-      });
-
-      return new Response(JSON.stringify({
-        status: "ok",
-        tools_used: ["solicitar_humano_keyword"],
-        intencao: "escalonamento",
-        precisa_humano: true,
-        ainda_precisa_humano: true,
-        pipeline_coluna_sugerida: "Atendimento Humano",
-        setor_sugerido: "",
-        modo: "hibrido",
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // ── STRUCTURED ANTI-REPETITION ──
-    const outboundMessages = (msgs || []).filter((m: any) => m.direcao === "outbound").map((m: any) => m.conteudo);
-    const extractTopics = (texts: string[]): string[] => {
-      const topics: string[] = [];
-      const allText = texts.join(" ").toLowerCase();
-      const patterns: [RegExp, string][] = [
-        [/endere[çc]o|rua |av\.|avenida |n[úu]mero/i, "Endereço de loja"],
-        [/hor[áa]rio|funciona|abre|fecha|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo/i, "Horário de funcionamento"],
-        [/telefone|\(\d{2}\)|\d{4,5}-\d{4}/i, "Telefone de contato"],
-        [/whatsapp/i, "WhatsApp"],
-        [/agend|visita|marcar/i, "Sugestão de agendamento/visita"],
-        [/pre[çc]o|valor|r\$|reais|custo|or[çc]amento/i, "Informação de preço/orçamento"],
-        [/lente|[óo]culos|arma[çc][ãa]o|receita/i, "Informação sobre produtos ópticos"],
-        [/consultor|especializado|humano|atendente/i, "Menção a Consultor especializado"],
-      ];
-      for (const [regex, label] of patterns) {
-        if (regex.test(allText)) topics.push(label);
-      }
-      return topics;
-    };
-    const topicsAlreadySent = extractTopics(outboundMessages);
-    const alreadySentSummary = topicsAlreadySent.length > 0
-      ? topicsAlreadySent.map(t => `- ✅ ${t}: já informado`).join("\n")
-      : "Nenhuma informação enviada ainda.";
-
-    // 5. Load pipeline columns and setores
-    const { data: colunas } = await supabase
-      .from("pipeline_colunas")
-      .select("id, nome")
-      .eq("ativo", true)
-      .order("ordem");
-
-    const { data: setores } = await supabase
-      .from("setores")
-      .select("id, nome")
-      .eq("ativo", true);
-
-    const colunasNomes = (colunas || []).map((c: any) => c.nome).join(", ");
-    const setoresNomes = (setores || []).map((s: any) => s.nome).join(", ");
-
-    // 6. Build instructions
-    let instructions = `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}\n\nREGRA ANTI-ALUCINAÇÃO (OBRIGATÓRIA):\n- NUNCA invente informações que não estejam na base de conhecimento.\n- Se não encontrar a informação na base, diga: "Não tenho essa informação disponível no momento. Vou encaminhar para um Consultor especializado."\n- NUNCA invente preços, endereços, horários ou dados de produtos.\n- Cite APENAS dados presentes na BASE DE CONHECIMENTO abaixo.\n\nREGRA DE TERMINOLOGIA (OBRIGATÓRIA): Ao se referir a atendimento por uma pessoa real, use SEMPRE e EXCLUSIVAMENTE o termo "Consultor especializado". NUNCA use "atendente", "operador", "humano", "agente" ou qualquer sinônimo. Sempre "Consultor especializado".`;
-
-    instructions += `\n\nREGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita endereço, horário, telefone, ou QUALQUER informação já presente nas mensagens anteriores.\n- Releia TODO o histórico ANTES de gerar a resposta.\n- Se o cliente perguntar algo já respondido, diga "Conforme mencionei anteriormente..." de forma BREVE.\n- Respostas devem ser CURTAS e DIRETAS.\n\nINFORMAÇÕES JÁ COMPARTILHADAS NESTA CONVERSA (PROIBIDO REPETIR):\n${alreadySentSummary}\n\nSe o cliente perguntar sobre um tema já coberto acima, NÃO repita os dados. Apenas referencie brevemente.`;
-
-    instructions += `\n\nREGRA DE FALLBACK PARA PRODUTOS:\n- Se o cliente perguntar sobre produtos (lentes, óculos, armações) e NÃO houver detalhes na BASE DE CONHECIMENTO, use os valores base das REGRAS DE ATENDIMENTO.\n- NUNCA responda com endereço de loja quando o cliente pergunta sobre PRODUTOS ou PREÇOS.\n- Se não souber o preço específico, sugira enviar foto da receita para orçamento personalizado.\n- Endereços de loja só devem ser informados quando o cliente EXPLICITAMENTE perguntar sobre localização, endereço ou como chegar.`;
-
-    instructions += `\n\nCAPACIDADES DE VISÃO (IMAGENS):\n- Você pode receber e interpretar imagens enviadas pelo cliente.\n- Se o cliente enviar uma foto de receita oftalmológica, use a tool 'interpretar_receita' para extrair os dados.\n- Se o cliente enviar uma foto de produto, documento ou qualquer outra imagem, descreva o que vê e responda no contexto da conversa.\n- SEMPRE reconheça que recebeu a imagem e descreva brevemente o que vê antes de prosseguir.`;
-
-    if (knowledgeBlock) {
-      instructions += knowledgeBlock;
-    }
-
-    if (fewShotBlock) {
-      instructions += fewShotBlock;
-    }
-
-    if (antiExemploBlock) {
-      instructions += antiExemploBlock;
-    }
-
-    if (isHibrido) {
-      instructions += `\n\nCONTEXTO MODO HÍBRIDO:\nUm Consultor especializado foi solicitado anteriormente mas ainda não assumiu a conversa. Você continua respondendo normalmente — trate qualquer assunto dentro do seu escopo com a mesma qualidade.\n\nCOMPORTAMENTO:\n- Se o cliente trouxer um assunto NOVO que você consegue resolver, responda naturalmente como se estivesse no modo normal.\n- Se o cliente insistir no assunto que gerou a solicitação do Consultor especializado, ou surgir algo fora do seu escopo, reforce que o Consultor especializado já foi acionado.\n- A cada resposta, REAVALIE se o cliente ainda precisa de um Consultor especializado considerando o histórico completo da conversa.\n- Se a questão original foi sanada ou o cliente mudou completamente de assunto para algo que você resolve, indique que não precisa mais do Consultor especializado (ainda_precisa_humano = false).`;
-    }
-
-    instructions += `\n\nINSTRUÇÕES DE CLASSIFICAÇÃO E AÇÃO (uso interno, não mostrar ao cliente):\n- Você é um agente autônomo com múltiplas ferramentas. Escolha a mais adequada para cada situação.\n- Colunas disponíveis no pipeline: ${colunasNomes}\n- Setores internos disponíveis: ${setoresNomes || "nenhum cadastrado"}\n- Esta é a mensagem número ${inboundCount} do cliente nesta conversa.\n- Se é a 1ª ou 2ª mensagem, use pipeline_coluna_sugerida = "Novo Contato" (a menos que precise de Consultor especializado).\n- Só mova para colunas específicas após 3+ mensagens quando a intenção estiver clara.\n- Se precisa_humano = true, SEMPRE mova para "Atendimento Humano".\n- TERMINOLOGIA: em respostas ao cliente, SEMPRE diga "Consultor especializado". NUNCA "atendente", "operador", "humano" ou "agente".${isHibrido ? '\n- O atendimento está em MODO HÍBRIDO. Reavalie se ainda_precisa_humano é true ou false.' : ''}`;
-
-    // 7. Build input (chat history + highlighted current message)
-    const lastInboundIndex = chatHistory.length - 1 - [...chatHistory].reverse().findIndex(m => m.role === "user");
-    const historyWithoutLast = lastInboundIndex >= 0 && lastInboundIndex < chatHistory.length
-      ? chatHistory.filter((_: any, i: number) => i !== lastInboundIndex)
-      : chatHistory;
-
-    const lastMessage = lastInboundIndex >= 0 && lastInboundIndex < chatHistory.length
-      ? chatHistory[lastInboundIndex]
-      : null;
-
-    const input: any[] = [...historyWithoutLast];
-
-    // Build the current message input (could be multimodal)
-    if (lastMessage) {
-      if (typeof lastMessage.content === "string") {
-        input.push({
-          role: "user",
-          content: `MENSAGEM ATUAL DO CLIENTE (responda especificamente a esta mensagem):\n\n${lastMessage.content}`,
-        });
-      } else if (Array.isArray(lastMessage.content)) {
-        // Multimodal content (image + text)
-        const enhancedContent = [
-          { type: "text", text: "MENSAGEM ATUAL DO CLIENTE (responda especificamente a esta mensagem):" },
-          ...lastMessage.content,
-        ];
-        input.push({ role: "user", content: enhancedContent });
-      }
-    } else if (mensagem_texto) {
-      input.push({
-        role: "user",
-        content: `MENSAGEM ATUAL DO CLIENTE (responda especificamente a esta mensagem):\n\n${mensagem_texto}`,
-      });
-    }
-
-    // 8. Define agent tools
-    const tools = [
-      {
-        type: "function",
-        name: "classify_and_respond",
-        description: "Classifica a intenção do cliente e gera a resposta. Use como ferramenta padrão para responder mensagens de texto. PROIBIÇÕES: 1) NÃO use esta tool se o cliente pedir para falar com consultor, atendente ou pessoa real — use solicitar_humano. 2) NUNCA responda com endereço de loja quando o cliente pergunta sobre produtos/preços. 3) NUNCA repita informações já compartilhadas na conversa.",
-        parameters: {
-          type: "object",
-          properties: {
-            resposta: {
-              type: "string",
-              description: "Texto de resposta para enviar ao cliente via WhatsApp. REGRAS: 1) NUNCA repita dados já enviados. 2) Respostas CURTAS e DIRETAS. 3) Siga as regras de atendimento. 4) Use SEMPRE 'Consultor especializado'.",
-            },
-            intencao: {
-              type: "string",
-              enum: ["orcamento", "status", "reclamacao", "parceria", "compras", "marketing", "agendamento", "informacoes", "receita_oftalmologica", "outro"],
-              description: "Classificação da intenção do cliente",
-            },
-            precisa_humano: {
-              type: "boolean",
-              description: "true se a IA não consegue resolver e precisa de intervenção de um Consultor especializado",
-            },
-            ainda_precisa_humano: {
-              type: "boolean",
-              description: "Reavaliação contínua: o cliente AINDA precisa de um Consultor especializado?",
-            },
-            pipeline_coluna_sugerida: {
-              type: "string",
-              description: "Nome exato da coluna do pipeline para onde mover o contato",
-            },
-            setor_sugerido: {
-              type: "string",
-              description: "Nome do setor interno para rotear (se aplicável, senão string vazia)",
-            },
-          },
-          required: ["resposta", "intencao", "precisa_humano", "ainda_precisa_humano", "pipeline_coluna_sugerida"],
-          additionalProperties: false,
-        },
-      },
-      {
-        type: "function",
-        name: "interpretar_receita",
-        description: "Extrai dados de uma imagem de receita oftalmológica. Use quando o cliente enviar uma foto de receita/prescrição de óculos ou lentes. Extraia grau (esférico, cilíndrico), eixo, adição, DNP e tipo de lente recomendado.",
-        parameters: {
-          type: "object",
-          properties: {
-            olho_direito: {
-              type: "object",
-              properties: {
-                esferico: { type: "string", description: "Grau esférico (ex: -2.00, +1.50)" },
-                cilindrico: { type: "string", description: "Grau cilíndrico (ex: -0.75)" },
-                eixo: { type: "string", description: "Eixo em graus (ex: 180)" },
-                adicao: { type: "string", description: "Adição para perto (ex: +2.00), se houver" },
-                dnp: { type: "string", description: "Distância naso-pupilar em mm, se informada" },
-              },
-              required: ["esferico"],
-              additionalProperties: false,
-            },
-            olho_esquerdo: {
-              type: "object",
-              properties: {
-                esferico: { type: "string", description: "Grau esférico" },
-                cilindrico: { type: "string", description: "Grau cilíndrico" },
-                eixo: { type: "string", description: "Eixo em graus" },
-                adicao: { type: "string", description: "Adição para perto, se houver" },
-                dnp: { type: "string", description: "Distância naso-pupilar em mm, se informada" },
-              },
-              required: ["esferico"],
-              additionalProperties: false,
-            },
-            tipo_lente_recomendado: {
-              type: "string",
-              enum: ["visao_simples", "bifocal", "multifocal", "progressiva", "nao_identificado"],
-              description: "Tipo de lente baseado na prescrição",
-            },
-            observacoes: {
-              type: "string",
-              description: "Observações adicionais como nome do médico, CRM, validade, etc.",
-            },
-            resposta_cliente: {
-              type: "string",
-              description: "Mensagem para enviar ao cliente confirmando os dados extraídos e próximos passos",
-            },
-          },
-          required: ["olho_direito", "olho_esquerdo", "tipo_lente_recomendado", "resposta_cliente"],
-          additionalProperties: false,
-        },
-      },
-      {
-        type: "function",
-        name: "solicitar_humano",
-        description: "Use OBRIGATORIAMENTE quando o cliente pedir para falar com pessoa real, consultor, atendente, ou qualquer sinônimo. Também use quando a IA não consegue resolver a demanda ou o cliente demonstra frustração/insatisfação com as respostas automáticas. PRIORIDADE MÁXIMA sobre classify_and_respond quando há pedido explícito de atendimento humano.",
-        parameters: {
-          type: "object",
-          properties: {
-            motivo: {
-              type: "string",
-              description: "Resumo do motivo do escalonamento para o Consultor especializado",
-            },
-            resposta_cliente: {
-              type: "string",
-              description: "Mensagem para o cliente informando que um Consultor especializado foi acionado",
-            },
-            setor_sugerido: {
-              type: "string",
-              description: "Setor para rotear (se identificável)",
-            },
-          },
-          required: ["motivo", "resposta_cliente"],
-          additionalProperties: false,
-        },
-      },
-    ];
-
-    // 9. Call OpenAI Responses API
-    const aiResponse = await fetch("https://api.openai.com/v1/responses", {
+    // ── 6. CALL OPENAI CHAT COMPLETIONS API ──
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -445,114 +389,101 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "gpt-4o",
-        instructions,
-        input,
-        tools,
-        tool_choice: "required",
+        messages,
+        tools: TOOLS,
+        tool_choice: "auto",
         temperature: 0,
+        max_tokens: 500,
       }),
     });
 
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
-      if (aiResponse.status === 429) {
-        console.error("OpenAI rate limited:", errText);
-        return new Response(JSON.stringify({ error: "Rate limited, will retry" }), {
-          status: 429,
+      console.error(`OpenAI error [${aiResponse.status}]:`, errText);
+      if (aiResponse.status === 429 || aiResponse.status === 402) {
+        return new Response(JSON.stringify({ error: `OpenAI ${aiResponse.status}` }), {
+          status: aiResponse.status,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (aiResponse.status === 402) {
-        console.error("OpenAI credits exhausted:", errText);
-        return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`OpenAI API error [${aiResponse.status}]: ${errText}`);
+      throw new Error(`OpenAI ${aiResponse.status}: ${errText}`);
     }
 
     const aiData = await aiResponse.json();
+    const choice = aiData.choices?.[0];
 
-    // 10. Process ALL function calls from the agent
-    const functionCalls = (aiData.output || []).filter((item: any) => item.type === "function_call");
-    if (!functionCalls.length) {
-      console.error("OpenAI response:", JSON.stringify(aiData));
-      throw new Error("OpenAI did not return any function_call in output");
-    }
+    if (!choice) throw new Error("No choice returned from OpenAI");
 
+    // ── 7. PROCESS RESPONSE ──
     let resposta = "";
     let intencao = "outro";
     let precisa_humano = false;
-    let ainda_precisa_humano = false;
-    let pipeline_coluna_sugerida = "Novo Contato";
+    let pipeline_coluna = "Novo Contato";
     let setor_sugerido = "";
 
-    for (const fc of functionCalls) {
-      const args = JSON.parse(fc.arguments);
-      console.log(`Agent tool called: ${fc.name}`, JSON.stringify(args).substring(0, 200));
+    const toolCalls = choice.message?.tool_calls || [];
 
-      if (fc.name === "classify_and_respond") {
+    if (toolCalls.length === 0) {
+      // Model responded with plain text (no tool call) — use it as response
+      resposta = choice.message?.content || "";
+      console.log("AI responded without tool call (plain text)");
+    }
+
+    for (const tc of toolCalls) {
+      const fn = tc.function?.name;
+      const args = JSON.parse(tc.function?.arguments || "{}");
+      console.log(`Tool: ${fn}`, JSON.stringify(args).substring(0, 200));
+
+      if (fn === "responder") {
         resposta = args.resposta;
-        intencao = args.intencao;
-        precisa_humano = args.precisa_humano;
-        ainda_precisa_humano = args.ainda_precisa_humano;
-        pipeline_coluna_sugerida = args.pipeline_coluna_sugerida;
-        setor_sugerido = args.setor_sugerido || "";
+        intencao = args.intencao || "outro";
+        pipeline_coluna = args.coluna_pipeline || "Novo Contato";
+        setor_sugerido = args.setor || "";
 
-      } else if (fc.name === "interpretar_receita") {
-        resposta = args.resposta_cliente;
-        intencao = "receita_oftalmologica";
+      } else if (fn === "escalar_consultor") {
+        resposta = args.resposta;
+        precisa_humano = true;
+        pipeline_coluna = "Atendimento Humano";
+        setor_sugerido = args.setor || "";
 
-        // Save prescription data to contato metadata
-        await supabase
-          .from("contatos")
-          .update({
-            metadata: {
-              ultima_receita: {
-                olho_direito: args.olho_direito,
-                olho_esquerdo: args.olho_esquerdo,
-                tipo_lente: args.tipo_lente_recomendado,
-                observacoes: args.observacoes,
-                data_leitura: new Date().toISOString(),
-              },
-            },
-          })
-          .eq("id", contatoIdToUpdate);
-
-        // Log CRM event for prescription
         await supabase.from("eventos_crm").insert({
-          contato_id: contatoIdToUpdate,
-          tipo: "receita_interpretada",
-          descricao: `IA interpretou receita: OD ${args.olho_direito.esferico}/${args.olho_direito.cilindrico || 'plano'} OE ${args.olho_esquerdo.esferico}/${args.olho_esquerdo.cilindrico || 'plano'} — ${args.tipo_lente_recomendado}`,
-          metadata: { olho_direito: args.olho_direito, olho_esquerdo: args.olho_esquerdo, tipo_lente: args.tipo_lente_recomendado, observacoes: args.observacoes },
+          contato_id: contatoId,
+          tipo: "escalonamento_humano",
+          descricao: `IA escalou: ${args.motivo}`,
+          metadata: { motivo: args.motivo, setor: args.setor },
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
 
-        pipeline_coluna_sugerida = inboundCount >= 3 ? "Orçamento" : "Novo Contato";
+      } else if (fn === "interpretar_receita") {
+        resposta = args.resposta;
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = inboundCount >= 3 ? "Orçamento" : "Novo Contato";
 
-      } else if (fc.name === "solicitar_humano") {
-        resposta = args.resposta_cliente;
-        precisa_humano = true;
-        pipeline_coluna_sugerida = "Atendimento Humano";
-        setor_sugerido = args.setor_sugerido || "";
+        await supabase.from("contatos").update({
+          metadata: {
+            ultima_receita: {
+              olho_direito: args.olho_direito,
+              olho_esquerdo: args.olho_esquerdo,
+              tipo_lente: args.tipo_lente,
+              observacoes: args.observacoes,
+              data_leitura: new Date().toISOString(),
+            },
+          },
+        }).eq("id", contatoId);
 
-        // Log escalation event
         await supabase.from("eventos_crm").insert({
-          contato_id: contatoIdToUpdate,
-          tipo: "escalonamento_humano",
-          descricao: `IA solicitou Consultor especializado: ${args.motivo}`,
-          metadata: { motivo: args.motivo, setor: args.setor_sugerido },
+          contato_id: contatoId,
+          tipo: "receita_interpretada",
+          descricao: `Receita: OD ${args.olho_direito.esferico} OE ${args.olho_esquerdo.esferico} — ${args.tipo_lente}`,
+          metadata: args,
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
       }
     }
 
-    console.log(`AI Agent: tools=${functionCalls.map((f: any) => f.name).join(',')}, intencao=${intencao}, precisa_humano=${precisa_humano}, coluna=${pipeline_coluna_sugerida}`);
-
-    // 11. Send response via send-whatsapp
+    // ── 8. SEND RESPONSE ──
     if (resposta) {
       const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
         method: "POST",
@@ -566,84 +497,132 @@ serve(async (req) => {
           remetente_nome: "Assistente IA",
         }),
       });
-      if (!sendRes.ok) {
-        console.error("Failed to send WhatsApp response:", await sendRes.text());
-      }
+      if (!sendRes.ok) console.error("WhatsApp send error:", await sendRes.text());
     }
 
-    // 12. Determine new modo
-    const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
+    // ── 9. UPDATE MODO + PIPELINE ──
     let newModo: string | null = null;
-
-    if (isHibrido) {
-      if (ainda_precisa_humano === false) {
-        newModo = "ia";
-        console.log("Hybrid → IA: AI resolved the pending issue");
-      }
-    } else if (precisa_humano) {
+    if (precisa_humano && !isHibrido) {
       newModo = "hibrido";
-      console.log("IA → Híbrido: escalation triggered, AI continues monitoring");
+      console.log("IA → Híbrido");
     }
 
     if (newModo) {
       await supabase.from("atendimentos").update({ modo: newModo }).eq("id", atendimento_id);
     }
 
-    // 13. Pipeline column movement
-    if (precisa_humano || (isHibrido && ainda_precisa_humano !== false)) {
-      const humanoColuna = colunas?.find((c: any) => c.nome === "Atendimento Humano");
-      if (humanoColuna) contatoUpdates.pipeline_coluna_id = humanoColuna.id;
-    } else if (isHibrido && ainda_precisa_humano === false) {
-      const targetColuna = colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
-      if (targetColuna) contatoUpdates.pipeline_coluna_id = targetColuna.id;
-    } else if (inboundCount >= 3 || pipeline_coluna_sugerida === "Novo Contato") {
-      const targetColuna = colunas?.find((c: any) => c.nome === pipeline_coluna_sugerida);
-      if (targetColuna) contatoUpdates.pipeline_coluna_id = targetColuna.id;
+    // Pipeline column
+    const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
+
+    if (precisa_humano) {
+      const col = colunas.find((c: any) => c.nome === "Atendimento Humano");
+      if (col) contatoUpdates.pipeline_coluna_id = col.id;
+    } else if (inboundCount >= 3 || pipeline_coluna === "Novo Contato") {
+      const col = colunas.find((c: any) => c.nome === pipeline_coluna);
+      if (col) contatoUpdates.pipeline_coluna_id = col.id;
     }
 
-    // 14. Route to setor if suggested
     if (setor_sugerido) {
-      const matchedSetor = setores?.find((s: any) => s.nome.toLowerCase() === setor_sugerido.toLowerCase());
-      if (matchedSetor) contatoUpdates.setor_destino = matchedSetor.id;
+      const s = setores.find((s: any) => s.nome.toLowerCase() === setor_sugerido.toLowerCase());
+      if (s) contatoUpdates.setor_destino = s.id;
     }
 
-    await supabase.from("contatos").update(contatoUpdates).eq("id", contatoIdToUpdate);
+    await supabase.from("contatos").update(contatoUpdates).eq("id", contatoId);
 
-    // 15. Log CRM event (for classify_and_respond)
-    if (intencao !== "receita_oftalmologica" && !precisa_humano) {
-      const modoDesc = newModo === "hibrido"
-        ? "Escalado para Consultor especializado (IA continua monitorando)."
-        : newModo === "ia"
-        ? "IA resolveu a pendência, Consultor especializado não é mais necessário."
-        : `Movido para "${pipeline_coluna_sugerida}".`;
-
+    // CRM event
+    if (!precisa_humano) {
       await supabase.from("eventos_crm").insert({
-        contato_id: contatoIdToUpdate,
+        contato_id: contatoId,
         tipo: "triagem_ia",
-        descricao: `IA classificou como "${intencao}". ${modoDesc}`,
-        metadata: { intencao, precisa_humano, ainda_precisa_humano, pipeline_coluna_sugerida, setor_sugerido, modo: newModo || atendimento.modo },
+        descricao: `IA: "${intencao}" → ${pipeline_coluna}`,
+        metadata: { intencao, pipeline_coluna, setor_sugerido, modo: newModo || atendimento.modo },
         referencia_tipo: "atendimento",
         referencia_id: atendimento_id,
       });
     }
 
+    console.log(`Result: tool=${toolCalls.map((t: any) => t.function?.name).join(",") || "text"} | intencao=${intencao} | humano=${precisa_humano} | coluna=${pipeline_coluna}`);
+
     return new Response(JSON.stringify({
       status: "ok",
-      tools_used: functionCalls.map((f: any) => f.name),
+      tools_used: toolCalls.map((t: any) => t.function?.name) || ["text"],
       intencao,
       precisa_humano,
-      ainda_precisa_humano,
-      pipeline_coluna_sugerida,
+      pipeline_coluna_sugerida: pipeline_coluna,
       setor_sugerido,
       modo: newModo || atendimento.modo,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (e) {
     console.error("ai-triage error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 });
+
+// ── ESCALATION HANDLER (reused by keyword bypass and tool call) ──
+async function handleEscalation(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+  contatoId: string,
+  mensagem: string,
+  colunas: any[],
+  isHibrido: boolean,
+  trigger: string
+) {
+  const resposta =
+    "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Enquanto isso, se tiver alguma dúvida rápida, estou à disposição! 😊";
+
+  // Send response
+  await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      atendimento_id: atendimentoId,
+      texto: resposta,
+      remetente_nome: "Assistente IA",
+    }),
+  });
+
+  // Update to hibrido
+  if (!isHibrido) {
+    await supabase.from("atendimentos").update({ modo: "hibrido" }).eq("id", atendimentoId);
+  }
+
+  // Move to Atendimento Humano
+  const col = colunas.find((c: any) => c.nome === "Atendimento Humano");
+  const updates: any = { ultimo_contato_at: new Date().toISOString() };
+  if (col) updates.pipeline_coluna_id = col.id;
+  await supabase.from("contatos").update(updates).eq("id", contatoId);
+
+  // Log
+  await supabase.from("eventos_crm").insert({
+    contato_id: contatoId,
+    tipo: "escalonamento_humano",
+    descricao: `Escalonamento (${trigger}): cliente pediu Consultor`,
+    metadata: { trigger, mensagem },
+    referencia_tipo: "atendimento",
+    referencia_id: atendimentoId,
+  });
+
+  return new Response(JSON.stringify({
+    status: "ok",
+    tools_used: [`escalar_consultor_${trigger}`],
+    intencao: "escalonamento",
+    precisa_humano: true,
+    pipeline_coluna_sugerida: "Atendimento Humano",
+    setor_sugerido: "",
+    modo: "hibrido",
+  }), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
