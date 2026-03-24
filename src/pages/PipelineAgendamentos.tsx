@@ -47,19 +47,23 @@ export default function PipelineAgendamentos() {
 
   return (
     <div className="flex flex-col h-full">
-      <PageHeader title="Pipeline de Agendamentos" description="Acompanhe agendamentos por status">
-        <Select value={filtroLoja} onValueChange={(v) => setFiltroLoja(v === "all" ? "" : v)}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Todas as lojas" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas as lojas</SelectItem>
-            {lojas.map((l) => (
-              <SelectItem key={l} value={l}>{l}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </PageHeader>
+      <PageHeader
+        title="Pipeline de Agendamentos"
+        description="Acompanhe agendamentos por status"
+        actions={
+          <Select value={filtroLoja} onValueChange={(v) => setFiltroLoja(v === "all" ? "" : v)}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Todas as lojas" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as lojas</SelectItem>
+              {lojas.map((l) => (
+                <SelectItem key={l} value={l}>{l}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
 
       <div className="flex-1 overflow-x-auto px-4 pb-4">
         <div className="flex gap-3 h-full min-w-max">

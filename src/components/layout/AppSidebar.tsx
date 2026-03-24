@@ -59,6 +59,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       ],
     },
   ],
+  agendamentos: [
+    {
+      label: "Agendamentos",
+      items: [
+        { title: "Pipeline Agendamentos", url: "/agendamentos", icon: CalendarDays },
+      ],
+    },
+  ],
   solicitacoes: [
     {
       label: "Solicitações",
