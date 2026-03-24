@@ -81,6 +81,23 @@ serve(async (req) => {
       });
     }
 
+    // 2.5. Check if this is a store phone
+    const cleanPhoneForLoja = phone.replace(/\D/g, "");
+    const { data: lojaMatch } = await supabase
+      .from("telefones_lojas")
+      .select("*")
+      .eq("telefone", cleanPhoneForLoja)
+      .eq("ativo", true)
+      .limit(1)
+      .single();
+
+    const isLoja = !!lojaMatch;
+
+    // Update contato tipo to "loja" if matched and not already
+    if (isLoja && contato.tipo !== "loja") {
+      await supabase.from("contatos").update({ tipo: "loja" }).eq("id", contato.id);
+    }
+
     // 3. Find open atendimento or create solicitação + atendimento
     let { data: atendimentoAberto } = await supabase
       .from("atendimentos")

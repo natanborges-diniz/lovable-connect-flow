@@ -136,6 +136,9 @@ export default function Configuracoes() {
         {/* Knowledge Base */}
         <KnowledgeBaseCard />
 
+        {/* Telefones de Lojas */}
+        <TelefonesLojasCard />
+
         {/* Modo Homologação */}
         <HomologacaoCard />
 
