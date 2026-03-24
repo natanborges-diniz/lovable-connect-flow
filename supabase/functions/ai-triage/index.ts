@@ -167,7 +167,7 @@ serve(async (req) => {
     const setoresNomes = (setores || []).map((s: any) => s.nome).join(", ");
 
     // 6. Build instructions
-    let instructions = `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}\n\nREGRA DE TERMINOLOGIA (OBRIGATÓRIA): Ao se referir a atendimento por uma pessoa real, use SEMPRE e EXCLUSIVAMENTE o termo "Consultor especializado". NUNCA use "atendente", "operador", "humano", "agente" ou qualquer sinônimo. Sempre "Consultor especializado".`;
+    let instructions = `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}\n\nREGRA ANTI-ALUCINAÇÃO (OBRIGATÓRIA):\n- NUNCA invente informações que não estejam na base de conhecimento.\n- Se não encontrar a informação na base, diga: "Não tenho essa informação disponível no momento. Vou encaminhar para um Consultor especializado."\n- NUNCA invente preços, endereços, horários ou dados de produtos.\n- Cite APENAS dados presentes na BASE DE CONHECIMENTO abaixo.\n\nREGRA DE TERMINOLOGIA (OBRIGATÓRIA): Ao se referir a atendimento por uma pessoa real, use SEMPRE e EXCLUSIVAMENTE o termo "Consultor especializado". NUNCA use "atendente", "operador", "humano", "agente" ou qualquer sinônimo. Sempre "Consultor especializado".`;
 
     instructions += `\n\nREGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita endereço, horário, telefone, ou QUALQUER informação já presente nas mensagens anteriores.\n- Releia TODO o histórico ANTES de gerar a resposta.\n- Se o cliente perguntar algo já respondido, diga "Conforme mencionei anteriormente..." de forma BREVE.\n- Respostas devem ser CURTAS e DIRETAS.\n\nINFORMAÇÕES JÁ ENVIADAS NESTA CONVERSA (NÃO REPITA NADA DISTO):\n${alreadySentSummary}`;
 
