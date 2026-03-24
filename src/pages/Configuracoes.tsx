@@ -132,6 +132,9 @@ export default function Configuracoes() {
         {/* Prompt IA */}
         <PromptIACard />
 
+        {/* Knowledge Base */}
+        <KnowledgeBaseCard />
+
         {/* Modo Homologação */}
         <HomologacaoCard />
 
