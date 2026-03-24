@@ -38,10 +38,10 @@ export function usePipelineColunas(setorId?: string | null) {
 export function useCreatePipelineColuna() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (coluna: { nome: string; cor?: string; ordem: number }) => {
+    mutationFn: async (coluna: { nome: string; cor?: string; ordem: number; setor_id?: string | null }) => {
       const { data, error } = await supabase
         .from("pipeline_colunas")
-        .insert({ nome: coluna.nome, cor: coluna.cor ?? "muted-foreground", ordem: coluna.ordem })
+        .insert({ nome: coluna.nome, cor: coluna.cor ?? "muted-foreground", ordem: coluna.ordem, ...(coluna.setor_id ? { setor_id: coluna.setor_id } : {}) } as any)
         .select()
         .single();
       if (error) throw error;
