@@ -171,8 +171,13 @@ serve(async (req) => {
       markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
     }
 
-    // 6. Trigger AI triage (fire-and-forget) if mode is 'ia'
-    if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
+    // 6. Trigger appropriate bot (fire-and-forget)
+    if (isLoja) {
+      // Route to store bot
+      triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaMatch).catch(
+        (e) => console.error("Bot lojas trigger failed:", e)
+      );
+    } else if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
       triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, supabase, atendimentoId, contato.id, phone, text).catch(
         (e) => console.error("AI triage trigger failed:", e)
       );
