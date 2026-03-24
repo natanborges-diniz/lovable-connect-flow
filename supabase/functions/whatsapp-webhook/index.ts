@@ -208,15 +208,19 @@ serve(async (req) => {
     if (shouldSkipBot) {
       console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
     } else if (isLoja) {
-      triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaMatch).catch(
-        (e) => console.error("Bot lojas trigger failed:", e)
+      runInBackground(
+        triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaMatch).catch(
+          (e) => console.error("Bot lojas trigger failed:", e)
+        )
       );
     } else if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
-      triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, {
-        tipo_conteudo: tipoConteudo,
-        media_url: storedMediaUrl,
-      }).catch(
-        (e) => console.error("AI triage trigger failed:", e)
+      runInBackground(
+        triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, {
+          tipo_conteudo: tipoConteudo,
+          media_url: storedMediaUrl,
+        }).catch(
+          (e) => console.error("AI triage trigger failed:", e)
+        )
       );
     }
 
@@ -368,6 +372,16 @@ async function triggerAiTriage(
       ...(mediaInfo && { media: mediaInfo }),
     }),
   });
+}
+
+function runInBackground(promise: Promise<unknown>) {
+  const edgeRuntime = (globalThis as any).EdgeRuntime;
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(promise);
+    return;
+  }
+
+  promise.catch((e) => console.error("Background task failed:", e));
 }
 
 // ─── Mark message as read via Meta Graph API ───
