@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2 } from "lucide-react";
 import { KnowledgeBaseCard } from "@/components/configuracoes/KnowledgeBaseCard";
+import { TelefonesLojasCard } from "@/components/configuracoes/TelefonesLojasCard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -134,6 +135,9 @@ export default function Configuracoes() {
 
         {/* Knowledge Base */}
         <KnowledgeBaseCard />
+
+        {/* Telefones de Lojas */}
+        <TelefonesLojasCard />
 
         {/* Modo Homologação */}
         <HomologacaoCard />

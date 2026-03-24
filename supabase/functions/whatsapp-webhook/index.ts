@@ -81,6 +81,23 @@ serve(async (req) => {
       });
     }
 
+    // 2.5. Check if this is a store phone
+    const cleanPhoneForLoja = phone.replace(/\D/g, "");
+    const { data: lojaMatch } = await supabase
+      .from("telefones_lojas")
+      .select("*")
+      .eq("telefone", cleanPhoneForLoja)
+      .eq("ativo", true)
+      .limit(1)
+      .single();
+
+    const isLoja = !!lojaMatch;
+
+    // Update contato tipo to "loja" if matched and not already
+    if (isLoja && contato.tipo !== "loja") {
+      await supabase.from("contatos").update({ tipo: "loja" }).eq("id", contato.id);
+    }
+
     // 3. Find open atendimento or create solicitação + atendimento
     let { data: atendimentoAberto } = await supabase
       .from("atendimentos")
@@ -154,8 +171,13 @@ serve(async (req) => {
       markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
     }
 
-    // 6. Trigger AI triage (fire-and-forget) if mode is 'ia'
-    if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
+    // 6. Trigger appropriate bot (fire-and-forget)
+    if (isLoja) {
+      // Route to store bot
+      triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaMatch).catch(
+        (e) => console.error("Bot lojas trigger failed:", e)
+      );
+    } else if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
       triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, supabase, atendimentoId, contato.id, phone, text).catch(
         (e) => console.error("AI triage trigger failed:", e)
       );
@@ -172,6 +194,31 @@ serve(async (req) => {
     });
   }
 });
+
+// ─── Trigger Bot Lojas ───
+async function triggerBotLojas(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  atendimentoId: string,
+  contatoId: string,
+  phone: string,
+  text: string,
+  lojaInfo: any
+) {
+  await fetch(`${supabaseUrl}/functions/v1/bot-lojas`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      atendimento_id: atendimentoId,
+      contato_id: contatoId,
+      mensagem_texto: text,
+      loja_info: lojaInfo,
+    }),
+  });
+}
 
 // ─── Trigger AI Triage with homologação check ───
 async function triggerAiTriage(
