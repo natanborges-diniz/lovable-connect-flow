@@ -240,7 +240,26 @@ async function createFinanceiroSolicitacao(
   payResult: Record<string, unknown>
 ) {
   try {
-    // Create solicitação
+    // Find the "Novo" column in Financeiro pipeline
+    const { data: financeiroSetor } = await supabase
+      .from("setores")
+      .select("id")
+      .eq("nome", "Financeiro")
+      .single();
+
+    let novoColId: string | null = null;
+    if (financeiroSetor) {
+      const { data: novoCol } = await supabase
+        .from("pipeline_colunas")
+        .select("id")
+        .eq("setor_id", financeiroSetor.id)
+        .eq("nome", "Novo")
+        .eq("ativo", true)
+        .single();
+      novoColId = novoCol?.id || null;
+    }
+
+    // Create solicitação with pipeline_coluna_id pointing to Financeiro "Novo"
     const { data: solicitacao } = await supabase
       .from("solicitacoes")
       .insert({
@@ -251,23 +270,10 @@ async function createFinanceiroSolicitacao(
         status: "em_atendimento",
         tipo: "link_pagamento",
         metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento },
+        ...(novoColId ? { pipeline_coluna_id: novoColId } : {}),
       })
       .select()
       .single();
-
-    // Move contact to Financeiro pipeline column
-    const { data: financeiroColuna } = await supabase
-      .from("pipeline_colunas")
-      .select("id")
-      .eq("nome", "Financeiro")
-      .single();
-
-    if (financeiroColuna && contatoId) {
-      await supabase
-        .from("contatos")
-        .update({ pipeline_coluna_id: financeiroColuna.id })
-        .eq("id", contatoId);
-    }
 
     // Log CRM event
     if (solicitacao) {

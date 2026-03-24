@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
+import PipelineFinanceiro from "./pages/PipelineFinanceiro";
 import Solicitacoes from "./pages/Solicitacoes";
 import Atendimentos from "./pages/Atendimentos";
 import Tarefas from "./pages/Tarefas";
@@ -32,6 +33,7 @@ const App = () => (
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/crm" element={<Pipeline />} />
+              <Route path="/financeiro" element={<PipelineFinanceiro />} />
               <Route path="/crm/contatos" element={<Contatos />} />
               <Route path="/solicitacoes" element={<Solicitacoes />} />
               <Route path="/atendimentos" element={<Atendimentos />} />
