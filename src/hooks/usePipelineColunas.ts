@@ -12,15 +12,23 @@ export interface PipelineColuna {
   updated_at: string;
 }
 
-export function usePipelineColunas() {
+export function usePipelineColunas(setorId?: string | null) {
   return useQuery({
-    queryKey: ["pipeline_colunas"],
+    queryKey: ["pipeline_colunas", setorId ?? "vendas"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("pipeline_colunas")
         .select("*")
         .eq("ativo", true)
         .order("ordem", { ascending: true });
+
+      if (setorId) {
+        query = query.eq("setor_id", setorId);
+      } else {
+        query = query.is("setor_id", null);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as PipelineColuna[];
     },
