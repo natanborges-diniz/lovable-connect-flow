@@ -14,6 +14,84 @@ export type Database = {
   }
   public: {
     Tables: {
+      agendamentos: {
+        Row: {
+          atendimento_id: string | null
+          cobranca_loja_enviada: boolean | null
+          confirmacao_enviada: boolean | null
+          contato_id: string
+          created_at: string | null
+          data_horario: string
+          id: string
+          lembrete_enviado: boolean | null
+          loja_confirmou_presenca: boolean | null
+          loja_nome: string
+          loja_telefone: string | null
+          metadata: Json | null
+          noshow_agendar_para: string | null
+          noshow_enviado: boolean | null
+          observacoes: string | null
+          status: string
+          tentativas_recuperacao: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          atendimento_id?: string | null
+          cobranca_loja_enviada?: boolean | null
+          confirmacao_enviada?: boolean | null
+          contato_id: string
+          created_at?: string | null
+          data_horario: string
+          id?: string
+          lembrete_enviado?: boolean | null
+          loja_confirmou_presenca?: boolean | null
+          loja_nome: string
+          loja_telefone?: string | null
+          metadata?: Json | null
+          noshow_agendar_para?: string | null
+          noshow_enviado?: boolean | null
+          observacoes?: string | null
+          status?: string
+          tentativas_recuperacao?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          atendimento_id?: string | null
+          cobranca_loja_enviada?: boolean | null
+          confirmacao_enviada?: boolean | null
+          contato_id?: string
+          created_at?: string | null
+          data_horario?: string
+          id?: string
+          lembrete_enviado?: boolean | null
+          loja_confirmou_presenca?: boolean | null
+          loja_nome?: string
+          loja_telefone?: string | null
+          metadata?: Json | null
+          noshow_agendar_para?: string | null
+          noshow_enviado?: boolean | null
+          observacoes?: string | null
+          status?: string
+          tentativas_recuperacao?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agendamentos_atendimento_id_fkey"
+            columns: ["atendimento_id"]
+            isOneToOne: false
+            referencedRelation: "atendimentos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agendamentos_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       atendimentos: {
         Row: {
           atendente_nome: string | null
@@ -782,6 +860,9 @@ export type Database = {
           cod_empresa: string | null
           created_at: string | null
           departamento: string | null
+          endereco: string | null
+          horario_abertura: string | null
+          horario_fechamento: string | null
           id: string
           nome_loja: string
           telefone: string
@@ -791,6 +872,9 @@ export type Database = {
           cod_empresa?: string | null
           created_at?: string | null
           departamento?: string | null
+          endereco?: string | null
+          horario_abertura?: string | null
+          horario_fechamento?: string | null
           id?: string
           nome_loja: string
           telefone: string
@@ -800,6 +884,9 @@ export type Database = {
           cod_empresa?: string | null
           created_at?: string | null
           departamento?: string | null
+          endereco?: string | null
+          horario_abertura?: string | null
+          horario_fechamento?: string | null
           id?: string
           nome_loja?: string
           telefone?: string
