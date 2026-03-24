@@ -462,7 +462,6 @@ serve(async (req) => {
           messages: callMessages,
           tools: TOOLS,
           tool_choice: "required",
-          temperature: 0.1,
           max_completion_tokens: 500,
         }),
       });
