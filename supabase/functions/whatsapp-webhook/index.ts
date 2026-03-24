@@ -41,8 +41,8 @@ serve(async (req) => {
       });
     }
 
-    const { phone, senderName, text, messageId, source } = message;
-    console.log(`Message received via ${source} from ${phone}: ${text.substring(0, 50)}`);
+    const { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
+    console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
     // 1. Find or create contato
     let { data: contato } = await supabase
@@ -93,7 +93,6 @@ serve(async (req) => {
 
     const isLoja = !!lojaMatch;
 
-    // Update contato tipo to "loja" if matched and not already
     if (isLoja && contato.tipo !== "loja") {
       await supabase.from("contatos").update({ tipo: "loja" }).eq("id", contato.id);
     }
@@ -156,25 +155,56 @@ serve(async (req) => {
       });
     }
 
-    // 4. Save message with provedor
+    // 4. Handle media: download and store in bucket
+    let storedMediaUrl: string | null = null;
+    let tipoConteudo = "text";
+
+    if (mediaType && mediaType !== "text") {
+      tipoConteudo = mediaType; // image, document, audio, video, sticker
+      try {
+        storedMediaUrl = await downloadAndStoreMedia(supabase, SUPABASE_URL, {
+          source,
+          mediaId,
+          mediaUrl,
+          mediaMimeType,
+          atendimentoId,
+          messageId,
+        });
+        console.log(`Media stored: ${storedMediaUrl}`);
+      } catch (e) {
+        console.error("Failed to download/store media:", e);
+      }
+    }
+
+    // 5. Save message
+    const messageContent = mediaType && mediaType !== "text"
+      ? (text || `[${mediaType}]`)
+      : text;
+
     await supabase.from("mensagens").insert({
       atendimento_id: atendimentoId,
       direcao: "inbound",
-      conteudo: text,
+      conteudo: messageContent,
       remetente_nome: senderName || contato.nome,
-      metadata: { whatsapp_message_id: messageId, source },
+      tipo_conteudo: tipoConteudo,
+      metadata: {
+        whatsapp_message_id: messageId,
+        source,
+        ...(storedMediaUrl && { media_url: storedMediaUrl }),
+        ...(mediaMimeType && { mime_type: mediaMimeType }),
+      },
       provedor: source,
     });
 
-    // 5. Mark as read (Meta official API only)
+    // 6. Mark as read (Meta official API only)
     if (source === "meta_official" && messageId) {
       markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
     }
 
-    // 6. Check homologação mode (applies to both bots)
+    // 7. Check homologação mode
     const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
 
-    // 7. Trigger appropriate bot (fire-and-forget)
+    // 8. Trigger appropriate bot (fire-and-forget)
     if (shouldSkipBot) {
       console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
     } else if (isLoja) {
@@ -182,7 +212,10 @@ serve(async (req) => {
         (e) => console.error("Bot lojas trigger failed:", e)
       );
     } else if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
-      triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, supabase, atendimentoId, contato.id, phone, text).catch(
+      triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, {
+        tipo_conteudo: tipoConteudo,
+        media_url: storedMediaUrl,
+      }).catch(
         (e) => console.error("AI triage trigger failed:", e)
       );
     }
@@ -198,6 +231,73 @@ serve(async (req) => {
     });
   }
 });
+
+// ─── Download and Store Media ───
+async function downloadAndStoreMedia(
+  supabase: any,
+  supabaseUrl: string,
+  opts: {
+    source: string;
+    mediaId?: string;
+    mediaUrl?: string;
+    mediaMimeType?: string;
+    atendimentoId: string;
+    messageId: string;
+  }
+): Promise<string | null> {
+  let mediaBytes: ArrayBuffer | null = null;
+  let mimeType = opts.mediaMimeType || "application/octet-stream";
+
+  if (opts.source === "meta_official" && opts.mediaId) {
+    // Step 1: Get media URL from Graph API
+    const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+    if (!accessToken) throw new Error("WHATSAPP_ACCESS_TOKEN not set");
+
+    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${opts.mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!metaRes.ok) throw new Error(`Meta media lookup failed: ${metaRes.status}`);
+    const metaData = await metaRes.json();
+    mimeType = metaData.mime_type || mimeType;
+
+    // Step 2: Download the actual media
+    const downloadRes = await fetch(metaData.url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!downloadRes.ok) throw new Error(`Meta media download failed: ${downloadRes.status}`);
+    mediaBytes = await downloadRes.arrayBuffer();
+
+  } else if (opts.mediaUrl) {
+    // Evolution API / Z-API: direct URL download
+    const downloadRes = await fetch(opts.mediaUrl);
+    if (!downloadRes.ok) throw new Error(`Media download failed: ${downloadRes.status}`);
+    mediaBytes = await downloadRes.arrayBuffer();
+  }
+
+  if (!mediaBytes) return null;
+
+  // Determine file extension from mime type
+  const extMap: Record<string, string> = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+    "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/opus": "opus",
+    "video/mp4": "mp4", "application/pdf": "pdf",
+    "image/gif": "gif", "audio/aac": "aac",
+  };
+  const ext = extMap[mimeType] || "bin";
+  const filePath = `${opts.atendimentoId}/${opts.messageId}.${ext}`;
+
+  const { error: uploadErr } = await supabase.storage
+    .from("whatsapp-media")
+    .upload(filePath, mediaBytes, { contentType: mimeType, upsert: true });
+
+  if (uploadErr) throw uploadErr;
+
+  const { data: publicUrl } = supabase.storage
+    .from("whatsapp-media")
+    .getPublicUrl(filePath);
+
+  return publicUrl?.publicUrl || null;
+}
 
 // ─── Trigger Bot Lojas ───
 async function triggerBotLojas(
@@ -224,7 +324,7 @@ async function triggerBotLojas(
   });
 }
 
-// ─── Check homologação mode (centralized) ───
+// ─── Check homologação mode ───
 async function isHomologacaoBlocked(supabase: any, phone: string): Promise<boolean> {
   const { data: modoConfig } = await supabase
     .from("configuracoes_ia")
@@ -249,11 +349,11 @@ async function isHomologacaoBlocked(supabase: any, phone: string): Promise<boole
 async function triggerAiTriage(
   supabaseUrl: string,
   serviceRoleKey: string,
-  supabase: any,
   atendimentoId: string,
   contatoId: string,
   phone: string,
-  text: string
+  text: string,
+  mediaInfo?: { tipo_conteudo: string; media_url: string | null }
 ) {
   await fetch(`${supabaseUrl}/functions/v1/ai-triage`, {
     method: "POST",
@@ -265,6 +365,7 @@ async function triggerAiTriage(
       atendimento_id: atendimentoId,
       contato_id: contatoId,
       mensagem_texto: text,
+      ...(mediaInfo && { media: mediaInfo }),
     }),
   });
 }
@@ -289,6 +390,10 @@ interface NormalizedMessage {
   text: string;
   messageId: string;
   source: "meta_official" | "evolution_api" | "z_api" | "generic";
+  mediaType?: string;    // image, audio, video, document, sticker
+  mediaId?: string;      // Meta media ID
+  mediaUrl?: string;     // Direct URL (Evolution/Z-API)
+  mediaMimeType?: string;
 }
 
 function normalizeWebhookPayload(body: any): NormalizedMessage | null {
@@ -301,15 +406,63 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         const value = change.value;
         if (!value?.messages?.length) continue;
         const msg = value.messages[0];
-        if (msg.type !== "text") continue;
         const contactInfo = value.contacts?.[0];
-        return {
+
+        const base = {
           phone: msg.from,
           senderName: contactInfo?.profile?.name || msg.from,
-          text: msg.text?.body || "",
           messageId: msg.id || "",
-          source: "meta_official",
+          source: "meta_official" as const,
         };
+
+        if (msg.type === "text") {
+          return { ...base, text: msg.text?.body || "" };
+        }
+        if (msg.type === "image") {
+          return {
+            ...base,
+            text: msg.image?.caption || "",
+            mediaType: "image",
+            mediaId: msg.image?.id,
+            mediaMimeType: msg.image?.mime_type,
+          };
+        }
+        if (msg.type === "document") {
+          return {
+            ...base,
+            text: msg.document?.caption || msg.document?.filename || "",
+            mediaType: "document",
+            mediaId: msg.document?.id,
+            mediaMimeType: msg.document?.mime_type,
+          };
+        }
+        if (msg.type === "audio") {
+          return {
+            ...base,
+            text: "",
+            mediaType: "audio",
+            mediaId: msg.audio?.id,
+            mediaMimeType: msg.audio?.mime_type,
+          };
+        }
+        if (msg.type === "video") {
+          return {
+            ...base,
+            text: msg.video?.caption || "",
+            mediaType: "video",
+            mediaId: msg.video?.id,
+            mediaMimeType: msg.video?.mime_type,
+          };
+        }
+        if (msg.type === "sticker") {
+          return {
+            ...base,
+            text: "",
+            mediaType: "sticker",
+            mediaId: msg.sticker?.id,
+            mediaMimeType: msg.sticker?.mime_type,
+          };
+        }
       }
     }
     return null;
@@ -318,10 +471,65 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
   // ── Evolution API ──
   if (body.data?.key?.remoteJid) {
     const phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
+    const msgData = body.data.message;
+
+    // Image message
+    if (msgData?.imageMessage) {
+      return {
+        phone,
+        senderName: body.data.pushName || phone,
+        text: msgData.imageMessage.caption || "",
+        messageId: body.data.key.id || "",
+        source: "evolution_api",
+        mediaType: "image",
+        mediaUrl: msgData.imageMessage.url || body.data.mediaUrl,
+        mediaMimeType: msgData.imageMessage.mimetype,
+      };
+    }
+    // Document message
+    if (msgData?.documentMessage) {
+      return {
+        phone,
+        senderName: body.data.pushName || phone,
+        text: msgData.documentMessage.caption || msgData.documentMessage.fileName || "",
+        messageId: body.data.key.id || "",
+        source: "evolution_api",
+        mediaType: "document",
+        mediaUrl: msgData.documentMessage.url || body.data.mediaUrl,
+        mediaMimeType: msgData.documentMessage.mimetype,
+      };
+    }
+    // Audio message
+    if (msgData?.audioMessage) {
+      return {
+        phone,
+        senderName: body.data.pushName || phone,
+        text: "",
+        messageId: body.data.key.id || "",
+        source: "evolution_api",
+        mediaType: "audio",
+        mediaUrl: msgData.audioMessage.url || body.data.mediaUrl,
+        mediaMimeType: msgData.audioMessage.mimetype,
+      };
+    }
+    // Video message
+    if (msgData?.videoMessage) {
+      return {
+        phone,
+        senderName: body.data.pushName || phone,
+        text: msgData.videoMessage.caption || "",
+        messageId: body.data.key.id || "",
+        source: "evolution_api",
+        mediaType: "video",
+        mediaUrl: msgData.videoMessage.url || body.data.mediaUrl,
+        mediaMimeType: msgData.videoMessage.mimetype,
+      };
+    }
+    // Text message (fallback)
     return {
       phone,
       senderName: body.data.pushName || phone,
-      text: body.data.message?.conversation || body.data.message?.extendedTextMessage?.text || "",
+      text: msgData?.conversation || msgData?.extendedTextMessage?.text || "",
       messageId: body.data.key.id || "",
       source: "evolution_api",
     };
@@ -329,13 +537,16 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
 
   // ── Z-API ──
   if (body.phone) {
-    return {
+    const base = {
       phone: body.phone.replace(/\D/g, ""),
       senderName: body.senderName || body.phone,
-      text: body.text?.message || body.message || "",
       messageId: body.messageId || body.zapiMessageId || "",
-      source: "z_api",
+      source: "z_api" as const,
     };
+    if (body.image) {
+      return { ...base, text: body.image.caption || "", mediaType: "image", mediaUrl: body.image.imageUrl };
+    }
+    return { ...base, text: body.text?.message || body.message || "" };
   }
 
   // ── Generic ──
