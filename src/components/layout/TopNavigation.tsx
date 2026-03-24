@@ -12,6 +12,7 @@ interface TopNavigationProps {
 const modules: { key: ModuleKey; label: string; icon: React.ElementType; defaultPath: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, defaultPath: "/" },
   { key: "crm", label: "CRM", icon: Users, defaultPath: "/crm" },
+  { key: "financeiro", label: "Financeiro", icon: DollarSign, defaultPath: "/financeiro" },
   { key: "solicitacoes", label: "Solicitações", icon: FileText, defaultPath: "/solicitacoes" },
   { key: "atendimentos", label: "Atendimentos", icon: MessageSquare, defaultPath: "/atendimentos" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
