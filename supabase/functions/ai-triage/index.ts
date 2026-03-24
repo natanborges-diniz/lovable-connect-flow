@@ -451,18 +451,19 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, kbRes, exRes, antiRes, msgsRes, colRes, setRes] = await Promise.all([
+    const [promptRes, kbRes, exRes, antiRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
       supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(10),
       supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(3),
-      // PHASE 1 FIX: fetch LAST 60 messages (desc), then reverse
       supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
         .limit(60),
       supabase.from("pipeline_colunas").select("id, nome").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
+      supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento").eq("ativo", true),
+      supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
