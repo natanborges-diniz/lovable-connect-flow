@@ -146,10 +146,105 @@ serve(async (req) => {
 
     const inboundCount = (msgs || []).filter((m: any) => m.direcao === "inbound").length;
 
+    // ── KEYWORD ESCALATION PRE-CHECK ──
+    const lastInboundMsg = mensagem_texto || "";
+    const escalationKeywords = [
+      "falar com consultor", "falar com atendente", "falar com humano", "falar com pessoa",
+      "atendente humano", "consultor especializado", "quero um consultor", "quero falar com alguem",
+      "quero falar com alguém", "pessoa real", "atendimento humano", "falar com gente",
+      "preciso de ajuda humana", "nao quero robo", "não quero robô", "me transfira",
+      "transferir para atendente", "quero atendente"
+    ];
+    const msgLower = lastInboundMsg.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const forceEscalation = escalationKeywords.some(kw => {
+      const kwNorm = kw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return msgLower.includes(kwNorm);
+    });
+
+    if (forceEscalation) {
+      console.log("KEYWORD ESCALATION: forcing solicitar_humano bypass");
+
+      const respostaEscalacao = "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Enquanto isso, se tiver alguma dúvida rápida, estou à disposição! 😊";
+
+      // Send response
+      await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          atendimento_id,
+          texto: respostaEscalacao,
+          remetente_nome: "Assistente IA",
+        }),
+      });
+
+      // Update modo to hibrido
+      if (!isHibrido) {
+        await supabase.from("atendimentos").update({ modo: "hibrido" }).eq("id", atendimento_id);
+      }
+
+      // Move to Atendimento Humano column
+      const { data: colunasEsc } = await supabase
+        .from("pipeline_colunas")
+        .select("id, nome")
+        .eq("nome", "Atendimento Humano")
+        .eq("ativo", true)
+        .single();
+
+      const contatoEscUpdates: any = { ultimo_contato_at: new Date().toISOString() };
+      if (colunasEsc) contatoEscUpdates.pipeline_coluna_id = colunasEsc.id;
+      await supabase.from("contatos").update(contatoEscUpdates).eq("id", contatoIdToUpdate);
+
+      // Log CRM event
+      await supabase.from("eventos_crm").insert({
+        contato_id: contatoIdToUpdate,
+        tipo: "escalonamento_humano",
+        descricao: "Cliente solicitou explicitamente falar com Consultor especializado (keyword detection)",
+        metadata: { trigger: "keyword", mensagem: lastInboundMsg },
+        referencia_tipo: "atendimento",
+        referencia_id: atendimento_id,
+      });
+
+      return new Response(JSON.stringify({
+        status: "ok",
+        tools_used: ["solicitar_humano_keyword"],
+        intencao: "escalonamento",
+        precisa_humano: true,
+        ainda_precisa_humano: true,
+        pipeline_coluna_sugerida: "Atendimento Humano",
+        setor_sugerido: "",
+        modo: "hibrido",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ── STRUCTURED ANTI-REPETITION ──
     const outboundMessages = (msgs || []).filter((m: any) => m.direcao === "outbound").map((m: any) => m.conteudo);
-    const alreadySentSummary = outboundMessages.length > 0
-      ? outboundMessages.join("\n---\n")
-      : "Nenhuma mensagem enviada ainda.";
+    const extractTopics = (texts: string[]): string[] => {
+      const topics: string[] = [];
+      const allText = texts.join(" ").toLowerCase();
+      const patterns: [RegExp, string][] = [
+        [/endere[çc]o|rua |av\.|avenida |n[úu]mero/i, "Endereço de loja"],
+        [/hor[áa]rio|funciona|abre|fecha|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo/i, "Horário de funcionamento"],
+        [/telefone|\(\d{2}\)|\d{4,5}-\d{4}/i, "Telefone de contato"],
+        [/whatsapp/i, "WhatsApp"],
+        [/agend|visita|marcar/i, "Sugestão de agendamento/visita"],
+        [/pre[çc]o|valor|r\$|reais|custo|or[çc]amento/i, "Informação de preço/orçamento"],
+        [/lente|[óo]culos|arma[çc][ãa]o|receita/i, "Informação sobre produtos ópticos"],
+        [/consultor|especializado|humano|atendente/i, "Menção a Consultor especializado"],
+      ];
+      for (const [regex, label] of patterns) {
+        if (regex.test(allText)) topics.push(label);
+      }
+      return topics;
+    };
+    const topicsAlreadySent = extractTopics(outboundMessages);
+    const alreadySentSummary = topicsAlreadySent.length > 0
+      ? topicsAlreadySent.map(t => `- ✅ ${t}: já informado`).join("\n")
+      : "Nenhuma informação enviada ainda.";
 
     // 5. Load pipeline columns and setores
     const { data: colunas } = await supabase
@@ -169,7 +264,9 @@ serve(async (req) => {
     // 6. Build instructions
     let instructions = `REGRAS DE ATENDIMENTO (PRIORIDADE MÁXIMA — SIGA RIGOROSAMENTE):\n\n${systemPrompt}\n\nREGRA ANTI-ALUCINAÇÃO (OBRIGATÓRIA):\n- NUNCA invente informações que não estejam na base de conhecimento.\n- Se não encontrar a informação na base, diga: "Não tenho essa informação disponível no momento. Vou encaminhar para um Consultor especializado."\n- NUNCA invente preços, endereços, horários ou dados de produtos.\n- Cite APENAS dados presentes na BASE DE CONHECIMENTO abaixo.\n\nREGRA DE TERMINOLOGIA (OBRIGATÓRIA): Ao se referir a atendimento por uma pessoa real, use SEMPRE e EXCLUSIVAMENTE o termo "Consultor especializado". NUNCA use "atendente", "operador", "humano", "agente" ou qualquer sinônimo. Sempre "Consultor especializado".`;
 
-    instructions += `\n\nREGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita endereço, horário, telefone, ou QUALQUER informação já presente nas mensagens anteriores.\n- Releia TODO o histórico ANTES de gerar a resposta.\n- Se o cliente perguntar algo já respondido, diga "Conforme mencionei anteriormente..." de forma BREVE.\n- Respostas devem ser CURTAS e DIRETAS.\n\nINFORMAÇÕES JÁ ENVIADAS NESTA CONVERSA (NÃO REPITA NADA DISTO):\n${alreadySentSummary}`;
+    instructions += `\n\nREGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):\n- NUNCA repita endereço, horário, telefone, ou QUALQUER informação já presente nas mensagens anteriores.\n- Releia TODO o histórico ANTES de gerar a resposta.\n- Se o cliente perguntar algo já respondido, diga "Conforme mencionei anteriormente..." de forma BREVE.\n- Respostas devem ser CURTAS e DIRETAS.\n\nINFORMAÇÕES JÁ COMPARTILHADAS NESTA CONVERSA (PROIBIDO REPETIR):\n${alreadySentSummary}\n\nSe o cliente perguntar sobre um tema já coberto acima, NÃO repita os dados. Apenas referencie brevemente.`;
+
+    instructions += `\n\nREGRA DE FALLBACK PARA PRODUTOS:\n- Se o cliente perguntar sobre produtos (lentes, óculos, armações) e NÃO houver detalhes na BASE DE CONHECIMENTO, use os valores base das REGRAS DE ATENDIMENTO.\n- NUNCA responda com endereço de loja quando o cliente pergunta sobre PRODUTOS ou PREÇOS.\n- Se não souber o preço específico, sugira enviar foto da receita para orçamento personalizado.\n- Endereços de loja só devem ser informados quando o cliente EXPLICITAMENTE perguntar sobre localização, endereço ou como chegar.`;
 
     instructions += `\n\nCAPACIDADES DE VISÃO (IMAGENS):\n- Você pode receber e interpretar imagens enviadas pelo cliente.\n- Se o cliente enviar uma foto de receita oftalmológica, use a tool 'interpretar_receita' para extrair os dados.\n- Se o cliente enviar uma foto de produto, documento ou qualquer outra imagem, descreva o que vê e responda no contexto da conversa.\n- SEMPRE reconheça que recebeu a imagem e descreva brevemente o que vê antes de prosseguir.`;
 
@@ -230,7 +327,7 @@ serve(async (req) => {
       {
         type: "function",
         name: "classify_and_respond",
-        description: "Classifica a intenção do cliente e gera a resposta. Use como ferramenta padrão para responder mensagens de texto.",
+        description: "Classifica a intenção do cliente e gera a resposta. Use como ferramenta padrão para responder mensagens de texto. PROIBIÇÕES: 1) NÃO use esta tool se o cliente pedir para falar com consultor, atendente ou pessoa real — use solicitar_humano. 2) NUNCA responda com endereço de loja quando o cliente pergunta sobre produtos/preços. 3) NUNCA repita informações já compartilhadas na conversa.",
         parameters: {
           type: "object",
           properties: {
@@ -316,7 +413,7 @@ serve(async (req) => {
       {
         type: "function",
         name: "solicitar_humano",
-        description: "Escalona o atendimento para um Consultor especializado quando a IA detecta que não pode resolver. Forneça contexto completo.",
+        description: "Use OBRIGATORIAMENTE quando o cliente pedir para falar com pessoa real, consultor, atendente, ou qualquer sinônimo. Também use quando a IA não consegue resolver a demanda ou o cliente demonstra frustração/insatisfação com as respostas automáticas. PRIORIDADE MÁXIMA sobre classify_and_respond quando há pedido explícito de atendimento humano.",
         parameters: {
           type: "object",
           properties: {
