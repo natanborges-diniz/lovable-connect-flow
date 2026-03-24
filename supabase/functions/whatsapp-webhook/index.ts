@@ -171,9 +171,13 @@ serve(async (req) => {
       markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
     }
 
-    // 6. Trigger appropriate bot (fire-and-forget)
-    if (isLoja) {
-      // Route to store bot
+    // 6. Check homologação mode (applies to both bots)
+    const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
+
+    // 7. Trigger appropriate bot (fire-and-forget)
+    if (shouldSkipBot) {
+      console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
+    } else if (isLoja) {
       triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaMatch).catch(
         (e) => console.error("Bot lojas trigger failed:", e)
       );
