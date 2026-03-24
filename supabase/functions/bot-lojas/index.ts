@@ -297,7 +297,7 @@ serve(async (req) => {
 // ─── Menu ───
 
 function buildMenu(nomeLoja: string): string {
-  return `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n1️⃣ Gerar Link de Pagamento\n2️⃣ Gerar Boleto\n3️⃣ Consultar CPF\n\n_Digite o número da opção desejada._`;
+  return `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n1️⃣ Gerar Link de Pagamento\n2️⃣ Gerar Boleto\n3️⃣ Consultar CPF\n4️⃣ Confirmar Comparecimento de Cliente\n\n_Digite o número da opção desejada._`;
 }
 
 // ─── Link de Pagamento Flow ───
