@@ -5,34 +5,45 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Store, Trash2 } from "lucide-react";
+import { Plus, Store, Trash2, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+interface LojaFormData {
+  telefone: string;
+  nome_loja: string;
+  cod_empresa?: string;
+  departamento?: string;
+  endereco?: string;
+  horario_abertura?: string;
+  horario_fechamento?: string;
+}
+
 export function TelefonesLojasCard() {
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingLoja, setEditingLoja] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const { data: telefones, isLoading } = useQuery({
     queryKey: ["telefones_lojas"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("telefones_lojas" as any)
+        .from("telefones_lojas")
         .select("*")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data as any[];
+      return data;
     },
   });
 
   const toggleAtivo = useMutation({
     mutationFn: async ({ id, ativo }: { id: string; ativo: boolean }) => {
       const { error } = await supabase
-        .from("telefones_lojas" as any)
-        .update({ ativo } as any)
+        .from("telefones_lojas")
+        .update({ ativo })
         .eq("id", id);
       if (error) throw error;
     },
@@ -42,7 +53,7 @@ export function TelefonesLojasCard() {
   const deleteTelefone = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
-        .from("telefones_lojas" as any)
+        .from("telefones_lojas")
         .delete()
         .eq("id", id);
       if (error) throw error;
@@ -55,19 +66,57 @@ export function TelefonesLojasCard() {
   });
 
   const createTelefone = useMutation({
-    mutationFn: async (data: { telefone: string; nome_loja: string; cod_empresa?: string; departamento?: string }) => {
+    mutationFn: async (data: LojaFormData) => {
       const { error } = await supabase
-        .from("telefones_lojas" as any)
-        .insert(data as any);
+        .from("telefones_lojas")
+        .insert({
+          telefone: data.telefone,
+          nome_loja: data.nome_loja,
+          cod_empresa: data.cod_empresa,
+          departamento: data.departamento,
+          endereco: data.endereco,
+          horario_abertura: data.horario_abertura,
+          horario_fechamento: data.horario_fechamento,
+        });
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["telefones_lojas"] });
       toast.success("Telefone de loja cadastrado");
-      setDialogOpen(false);
+      setCreateDialogOpen(false);
     },
     onError: (e: any) => toast.error(e.message),
   });
+
+  const updateTelefone = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: LojaFormData }) => {
+      const { error } = await supabase
+        .from("telefones_lojas")
+        .update({
+          telefone: data.telefone,
+          nome_loja: data.nome_loja,
+          cod_empresa: data.cod_empresa,
+          departamento: data.departamento,
+          endereco: data.endereco,
+          horario_abertura: data.horario_abertura,
+          horario_fechamento: data.horario_fechamento,
+        })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["telefones_lojas"] });
+      toast.success("Loja atualizada");
+      setEditDialogOpen(false);
+      setEditingLoja(null);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const handleEdit = (loja: any) => {
+    setEditingLoja(loja);
+    setEditDialogOpen(true);
+  };
 
   return (
     <Card className="shadow-card">
@@ -75,13 +124,13 @@ export function TelefonesLojasCard() {
         <CardTitle className="text-lg flex items-center gap-2">
           <Store className="h-5 w-5" /> Telefones de Lojas
         </CardTitle>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Nova Loja</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Cadastrar Telefone de Loja</DialogTitle></DialogHeader>
-            <CreateLojaForm onSubmit={(data) => createTelefone.mutate(data)} loading={createTelefone.isPending} />
+            <LojaForm onSubmit={(data) => createTelefone.mutate(data)} loading={createTelefone.isPending} submitLabel="Cadastrar Loja" />
           </DialogContent>
         </Dialog>
       </CardHeader>
@@ -102,11 +151,11 @@ export function TelefonesLojasCard() {
                 <TableHead>Endereço</TableHead>
                 <TableHead>Horário</TableHead>
                 <TableHead>Ativo</TableHead>
-                <TableHead className="w-10"></TableHead>
+                <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {telefones.map((t: any) => (
+              {telefones.map((t) => (
                 <TableRow key={t.id}>
                   <TableCell className="font-mono text-sm">{t.telefone}</TableCell>
                   <TableCell className="font-medium">{t.nome_loja}</TableCell>
@@ -114,19 +163,29 @@ export function TelefonesLojasCard() {
                   <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{t.horario_abertura || "—"} – {t.horario_fechamento || "—"}</TableCell>
                   <TableCell>
                     <Switch
-                      checked={t.ativo}
+                      checked={t.ativo ?? true}
                       onCheckedChange={(v) => toggleAtivo.mutate({ id: t.id, ativo: v })}
                     />
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-destructive"
-                      onClick={() => deleteTelefone.mutate(t.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleEdit(t)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => deleteTelefone.mutate(t.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -134,12 +193,63 @@ export function TelefonesLojasCard() {
           </Table>
         )}
       </CardContent>
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={(open) => { setEditDialogOpen(open); if (!open) setEditingLoja(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Editar Loja</DialogTitle></DialogHeader>
+          {editingLoja && (
+            <LojaForm
+              initialData={{
+                telefone: editingLoja.telefone,
+                nome_loja: editingLoja.nome_loja,
+                cod_empresa: editingLoja.cod_empresa || "",
+                departamento: editingLoja.departamento || "geral",
+                endereco: editingLoja.endereco || "",
+                horario_abertura: editingLoja.horario_abertura || "09:00",
+                horario_fechamento: editingLoja.horario_fechamento || "18:00",
+              }}
+              onSubmit={(data) => updateTelefone.mutate({ id: editingLoja.id, data })}
+              loading={updateTelefone.isPending}
+              submitLabel="Salvar Alterações"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
 
-function CreateLojaForm({ onSubmit, loading }: { onSubmit: (data: any) => void; loading: boolean }) {
-  const [form, setForm] = useState({ telefone: "", nome_loja: "", cod_empresa: "", departamento: "geral", endereco: "", horario_abertura: "09:00", horario_fechamento: "18:00" });
+function LojaForm({
+  onSubmit,
+  loading,
+  submitLabel,
+  initialData,
+}: {
+  onSubmit: (data: LojaFormData) => void;
+  loading: boolean;
+  submitLabel: string;
+  initialData?: {
+    telefone: string;
+    nome_loja: string;
+    cod_empresa: string;
+    departamento: string;
+    endereco: string;
+    horario_abertura: string;
+    horario_fechamento: string;
+  };
+}) {
+  const [form, setForm] = useState(
+    initialData || {
+      telefone: "",
+      nome_loja: "",
+      cod_empresa: "",
+      departamento: "geral",
+      endereco: "",
+      horario_abertura: "09:00",
+      horario_fechamento: "18:00",
+    }
+  );
 
   return (
     <form
@@ -221,7 +331,7 @@ function CreateLojaForm({ onSubmit, loading }: { onSubmit: (data: any) => void; 
         </div>
       </div>
       <Button type="submit" className="w-full" disabled={loading || !form.telefone || !form.nome_loja}>
-        {loading ? "Cadastrando..." : "Cadastrar Loja"}
+        {loading ? "Salvando..." : submitLabel}
       </Button>
     </form>
   );
