@@ -4,7 +4,7 @@ import { useAgendamentos } from "@/hooks/useAgendamentos";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarDays, MapPin, User, Clock, Phone } from "lucide-react";
+import { CalendarDays, MapPin, User, Clock, Phone, DollarSign, FileText, ShoppingCart } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,6 +13,8 @@ const STATUS_COLUMNS = [
   { key: "agendado", label: "Agendado", color: "bg-blue-500" },
   { key: "confirmado", label: "Confirmado", color: "bg-cyan-500" },
   { key: "atendido", label: "Atendido", color: "bg-green-500" },
+  { key: "orcamento", label: "Orçamento", color: "bg-indigo-500" },
+  { key: "venda_fechada", label: "Venda Fechada", color: "bg-emerald-600" },
   { key: "no_show", label: "No-Show", color: "bg-red-500" },
   { key: "recuperacao", label: "Recuperação", color: "bg-amber-500" },
   { key: "reagendado", label: "Reagendado", color: "bg-purple-500" },
@@ -108,6 +110,31 @@ export default function PipelineAgendamentos() {
                             <div className="flex items-center gap-1">
                               <span className={`text-[10px] ${ag.loja_confirmou_presenca ? "text-green-600" : "text-red-600"}`}>
                                 Loja: {ag.loja_confirmou_presenca ? "✅ Confirmou" : "❌ Não compareceu"}
+                              </span>
+                            </div>
+                          )}
+                          {ag.valor_orcamento != null && (
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                              <span className="text-xs font-medium">
+                                Orçamento: R$ {ag.valor_orcamento.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          )}
+                          {ag.numero_venda && (
+                            <div className="flex items-center gap-2">
+                              <ShoppingCart className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                              <span className="text-xs font-medium">
+                                Venda #{ag.numero_venda}
+                                {ag.valor_venda != null && ` — R$ ${ag.valor_venda.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
+                              </span>
+                            </div>
+                          )}
+                          {ag.numeros_os && ag.numeros_os.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-xs text-muted-foreground">
+                                OS: {ag.numeros_os.join(", ")}
                               </span>
                             </div>
                           )}

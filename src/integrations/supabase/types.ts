@@ -30,10 +30,14 @@ export type Database = {
           metadata: Json | null
           noshow_agendar_para: string | null
           noshow_enviado: boolean | null
+          numero_venda: string | null
+          numeros_os: string[] | null
           observacoes: string | null
           status: string
           tentativas_recuperacao: number | null
           updated_at: string | null
+          valor_orcamento: number | null
+          valor_venda: number | null
         }
         Insert: {
           atendimento_id?: string | null
@@ -50,10 +54,14 @@ export type Database = {
           metadata?: Json | null
           noshow_agendar_para?: string | null
           noshow_enviado?: boolean | null
+          numero_venda?: string | null
+          numeros_os?: string[] | null
           observacoes?: string | null
           status?: string
           tentativas_recuperacao?: number | null
           updated_at?: string | null
+          valor_orcamento?: number | null
+          valor_venda?: number | null
         }
         Update: {
           atendimento_id?: string | null
@@ -70,10 +78,14 @@ export type Database = {
           metadata?: Json | null
           noshow_agendar_para?: string | null
           noshow_enviado?: boolean | null
+          numero_venda?: string | null
+          numeros_os?: string[] | null
           observacoes?: string | null
           status?: string
           tentativas_recuperacao?: number | null
           updated_at?: string | null
+          valor_orcamento?: number | null
+          valor_venda?: number | null
         }
         Relationships: [
           {
