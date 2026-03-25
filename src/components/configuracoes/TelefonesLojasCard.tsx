@@ -99,8 +99,8 @@ export function TelefonesLojasCard() {
               <TableRow>
                 <TableHead>Telefone</TableHead>
                 <TableHead>Loja</TableHead>
-                <TableHead>Cód. Empresa</TableHead>
-                <TableHead>Departamento</TableHead>
+                <TableHead>Endereço</TableHead>
+                <TableHead>Horário</TableHead>
                 <TableHead>Ativo</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
@@ -110,10 +110,8 @@ export function TelefonesLojasCard() {
                 <TableRow key={t.id}>
                   <TableCell className="font-mono text-sm">{t.telefone}</TableCell>
                   <TableCell className="font-medium">{t.nome_loja}</TableCell>
-                  <TableCell className="text-muted-foreground">{t.cod_empresa || "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{t.departamento || "geral"}</Badge>
-                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">{t.endereco || "—"}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{t.horario_abertura || "—"} – {t.horario_fechamento || "—"}</TableCell>
                   <TableCell>
                     <Switch
                       checked={t.ativo}
@@ -141,7 +139,7 @@ export function TelefonesLojasCard() {
 }
 
 function CreateLojaForm({ onSubmit, loading }: { onSubmit: (data: any) => void; loading: boolean }) {
-  const [form, setForm] = useState({ telefone: "", nome_loja: "", cod_empresa: "", departamento: "geral" });
+  const [form, setForm] = useState({ telefone: "", nome_loja: "", cod_empresa: "", departamento: "geral", endereco: "", horario_abertura: "09:00", horario_fechamento: "18:00" });
 
   return (
     <form
@@ -152,6 +150,9 @@ function CreateLojaForm({ onSubmit, loading }: { onSubmit: (data: any) => void; 
           nome_loja: form.nome_loja,
           cod_empresa: form.cod_empresa || undefined,
           departamento: form.departamento || "geral",
+          endereco: form.endereco || undefined,
+          horario_abertura: form.horario_abertura || "09:00",
+          horario_fechamento: form.horario_fechamento || "18:00",
         });
       }}
       className="space-y-4"
@@ -174,6 +175,32 @@ function CreateLojaForm({ onSubmit, loading }: { onSubmit: (data: any) => void; 
           placeholder="Ex: Ótica Centro"
           required
         />
+      </div>
+      <div className="space-y-2">
+        <Label>Endereço</Label>
+        <Input
+          value={form.endereco}
+          onChange={(e) => setForm({ ...form, endereco: e.target.value })}
+          placeholder="Ex: Av. Autonomistas, 1768, Loja E19, Osasco"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label>Horário Abertura</Label>
+          <Input
+            type="time"
+            value={form.horario_abertura}
+            onChange={(e) => setForm({ ...form, horario_abertura: e.target.value })}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Horário Fechamento</Label>
+          <Input
+            type="time"
+            value={form.horario_fechamento}
+            onChange={(e) => setForm({ ...form, horario_fechamento: e.target.value })}
+          />
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
