@@ -133,9 +133,10 @@ function validateResponse(resposta: string, recentOutbound: string[]): { valid: 
   }
 
   // Must contain a question OR a concrete action (not just a statement)
+  // But only reject very short responses — longer ones likely have context
   const hasQuestion = resposta.includes("?");
-  const hasAction = /envie|enviar|agende|agendar|acesse|clique|ligue|visite|orçamento|receita|foto/i.test(resposta);
-  if (!hasQuestion && !hasAction && resposta.length < 100) {
+  const hasAction = /envie|enviar|agende|agendar|acesse|clique|ligue|visite|orçamento|receita|foto|confirmo|agendado|reserv|marc/i.test(resposta);
+  if (!hasQuestion && !hasAction && resposta.length < 80) {
     return { valid: false, reason: "no question or action — stalls conversation" };
   }
 
@@ -569,7 +570,7 @@ serve(async (req) => {
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
       supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(30),
-      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(10),
+      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").in("avaliacao", ["negativo", "corrigido"]).order("created_at", { ascending: false }).limit(10),
       supabase.from("ia_regras_proibidas").select("regra, categoria").eq("ativo", true),
       supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
         .eq("atendimento_id", atendimento_id)
@@ -868,61 +869,75 @@ serve(async (req) => {
     if (resposta && !precisa_humano) {
       const validation = validateResponse(resposta, recentOutbound);
 
-      if (!validation.valid) {
+    if (!validation.valid) {
         console.log(`[VALIDATOR] REJECTED: ${validation.reason} — attempting retry`);
         validatorFlags.push(`rejected:${validation.reason}`);
 
-        // One retry with explicit correction
-        const retryResult = await callAI(
-          `CORREÇÃO: Sua resposta anterior foi rejeitada porque: ${validation.reason}. Gere uma resposta COMPLETAMENTE DIFERENTE que avance a conversa com uma PERGUNTA OBJETIVA. NÃO use frases genéricas.`
-        );
+        // If the rejection is only "no question" but the response has real content (>40 chars),
+        // append a question instead of discarding the entire contextual response
+        if (validation.reason.includes("no question or action") && resposta.length > 40) {
+          resposta = resposta.trimEnd().replace(/[.!]$/, "") + ". Como posso te ajudar com isso?";
+          validatorFlags.push("appended_question");
+          console.log("[VALIDATOR] Appended question to contextual response");
+        } else {
+          // One retry with explicit correction
+          const retryResult = await callAI(
+            `CORREÇÃO: Sua resposta anterior foi rejeitada porque: ${validation.reason}. Gere uma resposta COMPLETAMENTE DIFERENTE que avance a conversa com uma PERGUNTA OBJETIVA. Considere o CONTEXTO COMPLETO da conversa — o cliente pode estar no meio de um fluxo (agendamento, orçamento, etc). NÃO use frases genéricas como "me conta mais".`
+          );
 
-        if (!retryResult.error && retryResult.data?.choices?.[0]) {
-          const retryChoice = retryResult.data.choices[0];
-          const retryToolCalls = retryChoice.message?.tool_calls || [];
-          let retryResposta = "";
+          if (!retryResult.error && retryResult.data?.choices?.[0]) {
+            const retryChoice = retryResult.data.choices[0];
+            const retryToolCalls = retryChoice.message?.tool_calls || [];
+            let retryResposta = "";
 
-          for (const tc of retryToolCalls) {
-            if (tc.function?.name === "responder") {
-              const retryArgs = JSON.parse(tc.function?.arguments || "{}");
-              retryResposta = retryArgs.resposta || "";
-              if (retryArgs.proximo_passo && !retryResposta.includes(retryArgs.proximo_passo)) {
-                retryResposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". " + retryArgs.proximo_passo;
+            for (const tc of retryToolCalls) {
+              if (tc.function?.name === "responder") {
+                const retryArgs = JSON.parse(tc.function?.arguments || "{}");
+                retryResposta = retryArgs.resposta || "";
+                if (retryArgs.proximo_passo && !retryResposta.includes(retryArgs.proximo_passo)) {
+                  retryResposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". " + retryArgs.proximo_passo;
+                }
+                intencao = retryArgs.intencao || intencao;
+                pipeline_coluna = retryArgs.coluna_pipeline || pipeline_coluna;
               }
-              intencao = retryArgs.intencao || intencao;
-              pipeline_coluna = retryArgs.coluna_pipeline || pipeline_coluna;
             }
-          }
 
-          const retryValidation = validateResponse(retryResposta || "", recentOutbound);
-          if (retryValidation.valid && retryResposta) {
-            resposta = retryResposta;
-            validatorFlags.push("retry_accepted");
-            console.log("[VALIDATOR] Retry accepted");
+            const retryValidation = validateResponse(retryResposta || "", recentOutbound);
+            if (retryValidation.valid && retryResposta) {
+              resposta = retryResposta;
+              validatorFlags.push("retry_accepted");
+              console.log("[VALIDATOR] Retry accepted");
+            } else {
+              // Keep the original AI response + append question rather than using a generic fallback
+              if (retryResposta && retryResposta.length > 30) {
+                resposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". O que precisa?";
+                validatorFlags.push("retry_appended_question");
+                console.log("[VALIDATOR] Retry response kept with appended question");
+              } else {
+                // Only now use fallback pool as last resort
+                const fb = pickFallback(recentOutbound);
+                if (fb) {
+                  resposta = fb;
+                  validatorFlags.push("deterministic_fallback");
+                  console.log("[VALIDATOR] Using rotating fallback");
+                } else {
+                  resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
+                  precisa_humano = true;
+                  validatorFlags.push("fallback_exhausted_escalate");
+                  console.log("[VALIDATOR] All fallbacks exhausted — escalating to human");
+                }
+              }
+            }
           } else {
-            // Rotating deterministic fallback
             const fb = pickFallback(recentOutbound);
             if (fb) {
               resposta = fb;
               validatorFlags.push("deterministic_fallback");
-              console.log("[VALIDATOR] Retry also rejected — using rotating fallback");
             } else {
-              // All fallbacks exhausted — escalate to human
               resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
               precisa_humano = true;
               validatorFlags.push("fallback_exhausted_escalate");
-              console.log("[VALIDATOR] All fallbacks exhausted — escalating to human");
             }
-          }
-        } else {
-          const fb = pickFallback(recentOutbound);
-          if (fb) {
-            resposta = fb;
-            validatorFlags.push("deterministic_fallback");
-          } else {
-            resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
-            precisa_humano = true;
-            validatorFlags.push("fallback_exhausted_escalate");
           }
         }
       } else {
