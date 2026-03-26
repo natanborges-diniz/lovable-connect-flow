@@ -365,6 +365,23 @@ export default function Pipeline() {
                                           </span>
                                         </div>
                                       )}
+
+                                      {atInfo && (
+                                        <div className="pl-6 pt-1">
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 text-[10px] px-2 text-muted-foreground hover:text-primary"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              navigate(`/atendimentos?open=${atInfo.id}`);
+                                            }}
+                                          >
+                                            <MessageSquare className="h-3 w-3 mr-1" />
+                                            Abrir em Atendimentos
+                                          </Button>
+                                        </div>
+                                      )}
                                     </CardContent>
                                   </Card>
                                 )}
