@@ -1,66 +1,72 @@
 
 
-## Plano: Corrigir Agendamentos Duplicados e Mensagens Redundantes
+## Plano: Temporalidade Dinâmica nas Mensagens de Lembrete
 
-### Problemas Identificados
+### Problema
 
-1. **Mensagem duplicada por agendamento**: Quando a IA chama `agendar_visita`, a function `agendar-cliente` envia uma mensagem de confirmação formatada (✅ Agendamento confirmado!) via `send-whatsapp`. Depois, a IA TAMBÉM envia `args.resposta` como segunda mensagem. Resultado: cliente recebe duas mensagens por agendamento.
-
-2. **Agendamento duplicado**: Não há verificação de agendamento existente. Quando o cliente confirma algo que já foi agendado, a IA chama `agendar_visita` novamente, criando um segundo registro.
-
-3. **Pergunta contraditória sobre lembrete**: A confirmação diz "Vou te enviar um lembrete no dia anterior 😉" e depois a IA pergunta "Quer que eu envie um lembrete?" — redundante e confuso.
+Quando o card vai para `lembrete_enviado` (automaticamente pelo cron OU manualmente), a mensagem de lembrete usa variáveis fixas como `{{data}}` que mostram "28/03/2026" — sem contexto temporal. O cliente precisa ler "amanhã às 10h", "hoje às 14h", ou "sábado às 10h" dependendo da relação entre agora e o horário do agendamento.
 
 ### Solução
 
-**1. Eliminar mensagem duplicada (`ai-triage/index.ts`)**
+Adicionar uma nova variável `{{quando}}` ao sistema de resolução de templates que calcula automaticamente a expressão temporal correta.
 
-No bloco que processa `agendar_visita` / `reagendar_visita` (linha ~823), ao invés de usar `args.resposta` como resposta da IA, definir `resposta = ""` (vazio). A `agendar-cliente` já envia a mensagem bonita formatada. A IA não precisa enviar nada adicional.
+### Lógica de `{{quando}}`
 
-Ou melhor: remover o envio de WhatsApp da `agendar-cliente` e deixar só a IA responder (mais controle). A opção mais limpa é **remover o `send-whatsapp` da `agendar-cliente`**, já que a confirmação formatada pode ser montada direto no `args.resposta` da IA.
-
-**Decisão**: Remover o envio de mensagem da `agendar-cliente/index.ts` (linhas 57-72). A IA já envia a resposta. O `agendar-cliente` fica responsável apenas por criar o registro e logar o evento CRM.
-
-**2. Verificar duplicata antes de criar (`ai-triage/index.ts`)**
-
-No bloco `agendar_visita` (linha ~839), antes de chamar `agendar-cliente`, verificar se já existe um agendamento ativo para o mesmo contato + loja + mesma data. Se existir, pular a criação e apenas responder ao cliente que o agendamento já está confirmado.
-
-```
-// Pseudocódigo
-const jaExiste = agendamentosAtivos.some(a => 
-  a.loja_nome === args.loja_nome && 
-  a.data_horario.startsWith(args.data_horario.substring(0, 10)) &&
-  (a.status === "agendado" || a.status === "confirmado")
-);
-if (jaExiste) {
-  // Não criar novo — apenas confirmar ao cliente
-  resposta = args.resposta; // usa resposta da IA sem criar duplicata
-  // Pular chamada a agendar-cliente
-}
-```
-
-**3. Instrução no prompt para não perguntar sobre lembrete (`ai-triage/index.ts`)**
-
-Adicionar na seção de regras do prompt:
-```
-REGRA: Quando agendar uma visita, NÃO pergunte se o cliente quer lembrete — 
-o lembrete é automático. Apenas confirme os dados e encerre.
-Após confirmação do cliente, NÃO crie outro agendamento — 
-apenas confirme que está tudo certo.
+```text
+Se agendamento é HOJE       → "hoje às 10:00"
+Se agendamento é AMANHÃ     → "amanhã às 10:00"  
+Se agendamento é esta semana → "sábado às 10:00"
+Se agendamento é > 7 dias   → "dia 05/04 às 10:00"
 ```
 
 ### Arquivos Alterados
 
-1. **`supabase/functions/agendar-cliente/index.ts`**
-   - Remover bloco de envio WhatsApp (linhas 57-72) — a IA já responde
+**1. `supabase/functions/pipeline-automations/index.ts`**
+- Na função `resolveText`, adicionar cálculo de `{{quando}}` usando timezone `America/Sao_Paulo`
+- Compara `now` com `data_horario` para determinar: hoje, amanhã, dia da semana, ou data completa
+- Também adicionar `{{dia_semana}}` (ex: "sábado") como variável extra
 
-2. **`supabase/functions/ai-triage/index.ts`**
-   - Adicionar verificação de duplicata antes de chamar `agendar-cliente`
-   - Adicionar regra no prompt: "NÃO pergunte sobre lembrete" e "Após confirmação, NÃO crie novo agendamento"
-   - No `proximo_passo` da tool `agendar_visita`, instruir que após agendamento o próximo passo é aguardar (não perguntar sobre lembrete)
+**2. `supabase/functions/agendamentos-cron/index.ts`**
+- Na mensagem de retry do lembrete (linha ~197), substituir texto fixo por lógica temporal dinâmica
+- Em vez de "sua visita às *10:00*", usar "sua visita *amanhã às 10:00*" ou "sua visita *hoje às 10:00*"
+
+**3. Também no cron**: O cron hoje só move para `lembrete_enviado` agendamentos de **amanhã** (linhas 33-43). Precisa incluir agendamentos de **hoje** que ainda estão em `agendado` (caso de agendamento same-day ou movimentação manual).
+
+### Detalhes Técnicos
+
+Nova função auxiliar em `pipeline-automations`:
+```typescript
+function resolveQuando(dataHorario: string): string {
+  const now = new Date();
+  const dt = new Date(dataHorario);
+  // Usar timezone SP para comparações de dia
+  const nowSP = new Date(now.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+  const dtSP = new Date(dt.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+  const hora = dt.toLocaleTimeString("pt-BR", {hour:"2-digit",minute:"2-digit",timeZone:"America/Sao_Paulo"});
+  
+  const diffDays = Math.floor((dtSP.setHours(0,0,0,0) - nowSP.setHours(0,0,0,0)) / 86400000);
+  
+  if (diffDays === 0) return `hoje às ${hora}`;
+  if (diffDays === 1) return `amanhã às ${hora}`;
+  if (diffDays > 1 && diffDays <= 6) {
+    const diaSemana = dt.toLocaleDateString("pt-BR", {weekday:"long", timeZone:"America/Sao_Paulo"});
+    return `${diaSemana} às ${hora}`;
+  }
+  return `dia ${dt.toLocaleDateString("pt-BR", {timeZone:"America/Sao_Paulo"})} às ${hora}`;
+}
+```
+
+Adicionada ao `resolveText` como `{{quando}}`.
+
+No cron, expandir query de transição para `lembrete_enviado` para incluir agendamentos de hoje que estão em `agendado`:
+```text
+// Antes: só amanhã
+// Depois: hoje OU amanhã (desde que status = agendado)
+```
 
 ### Resultado
-
-- Cliente recebe UMA única mensagem de confirmação (da IA)
-- Confirmações subsequentes ("confirmado") não criam agendamento duplicado
-- Sem pergunta contraditória sobre lembrete
+- Mensagem do template: "Oi Natan, lembrando da sua visita **amanhã às 10:00** na Diniz Itapevi"
+- Movimentação manual same-day: "...sua visita **hoje às 14:00**..."
+- Movimentação manual para sábado: "...sua visita **sábado às 10:00**..."
+- Retry do lembrete também usa linguagem temporal correta
 
