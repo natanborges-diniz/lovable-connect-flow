@@ -407,11 +407,26 @@ function extractSentTopics(outboundTexts: string[]): string[] {
 }
 
 // Deterministic fallback responses
-const DETERMINISTIC_FALLBACKS: Record<string, string> = {
-  subject_change: "Sem problemas! Me diz sobre o que quer falar agora que eu te ajudo 😊",
-  validator_failed: "Conta pra mim com mais detalhes o que você precisa que eu te dou um retorno certeiro!",
-  no_response: "Opa, me conta o que tá precisando!",
-};
+const DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE = "Sem problemas! Me diz sobre o que quer falar agora que eu te ajudo 😊";
+
+const VALIDATOR_FAILED_POOL = [
+  "Conta pra mim com mais detalhes o que você precisa que eu te dou um retorno certeiro!",
+  "Me explica melhor a sua necessidade que eu busco a melhor solução pra você!",
+  "Pra eu te ajudar certinho, preciso entender melhor — pode me dar mais detalhes?",
+  "Quero te ajudar da melhor forma! Me conta mais sobre o que está buscando?",
+  "Pode me explicar um pouco mais? Assim eu consigo te dar uma resposta precisa!",
+];
+
+function pickFallback(recentOutbound: string[]): string | null {
+  const recentNorm = recentOutbound.slice(-10).map(norm);
+  for (const fb of VALIDATOR_FAILED_POOL) {
+    const fbNorm = norm(fb);
+    const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
+    if (!alreadySent) return fb;
+  }
+  // All fallbacks exhausted — return null to escalate
+  return null;
+}
 
 // ═══════════════════════════════════════════
 // MAIN HANDLER
@@ -498,7 +513,7 @@ serve(async (req) => {
     // ── 3. PRE-LLM ROUTER: subject change → deterministic ──
     if (matchesSubjectChange(currentMsg)) {
       console.log("[ROUTER] Subject change detected — deterministic response");
-      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS.subject_change);
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE);
       await logEvent(supabase, contatoId, atendimento_id, "router_subject_change", currentMsg);
       return jsonResponse({ status: "ok", tools_used: ["router_subject_change"], intencao: "outro", precisa_humano: false, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
     }
@@ -839,14 +854,30 @@ serve(async (req) => {
             validatorFlags.push("retry_accepted");
             console.log("[VALIDATOR] Retry accepted");
           } else {
-            // Deterministic fallback
-            resposta = DETERMINISTIC_FALLBACKS.validator_failed;
-            validatorFlags.push("deterministic_fallback");
-            console.log("[VALIDATOR] Retry also rejected — using deterministic fallback");
+            // Rotating deterministic fallback
+            const fb = pickFallback(recentOutbound);
+            if (fb) {
+              resposta = fb;
+              validatorFlags.push("deterministic_fallback");
+              console.log("[VALIDATOR] Retry also rejected — using rotating fallback");
+            } else {
+              // All fallbacks exhausted — escalate to human
+              resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
+              precisa_humano = true;
+              validatorFlags.push("fallback_exhausted_escalate");
+              console.log("[VALIDATOR] All fallbacks exhausted — escalating to human");
+            }
           }
         } else {
-          resposta = DETERMINISTIC_FALLBACKS.validator_failed;
-          validatorFlags.push("deterministic_fallback");
+          const fb = pickFallback(recentOutbound);
+          if (fb) {
+            resposta = fb;
+            validatorFlags.push("deterministic_fallback");
+          } else {
+            resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
+            precisa_humano = true;
+            validatorFlags.push("fallback_exhausted_escalate");
+          }
         }
       } else {
         validatorFlags.push("passed");
