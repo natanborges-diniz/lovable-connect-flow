@@ -75,36 +75,62 @@ serve(async (req) => {
       throw new Error(`Meta API error: ${JSON.stringify(apiResult.error?.message || apiResult)}`);
     }
 
-    // Create solicitação + atendimento with canal_provedor = meta_official
-    const { data: solicitacao, error: solErr } = await supabase
-      .from("solicitacoes")
-      .insert({
-        contato_id,
-        assunto: `Disparo proativo: ${template_name}`,
-        descricao: `Template enviado: ${template_name}`,
-        canal_origem: "whatsapp",
-        status: "aberta",
-      })
-      .select()
-      .single();
-    if (solErr) throw solErr;
+    // ─── Reuse existing open atendimento or create new ───
+    let atendimentoId: string;
+    let solicitacaoId: string;
 
-    const { data: atendimento, error: atErr } = await supabase
+    // Search for any open atendimento for this contact (any provider)
+    const { data: existingAtendimento } = await supabase
       .from("atendimentos")
-      .insert({
-        solicitacao_id: solicitacao.id,
-        contato_id,
-        canal: "whatsapp",
-        status: "aguardando",
-        canal_provedor: "meta_official",
-      })
-      .select()
+      .select("id, solicitacao_id")
+      .eq("contato_id", contato_id)
+      .eq("canal", "whatsapp")
+      .neq("status", "encerrado")
+      .order("created_at", { ascending: false })
+      .limit(1)
       .single();
-    if (atErr) throw atErr;
 
-    // Save outbound template message
+    if (existingAtendimento) {
+      // Reuse existing atendimento — just log the template message there
+      atendimentoId = existingAtendimento.id;
+      solicitacaoId = existingAtendimento.solicitacao_id;
+      console.log(`Reusing existing atendimento ${atendimentoId} for template ${template_name}`);
+    } else {
+      // No open atendimento — create new solicitação + atendimento
+      const { data: solicitacao, error: solErr } = await supabase
+        .from("solicitacoes")
+        .insert({
+          contato_id,
+          assunto: `Disparo proativo: ${template_name}`,
+          descricao: `Template enviado: ${template_name}`,
+          canal_origem: "whatsapp",
+          status: "aberta",
+        })
+        .select()
+        .single();
+      if (solErr) throw solErr;
+
+      const { data: atendimento, error: atErr } = await supabase
+        .from("atendimentos")
+        .insert({
+          solicitacao_id: solicitacao.id,
+          contato_id,
+          canal: "whatsapp",
+          status: "aguardando",
+          canal_provedor: "meta_official",
+        })
+        .select()
+        .single();
+      if (atErr) throw atErr;
+
+      atendimentoId = atendimento.id;
+      solicitacaoId = solicitacao.id;
+      console.log(`Created new atendimento ${atendimentoId} for template ${template_name}`);
+    }
+
+    // Save outbound template message (always with provedor meta_official for traceability)
     await supabase.from("mensagens").insert({
-      atendimento_id: atendimento.id,
+      atendimento_id: atendimentoId,
       direcao: "outbound",
       conteudo: `[Template: ${template_name}]${template_params?.length ? " Params: " + template_params.join(", ") : ""}`,
       remetente_nome: "Sistema",
@@ -117,13 +143,13 @@ serve(async (req) => {
       tipo: "disparo_proativo",
       descricao: `Template "${template_name}" enviado via API oficial`,
       referencia_tipo: "atendimento",
-      referencia_id: atendimento.id,
+      referencia_id: atendimentoId,
     });
 
     return new Response(JSON.stringify({
       status: "sent",
-      atendimento_id: atendimento.id,
-      solicitacao_id: solicitacao.id,
+      atendimento_id: atendimentoId,
+      solicitacao_id: solicitacaoId,
       whatsapp_response: apiResult,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

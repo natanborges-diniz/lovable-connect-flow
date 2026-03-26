@@ -97,13 +97,12 @@ serve(async (req) => {
       await supabase.from("contatos").update({ tipo: "loja" }).eq("id", contato.id);
     }
 
-    // 3. Find open atendimento or create solicitação + atendimento
+    // 3. Find open atendimento (any provider) or create solicitação + atendimento
     let { data: atendimentoAberto } = await supabase
       .from("atendimentos")
-      .select("id, modo")
+      .select("id, modo, canal_provedor")
       .eq("contato_id", contato.id)
       .eq("canal", "whatsapp")
-      .eq("canal_provedor", source)
       .neq("status", "encerrado")
       .order("created_at", { ascending: false })
       .limit(1)
