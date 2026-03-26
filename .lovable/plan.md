@@ -1,72 +1,80 @@
 
 
-## Plano: Unificar Atendimentos Cross-Canal + Auto-Confirmar Agendamento
+## Plano: Todo Contato Entra no CRM — Roteamento Inteligente por Tipo e Histórico
 
-### Problemas
+### Problema Atual
 
-1. **`send-whatsapp-template` cria SEMPRE um novo atendimento** (solicitação + atendimento com `canal_provedor: meta_official`). Quando o cliente responde "sim" ao lembrete, o webhook encontra esse atendimento novo em vez do original — gerando dois atendimentos separados para o mesmo cliente.
+- Contatos só entram no pipeline CRM após 3+ mensagens inbound (linha 994 do `ai-triage`)
+- Contatos novos ficam sem `pipeline_coluna_id` e não aparecem no Kanban
+- Contatos que retornam após abandono entram como se fossem novos
+- Lojas/colaboradores não são direcionados ao pipeline interno automaticamente
 
-2. **Nenhuma lógica detecta "sim" como confirmação** de agendamento. O cliente responde "sim" ao lembrete mas o card fica parado em `lembrete_enviado`.
+### Solução: Roteamento em Duas Camadas
 
-### Solução
+#### Camada 1 — No webhook (imediato, ao criar atendimento)
 
-#### 1. `send-whatsapp-template` — Reutilizar atendimento existente
-
-Em vez de criar solicitação + atendimento novos, buscar atendimento aberto do contato (qualquer provedor). Se existir, registrar a mensagem do template nesse atendimento existente. Se não existir, aí sim criar um novo.
-
-```text
-Antes:  SEMPRE cria solicitação + atendimento
-Depois: Busca atendimento aberto → se existe, usa ele → se não, cria novo
-```
-
-A mensagem do template é salva com `provedor: "meta_official"` para rastreabilidade, mas dentro do mesmo atendimento.
-
-#### 2. `whatsapp-webhook` — Buscar atendimento sem filtrar por provedor
-
-Alterar a busca de atendimento aberto para NÃO filtrar por `canal_provedor`. Assim, quando o cliente responde via meta_official a um template, o webhook encontra o atendimento original (que pode ser evolution_api).
-
-Atualizar o `canal_provedor` do atendimento para o canal mais recente (para que respostas saiam pelo canal correto).
+Quando um novo atendimento é criado (linhas 123-161 do `whatsapp-webhook`), atribuir `pipeline_coluna_id` ao contato imediatamente:
 
 ```text
-Antes:  .eq("canal_provedor", source)
-Depois: sem filtro de provedor → encontra qualquer atendimento aberto do contato
-        → atualiza canal_provedor para o source atual
+SE contato.tipo = "loja" ou "colaborador"
+  → Pipeline interno (coluna "Novo" do setor interno)
+  → Bot de lojas já é acionado normalmente
+
+SE contato NÃO tem pipeline_coluna_id (nunca entrou no CRM)
+  → Coluna "Novo Contato" do pipeline de vendas
+
+SE contato TEM pipeline_coluna_id
+  SE coluna atual = "Abandonado" ou "Cancelado" (colunas terminais)
+    → Mover para coluna "Retorno" (nova coluna)
+  SENÃO
+    → Manter na coluna atual (continua a jornada)
 ```
 
-#### 3. `whatsapp-webhook` — Detecção de confirmação pré-IA
+#### Camada 2 — Na triagem IA (progressão com maturidade)
 
-Antes de acionar a IA, verificar se o cliente tem agendamento em `lembrete_enviado` e a mensagem é uma confirmação (sim, confirmo, ok, etc.). Se sim:
-- Atualizar agendamento para `confirmado`
-- Disparar `pipeline-automations` para o novo status
-- Registrar evento CRM
-- Enviar resposta determinística ("Confirmado! Te esperamos...")
-- NÃO acionar a IA (resposta já tratada)
+Remover a restrição `inboundCount >= 3` na linha 994. A IA já sugere a coluna correta — a barreira de 3 mensagens atrasa a classificação desnecessariamente. Como o contato já está no CRM desde a primeira mensagem (Camada 1), a IA só precisa **mover** quando tem certeza da intenção.
 
+Nova lógica (linha 994):
 ```text
-Palavras-chave de confirmação:
-"sim", "confirmo", "confirmado", "ok", "vou sim", "pode confirmar", 
-"estarei lá", "vou estar", "combinado", "fechado", "tá bom", "beleza"
+// Antes: inboundCount >= 3 || pipeline_coluna !== "Novo Contato"
+// Depois: pipeline_coluna !== "Novo Contato" (sempre move se a IA sugere coluna específica)
 ```
+
+### Nova Coluna: "Retorno"
+
+Criar coluna "Retorno" no pipeline de vendas, posicionada após "Novo Contato". Serve para contatos que já passaram pelo funil (foram abandonados/cancelados) e voltaram a entrar em contato. Permite ao operador ver que é um cliente conhecido que retornou.
 
 ### Arquivos Alterados
 
-**1. `supabase/functions/send-whatsapp-template/index.ts`**
-- Remover criação automática de solicitação + atendimento
-- Buscar atendimento aberto do contato (sem filtro de provedor)
-- Se existir, salvar mensagem nele; se não, criar novo
+**1. `supabase/functions/whatsapp-webhook/index.ts`**
+- Após criar novo atendimento (linha ~150), adicionar lógica de atribuição de `pipeline_coluna_id`:
+  - Buscar colunas do pipeline
+  - Verificar tipo do contato (loja/colaborador → pipeline interno)
+  - Verificar se contato já tem coluna (terminal → "Retorno", sem coluna → "Novo Contato")
+  - Atualizar contato com a coluna
 
-**2. `supabase/functions/whatsapp-webhook/index.ts`**
-- Linha 100-110: Remover `.eq("canal_provedor", source)` da busca de atendimento
-- Após encontrar atendimento, atualizar `canal_provedor` para o source atual
-- Adicionar bloco de detecção de confirmação entre etapas 5 (salvar mensagem) e 7 (check homologação)
+**2. `supabase/functions/ai-triage/index.ts`**
+- Linha 994: Remover condição `inboundCount >= 3` — mover contato sempre que a IA sugere coluna diferente de "Novo Contato"
 
-**3. `supabase/functions/pipeline-automations/index.ts`**
-- Sem alterações — já suporta status `confirmado`
+**3. Migração SQL**
+- Criar coluna "Retorno" no pipeline de vendas (se não existir)
+
+### Fluxo Visual
+
+```text
+WhatsApp msg → webhook
+  ├─ Contato tipo loja/colaborador → Pipeline Interno + Bot
+  ├─ Contato novo (sem coluna) → "Novo Contato" no CRM
+  ├─ Contato retornando (Abandonado/Cancelado) → "Retorno" no CRM
+  └─ Contato ativo (já tem coluna válida) → Mantém posição
+      │
+      └─ IA classifica → Move para coluna adequada quando tem certeza
+```
 
 ### Resultado
 
-- Cliente tem UM único atendimento, independente do canal de saída (template oficial vs evolution)
-- Operador vê todo o histórico unificado na mesma conversa
-- "Sim" ao lembrete → card move automaticamente para "Confirmado"
-- Automações de `confirmado` disparam corretamente
+- Todo atendimento WhatsApp aparece no CRM desde a primeira mensagem
+- Lojas e corporativos vão direto pro pipeline interno
+- Clientes que retornam são identificados como "Retorno", não como leads novos
+- IA continua fazendo a progressão do card conforme a conversa evolui
 
