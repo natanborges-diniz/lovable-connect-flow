@@ -407,11 +407,26 @@ function extractSentTopics(outboundTexts: string[]): string[] {
 }
 
 // Deterministic fallback responses
-const DETERMINISTIC_FALLBACKS: Record<string, string> = {
-  subject_change: "Sem problemas! Me diz sobre o que quer falar agora que eu te ajudo 😊",
-  validator_failed: "Conta pra mim com mais detalhes o que você precisa que eu te dou um retorno certeiro!",
-  no_response: "Opa, me conta o que tá precisando!",
-};
+const DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE = "Sem problemas! Me diz sobre o que quer falar agora que eu te ajudo 😊";
+
+const VALIDATOR_FAILED_POOL = [
+  "Conta pra mim com mais detalhes o que você precisa que eu te dou um retorno certeiro!",
+  "Me explica melhor a sua necessidade que eu busco a melhor solução pra você!",
+  "Pra eu te ajudar certinho, preciso entender melhor — pode me dar mais detalhes?",
+  "Quero te ajudar da melhor forma! Me conta mais sobre o que está buscando?",
+  "Pode me explicar um pouco mais? Assim eu consigo te dar uma resposta precisa!",
+];
+
+function pickFallback(recentOutbound: string[]): string | null {
+  const recentNorm = recentOutbound.slice(-10).map(norm);
+  for (const fb of VALIDATOR_FAILED_POOL) {
+    const fbNorm = norm(fb);
+    const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
+    if (!alreadySent) return fb;
+  }
+  // All fallbacks exhausted — return null to escalate
+  return null;
+}
 
 // ═══════════════════════════════════════════
 // MAIN HANDLER
