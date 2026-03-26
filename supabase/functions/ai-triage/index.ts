@@ -381,6 +381,12 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
 5. Se o cliente mudar de assunto, SIGA imediatamente o novo tema.
 6. NUNCA repita informação já dada.
 
+# REGRAS DE AGENDAMENTO
+- Quando agendar uma visita, NÃO pergunte se o cliente quer lembrete — o lembrete é AUTOMÁTICO.
+- Após o agendamento, apenas confirme os dados (loja, data, hora) e encerre com tom positivo.
+- Se o cliente confirmar um agendamento já criado ("confirmado", "ok", "tá bom"), NÃO crie outro agendamento. Apenas confirme que está tudo certo.
+- NUNCA diga "Vou te enviar um lembrete" e depois pergunte "Quer que eu envie um lembrete?" — o lembrete já é automático.
+
 # PROIBIDO (NUNCA USE)
 - "Se precisar estou por aqui"
 - "Estou à disposição"
@@ -836,22 +842,34 @@ serve(async (req) => {
           }
         }
 
-        // Create new agendamento via agendar-cliente function
-        try {
-          await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contato_id: contatoId,
-              atendimento_id,
-              loja_nome: args.loja_nome,
-              loja_telefone: lojaMatch?.telefone || null,
-              data_horario: args.data_horario,
-              observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
-            }),
-          });
-        } catch (e) {
-          console.error("[TOOL] agendar-cliente call failed:", e);
+        // Check for duplicate: same contact + same store + same date
+        const targetDate = (args.data_horario || "").substring(0, 10);
+        const jaExiste = agendamentosAtivos.some((a: any) =>
+          a.loja_nome?.toLowerCase() === (args.loja_nome || "").toLowerCase() &&
+          (a.data_horario || "").substring(0, 10) === targetDate &&
+          (a.status === "agendado" || a.status === "confirmado")
+        );
+
+        if (jaExiste) {
+          console.log(`[TOOL] Duplicate agendamento detected for ${args.loja_nome} on ${targetDate} — skipping creation`);
+        } else {
+          // Create new agendamento via agendar-cliente function
+          try {
+            await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contato_id: contatoId,
+                atendimento_id,
+                loja_nome: args.loja_nome,
+                loja_telefone: lojaMatch?.telefone || null,
+                data_horario: args.data_horario,
+                observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
+              }),
+            });
+          } catch (e) {
+            console.error("[TOOL] agendar-cliente call failed:", e);
+          }
         }
 
         await supabase.from("eventos_crm").insert({

@@ -53,23 +53,8 @@ serve(async (req) => {
     const dataFormatada = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
     const horaFormatada = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
 
-    // Send confirmation to client via current atendimento
-    if (atendimento_id) {
-      const confirmMsg = `✅ *Agendamento confirmado!*\n\n📍 ${loja_nome}\n📅 ${dataFormatada}\n⏰ ${horaFormatada}\n${observacoes ? `📝 ${observacoes}\n` : ""}\nTe esperamos lá! Vou te enviar um lembrete no dia anterior 😉`;
-
-      await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          atendimento_id,
-          texto: confirmMsg,
-          remetente_nome: "Assistente IA",
-        }),
-      });
-    }
+    // NOTE: WhatsApp confirmation is sent by the AI in ai-triage (args.resposta).
+    // This function only creates the record and logs the CRM event.
 
     // Log CRM event
     await supabase.from("eventos_crm").insert({
