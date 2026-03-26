@@ -30,16 +30,15 @@ serve(async (req) => {
     //    Agendamentos de amanhã que ainda estão "agendado"
     //    Move para "lembrete_enviado" → trigger dispara template lembrete
     // ═══════════════════════════════════════════
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStart = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate()).toISOString();
-    const tomorrowEnd = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate() + 1).toISOString();
+    // Include TODAY (same-day agendamentos still in "agendado") and TOMORROW
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2).toISOString();
 
     const { data: paraLembrete } = await supabase
       .from("agendamentos")
       .select("id")
       .eq("status", "agendado")
-      .gte("data_horario", tomorrowStart)
+      .gte("data_horario", todayStart)
       .lt("data_horario", tomorrowEnd);
 
     for (const ag of paraLembrete || []) {
@@ -191,10 +190,11 @@ async function processLembreteRetry(
     const firstName = contato?.nome?.split(" ")[0] || "Cliente";
     const dt = new Date(ag.data_horario);
     const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const quando = resolveQuando(ag.data_horario, now);
 
     // Send 2nd reminder via atendimento if available
     if (ag.atendimento_id) {
-      const msg = `Oi ${firstName}, ainda não conseguimos confirmar sua visita às *${hora}* na *${ag.loja_nome}*. Podemos manter? Responda SIM ou se preferir reagendar, é só dizer 😊`;
+      const msg = `Oi ${firstName}, ainda não conseguimos confirmar sua visita *${quando}* na *${ag.loja_nome}*. Podemos manter? Responda SIM ou se preferir reagendar, é só dizer 😊`;
       await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
         method: "POST",
         headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
@@ -363,4 +363,28 @@ async function sendStoreChargeMessage(
     headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ atendimento_id: lojaAt.id, texto: msg, remetente_nome: "Sistema" }),
   });
+}
+
+// ═══════════════════════════════════════════
+// Helper: Resolve temporal label (hoje/amanhã/dia da semana)
+// ═══════════════════════════════════════════
+function resolveQuando(dataHorario: string, now?: Date): string {
+  if (!dataHorario) return "";
+  const ref = now || new Date();
+  const dt = new Date(dataHorario);
+  const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+
+  const refSP = new Date(ref.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const dtSP = new Date(dt.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const refDay = new Date(refSP.getFullYear(), refSP.getMonth(), refSP.getDate()).getTime();
+  const dtDay = new Date(dtSP.getFullYear(), dtSP.getMonth(), dtSP.getDate()).getTime();
+  const diffDays = Math.round((dtDay - refDay) / 86400000);
+
+  if (diffDays === 0) return `hoje às ${hora}`;
+  if (diffDays === 1) return `amanhã às ${hora}`;
+  if (diffDays > 1 && diffDays <= 6) {
+    const diaSemana = dt.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "America/Sao_Paulo" });
+    return `${diaSemana} às ${hora}`;
+  }
+  return `dia ${dt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} às ${hora}`;
 }
