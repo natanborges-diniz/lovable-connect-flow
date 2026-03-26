@@ -1,47 +1,59 @@
 
 
-## Plano: Melhorar Acesso a Conversas/Atendimentos
+## Plano: Injetar Data/Hora Atual + Fortalecer Aprendizado
 
-### Problema
+### Problemas identificados
 
-A página `/atendimentos` existe na navegação, mas:
-1. A busca só filtra por `atendente_nome` — não busca por nome do contato ou assunto
-2. Não há link direto do card no CRM para o atendimento ativo
-3. O operador precisa navegar pelo CRM, clicar no card, e abrir por lá — caminho indireto
+1. **A IA não sabe que dia é hoje.** O prompt NÃO injeta a data/hora atual. Quando o cliente diz "sábado de manhã", a IA não consegue calcular a data (DD/MM) e fica pedindo ao cliente — absurdo.
+
+2. **A regra proibida existe** ("Óticas não podem fazer exames") **e é carregada no prompt**, mas a IA ainda ofereceu "agendamos exame de vista com especialista". O problema é que a regra está fraca demais textualmente e a IA interpreta "clínica parceira" como diferente de "ótica fazendo exame".
+
+3. **Nenhum exemplo modelo ativo** (`ia_exemplos` retornou vazio com `ativo = true`). Os feedbacks corrigidos existem mas não foram promovidos a exemplos.
 
 ### Solução
 
-**1. Busca expandida na página Atendimentos**
+**1. Injetar data/hora atual no prompt (CRÍTICO)**
 
-Alterar o filtro de busca para pesquisar também por **nome do contato** e **assunto da solicitação**, não apenas por atendente. Isso permite encontrar qualquer conversa rapidamente.
+No `buildSystemPrompt`, adicionar logo no início:
 
-- No `useAtendimentos`, trocar o `.ilike("atendente_nome", ...)` por um filtro `.or()` que busque em `contato.nome`, `solicitacao.assunto` e `atendente_nome`
-- Atualizar o placeholder do input para "Buscar por contato, assunto ou atendente..."
+```
+# DATA E HORA ATUAL
+Agora: quarta-feira, 26/03/2026 às 14:35 (horário de Brasília)
+Próximo sábado: 29/03/2026
+Próximo domingo: 30/03/2026
 
-**2. Link direto do card do Pipeline para o atendimento**
+REGRA: Quando o cliente disser "sábado", "segunda", etc., CALCULE a data automaticamente. 
+NUNCA peça ao cliente para informar a data em DD/MM — isso é trabalho SEU.
+```
 
-No card do CRM (Pipeline), adicionar um botão/ícone de "abrir conversa" que navega direto para `/atendimentos` e abre o dialog do atendimento ativo daquele contato.
+A data será calculada dinamicamente com `new Date()` usando timezone `America/Sao_Paulo`, incluindo o dia da semana e os próximos 7 dias nomeados.
 
-- Verificar o componente de card do Pipeline e adicionar ícone `MessageSquare` clicável
-- Ao clicar, navegar para `/atendimentos?open={atendimento_id}`
-- Na página Atendimentos, ler o query param `open` e abrir o dialog automaticamente
+**2. Fortalecer regras proibidas no prompt**
 
-**3. Filtro por contato via query param**
+Atualmente as regras são injetadas como `- ❌ {regra}`. Vou adicionar reforço:
 
-Permitir que links externos (ou do CRM) abram a página já filtrada:
-- `/atendimentos?contato=João` → preenche a busca
-- `/atendimentos?open=uuid` → abre o dialog direto
+```
+INSTRUÇÕES: Estas regras se aplicam A TODAS as situações, incluindo clínicas parceiras, 
+indicações e qualquer variação. NÃO há exceções.
+```
+
+**3. Auto-promover feedbacks corrigidos a exemplos**
+
+No `submitNegative` do `MessageFeedback.tsx`, quando o operador fornece `resposta_corrigida`, automaticamente criar o exemplo em `ia_exemplos` (sem precisar do toggle). O toggle "Criar exemplo" passará a vir **ligado por padrão** quando há resposta corrigida.
 
 ### Arquivos alterados
 
-1. **`src/hooks/useAtendimentos.ts`** — expandir filtro de busca com `.or()` para contato/assunto/atendente
-2. **`src/pages/Atendimentos.tsx`** — ler query params (`open`, `contato`), abrir dialog automaticamente, atualizar placeholder
-3. **`src/pages/Pipeline.tsx`** (ou componente de card) — adicionar botão de acesso rápido ao atendimento
+1. **`supabase/functions/ai-triage/index.ts`**
+   - Função `buildSystemPrompt`: adicionar seção `# DATA E HORA ATUAL` com cálculo dinâmico dos próximos 7 dias
+   - Reforçar bloco de proibições com instrução de aplicação universal
+   - Adicionar regra explícita: "NUNCA peça data DD/MM ao cliente"
+
+2. **`src/components/atendimentos/MessageFeedback.tsx`**
+   - Toggle "Criar exemplo" vem ligado por padrão quando `respostaCorrigida` tem conteúdo
 
 ### Resultado
 
-O operador poderá:
-- Ir em "Atendimentos" na nav superior e buscar por nome do contato (ex: "João")
-- Clicar num ícone de conversa no card do CRM e cair direto no chat
-- Usar a URL `/atendimentos?open=ID` como atalho
+- A IA saberá que "sábado" = 29/03/2026 e usará a tool `agendar_visita` com ISO date diretamente
+- As regras proibidas terão peso reforçado no prompt
+- Feedbacks com correção criarão exemplos automaticamente, acelerando o aprendizado
 
