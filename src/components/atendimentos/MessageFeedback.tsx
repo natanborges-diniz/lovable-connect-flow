@@ -127,6 +127,14 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
               <p className="font-medium text-[10px] text-muted-foreground mb-1">Resposta da IA:</p>
               {conteudo}
             </div>
+            {/* Create model example shortcut */}
+            <div className="flex items-center gap-2 p-2 border border-primary/20 rounded-lg bg-primary/5">
+              <Switch checked={criarExemplo} onCheckedChange={setCriarExemplo} disabled={!respostaCorrigida.trim()} />
+              <div className="flex items-center gap-1.5 text-xs">
+                <BookOpen className="h-3.5 w-3.5 text-primary" />
+                <span>Criar exemplo modelo (ensinar a IA a responder assim)</span>
+              </div>
+            </div>
             <div className="space-y-2">
               <Label className="text-xs">Por que está errada?</Label>
               <Textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={2}
