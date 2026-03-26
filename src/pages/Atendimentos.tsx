@@ -71,7 +71,7 @@ export default function Atendimentos() {
           <div className="flex items-center gap-3 mb-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Buscar por atendente..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+              <Input placeholder="Buscar por contato, assunto ou atendente..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-48">
@@ -88,7 +88,7 @@ export default function Atendimentos() {
 
           {isLoading ? (
             <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
-          ) : !atendimentos?.length ? (
+          ) : !filteredAtendimentos?.length ? (
             <p className="text-sm text-muted-foreground py-8 text-center">Nenhum atendimento encontrado</p>
           ) : (
             <Table>
@@ -104,7 +104,7 @@ export default function Atendimentos() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {atendimentos.map((a: any) => (
+                {filteredAtendimentos.map((a: any) => (
                   <TableRow key={a.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(a.id)}>
                     <TableCell className="font-medium">{a.solicitacao?.assunto ?? "—"}</TableCell>
                     <TableCell>{a.contato?.nome ?? "—"}</TableCell>
