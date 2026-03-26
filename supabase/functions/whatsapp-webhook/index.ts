@@ -114,6 +114,12 @@ serve(async (req) => {
     if (atendimentoAberto) {
       atendimentoId = atendimentoAberto.id;
       atendimentoModo = (atendimentoAberto as any).modo || "ia";
+
+      // Update canal_provedor to current source for correct reply routing
+      if ((atendimentoAberto as any).canal_provedor !== source) {
+        await supabase.from("atendimentos").update({ canal_provedor: source }).eq("id", atendimentoId);
+        console.log(`Updated canal_provedor to ${source} for atendimento ${atendimentoId}`);
+      }
     } else {
       const { data: solicitacao, error: solErr } = await supabase
         .from("solicitacoes")
