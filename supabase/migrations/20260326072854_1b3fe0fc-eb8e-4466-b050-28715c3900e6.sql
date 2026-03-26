@@ -1,0 +1,1 @@
+UPDATE pipeline_automacoes SET status_alvo = 'lembrete_enviado' WHERE id = '965bbcea-571b-4107-a548-e61decf86176' AND status_alvo = 'confirmado';
