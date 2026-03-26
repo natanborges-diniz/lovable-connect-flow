@@ -206,6 +206,76 @@ serve(async (req) => {
       markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
     }
 
+    // 6.5. Auto-confirm agendamento if client responds with confirmation keyword
+    if (!isLoja && text) {
+      const confirmKeywords = ["sim", "confirmo", "confirmado", "ok", "vou sim", "pode confirmar", "estarei lá", "vou estar", "combinado", "fechado", "tá bom", "beleza", "ta bom", "vou", "claro", "com certeza"];
+      const normalizedText = text.trim().toLowerCase().replace(/[!.,?]/g, "");
+      const isConfirmation = confirmKeywords.some(kw => normalizedText === kw || normalizedText.startsWith(kw + " "));
+
+      if (isConfirmation) {
+        // Check if contato has an agendamento in lembrete_enviado
+        const { data: agendamentoPendente } = await supabase
+          .from("agendamentos")
+          .select("id, data_horario, loja_nome")
+          .eq("contato_id", contato.id)
+          .eq("status", "lembrete_enviado")
+          .order("data_horario", { ascending: true })
+          .limit(1)
+          .single();
+
+        if (agendamentoPendente) {
+          console.log(`Auto-confirming agendamento ${agendamentoPendente.id} based on keyword "${normalizedText}"`);
+
+          // Update agendamento status to confirmado
+          await supabase.from("agendamentos")
+            .update({ status: "confirmado", confirmacao_enviada: true })
+            .eq("id", agendamentoPendente.id);
+
+          // Register CRM event
+          await supabase.from("eventos_crm").insert({
+            contato_id: contato.id,
+            tipo: "agendamento_confirmado",
+            descricao: `Cliente confirmou agendamento via WhatsApp: "${text}"`,
+            referencia_tipo: "agendamento",
+            referencia_id: agendamentoPendente.id,
+          });
+
+          // Send deterministic confirmation response (no AI needed)
+          const dataAgendamento = new Date(agendamentoPendente.data_horario);
+          const hora = dataAgendamento.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+          const dataFormatada = dataAgendamento.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+
+          const confirmMsg = `✅ Confirmado! Te esperamos ${dataFormatada} às ${hora} na ${agendamentoPendente.loja_nome}. Até lá! 😊`;
+
+          // Save outbound confirmation message
+          await supabase.from("mensagens").insert({
+            atendimento_id: atendimentoId,
+            direcao: "outbound",
+            conteudo: confirmMsg,
+            remetente_nome: "Sistema",
+            provedor: source,
+          });
+
+          // Send via WhatsApp
+          await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phone: cleanPhoneForLoja,
+              message: confirmMsg,
+              atendimento_id: atendimentoId,
+              source,
+            }),
+          });
+
+          // Pipeline automations will fire via the DB trigger on status change
+          return new Response(JSON.stringify({ status: "ok", action: "auto_confirmed", atendimento_id: atendimentoId }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
+
     // 7. Check homologação mode
     const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
 
