@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useContatos, useUpdateContato } from "@/hooks/useContatos";
 import {
@@ -52,6 +53,7 @@ export default function Pipeline() {
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunas, isLoading: loadingColunas } = usePipelineColunas();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Realtime
   useEffect(() => {
@@ -361,6 +363,23 @@ export default function Pipeline() {
                                               locale: ptBR,
                                             })}
                                           </span>
+                                        </div>
+                                      )}
+
+                                      {atInfo && (
+                                        <div className="pl-6 pt-1">
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 text-[10px] px-2 text-muted-foreground hover:text-primary"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              navigate(`/atendimentos?open=${atInfo.id}`);
+                                            }}
+                                          >
+                                            <MessageSquare className="h-3 w-3 mr-1" />
+                                            Abrir em Atendimentos
+                                          </Button>
                                         </div>
                                       )}
                                     </CardContent>

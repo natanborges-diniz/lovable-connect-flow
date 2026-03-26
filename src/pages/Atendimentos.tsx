@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
@@ -23,18 +24,29 @@ import { toast } from "sonner";
 import type { StatusAtendimento } from "@/types/database";
 
 export default function Atendimentos() {
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState(searchParams.get("contato") || "");
   const [statusFilter, setStatusFilter] = useState<string>("todos");
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(searchParams.get("open") || null);
 
   const filters = {
-    search: search || undefined,
     status: statusFilter !== "todos" ? (statusFilter as StatusAtendimento) : undefined,
   };
 
   const { data: atendimentos, isLoading } = useAtendimentos(filters);
   const updateStatus = useUpdateAtendimentoStatus();
   const queryClient = useQueryClient();
+
+  // Client-side search across contato, assunto, atendente
+  const filteredAtendimentos = useMemo(() => {
+    if (!atendimentos || !search.trim()) return atendimentos;
+    const s = search.toLowerCase();
+    return atendimentos.filter((a: any) =>
+      (a.contato?.nome ?? "").toLowerCase().includes(s) ||
+      (a.solicitacao?.assunto ?? "").toLowerCase().includes(s) ||
+      (a.atendente_nome ?? "").toLowerCase().includes(s)
+    );
+  }, [atendimentos, search]);
 
   // Realtime: auto-refresh list when atendimentos or mensagens change
   useEffect(() => {
@@ -59,7 +71,7 @@ export default function Atendimentos() {
           <div className="flex items-center gap-3 mb-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Buscar por atendente..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+              <Input placeholder="Buscar por contato, assunto ou atendente..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-48">
@@ -76,7 +88,7 @@ export default function Atendimentos() {
 
           {isLoading ? (
             <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
-          ) : !atendimentos?.length ? (
+          ) : !filteredAtendimentos?.length ? (
             <p className="text-sm text-muted-foreground py-8 text-center">Nenhum atendimento encontrado</p>
           ) : (
             <Table>
@@ -92,7 +104,7 @@ export default function Atendimentos() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {atendimentos.map((a: any) => (
+                {filteredAtendimentos.map((a: any) => (
                   <TableRow key={a.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(a.id)}>
                     <TableCell className="font-medium">{a.solicitacao?.assunto ?? "—"}</TableCell>
                     <TableCell>{a.contato?.nome ?? "—"}</TableCell>

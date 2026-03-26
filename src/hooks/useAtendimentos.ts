@@ -12,7 +12,6 @@ export function useAtendimentos(filters?: { status?: StatusAtendimento; search?:
         .select("*, contato:contatos(id, nome, tipo), solicitacao:solicitacoes(id, assunto, status), fila:filas(id, nome, tipo)")
         .order("created_at", { ascending: false });
       if (filters?.status) query = query.eq("status", filters.status);
-      if (filters?.search) query = query.ilike("atendente_nome", `%${filters.search}%`);
       const { data, error } = await query;
       if (error) throw error;
       return data;
