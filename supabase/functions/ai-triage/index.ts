@@ -485,11 +485,12 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, kbRes, exRes, antiRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
+    const [promptRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
-      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(10),
-      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(3),
+      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(30),
+      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(10),
+      supabase.from("ia_regras_proibidas").select("regra, categoria").eq("ativo", true),
       supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
@@ -504,6 +505,7 @@ serve(async (req) => {
     const conhecimentos = kbRes.data || [];
     const exemplos = exRes.data || [];
     const antiFeedbacks = antiRes.data || [];
+    const regrasProibidas = regrasRes.data || [];
     // Reverse to chronological order
     const allMsgs = (msgsRes.data || []).reverse();
     const colunas = colRes.data || [];
