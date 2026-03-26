@@ -854,14 +854,30 @@ serve(async (req) => {
             validatorFlags.push("retry_accepted");
             console.log("[VALIDATOR] Retry accepted");
           } else {
-            // Deterministic fallback
-            resposta = DETERMINISTIC_FALLBACKS.validator_failed;
-            validatorFlags.push("deterministic_fallback");
-            console.log("[VALIDATOR] Retry also rejected — using deterministic fallback");
+            // Rotating deterministic fallback
+            const fb = pickFallback(recentOutbound);
+            if (fb) {
+              resposta = fb;
+              validatorFlags.push("deterministic_fallback");
+              console.log("[VALIDATOR] Retry also rejected — using rotating fallback");
+            } else {
+              // All fallbacks exhausted — escalate to human
+              resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
+              precisa_humano = true;
+              validatorFlags.push("fallback_exhausted_escalate");
+              console.log("[VALIDATOR] All fallbacks exhausted — escalating to human");
+            }
           }
         } else {
-          resposta = DETERMINISTIC_FALLBACKS.validator_failed;
-          validatorFlags.push("deterministic_fallback");
+          const fb = pickFallback(recentOutbound);
+          if (fb) {
+            resposta = fb;
+            validatorFlags.push("deterministic_fallback");
+          } else {
+            resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
+            precisa_humano = true;
+            validatorFlags.push("fallback_exhausted_escalate");
+          }
         }
       } else {
         validatorFlags.push("passed");
