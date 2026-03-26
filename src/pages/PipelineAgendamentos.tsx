@@ -60,6 +60,8 @@ export default function PipelineAgendamentos() {
     const ag = agendamentos.find((a) => a.id === agId);
     if (!ag || ag.status === newStatus) return;
 
+    const statusAnterior = ag.status;
+
     // Optimistic update
     queryClient.setQueryData(
       ["agendamentos", filtroLoja || undefined, undefined],
@@ -77,6 +79,19 @@ export default function PipelineAgendamentos() {
     } else {
       toast.success(`Movido para ${STATUS_COLUMNS.find((c) => c.key === newStatus)?.label || newStatus}`);
       queryClient.invalidateQueries({ queryKey: ["agendamentos"] });
+
+      // Trigger automations explicitly (DB trigger may not have vault secrets)
+      supabase.functions.invoke("pipeline-automations", {
+        body: {
+          entity_type: "agendamento",
+          entity_id: agId,
+          status_novo: newStatus,
+          status_anterior: statusAnterior,
+        },
+      }).then(({ error: autoErr }) => {
+        if (autoErr) console.error("[AUTOMATIONS] Error:", autoErr);
+        else console.log("[AUTOMATIONS] Triggered for", agId, statusAnterior, "→", newStatus);
+      });
     }
   };
 
