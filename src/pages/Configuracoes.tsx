@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2, MessageSquare, Store, Brain } from "lucide-react";
 import { KnowledgeBaseCard } from "@/components/configuracoes/KnowledgeBaseCard";
 import { LearningCard } from "@/components/configuracoes/LearningCard";
 import { TelefonesLojasCard } from "@/components/configuracoes/TelefonesLojasCard";
@@ -77,189 +78,59 @@ function useContatosHomologacao() {
 // ─── Main Component ───
 
 export default function Configuracoes() {
-  const [setorDialog, setSetorDialog] = useState(false);
-  const [filaDialog, setFilaDialog] = useState(false);
-  const queryClient = useQueryClient();
-  const { data: setores } = useSetores();
-  const { data: filas } = useFilas();
-
-  const createSetor = useMutation({
-    mutationFn: async (setor: { nome: string; descricao?: string }) => {
-      const { error } = await supabase.from("setores").insert(setor);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["setores"] });
-      toast.success("Setor criado");
-      setSetorDialog(false);
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const createFila = useMutation({
-    mutationFn: async (fila: { setor_id: string; nome: string; tipo: "atendimento" | "execucao"; descricao?: string; sla_minutos?: number }) => {
-      const { error } = await supabase.from("filas").insert([fila]);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["filas"] });
-      toast.success("Fila criada");
-      setFilaDialog(false);
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const toggleSetorAtivo = useMutation({
-    mutationFn: async ({ id, ativo }: { id: string; ativo: boolean }) => {
-      const { error } = await supabase.from("setores").update({ ativo }).eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["setores"] }),
-  });
-
-  const toggleFilaAtivo = useMutation({
-    mutationFn: async ({ id, ativo }: { id: string; ativo: boolean }) => {
-      const { error } = await supabase.from("filas").update({ ativo }).eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["filas"] }),
-  });
-
-  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
-
   return (
     <>
       <PageHeader title="Configurações" description="Gerencie setores, filas, IA e integrações" />
 
-      <div className="grid gap-6">
-        {/* Prompt IA */}
-        <PromptIACard />
+      <Tabs defaultValue="ia" className="w-full">
+        <TabsList className="w-full grid grid-cols-4 mb-6">
+          <TabsTrigger value="ia" className="flex items-center gap-1.5">
+            <Brain className="h-4 w-4" /> Inteligência Artificial
+          </TabsTrigger>
+          <TabsTrigger value="estrutura" className="flex items-center gap-1.5">
+            <Building2 className="h-4 w-4" /> Estrutura
+          </TabsTrigger>
+          <TabsTrigger value="lojas" className="flex items-center gap-1.5">
+            <Store className="h-4 w-4" /> Lojas
+          </TabsTrigger>
+          <TabsTrigger value="whatsapp" className="flex items-center gap-1.5">
+            <MessageSquare className="h-4 w-4" /> WhatsApp
+          </TabsTrigger>
+        </TabsList>
 
-        {/* Knowledge Base */}
-        <KnowledgeBaseCard />
+        {/* ─── IA ─── */}
+        <TabsContent value="ia">
+          <div className="grid gap-6">
+            <PromptIACard />
+            <KnowledgeBaseCard />
+            <LearningCard />
+          </div>
+        </TabsContent>
 
-        {/* Aprendizado da IA */}
-        <LearningCard />
+        {/* ─── Estrutura ─── */}
+        <TabsContent value="estrutura">
+          <div className="grid gap-6">
+            <SetoresCard />
+            <FilasCard />
+          </div>
+        </TabsContent>
 
-        {/* Telefones de Lojas */}
-        <TelefonesLojasCard />
+        {/* ─── Lojas ─── */}
+        <TabsContent value="lojas">
+          <div className="grid gap-6">
+            <TelefonesLojasCard />
+          </div>
+        </TabsContent>
 
-        {/* Modo Homologação */}
-        <HomologacaoCard />
-
-        {/* Setores */}
-        <Card className="shadow-card">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg flex items-center gap-2"><Building2 className="h-5 w-5" /> Setores</CardTitle>
-            <Dialog open={setorDialog} onOpenChange={setSetorDialog}>
-              <DialogTrigger asChild>
-                <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Novo Setor</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>Novo Setor</DialogTitle></DialogHeader>
-                <CreateSetorForm onSubmit={(data) => createSetor.mutate(data)} loading={createSetor.isPending} />
-              </DialogContent>
-            </Dialog>
-          </CardHeader>
-          <CardContent>
-            {!setores?.length ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Nenhum setor cadastrado</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead>Ativo</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {setores.map((s: any) => (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-medium">{s.nome}</TableCell>
-                      <TableCell className="text-muted-foreground">{s.descricao || "—"}</TableCell>
-                      <TableCell>
-                        <Switch checked={s.ativo} onCheckedChange={(v) => toggleSetorAtivo.mutate({ id: s.id, ativo: v })} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Filas */}
-        <Card className="shadow-card">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg flex items-center gap-2"><GitBranch className="h-5 w-5" /> Filas</CardTitle>
-            <Dialog open={filaDialog} onOpenChange={setFilaDialog}>
-              <DialogTrigger asChild>
-                <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Nova Fila</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>Nova Fila</DialogTitle></DialogHeader>
-                <CreateFilaForm setores={setores || []} onSubmit={(data) => createFila.mutate(data)} loading={createFila.isPending} />
-              </DialogContent>
-            </Dialog>
-          </CardHeader>
-          <CardContent>
-            {!filas?.length ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma fila cadastrada</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Setor</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>SLA</TableHead>
-                    <TableHead>Ativo</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filas.map((f: any) => (
-                    <TableRow key={f.id}>
-                      <TableCell className="font-medium">{f.nome}</TableCell>
-                      <TableCell className="text-muted-foreground">{f.setor?.nome || "—"}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={f.tipo === "atendimento" ? "bg-info-soft text-info" : "bg-success-soft text-success"}>
-                          {f.tipo === "atendimento" ? "Atendimento" : "Execução"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{f.sla_minutos ? `${f.sla_minutos} min` : "—"}</TableCell>
-                      <TableCell>
-                        <Switch checked={f.ativo} onCheckedChange={(v) => toggleFilaAtivo.mutate({ id: f.id, ativo: v })} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* WhatsApp Templates */}
-        <WhatsAppTemplatesCard />
-
-        {/* WhatsApp Integration */}
-        <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">📱 Integração WhatsApp</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label className="text-sm font-medium">URL do Webhook</Label>
-              <div className="flex items-center gap-2 mt-1">
-                <Input value={webhookUrl} readOnly className="font-mono text-xs" />
-                <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(webhookUrl); toast.success("URL copiada!"); }}>
-                  Copiar
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        {/* ─── WhatsApp ─── */}
+        <TabsContent value="whatsapp">
+          <div className="grid gap-6">
+            <WhatsAppTemplatesCard />
+            <HomologacaoCard />
+            <WhatsAppIntegrationCard />
+          </div>
+        </TabsContent>
+      </Tabs>
     </>
   );
 }
@@ -319,6 +190,159 @@ function PromptIACard() {
               </Button>
             </div>
           </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Setores Card ───
+
+function SetoresCard() {
+  const [setorDialog, setSetorDialog] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: setores } = useSetores();
+
+  const createSetor = useMutation({
+    mutationFn: async (setor: { nome: string; descricao?: string }) => {
+      const { error } = await supabase.from("setores").insert(setor);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setores"] });
+      toast.success("Setor criado");
+      setSetorDialog(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const toggleSetorAtivo = useMutation({
+    mutationFn: async ({ id, ativo }: { id: string; ativo: boolean }) => {
+      const { error } = await supabase.from("setores").update({ ativo }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["setores"] }),
+  });
+
+  return (
+    <Card className="shadow-card">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-lg flex items-center gap-2"><Building2 className="h-5 w-5" /> Setores</CardTitle>
+        <Dialog open={setorDialog} onOpenChange={setSetorDialog}>
+          <DialogTrigger asChild>
+            <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Novo Setor</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Novo Setor</DialogTitle></DialogHeader>
+            <CreateSetorForm onSubmit={(data) => createSetor.mutate(data)} loading={createSetor.isPending} />
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {!setores?.length ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">Nenhum setor cadastrado</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome</TableHead>
+                <TableHead>Descrição</TableHead>
+                <TableHead>Ativo</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {setores.map((s: any) => (
+                <TableRow key={s.id}>
+                  <TableCell className="font-medium">{s.nome}</TableCell>
+                  <TableCell className="text-muted-foreground">{s.descricao || "—"}</TableCell>
+                  <TableCell>
+                    <Switch checked={s.ativo} onCheckedChange={(v) => toggleSetorAtivo.mutate({ id: s.id, ativo: v })} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Filas Card ───
+
+function FilasCard() {
+  const [filaDialog, setFilaDialog] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: setores } = useSetores();
+  const { data: filas } = useFilas();
+
+  const createFila = useMutation({
+    mutationFn: async (fila: { setor_id: string; nome: string; tipo: "atendimento" | "execucao"; descricao?: string; sla_minutos?: number }) => {
+      const { error } = await supabase.from("filas").insert([fila]);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["filas"] });
+      toast.success("Fila criada");
+      setFilaDialog(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const toggleFilaAtivo = useMutation({
+    mutationFn: async ({ id, ativo }: { id: string; ativo: boolean }) => {
+      const { error } = await supabase.from("filas").update({ ativo }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["filas"] }),
+  });
+
+  return (
+    <Card className="shadow-card">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-lg flex items-center gap-2"><GitBranch className="h-5 w-5" /> Filas</CardTitle>
+        <Dialog open={filaDialog} onOpenChange={setFilaDialog}>
+          <DialogTrigger asChild>
+            <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Nova Fila</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Nova Fila</DialogTitle></DialogHeader>
+            <CreateFilaForm setores={setores || []} onSubmit={(data) => createFila.mutate(data)} loading={createFila.isPending} />
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {!filas?.length ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma fila cadastrada</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome</TableHead>
+                <TableHead>Setor</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>SLA</TableHead>
+                <TableHead>Ativo</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filas.map((f: any) => (
+                <TableRow key={f.id}>
+                  <TableCell className="font-medium">{f.nome}</TableCell>
+                  <TableCell className="text-muted-foreground">{f.setor?.nome || "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={f.tipo === "atendimento" ? "bg-info-soft text-info" : "bg-success-soft text-success"}>
+                      {f.tipo === "atendimento" ? "Atendimento" : "Execução"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{f.sla_minutos ? `${f.sla_minutos} min` : "—"}</TableCell>
+                  <TableCell>
+                    <Switch checked={f.ativo} onCheckedChange={(v) => toggleFilaAtivo.mutate({ id: f.id, ativo: v })} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </CardContent>
     </Card>
@@ -462,6 +486,31 @@ function HomologacaoCard() {
             )}
           </>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── WhatsApp Integration Card ───
+
+function WhatsAppIntegrationCard() {
+  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
+
+  return (
+    <Card className="shadow-card">
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">📱 Integração WhatsApp</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <Label className="text-sm font-medium">URL do Webhook</Label>
+          <div className="flex items-center gap-2 mt-1">
+            <Input value={webhookUrl} readOnly className="font-mono text-xs" />
+            <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(webhookUrl); toast.success("URL copiada!"); }}>
+              Copiar
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

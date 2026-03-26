@@ -7,8 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, RefreshCw, Trash2, Loader2, MessageSquare } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Plus, RefreshCw, Trash2, Loader2, MessageSquare, ChevronDown, Eye } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -41,9 +41,45 @@ const statusColors: Record<string, string> = {
   REJECTED: "bg-destructive/10 text-destructive",
 };
 
+function getComponentText(template: MetaTemplate, type: string): string | null {
+  const comp = template.components?.find((c: any) => c.type === type);
+  return comp?.text || null;
+}
+
+function TemplatePreview({ template }: { template: MetaTemplate }) {
+  const header = getComponentText(template, "HEADER");
+  const body = getComponentText(template, "BODY");
+  const footer = getComponentText(template, "FOOTER");
+  const buttons = template.components?.find((c: any) => c.type === "BUTTONS");
+
+  return (
+    <div className="bg-muted/50 rounded-lg p-4 space-y-2 border border-border">
+      {header && (
+        <p className="font-semibold text-sm text-foreground">{header}</p>
+      )}
+      {body && (
+        <p className="text-sm text-foreground whitespace-pre-wrap">{body}</p>
+      )}
+      {footer && (
+        <p className="text-xs text-muted-foreground mt-2">{footer}</p>
+      )}
+      {buttons?.buttons && (
+        <div className="flex flex-wrap gap-2 pt-2 border-t border-border mt-2">
+          {buttons.buttons.map((btn: any, i: number) => (
+            <span key={i} className="text-xs bg-primary/10 text-primary px-3 py-1 rounded-full">
+              {btn.text}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WhatsAppTemplatesCard() {
   const { data: templates, isLoading, refetch, isRefetching } = useTemplates();
   const [createDialog, setCreateDialog] = useState(false);
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const deleteMutation = useMutation({
@@ -100,47 +136,57 @@ export function WhatsAppTemplatesCard() {
         ) : !templates?.length ? (
           <p className="text-sm text-muted-foreground py-4 text-center">Nenhum template encontrado</p>
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead>Idioma</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-10"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {templates.map((t) => (
-                  <TableRow key={t.id}>
-                    <TableCell className="font-mono text-sm">{t.name}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{t.category}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{t.language}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={statusColors[t.status] || "bg-muted text-muted-foreground"}>
-                        {t.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive"
-                        onClick={() => {
-                          if (confirm(`Excluir template "${t.name}"?`)) {
-                            deleteMutation.mutate(t.name);
-                          }
-                        }}
-                        disabled={deleteMutation.isPending}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
+          <div className="space-y-2">
+            {templates.map((t) => (
+              <Collapsible
+                key={t.id}
+                open={expandedTemplate === t.id}
+                onOpenChange={(open) => setExpandedTemplate(open ? t.id : null)}
+              >
+                <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <CollapsibleTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedTemplate === t.id ? "rotate-180" : ""}`} />
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </CollapsibleTrigger>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-sm font-medium truncate">{t.name}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-muted-foreground">{t.category}</span>
+                        <span className="text-xs text-muted-foreground">•</span>
+                        <span className="text-xs text-muted-foreground">{t.language}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge variant="outline" className={statusColors[t.status] || "bg-muted text-muted-foreground"}>
+                      {t.status}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => {
+                        if (confirm(`Excluir template "${t.name}"?`)) {
+                          deleteMutation.mutate(t.name);
+                        }
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <CollapsibleContent className="pl-12 pr-3 pb-2 pt-1">
+                  {t.components?.length ? (
+                    <TemplatePreview template={t} />
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic py-2">Sem conteúdo disponível</p>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            ))}
           </div>
         )}
       </CardContent>
@@ -155,6 +201,20 @@ function CreateTemplateForm({ onSuccess }: { onSuccess: () => void }) {
   const [bodyText, setBodyText] = useState("");
   const [footerText, setFooterText] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Live preview state
+  const previewTemplate: MetaTemplate = {
+    name: name || "preview",
+    status: "PREVIEW",
+    category,
+    language: "pt_BR",
+    id: "preview",
+    components: [
+      ...(headerText.trim() ? [{ type: "HEADER", format: "TEXT", text: headerText }] : []),
+      { type: "BODY", text: bodyText || "Corpo da mensagem..." },
+      ...(footerText.trim() ? [{ type: "FOOTER", text: footerText }] : []),
+    ],
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,6 +290,15 @@ function CreateTemplateForm({ onSuccess }: { onSuccess: () => void }) {
         <Label>Rodapé (opcional)</Label>
         <Input value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="Texto do rodapé" />
       </div>
+
+      {/* Live Preview */}
+      <div className="space-y-2">
+        <Label className="flex items-center gap-1.5">
+          <Eye className="h-3.5 w-3.5" /> Pré-visualização
+        </Label>
+        <TemplatePreview template={previewTemplate} />
+      </div>
+
       <Button type="submit" className="w-full" disabled={loading || !name || !bodyText}>
         {loading ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Enviando...</> : "Criar e Enviar para Aprovação"}
       </Button>
