@@ -907,6 +907,12 @@ serve(async (req) => {
 
   } catch (e) {
     console.error("[ERROR] ai-triage:", e);
+    // Clear lock on error too
+    try {
+      const errMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+      delete errMeta.ia_lock;
+      await supabase.from("atendimentos").update({ metadata: errMeta }).eq("id", atendimento_id);
+    } catch (_) { /* ignore lock cleanup errors */ }
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
