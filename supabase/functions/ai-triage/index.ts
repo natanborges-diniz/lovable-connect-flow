@@ -53,7 +53,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
       resposta:
         "Boa! Me manda uma foto da sua receita que eu já te passo os valores certinhos. Se ainda não tem receita, posso te orientar também 😉",
       intencao: "orcamento",
-      pipeline_coluna: inboundCount >= 3 ? "Orçamento" : "Novo Contato",
+      pipeline_coluna: "Orçamento",
       precisa_humano: false,
     };
   }
