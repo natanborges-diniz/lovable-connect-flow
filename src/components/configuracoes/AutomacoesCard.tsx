@@ -20,7 +20,7 @@ import {
 } from "@/hooks/useAutomacoes";
 
 const STATUS_AGENDAMENTO = [
-  "agendado", "confirmado", "atendido", "orcamento",
+  "agendado", "lembrete_enviado", "confirmado", "atendido", "orcamento",
   "venda_fechada", "no_show", "recuperacao", "reagendado",
   "abandonado", "cancelado",
 ];
