@@ -991,7 +991,7 @@ serve(async (req) => {
     if (precisa_humano) {
       const col = colunas.find((c: any) => c.nome === "Atendimento Humano");
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
-    } else if (inboundCount >= 3 || pipeline_coluna !== "Novo Contato") {
+    } else if (pipeline_coluna !== "Novo Contato") {
       const col = colunas.find((c: any) => c.nome === pipeline_coluna);
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
     }

@@ -160,6 +160,47 @@ serve(async (req) => {
       });
     }
 
+    // ── CRM ROUTING: Assign pipeline_coluna_id immediately ──
+    if (!contato.pipeline_coluna_id || atendimentoAberto === null) {
+      try {
+        const { data: allColunas } = await supabase
+          .from("pipeline_colunas")
+          .select("id, nome, setor_id, ordem")
+          .eq("ativo", true);
+
+        if (allColunas && allColunas.length > 0) {
+          let targetColunaId: string | null = null;
+
+          if (contato.tipo === "loja" || contato.tipo === "colaborador") {
+            // Route to internal pipeline (Financeiro sector has setor_id)
+            const internalCol = allColunas
+              .filter((c: any) => c.setor_id !== null && c.nome !== "Agendado")
+              .sort((a: any, b: any) => a.ordem - b.ordem)[0];
+            if (internalCol) targetColunaId = internalCol.id;
+          } else if (!contato.pipeline_coluna_id) {
+            // New contact — assign "Novo Contato"
+            const novoContatoCol = allColunas.find((c: any) => c.nome === "Novo Contato");
+            if (novoContatoCol) targetColunaId = novoContatoCol.id;
+          } else {
+            // Existing contact — check if in terminal column
+            const currentColuna = allColunas.find((c: any) => c.id === contato.pipeline_coluna_id);
+            if (currentColuna && ["Abandonado", "Cancelado"].includes(currentColuna.nome) && !currentColuna.setor_id) {
+              const retornoCol = allColunas.find((c: any) => c.nome === "Retorno");
+              if (retornoCol) targetColunaId = retornoCol.id;
+            }
+            // Otherwise keep current column
+          }
+
+          if (targetColunaId && targetColunaId !== contato.pipeline_coluna_id) {
+            await supabase.from("contatos").update({ pipeline_coluna_id: targetColunaId }).eq("id", contato.id);
+            console.log(`[CRM ROUTING] Contact ${contato.id} assigned to column ${targetColunaId}`);
+          }
+        }
+      } catch (routingErr) {
+        console.error("[CRM ROUTING] Error:", routingErr);
+      }
+    }
+
     // 4. Handle media: download and store in bucket
     let storedMediaUrl: string | null = null;
     let tipoConteudo = "text";
