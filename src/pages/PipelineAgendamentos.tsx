@@ -1,10 +1,10 @@
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useAgendamentos } from "@/hooks/useAgendamentos";
+import { useAgendamentos, Agendamento } from "@/hooks/useAgendamentos";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarDays, MapPin, User, FileText, ShoppingCart } from "lucide-react";
+import { CalendarDays, MapPin, User, FileText, ShoppingCart, CheckCircle2, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,6 +12,7 @@ import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { AgendamentoDialog } from "@/components/agendamentos/AgendamentoDialog";
 
 const STATUS_COLUMNS = [
   { key: "agendado", label: "Agendado", color: "bg-blue-500" },
@@ -31,6 +32,8 @@ export default function PipelineAgendamentos() {
   const [filtroLoja, setFiltroLoja] = useState<string>("");
   const { data: agendamentos = [], isLoading } = useAgendamentos(filtroLoja || undefined);
   const queryClient = useQueryClient();
+  const [selectedAg, setSelectedAg] = useState<Agendamento | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const lojas = useMemo(() => {
     const set = new Set(agendamentos.map((a) => a.loja_nome));
@@ -61,6 +64,7 @@ export default function PipelineAgendamentos() {
     if (!ag || ag.status === newStatus) return;
 
     const statusAnterior = ag.status;
+    const colLabel = STATUS_COLUMNS.find((c) => c.key === newStatus)?.label || newStatus;
 
     // Optimistic update
     queryClient.setQueryData(
@@ -77,10 +81,12 @@ export default function PipelineAgendamentos() {
       toast.error("Erro ao mover card: " + error.message);
       queryClient.invalidateQueries({ queryKey: ["agendamentos"] });
     } else {
-      toast.success(`Movido para ${STATUS_COLUMNS.find((c) => c.key === newStatus)?.label || newStatus}`);
+      toast.success(`Movido para ${colLabel}`);
       queryClient.invalidateQueries({ queryKey: ["agendamentos"] });
 
-      // Trigger automations explicitly (DB trigger may not have vault secrets)
+      // Trigger automations and show feedback
+      const toastId = toast.loading(`⚡ Executando automações para "${colLabel}"...`);
+      
       supabase.functions.invoke("pipeline-automations", {
         body: {
           entity_type: "agendamento",
@@ -88,18 +94,44 @@ export default function PipelineAgendamentos() {
           status_novo: newStatus,
           status_anterior: statusAnterior,
         },
-      }).then(({ error: autoErr }) => {
-        if (autoErr) console.error("[AUTOMATIONS] Error:", autoErr);
-        else console.log("[AUTOMATIONS] Triggered for", agId, statusAnterior, "→", newStatus);
+      }).then(({ data, error: autoErr }) => {
+        if (autoErr) {
+          toast.error("Erro nas automações: " + autoErr.message, { id: toastId });
+        } else if (data?.status === "no_rules") {
+          toast.info("Nenhuma automação configurada para este estágio", { id: toastId });
+        } else if (data?.status === "blocked_homologacao") {
+          toast.warning("Automação bloqueada (modo homologação)", { id: toastId });
+        } else {
+          const executed = data?.executed || [];
+          const summary = executed.map((e: string) => {
+            if (e.startsWith("template:")) return `📨 Template: ${e.replace("template:", "")}`;
+            if (e.startsWith("mensagem:")) return "💬 Mensagem enviada";
+            if (e.startsWith("tarefa:")) return `📋 Tarefa criada`;
+            if (e.startsWith("error:")) return `❌ Erro: ${e.replace("error:", "")}`;
+            return e;
+          }).join("\n");
+          
+          const hasError = executed.some((e: string) => e.startsWith("error:"));
+          if (hasError) {
+            toast.warning(`Automações parciais:\n${summary}`, { id: toastId, duration: 5000 });
+          } else {
+            toast.success(`✅ Automações executadas:\n${summary}`, { id: toastId, duration: 4000 });
+          }
+        }
       });
     }
+  };
+
+  const handleCardClick = (ag: Agendamento) => {
+    setSelectedAg(ag);
+    setDialogOpen(true);
   };
 
   return (
     <div className="flex flex-col h-full">
       <PageHeader
         title="Pipeline de Agendamentos"
-        description="Arraste cards entre colunas para disparar automações"
+        description="Arraste cards entre colunas para disparar automações. Clique para editar."
         actions={
           <Select value={filtroLoja} onValueChange={(v) => setFiltroLoja(v === "all" ? "" : v)}>
             <SelectTrigger className="w-[200px]">
@@ -145,9 +177,10 @@ export default function PipelineAgendamentos() {
                                   ref={provided.innerRef}
                                   {...provided.draggableProps}
                                   {...provided.dragHandleProps}
+                                  onClick={() => !snapshot.isDragging && handleCardClick(ag)}
                                 >
                                   <Card
-                                    className={`border ${isToday(ag.data_horario) ? "border-primary shadow-sm" : ""} ${ag.status === "no_show" ? "border-destructive/50" : ""} ${
+                                    className={`border cursor-pointer hover:shadow-md transition-shadow ${isToday(ag.data_horario) ? "border-primary shadow-sm" : ""} ${ag.status === "no_show" ? "border-destructive/50" : ""} ${
                                       snapshot.isDragging ? "shadow-lg rotate-1" : ""
                                     }`}
                                   >
@@ -157,6 +190,18 @@ export default function PipelineAgendamentos() {
                                         <span className="text-sm font-medium truncate">
                                           {ag.contato?.nome || "Cliente"}
                                         </span>
+                                        {/* Monitoring indicators */}
+                                        <div className="ml-auto flex gap-0.5">
+                                          {ag.lembrete_enviado && (
+                                            <span title="Lembrete enviado"><CheckCircle2 className="h-3 w-3 text-sky-500" /></span>
+                                          )}
+                                          {ag.confirmacao_enviada && (
+                                            <span title="Confirmação enviada"><CheckCircle2 className="h-3 w-3 text-cyan-500" /></span>
+                                          )}
+                                          {ag.noshow_enviado && (
+                                            <span title="No-show enviado"><AlertCircle className="h-3 w-3 text-destructive" /></span>
+                                          )}
+                                        </div>
                                       </div>
                                       <div className="flex items-center gap-2">
                                         <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -238,6 +283,12 @@ export default function PipelineAgendamentos() {
           </div>
         </div>
       </DragDropContext>
+
+      <AgendamentoDialog
+        agendamento={selectedAg}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+      />
     </div>
   );
 }
