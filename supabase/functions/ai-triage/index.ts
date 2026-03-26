@@ -710,7 +710,7 @@ serve(async (req) => {
           messages: callMessages,
           tools: TOOLS,
           tool_choice: "required",
-          max_completion_tokens: 1200,
+          max_completion_tokens: 2500,
         }),
       });
 
