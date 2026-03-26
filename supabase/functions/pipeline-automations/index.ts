@@ -223,6 +223,28 @@ function resolveParams(params: string[], contato: any, agendamento: any): string
   return params.map((p) => resolveText(p, contato, agendamento));
 }
 
+function resolveQuando(dataHorario: string): string {
+  if (!dataHorario) return "";
+  const now = new Date();
+  const dt = new Date(dataHorario);
+  const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+
+  // Compare dates in SP timezone
+  const nowSP = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const dtSP = new Date(dt.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const nowDay = new Date(nowSP.getFullYear(), nowSP.getMonth(), nowSP.getDate()).getTime();
+  const dtDay = new Date(dtSP.getFullYear(), dtSP.getMonth(), dtSP.getDate()).getTime();
+  const diffDays = Math.round((dtDay - nowDay) / 86400000);
+
+  if (diffDays === 0) return `hoje às ${hora}`;
+  if (diffDays === 1) return `amanhã às ${hora}`;
+  if (diffDays > 1 && diffDays <= 6) {
+    const diaSemana = dt.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "America/Sao_Paulo" });
+    return `${diaSemana} às ${hora}`;
+  }
+  return `dia ${dt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} às ${hora}`;
+}
+
 function resolveText(template: string, contato: any, agendamento: any): string {
   if (!template) return "";
   
@@ -230,9 +252,13 @@ function resolveText(template: string, contato: any, agendamento: any): string {
   const loja = agendamento?.loja_nome || "";
   
   let hora = "";
+  let quando = "";
+  let diaSemana = "";
   if (agendamento?.data_horario) {
     const dt = new Date(agendamento.data_horario);
     hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    quando = resolveQuando(agendamento.data_horario);
+    diaSemana = dt.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "America/Sao_Paulo" });
   }
 
   return template
@@ -240,6 +266,8 @@ function resolveText(template: string, contato: any, agendamento: any): string {
     .replace(/\{\{primeiro_nome\}\}/g, firstName)
     .replace(/\{\{loja\}\}/g, loja)
     .replace(/\{\{hora\}\}/g, hora)
+    .replace(/\{\{quando\}\}/g, quando)
+    .replace(/\{\{dia_semana\}\}/g, diaSemana)
     .replace(/\{\{telefone\}\}/g, contato?.telefone || "")
     .replace(/\{\{data\}\}/g, agendamento?.data_horario
       ? new Date(agendamento.data_horario).toLocaleDateString("pt-BR")

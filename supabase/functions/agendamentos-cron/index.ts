@@ -30,16 +30,15 @@ serve(async (req) => {
     //    Agendamentos de amanhã que ainda estão "agendado"
     //    Move para "lembrete_enviado" → trigger dispara template lembrete
     // ═══════════════════════════════════════════
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStart = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate()).toISOString();
-    const tomorrowEnd = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate() + 1).toISOString();
+    // Include TODAY (same-day agendamentos still in "agendado") and TOMORROW
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2).toISOString();
 
     const { data: paraLembrete } = await supabase
       .from("agendamentos")
       .select("id")
       .eq("status", "agendado")
-      .gte("data_horario", tomorrowStart)
+      .gte("data_horario", todayStart)
       .lt("data_horario", tomorrowEnd);
 
     for (const ag of paraLembrete || []) {
