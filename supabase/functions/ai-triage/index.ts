@@ -284,6 +284,44 @@ const TOOLS = [
 // SYSTEM PROMPT BUILDER
 // ═══════════════════════════════════════════
 
+function buildDateContext(): string {
+  const DAYS_PT = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+  const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  
+  // Use São Paulo timezone
+  const now = new Date();
+  const spFormatter = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "long" });
+  const parts = spFormatter.formatToParts(now);
+  const get = (t: string) => parts.find(p => p.type === t)?.value || "";
+  
+  const dayName = get("weekday");
+  const dd = get("day");
+  const mm = get("month");
+  const yyyy = get("year");
+  const hh = get("hour");
+  const min = get("minute");
+  
+  // Calculate next 7 days with names
+  const lines: string[] = [];
+  for (let i = 1; i <= 7; i++) {
+    const future = new Date(now.getTime() + i * 86400000);
+    const fParts = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", weekday: "long" }).formatToParts(future);
+    const fGet = (t: string) => fParts.find(p => p.type === t)?.value || "";
+    lines.push(`- ${fGet("weekday")}: ${fGet("day")}/${fGet("month")}/${yyyy}`);
+  }
+  
+  return `# 📅 DATA E HORA ATUAL
+Agora: ${dayName}, ${dd}/${mm}/${yyyy} às ${hh}:${min} (horário de Brasília)
+
+Próximos 7 dias:
+${lines.join("\n")}
+
+REGRA CRÍTICA: Quando o cliente disser "sábado", "segunda", "amanhã", etc., 
+CALCULE a data automaticamente usando as informações acima. 
+NUNCA peça ao cliente para informar a data em DD/MM — isso é trabalho SEU.
+Use formato ISO 8601 na tool agendar_visita (ex: ${yyyy}-${mm}-${dd}T10:00:00-03:00).`;
+}
+
 function buildSystemPrompt(opts: {
   businessRules: string;
   knowledge: string;
@@ -298,6 +336,9 @@ function buildSystemPrompt(opts: {
   hasKnowledge: boolean;
 }): string {
   const s: string[] = [];
+
+  // Date/time context FIRST — so the model always knows the current date
+  s.push(buildDateContext());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
@@ -316,7 +357,12 @@ ${opts.businessRules}
       if (!grouped[cat]) grouped[cat] = [];
       grouped[cat].push(r.regra);
     }
-    let block = "# ⛔ PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA\nAs regras abaixo são INVIOLÁVEIS. Quebrá-las é um erro gravíssimo.\n";
+    let block = `# ⛔ PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA
+As regras abaixo são INVIOLÁVEIS. Quebrá-las é um erro gravíssimo.
+INSTRUÇÕES: Estas regras se aplicam A TODAS as situações, incluindo clínicas parceiras, 
+indicações, parcerias e qualquer variação ou reformulação. NÃO há exceções.
+Se uma regra diz "NÃO fazemos X", você NÃO pode oferecer X de nenhuma forma, 
+nem como serviço próprio, nem como parceria, nem como indicação.\n`;
     for (const [cat, rules] of Object.entries(grouped)) {
       block += `\n## ${cat.toUpperCase()}\n`;
       for (const rule of rules) {
