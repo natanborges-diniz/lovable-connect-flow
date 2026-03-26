@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.manage-whatsapp-templates]
 verify_jwt = false
+
+[functions.pipeline-automations]
+verify_jwt = false

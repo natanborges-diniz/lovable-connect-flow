@@ -625,6 +625,53 @@ export type Database = {
           },
         ]
       }
+      pipeline_automacoes: {
+        Row: {
+          ativo: boolean
+          config: Json
+          created_at: string
+          entidade: string
+          id: string
+          ordem: number
+          pipeline_coluna_id: string | null
+          status_alvo: string | null
+          tipo_acao: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          config?: Json
+          created_at?: string
+          entidade?: string
+          id?: string
+          ordem?: number
+          pipeline_coluna_id?: string | null
+          status_alvo?: string | null
+          tipo_acao: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          config?: Json
+          created_at?: string
+          entidade?: string
+          id?: string
+          ordem?: number
+          pipeline_coluna_id?: string | null
+          status_alvo?: string | null
+          tipo_acao?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_automacoes_pipeline_coluna_id_fkey"
+            columns: ["pipeline_coluna_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_colunas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pipeline_colunas: {
         Row: {
           ativo: boolean

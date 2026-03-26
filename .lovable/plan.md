@@ -1,76 +1,42 @@
+## Sistema de Agendamentos — Implementado ✅
 
+### O que foi feito
 
-## Plano: Automações Atreladas a Colunas do Pipeline
+1. **Tabela `agendamentos`** — completa com status, flags de lembrete/cobrança, confirmação de loja
+2. **Colunas `horario_abertura`, `horario_fechamento`, `endereco`** em `telefones_lojas`
+3. **Setor + Pipeline "Agendamentos"** — colunas: Agendado, Confirmado, Atendido, Orçamento, Venda Fechada, No-Show, Recuperação, Reagendado, Abandonado, Cancelado
+4. **Secret `WHATSAPP_BUSINESS_ACCOUNT_ID`** configurado
+5. **Edge function `agendar-cliente`** — cria agendamento + envia confirmação WhatsApp
+6. **Edge function `agendamentos-cron`** — motor de transição temporal (move cards, não envia mensagens)
+7. **Edge function `manage-whatsapp-templates`** — CRUD de templates Meta via Graph API
+8. **Bot Lojas opção 4** — confirmar comparecimento do cliente
+9. **AI Triage** — contexto de lojas injetado, tools `agendar_visita` e `reagendar_visita`
+10. **Frontend** — Pipeline Agendamentos (Kanban com drag-and-drop), rota `/agendamentos`
 
-### Conceito
-
-Hoje as automações (lembretes, cobranças, no-show) são disparadas por um cron que verifica horários e flags. O novo modelo inverte a lógica: **a movimentação de coluna é o gatilho**. Quando um card entra numa coluna — seja por ação do sistema, da IA ou do operador manual — a regra daquela coluna é executada (ex: enviar mensagem WhatsApp, atualizar status, etc.).
-
-### O que muda
-
-```text
-ANTES:  Cron verifica hora → muda status → envia mensagem
-DEPOIS: Card muda de coluna → Edge Function "column-action" executa a regra → envia mensagem
-```
+## Automações Atreladas a Colunas — Implementado ✅
 
 ### Arquitetura
 
 ```text
-┌──────────────────┐       ┌──────────────────┐
-│  Pipeline UI     │       │  AI Triage /      │
-│  (drag & drop)   │       │  Cron / Bot       │
-└────────┬─────────┘       └────────┬──────────┘
-         │ UPDATE contato.pipeline_coluna_id    │
-         └────────────┬────────────┘
-                      ▼
-         ┌────────────────────────┐
-         │  DB Trigger (webhook)  │
-         │  on contatos UPDATE    │
-         │  or agendamentos UPDATE│
-         └────────────┬──────────┘
-                      ▼
-         ┌────────────────────────┐
-         │  Edge Function         │
-         │  "pipeline-automations"│
-         │  - Lê regras da coluna │
-         │  - Executa ação        │
-         │  (msg, template, etc.) │
-         └────────────────────────┘
+Card muda de coluna → DB Trigger → Edge Function "pipeline-automations" → executa regras
 ```
 
-### Etapas de implementação
+### O que foi feito
 
-**1. Tabela `pipeline_automacoes`** — regras por coluna
-- `id`, `pipeline_coluna_id` (FK), `tipo_acao` (enum: `enviar_template`, `enviar_mensagem`, `atualizar_status`, `criar_tarefa`), `config` (jsonb com template_name, params, texto, etc.), `ativo`, `ordem`, `created_at`
-- Permite múltiplas ações por coluna
+1. **Tabela `pipeline_automacoes`** — regras por coluna/status (template, mensagem, tarefa, campo)
+2. **Edge function `pipeline-automations`** — executa ações configuradas, respeita homologação
+3. **DB Triggers** — `on_agendamento_status_change` e `on_contato_coluna_change` via `pg_net`
+4. **Cron refatorado** — apenas transição temporal, disparo de mensagens delegado às automações
+5. **Drag-and-drop no Pipeline Agendamentos** — operador pode mover cards manualmente
+6. **UI de Automações** — aba em Configurações para criar/gerenciar regras por status
+7. **Automações pré-configuradas** — lembrete (confirmado), recuperação (no_show), pós-venda (venda_fechada)
 
-**2. Edge Function `pipeline-automations`** — executa ações
-- Recebe `{ entity_type, entity_id, coluna_id, coluna_anterior_id }`
-- Busca automações ativas daquela `coluna_id`
-- Para cada ação: envia template WhatsApp, envia mensagem livre, atualiza campo, cria tarefa, etc.
-- Respeita modo de homologação (só dispara para contatos whitelisted)
+### Variáveis de template
 
-**3. DB Trigger + Webhook (pg_net)** — detecta mudança de coluna
-- Trigger `AFTER UPDATE` em `contatos`: se `pipeline_coluna_id` mudou, chama `pipeline-automations` via `net.http_post`
-- Trigger `AFTER UPDATE` em `agendamentos`: se `status` mudou, faz o mesmo para o pipeline de agendamentos
+- `{{primeiro_nome}}`, `{{nome}}`, `{{loja}}`, `{{hora}}`, `{{data}}`, `{{telefone}}`
 
-**4. Refatorar o cron `agendamentos-cron`**
-- O cron continua existindo para ações baseadas em tempo (verificar se o horário passou), mas ao invés de enviar mensagens diretamente, ele **move o card de coluna** (ex: `agendado` → `no_show`), o que dispara a automação da coluna
-- O cron se torna apenas um "motor de transição temporal"
+### Próximos passos
 
-**5. Frontend: UI de configuração de automações**
-- Em Configurações → aba "Automações" ou dentro de cada coluna do pipeline
-- Para cada coluna: lista de ações configuradas (template, mensagem livre, etc.)
-- Formulário para adicionar/editar ações com preview da mensagem
-
-**6. Adaptar os pipelines UI** (Vendas, Agendamentos, Financeiro)
-- O `onDragEnd` no Pipeline de Vendas já faz `updateContato({ pipeline_coluna_id })` — o trigger cuida do resto
-- O Pipeline de Agendamentos passa a usar drag-and-drop também (hoje é read-only) — ao mover card, atualiza `agendamentos.status` e dispara a automação
-
-### Seção técnica
-
-- **Trigger SQL** usa `pg_net` para chamar a Edge Function, evitando acoplamento direto
-- **Idempotência**: a Edge Function verifica se a ação já foi executada (usando metadata do agendamento/contato) para evitar duplicatas
-- **Automações pré-configuradas padrão**: ao criar o sistema, seed com as regras atuais (lembrete no "Confirmado", cobrança no "No-Show", recuperação no "Recuperação")
-- **Retrocompatibilidade**: o cron continua como fallback temporal, mas delega o envio de mensagens à lógica de automação de coluna
-
+- Submeter templates Meta para aprovação: `confirmacao_agendamento`, `lembrete_agendamento`, `noshow_reagendamento`
+- Testar fluxo completo: agendamento → lembrete → confirmação loja → no-show → recuperação
+- Configurar cron job no pg_cron para executar `agendamentos-cron` a cada 15min
