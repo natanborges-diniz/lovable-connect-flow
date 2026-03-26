@@ -364,3 +364,27 @@ async function sendStoreChargeMessage(
     body: JSON.stringify({ atendimento_id: lojaAt.id, texto: msg, remetente_nome: "Sistema" }),
   });
 }
+
+// ═══════════════════════════════════════════
+// Helper: Resolve temporal label (hoje/amanhã/dia da semana)
+// ═══════════════════════════════════════════
+function resolveQuando(dataHorario: string, now?: Date): string {
+  if (!dataHorario) return "";
+  const ref = now || new Date();
+  const dt = new Date(dataHorario);
+  const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+
+  const refSP = new Date(ref.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const dtSP = new Date(dt.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const refDay = new Date(refSP.getFullYear(), refSP.getMonth(), refSP.getDate()).getTime();
+  const dtDay = new Date(dtSP.getFullYear(), dtSP.getMonth(), dtSP.getDate()).getTime();
+  const diffDays = Math.round((dtDay - refDay) / 86400000);
+
+  if (diffDays === 0) return `hoje às ${hora}`;
+  if (diffDays === 1) return `amanhã às ${hora}`;
+  if (diffDays > 1 && diffDays <= 6) {
+    const diaSemana = dt.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "America/Sao_Paulo" });
+    return `${diaSemana} às ${hora}`;
+  }
+  return `dia ${dt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} às ${hora}`;
+}
