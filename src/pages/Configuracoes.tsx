@@ -84,9 +84,9 @@ export default function Configuracoes() {
       <PageHeader title="Configurações" description="Gerencie setores, filas, IA e integrações" />
 
       <Tabs defaultValue="ia" className="w-full">
-        <TabsList className="w-full grid grid-cols-4 mb-6">
+        <TabsList className="w-full grid grid-cols-5 mb-6">
           <TabsTrigger value="ia" className="flex items-center gap-1.5">
-            <Brain className="h-4 w-4" /> Inteligência Artificial
+            <Brain className="h-4 w-4" /> IA
           </TabsTrigger>
           <TabsTrigger value="estrutura" className="flex items-center gap-1.5">
             <Building2 className="h-4 w-4" /> Estrutura
@@ -96,6 +96,9 @@ export default function Configuracoes() {
           </TabsTrigger>
           <TabsTrigger value="whatsapp" className="flex items-center gap-1.5">
             <MessageSquare className="h-4 w-4" /> WhatsApp
+          </TabsTrigger>
+          <TabsTrigger value="automacoes" className="flex items-center gap-1.5">
+            <Zap className="h-4 w-4" /> Automações
           </TabsTrigger>
         </TabsList>
 
@@ -129,6 +132,13 @@ export default function Configuracoes() {
             <WhatsAppTemplatesCard />
             <HomologacaoCard />
             <WhatsAppIntegrationCard />
+          </div>
+        </TabsContent>
+
+        {/* ─── Automações ─── */}
+        <TabsContent value="automacoes">
+          <div className="grid gap-6">
+            <AutomacoesCard />
           </div>
         </TabsContent>
       </Tabs>
