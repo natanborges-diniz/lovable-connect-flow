@@ -235,7 +235,10 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
               </div>
               <div className="space-y-2">
                 <Label className="text-xs">Resposta corrigida (opcional)</Label>
-                <Textarea value={respostaCorrigida} onChange={(e) => setRespostaCorrigida(e.target.value)} rows={3}
+                <Textarea value={respostaCorrigida} onChange={(e) => {
+                  setRespostaCorrigida(e.target.value);
+                  if (e.target.value.trim()) setCriarExemplo(true);
+                }} rows={3}
                   placeholder="Como a IA deveria ter respondido..." className="text-xs" />
               </div>
               <div className="flex items-center gap-2 p-2 border border-destructive/20 rounded-lg bg-destructive/5">
