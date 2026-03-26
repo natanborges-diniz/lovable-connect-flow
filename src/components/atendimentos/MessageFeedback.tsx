@@ -3,8 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ThumbsUp, ThumbsDown, Loader2 } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Loader2, ShieldAlert } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -20,6 +20,7 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
   const [showDialog, setShowDialog] = useState(false);
   const [motivo, setMotivo] = useState("");
   const [respostaCorrigida, setRespostaCorrigida] = useState("");
+  const [criarRegra, setCriarRegra] = useState(false);
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
@@ -46,6 +47,7 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
   const submitNegative = async () => {
     setSaving(true);
     try {
+      // Save feedback
       const { error } = await supabase.from("ia_feedbacks" as any).insert({
         mensagem_id: mensagemId,
         atendimento_id: atendimentoId,
@@ -54,9 +56,22 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
         resposta_corrigida: respostaCorrigida || null,
       } as any);
       if (error) throw error;
+
+      // Also create prohibited rule if checked
+      if (criarRegra && motivo.trim()) {
+        const regra = respostaCorrigida
+          ? `${motivo}. Correto: ${respostaCorrigida}`
+          : motivo;
+        await supabase.from("ia_regras_proibidas" as any).insert({
+          regra,
+          categoria: "informacao_falsa",
+        } as any);
+        queryClient.invalidateQueries({ queryKey: ["ia_regras_proibidas"] });
+      }
+
       setFeedbackGiven("negativo");
       setShowDialog(false);
-      toast.success("Feedback registrado! A IA aprenderá com esta correção.");
+      toast.success(criarRegra ? "Feedback + regra proibida criados!" : "Feedback registrado!");
     } catch (e: any) {
       toast.error("Erro: " + e.message);
     } finally {
@@ -75,22 +90,12 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
   return (
     <>
       <div className="flex items-center gap-0.5 mt-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5 opacity-40 hover:opacity-100"
-          onClick={(e) => { e.stopPropagation(); handlePositive(); }}
-          disabled={saving}
-        >
+        <Button variant="ghost" size="icon" className="h-5 w-5 opacity-40 hover:opacity-100"
+          onClick={(e) => { e.stopPropagation(); handlePositive(); }} disabled={saving}>
           <ThumbsUp className="h-3 w-3" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5 opacity-40 hover:opacity-100"
-          onClick={(e) => { e.stopPropagation(); handleNegative(); }}
-          disabled={saving}
-        >
+        <Button variant="ghost" size="icon" className="h-5 w-5 opacity-40 hover:opacity-100"
+          onClick={(e) => { e.stopPropagation(); handleNegative(); }} disabled={saving}>
           <ThumbsDown className="h-3 w-3" />
         </Button>
       </div>
@@ -107,23 +112,21 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
             </div>
             <div className="space-y-2">
               <Label className="text-xs">Por que está errada?</Label>
-              <Textarea
-                value={motivo}
-                onChange={(e) => setMotivo(e.target.value)}
-                rows={2}
-                placeholder="Ex: Inventou preço, informação incorreta sobre produto..."
-                className="text-xs"
-              />
+              <Textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={2}
+                placeholder="Ex: Inventou preço, informação incorreta sobre produto..." className="text-xs" />
             </div>
             <div className="space-y-2">
               <Label className="text-xs">Resposta corrigida (opcional)</Label>
-              <Textarea
-                value={respostaCorrigida}
-                onChange={(e) => setRespostaCorrigida(e.target.value)}
-                rows={3}
-                placeholder="Como a IA deveria ter respondido..."
-                className="text-xs"
-              />
+              <Textarea value={respostaCorrigida} onChange={(e) => setRespostaCorrigida(e.target.value)} rows={3}
+                placeholder="Como a IA deveria ter respondido..." className="text-xs" />
+            </div>
+            {/* Create prohibited rule shortcut */}
+            <div className="flex items-center gap-2 p-2 border border-destructive/20 rounded-lg bg-destructive/5">
+              <Switch checked={criarRegra} onCheckedChange={setCriarRegra} />
+              <div className="flex items-center gap-1.5 text-xs">
+                <ShieldAlert className="h-3.5 w-3.5 text-destructive" />
+                <span>Criar regra proibida (a IA nunca mais fará isso)</span>
+              </div>
             </div>
             <Button onClick={submitNegative} disabled={saving || !motivo.trim()} className="w-full" size="sm">
               {saving ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Salvando...</> : "Enviar Feedback"}

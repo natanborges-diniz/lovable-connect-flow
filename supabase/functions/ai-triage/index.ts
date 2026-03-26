@@ -289,6 +289,7 @@ function buildSystemPrompt(opts: {
   knowledge: string;
   examples: string;
   antiExamples: string;
+  regrasProibidas: { regra: string; categoria: string }[];
   sentTopics: string[];
   colunasNomes: string;
   setoresNomes: string;
@@ -306,6 +307,24 @@ ${opts.businessRules}
 
 # TERMINOLOGIA
 - Pessoa real = "Consultor especializado". NUNCA "atendente", "operador", "humano".`);
+
+  // Inject prohibited rules FIRST — maximum weight
+  if (opts.regrasProibidas.length > 0) {
+    const grouped: Record<string, string[]> = {};
+    for (const r of opts.regrasProibidas) {
+      const cat = r.categoria || "geral";
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(r.regra);
+    }
+    let block = "# ⛔ PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA\nAs regras abaixo são INVIOLÁVEIS. Quebrá-las é um erro gravíssimo.\n";
+    for (const [cat, rules] of Object.entries(grouped)) {
+      block += `\n## ${cat.toUpperCase()}\n`;
+      for (const rule of rules) {
+        block += `- ❌ ${rule}\n`;
+      }
+    }
+    s.push(block);
+  }
 
   s.push(`# REGRAS DE PRECISÃO
 1. NUNCA invente dados. Sem dados → escale para Consultor.
@@ -485,11 +504,12 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, kbRes, exRes, antiRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
+    const [promptRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
-      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(10),
-      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(3),
+      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(30),
+      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").eq("avaliacao", "negativo").order("created_at", { ascending: false }).limit(10),
+      supabase.from("ia_regras_proibidas").select("regra, categoria").eq("ativo", true),
       supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
@@ -504,6 +524,7 @@ serve(async (req) => {
     const conhecimentos = kbRes.data || [];
     const exemplos = exRes.data || [];
     const antiFeedbacks = antiRes.data || [];
+    const regrasProibidas = regrasRes.data || [];
     // Reverse to chronological order
     const allMsgs = (msgsRes.data || []).reverse();
     const colunas = colRes.data || [];
@@ -573,6 +594,7 @@ serve(async (req) => {
       knowledge: knowledgeStr + agendamentoCtx,
       examples: examplesStr,
       antiExamples: antiStr,
+      regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
       sentTopics,
       colunasNomes: colunas.map((c: any) => c.nome).join(", "),
       setoresNomes: setores.map((s: any) => s.nome).join(", "),
@@ -606,7 +628,7 @@ serve(async (req) => {
       ? `${contextWindow[0]?.created_at} → ${contextWindow[contextWindow.length - 1]?.created_at}`
       : "empty";
 
-    console.log(`[CONTEXT] Prompt:${systemPrompt.length}ch | KB:${conhecimentos.length} | Ex:${exemplos.length} | Anti:${antiFeedbacks.length} | Modo:${atendimento.modo} | Window:${contextWindow.length}/${allMsgs.length} | Range:${historyRange} | Topics:${sentTopics.join(",") || "none"}`);
+    console.log(`[CONTEXT] Prompt:${systemPrompt.length}ch | KB:${conhecimentos.length} | Ex:${exemplos.length} | Anti:${antiFeedbacks.length} | Regras:${regrasProibidas.length} | Modo:${atendimento.modo} | Window:${contextWindow.length}/${allMsgs.length} | Range:${historyRange} | Topics:${sentTopics.join(",") || "none"}`);
 
     // ── 7. CALL LOVABLE AI GATEWAY (gpt-5) ──
     const callAI = async (retryCorrection?: string) => {

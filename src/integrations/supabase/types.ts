@@ -587,6 +587,30 @@ export type Database = {
         }
         Relationships: []
       }
+      ia_regras_proibidas: {
+        Row: {
+          ativo: boolean
+          categoria: string
+          created_at: string
+          id: string
+          regra: string
+        }
+        Insert: {
+          ativo?: boolean
+          categoria?: string
+          created_at?: string
+          id?: string
+          regra: string
+        }
+        Update: {
+          ativo?: boolean
+          categoria?: string
+          created_at?: string
+          id?: string
+          regra?: string
+        }
+        Relationships: []
+      }
       mensagens: {
         Row: {
           atendimento_id: string
