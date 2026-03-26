@@ -193,13 +193,13 @@ export default function PipelineAgendamentos() {
                                         {/* Monitoring indicators */}
                                         <div className="ml-auto flex gap-0.5">
                                           {ag.lembrete_enviado && (
-                                            <CheckCircle2 className="h-3 w-3 text-sky-500" title="Lembrete enviado" />
+                                            <span title="Lembrete enviado"><CheckCircle2 className="h-3 w-3 text-sky-500" /></span>
                                           )}
                                           {ag.confirmacao_enviada && (
-                                            <CheckCircle2 className="h-3 w-3 text-cyan-500" title="Confirmação enviada" />
+                                            <span title="Confirmação enviada"><CheckCircle2 className="h-3 w-3 text-cyan-500" /></span>
                                           )}
                                           {ag.noshow_enviado && (
-                                            <AlertCircle className="h-3 w-3 text-red-500" title="No-show enviado" />
+                                            <span title="No-show enviado"><AlertCircle className="h-3 w-3 text-destructive" /></span>
                                           )}
                                         </div>
                                       </div>
