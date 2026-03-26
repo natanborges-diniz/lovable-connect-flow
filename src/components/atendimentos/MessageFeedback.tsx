@@ -51,6 +51,8 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
   const submitNegative = async () => {
     setSaving(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { toast.error("Sessão expirada. Faça login novamente."); setSaving(false); return; }
       // Save feedback
       const { error } = await supabase.from("ia_feedbacks" as any).insert({
         mensagem_id: mensagemId,
@@ -58,6 +60,7 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
         avaliacao: respostaCorrigida ? "corrigido" : "negativo",
         motivo: motivo || null,
         resposta_corrigida: respostaCorrigida || null,
+        avaliador_id: user.id,
       } as any);
       if (error) throw error;
 
