@@ -53,6 +53,7 @@ export default function Pipeline() {
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunas, isLoading: loadingColunas } = usePipelineColunas();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Realtime
   useEffect(() => {
