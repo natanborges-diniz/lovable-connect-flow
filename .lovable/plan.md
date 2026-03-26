@@ -1,42 +1,86 @@
-## Sistema de Agendamentos — Implementado ✅
 
-### O que foi feito
 
-1. **Tabela `agendamentos`** — completa com status, flags de lembrete/cobrança, confirmação de loja
-2. **Colunas `horario_abertura`, `horario_fechamento`, `endereco`** em `telefones_lojas`
-3. **Setor + Pipeline "Agendamentos"** — colunas: Agendado, Confirmado, Atendido, Orçamento, Venda Fechada, No-Show, Recuperação, Reagendado, Abandonado, Cancelado
-4. **Secret `WHATSAPP_BUSINESS_ACCOUNT_ID`** configurado
-5. **Edge function `agendar-cliente`** — cria agendamento + envia confirmação WhatsApp
-6. **Edge function `agendamentos-cron`** — motor de transição temporal (move cards, não envia mensagens)
-7. **Edge function `manage-whatsapp-templates`** — CRUD de templates Meta via Graph API
-8. **Bot Lojas opção 4** — confirmar comparecimento do cliente
-9. **AI Triage** — contexto de lojas injetado, tools `agendar_visita` e `reagendar_visita`
-10. **Frontend** — Pipeline Agendamentos (Kanban com drag-and-drop), rota `/agendamentos`
+## Plano de Contingência — Fluxo Pós-Lembrete
 
-## Automações Atreladas a Colunas — Implementado ✅
-
-### Arquitetura
+### Cenários cobertos
 
 ```text
-Card muda de coluna → DB Trigger → Edge Function "pipeline-automations" → executa regras
+                    Lembrete Enviado (24h antes)
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+         Confirmou    Não respondeu   Cancelou
+         (→ Confirmado)  (ver abaixo)  (→ Cancelado)
 ```
 
-### O que foi feito
+### 1. Cliente NÃO confirma o lembrete
 
-1. **Tabela `pipeline_automacoes`** — regras por coluna/status (template, mensagem, tarefa, campo)
-2. **Edge function `pipeline-automations`** — executa ações configuradas, respeita homologação
-3. **DB Triggers** — `on_agendamento_status_change` e `on_contato_coluna_change` via `pg_net`
-4. **Cron refatorado** — apenas transição temporal, disparo de mensagens delegado às automações
-5. **Drag-and-drop no Pipeline Agendamentos** — operador pode mover cards manualmente
-6. **UI de Automações** — aba em Configurações para criar/gerenciar regras por status
-7. **Automações pré-configuradas** — lembrete (confirmado), recuperação (no_show), pós-venda (venda_fechada)
+**Regra**: Se o cliente não responde ao lembrete em **4 horas** (ou até 2h antes do horário agendado, o que vier primeiro), o sistema envia uma **segunda tentativa** — uma mensagem curta tipo:
 
-### Variáveis de template
+> "Oi {{primeiro_nome}}, ainda não conseguimos confirmar sua visita amanhã às {{hora}} na {{loja}}. Podemos manter? Responda SIM ou se preferir reagendar, é só dizer 😊"
 
-- `{{primeiro_nome}}`, `{{nome}}`, `{{loja}}`, `{{hora}}`, `{{data}}`, `{{telefone}}`
+Se após essa segunda tentativa ele ainda não responder até **1h antes do horário**, o agendamento permanece como está (não cancela automaticamente — o cliente pode simplesmente aparecer). O card fica em **"Lembrete Enviado"** e o fluxo segue normalmente para a cobrança à loja após o horário.
 
-### Próximos passos
+**Nova coluna sugerida**: Não precisa. O status "Lembrete Enviado" já cobre isso. Apenas adicionamos um campo `tentativas_lembrete` no agendamento.
 
-- Submeter templates Meta para aprovação: `confirmacao_agendamento`, `lembrete_agendamento`, `noshow_reagendamento`
-- Testar fluxo completo: agendamento → lembrete → confirmação loja → no-show → recuperação
-- Configurar cron job no pg_cron para executar `agendamentos-cron` a cada 15min
+### 2. Cobrança à loja — quem dá o gatilho de presença
+
+**Fluxo atual (correto)**:
+- Horário do agendamento passa → Cron marca `confirmacao_enviada` → Envia mensagem à loja via Bot perguntando se o cliente compareceu
+- Loja responde via **Opção 4 do Bot** → Sistema atualiza `loja_confirmou_presenca`
+  - `true` → Card move para **Atendido**
+  - `false` → Card move para **No-Show** → Dispara recuperação
+
+### 3. Contingência: loja NÃO responde
+
+```text
+Horário passou
+    │
+    ▼
+Cobrança 1 à loja (imediata ou 09h dia seguinte se fora do expediente)
+    │
+    ├── Loja responde → fluxo normal
+    │
+    ▼ (sem resposta em 3h)
+Cobrança 2 à loja (nudge mais direto)
+    │
+    ├── Loja responde → fluxo normal
+    │
+    ▼ (sem resposta em 6h após cobrança 2)
+Sistema assume NO-SHOW + cria TAREFA para operador
+    → Card move para "No-Show"
+    → Tarefa: "Loja {{loja}} não respondeu sobre {{cliente}} - verificar manualmente"
+    → Recuperação com cliente é disparada normalmente
+```
+
+**Campos novos em `agendamentos`**:
+- `tentativas_lembrete` (integer, default 0) — controla quantas vezes o lembrete foi enviado ao cliente
+- `tentativas_cobranca_loja` (integer, default 0) — controla quantas vezes a loja foi cobrada
+
+### 4. Ajustes no Cron (`agendamentos-cron`)
+
+O cron ganha duas novas verificações:
+
+- **Reenvio de lembrete ao cliente**: Se `status = 'lembrete_enviado'` e `tentativas_lembrete = 1` e passaram 4h sem resposta inbound → envia segunda tentativa, seta `tentativas_lembrete = 2`
+- **Segunda cobrança à loja**: Se `confirmacao_enviada = true` e `tentativas_cobranca_loja = 1` e passaram 3h sem resposta → envia segunda cobrança, seta `tentativas_cobranca_loja = 2`
+- **Timeout da loja**: Se `tentativas_cobranca_loja >= 2` e passaram 6h+ → move para `no_show` + cria tarefa manual
+
+### 5. Automações por coluna (resumo)
+
+| Coluna | Gatilho | Ação |
+|---|---|---|
+| Agendado | IA confirma no chat | Mensagem livre de confirmação |
+| Lembrete Enviado | Cron 24h antes | Template `lembrete_agendamento` |
+| Confirmado | Cliente responde ao lembrete | Nenhuma automação extra |
+| Atendido | Loja confirma via Bot | Template pós-atendimento (opcional) |
+| No-Show | Loja nega OU timeout de cobrança | Mensagem de recuperação ao cliente |
+| Recuperação | Cliente responde após no-show | IA conduz conversa |
+| Abandonado | 48h sem resposta após 2 tentativas | Nenhuma |
+
+### Implementação
+
+1. **Migration**: adicionar `tentativas_lembrete` e `tentativas_cobranca_loja` à tabela `agendamentos`
+2. **Cron**: adicionar lógica de reenvio de lembrete e segunda cobrança à loja com timeout
+3. **Pipeline-automations**: garantir que o move para `no_show` por timeout da loja também crie tarefa automática
+4. **UI**: atualizar cards do pipeline para mostrar indicadores de tentativas
+
