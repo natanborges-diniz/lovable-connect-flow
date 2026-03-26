@@ -141,8 +141,26 @@ export default function Pipeline() {
     // Card move between columns
     const contatoId = result.draggableId;
     const destColunaId = result.destination.droppableId;
+    const sourceColunaId = result.source.droppableId;
     if (destColunaId === "sem-coluna") return;
-    updateContato.mutate({ id: contatoId, pipeline_coluna_id: destColunaId } as any);
+    if (destColunaId === sourceColunaId) return;
+
+    updateContato.mutate({ id: contatoId, pipeline_coluna_id: destColunaId } as any, {
+      onSuccess: () => {
+        // Trigger automations explicitly
+        supabase.functions.invoke("pipeline-automations", {
+          body: {
+            entity_type: "contato",
+            entity_id: contatoId,
+            coluna_id: destColunaId,
+            coluna_anterior_id: sourceColunaId === "sem-coluna" ? null : sourceColunaId,
+          },
+        }).then(({ error: autoErr }) => {
+          if (autoErr) console.error("[AUTOMATIONS] Error:", autoErr);
+          else console.log("[AUTOMATIONS] Triggered for contato", contatoId);
+        });
+      },
+    });
   };
 
   const startEditColuna = (id: string, nome: string) => {
