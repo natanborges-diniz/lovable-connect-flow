@@ -1,72 +1,72 @@
 
 
-## Plano: Temporalidade Dinâmica nas Mensagens de Lembrete
+## Plano: Unificar Atendimentos Cross-Canal + Auto-Confirmar Agendamento
 
-### Problema
+### Problemas
 
-Quando o card vai para `lembrete_enviado` (automaticamente pelo cron OU manualmente), a mensagem de lembrete usa variáveis fixas como `{{data}}` que mostram "28/03/2026" — sem contexto temporal. O cliente precisa ler "amanhã às 10h", "hoje às 14h", ou "sábado às 10h" dependendo da relação entre agora e o horário do agendamento.
+1. **`send-whatsapp-template` cria SEMPRE um novo atendimento** (solicitação + atendimento com `canal_provedor: meta_official`). Quando o cliente responde "sim" ao lembrete, o webhook encontra esse atendimento novo em vez do original — gerando dois atendimentos separados para o mesmo cliente.
+
+2. **Nenhuma lógica detecta "sim" como confirmação** de agendamento. O cliente responde "sim" ao lembrete mas o card fica parado em `lembrete_enviado`.
 
 ### Solução
 
-Adicionar uma nova variável `{{quando}}` ao sistema de resolução de templates que calcula automaticamente a expressão temporal correta.
+#### 1. `send-whatsapp-template` — Reutilizar atendimento existente
 
-### Lógica de `{{quando}}`
+Em vez de criar solicitação + atendimento novos, buscar atendimento aberto do contato (qualquer provedor). Se existir, registrar a mensagem do template nesse atendimento existente. Se não existir, aí sim criar um novo.
 
 ```text
-Se agendamento é HOJE       → "hoje às 10:00"
-Se agendamento é AMANHÃ     → "amanhã às 10:00"  
-Se agendamento é esta semana → "sábado às 10:00"
-Se agendamento é > 7 dias   → "dia 05/04 às 10:00"
+Antes:  SEMPRE cria solicitação + atendimento
+Depois: Busca atendimento aberto → se existe, usa ele → se não, cria novo
+```
+
+A mensagem do template é salva com `provedor: "meta_official"` para rastreabilidade, mas dentro do mesmo atendimento.
+
+#### 2. `whatsapp-webhook` — Buscar atendimento sem filtrar por provedor
+
+Alterar a busca de atendimento aberto para NÃO filtrar por `canal_provedor`. Assim, quando o cliente responde via meta_official a um template, o webhook encontra o atendimento original (que pode ser evolution_api).
+
+Atualizar o `canal_provedor` do atendimento para o canal mais recente (para que respostas saiam pelo canal correto).
+
+```text
+Antes:  .eq("canal_provedor", source)
+Depois: sem filtro de provedor → encontra qualquer atendimento aberto do contato
+        → atualiza canal_provedor para o source atual
+```
+
+#### 3. `whatsapp-webhook` — Detecção de confirmação pré-IA
+
+Antes de acionar a IA, verificar se o cliente tem agendamento em `lembrete_enviado` e a mensagem é uma confirmação (sim, confirmo, ok, etc.). Se sim:
+- Atualizar agendamento para `confirmado`
+- Disparar `pipeline-automations` para o novo status
+- Registrar evento CRM
+- Enviar resposta determinística ("Confirmado! Te esperamos...")
+- NÃO acionar a IA (resposta já tratada)
+
+```text
+Palavras-chave de confirmação:
+"sim", "confirmo", "confirmado", "ok", "vou sim", "pode confirmar", 
+"estarei lá", "vou estar", "combinado", "fechado", "tá bom", "beleza"
 ```
 
 ### Arquivos Alterados
 
-**1. `supabase/functions/pipeline-automations/index.ts`**
-- Na função `resolveText`, adicionar cálculo de `{{quando}}` usando timezone `America/Sao_Paulo`
-- Compara `now` com `data_horario` para determinar: hoje, amanhã, dia da semana, ou data completa
-- Também adicionar `{{dia_semana}}` (ex: "sábado") como variável extra
+**1. `supabase/functions/send-whatsapp-template/index.ts`**
+- Remover criação automática de solicitação + atendimento
+- Buscar atendimento aberto do contato (sem filtro de provedor)
+- Se existir, salvar mensagem nele; se não, criar novo
 
-**2. `supabase/functions/agendamentos-cron/index.ts`**
-- Na mensagem de retry do lembrete (linha ~197), substituir texto fixo por lógica temporal dinâmica
-- Em vez de "sua visita às *10:00*", usar "sua visita *amanhã às 10:00*" ou "sua visita *hoje às 10:00*"
+**2. `supabase/functions/whatsapp-webhook/index.ts`**
+- Linha 100-110: Remover `.eq("canal_provedor", source)` da busca de atendimento
+- Após encontrar atendimento, atualizar `canal_provedor` para o source atual
+- Adicionar bloco de detecção de confirmação entre etapas 5 (salvar mensagem) e 7 (check homologação)
 
-**3. Também no cron**: O cron hoje só move para `lembrete_enviado` agendamentos de **amanhã** (linhas 33-43). Precisa incluir agendamentos de **hoje** que ainda estão em `agendado` (caso de agendamento same-day ou movimentação manual).
-
-### Detalhes Técnicos
-
-Nova função auxiliar em `pipeline-automations`:
-```typescript
-function resolveQuando(dataHorario: string): string {
-  const now = new Date();
-  const dt = new Date(dataHorario);
-  // Usar timezone SP para comparações de dia
-  const nowSP = new Date(now.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-  const dtSP = new Date(dt.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-  const hora = dt.toLocaleTimeString("pt-BR", {hour:"2-digit",minute:"2-digit",timeZone:"America/Sao_Paulo"});
-  
-  const diffDays = Math.floor((dtSP.setHours(0,0,0,0) - nowSP.setHours(0,0,0,0)) / 86400000);
-  
-  if (diffDays === 0) return `hoje às ${hora}`;
-  if (diffDays === 1) return `amanhã às ${hora}`;
-  if (diffDays > 1 && diffDays <= 6) {
-    const diaSemana = dt.toLocaleDateString("pt-BR", {weekday:"long", timeZone:"America/Sao_Paulo"});
-    return `${diaSemana} às ${hora}`;
-  }
-  return `dia ${dt.toLocaleDateString("pt-BR", {timeZone:"America/Sao_Paulo"})} às ${hora}`;
-}
-```
-
-Adicionada ao `resolveText` como `{{quando}}`.
-
-No cron, expandir query de transição para `lembrete_enviado` para incluir agendamentos de hoje que estão em `agendado`:
-```text
-// Antes: só amanhã
-// Depois: hoje OU amanhã (desde que status = agendado)
-```
+**3. `supabase/functions/pipeline-automations/index.ts`**
+- Sem alterações — já suporta status `confirmado`
 
 ### Resultado
-- Mensagem do template: "Oi Natan, lembrando da sua visita **amanhã às 10:00** na Diniz Itapevi"
-- Movimentação manual same-day: "...sua visita **hoje às 14:00**..."
-- Movimentação manual para sábado: "...sua visita **sábado às 10:00**..."
-- Retry do lembrete também usa linguagem temporal correta
+
+- Cliente tem UM único atendimento, independente do canal de saída (template oficial vs evolution)
+- Operador vê todo o histórico unificado na mesma conversa
+- "Sim" ao lembrete → card move automaticamente para "Confirmado"
+- Automações de `confirmado` disparam corretamente
 
