@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ThumbsUp, ThumbsDown, Loader2, ShieldAlert } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Loader2, ShieldAlert, BookOpen } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
   const [motivo, setMotivo] = useState("");
   const [respostaCorrigida, setRespostaCorrigida] = useState("");
   const [criarRegra, setCriarRegra] = useState(false);
+  const [criarExemplo, setCriarExemplo] = useState(false);
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
@@ -57,7 +58,7 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
       } as any);
       if (error) throw error;
 
-      // Also create prohibited rule if checked
+      // Create prohibited rule if checked
       if (criarRegra && motivo.trim()) {
         const regra = respostaCorrigida
           ? `${motivo}. Correto: ${respostaCorrigida}`
@@ -69,9 +70,25 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
         queryClient.invalidateQueries({ queryKey: ["ia_regras_proibidas"] });
       }
 
+      // Create model example if checked
+      if (criarExemplo && respostaCorrigida.trim()) {
+        await supabase.from("ia_exemplos" as any).insert({
+          pergunta: motivo || conteudo,
+          resposta_ideal: respostaCorrigida,
+          categoria: "correcao",
+        } as any);
+        queryClient.invalidateQueries({ queryKey: ["ia_exemplos"] });
+      }
+
+      const actions = [
+        "Feedback registrado",
+        criarRegra ? "regra proibida criada" : "",
+        criarExemplo && respostaCorrigida.trim() ? "exemplo modelo criado" : "",
+      ].filter(Boolean).join(" + ");
+
       setFeedbackGiven("negativo");
       setShowDialog(false);
-      toast.success(criarRegra ? "Feedback + regra proibida criados!" : "Feedback registrado!");
+      toast.success(actions + "!");
     } catch (e: any) {
       toast.error("Erro: " + e.message);
     } finally {
@@ -109,6 +126,14 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
             <div className="bg-muted/50 rounded-lg p-3 text-xs max-h-24 overflow-auto">
               <p className="font-medium text-[10px] text-muted-foreground mb-1">Resposta da IA:</p>
               {conteudo}
+            </div>
+            {/* Create model example shortcut */}
+            <div className="flex items-center gap-2 p-2 border border-primary/20 rounded-lg bg-primary/5">
+              <Switch checked={criarExemplo} onCheckedChange={setCriarExemplo} disabled={!respostaCorrigida.trim()} />
+              <div className="flex items-center gap-1.5 text-xs">
+                <BookOpen className="h-3.5 w-3.5 text-primary" />
+                <span>Criar exemplo modelo (ensinar a IA a responder assim)</span>
+              </div>
             </div>
             <div className="space-y-2">
               <Label className="text-xs">Por que está errada?</Label>
