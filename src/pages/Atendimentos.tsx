@@ -24,18 +24,29 @@ import { toast } from "sonner";
 import type { StatusAtendimento } from "@/types/database";
 
 export default function Atendimentos() {
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState(searchParams.get("contato") || "");
   const [statusFilter, setStatusFilter] = useState<string>("todos");
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(searchParams.get("open") || null);
 
   const filters = {
-    search: search || undefined,
     status: statusFilter !== "todos" ? (statusFilter as StatusAtendimento) : undefined,
   };
 
   const { data: atendimentos, isLoading } = useAtendimentos(filters);
   const updateStatus = useUpdateAtendimentoStatus();
   const queryClient = useQueryClient();
+
+  // Client-side search across contato, assunto, atendente
+  const filteredAtendimentos = useMemo(() => {
+    if (!atendimentos || !search.trim()) return atendimentos;
+    const s = search.toLowerCase();
+    return atendimentos.filter((a: any) =>
+      (a.contato?.nome ?? "").toLowerCase().includes(s) ||
+      (a.solicitacao?.assunto ?? "").toLowerCase().includes(s) ||
+      (a.atendente_nome ?? "").toLowerCase().includes(s)
+    );
+  }, [atendimentos, search]);
 
   // Realtime: auto-refresh list when atendimentos or mensagens change
   useEffect(() => {
