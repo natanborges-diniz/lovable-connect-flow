@@ -513,7 +513,7 @@ serve(async (req) => {
     // ── 3. PRE-LLM ROUTER: subject change → deterministic ──
     if (matchesSubjectChange(currentMsg)) {
       console.log("[ROUTER] Subject change detected — deterministic response");
-      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS.subject_change);
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE);
       await logEvent(supabase, contatoId, atendimento_id, "router_subject_change", currentMsg);
       return jsonResponse({ status: "ok", tools_used: ["router_subject_change"], intencao: "outro", precisa_humano: false, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
     }
