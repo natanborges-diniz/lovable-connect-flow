@@ -21,6 +21,7 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
   const [motivo, setMotivo] = useState("");
   const [respostaCorrigida, setRespostaCorrigida] = useState("");
   const [criarRegra, setCriarRegra] = useState(false);
+  const [criarExemplo, setCriarExemplo] = useState(false);
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
