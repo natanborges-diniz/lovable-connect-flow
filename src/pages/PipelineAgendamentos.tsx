@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 const STATUS_COLUMNS = [
   { key: "agendado", label: "Agendado", color: "bg-blue-500" },
+  { key: "lembrete_enviado", label: "Lembrete Enviado", color: "bg-sky-500" },
   { key: "confirmado", label: "Confirmado", color: "bg-cyan-500" },
   { key: "atendido", label: "Atendido", color: "bg-green-500" },
   { key: "orcamento", label: "Orçamento", color: "bg-indigo-500" },
@@ -189,7 +190,17 @@ export default function PipelineAgendamentos() {
                                       )}
                                       {(ag.tentativas_recuperacao || 0) > 0 && (
                                         <div className="text-[10px] text-muted-foreground">
-                                          Tentativas: {ag.tentativas_recuperacao}
+                                          Recuperação: {ag.tentativas_recuperacao}x
+                                        </div>
+                                      )}
+                                      {(ag.tentativas_lembrete || 0) > 1 && (
+                                        <div className="text-[10px] text-amber-600">
+                                          Lembrete reenviado ({ag.tentativas_lembrete}x)
+                                        </div>
+                                      )}
+                                      {(ag.tentativas_cobranca_loja || 0) > 0 && (
+                                        <div className="text-[10px] text-orange-600">
+                                          Cobrança loja: {ag.tentativas_cobranca_loja}x
                                         </div>
                                       )}
                                     </CardContent>

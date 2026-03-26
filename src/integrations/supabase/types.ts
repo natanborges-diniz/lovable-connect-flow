@@ -34,6 +34,8 @@ export type Database = {
           numeros_os: string[] | null
           observacoes: string | null
           status: string
+          tentativas_cobranca_loja: number | null
+          tentativas_lembrete: number | null
           tentativas_recuperacao: number | null
           updated_at: string | null
           valor_orcamento: number | null
@@ -58,6 +60,8 @@ export type Database = {
           numeros_os?: string[] | null
           observacoes?: string | null
           status?: string
+          tentativas_cobranca_loja?: number | null
+          tentativas_lembrete?: number | null
           tentativas_recuperacao?: number | null
           updated_at?: string | null
           valor_orcamento?: number | null
@@ -82,6 +86,8 @@ export type Database = {
           numeros_os?: string[] | null
           observacoes?: string | null
           status?: string
+          tentativas_cobranca_loja?: number | null
+          tentativas_lembrete?: number | null
           tentativas_recuperacao?: number | null
           updated_at?: string | null
           valor_orcamento?: number | null
