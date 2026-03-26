@@ -239,6 +239,9 @@ export default function Configuracoes() {
           </CardContent>
         </Card>
 
+        {/* WhatsApp Templates */}
+        <WhatsAppTemplatesCard />
+
         {/* WhatsApp Integration */}
         <Card className="shadow-card">
           <CardHeader>
