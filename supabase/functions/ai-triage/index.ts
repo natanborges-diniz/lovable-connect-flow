@@ -890,6 +890,11 @@ serve(async (req) => {
 
     console.log(`[RESULT] tools=${toolCalls.map((t: any) => t.function?.name).join(",") || "text"} | intent=${intencao} | human=${precisa_humano} | col=${pipeline_coluna} | validator=${validatorFlags.join(",")}`);
 
+    // Clear debounce lock
+    const currentMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+    delete currentMeta.ia_lock;
+    await supabase.from("atendimentos").update({ metadata: currentMeta }).eq("id", atendimento_id);
+
     return jsonResponse({
       status: "ok",
       tools_used: toolCalls.map((t: any) => t.function?.name) || ["text"],
