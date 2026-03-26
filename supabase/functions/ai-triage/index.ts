@@ -289,6 +289,7 @@ function buildSystemPrompt(opts: {
   knowledge: string;
   examples: string;
   antiExamples: string;
+  regrasProibidas: { regra: string; categoria: string }[];
   sentTopics: string[];
   colunasNomes: string;
   setoresNomes: string;
@@ -306,6 +307,24 @@ ${opts.businessRules}
 
 # TERMINOLOGIA
 - Pessoa real = "Consultor especializado". NUNCA "atendente", "operador", "humano".`);
+
+  // Inject prohibited rules FIRST — maximum weight
+  if (opts.regrasProibidas.length > 0) {
+    const grouped: Record<string, string[]> = {};
+    for (const r of opts.regrasProibidas) {
+      const cat = r.categoria || "geral";
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(r.regra);
+    }
+    let block = "# ⛔ PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA\nAs regras abaixo são INVIOLÁVEIS. Quebrá-las é um erro gravíssimo.\n";
+    for (const [cat, rules] of Object.entries(grouped)) {
+      block += `\n## ${cat.toUpperCase()}\n`;
+      for (const rule of rules) {
+        block += `- ❌ ${rule}\n`;
+      }
+    }
+    s.push(block);
+  }
 
   s.push(`# REGRAS DE PRECISÃO
 1. NUNCA invente dados. Sem dados → escale para Consultor.
