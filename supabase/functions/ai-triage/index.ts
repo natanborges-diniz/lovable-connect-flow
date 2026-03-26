@@ -423,7 +423,7 @@ serve(async (req) => {
     // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
       .from("atendimentos")
-      .select("id, contato_id, canal, canal_provedor, modo")
+      .select("id, contato_id, canal, canal_provedor, modo, metadata")
       .eq("id", atendimento_id)
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
@@ -431,6 +431,40 @@ serve(async (req) => {
     if (atendimento.modo === "humano") {
       return jsonResponse({ status: "skipped", reason: "modo humano" });
     }
+
+    // ── 1.5. DEBOUNCE — prevent parallel processing for rapid messages ──
+    const meta = (atendimento.metadata as Record<string, any>) || {};
+    const iaLock = meta.ia_lock ? new Date(meta.ia_lock).getTime() : 0;
+    const now = Date.now();
+    const LOCK_TTL_MS = 15_000; // 15 second lock
+    const DEBOUNCE_WAIT_MS = 3_000; // wait 3 seconds for more messages
+
+    if (iaLock && (now - iaLock) < LOCK_TTL_MS) {
+      // Another instance is processing — wait then check if it handled our message
+      console.log(`[DEBOUNCE] Lock active (${Math.round((now - iaLock) / 1000)}s ago), waiting ${DEBOUNCE_WAIT_MS}ms...`);
+      await new Promise((r) => setTimeout(r, DEBOUNCE_WAIT_MS));
+
+      // Check if an outbound message was sent after our inbound arrived
+      const { data: recentOut } = await supabase
+        .from("mensagens")
+        .select("id")
+        .eq("atendimento_id", atendimento_id)
+        .eq("direcao", "outbound")
+        .gte("created_at", new Date(now - DEBOUNCE_WAIT_MS).toISOString())
+        .limit(1);
+
+      if (recentOut?.length) {
+        console.log("[DEBOUNCE] Another instance already responded, skipping");
+        return jsonResponse({ status: "skipped", reason: "debounce — already handled" });
+      }
+      // If no outbound yet, proceed (the other instance may have failed)
+      console.log("[DEBOUNCE] No response found, proceeding as fallback");
+    }
+
+    // Set lock
+    await supabase.from("atendimentos").update({
+      metadata: { ...meta, ia_lock: new Date().toISOString() },
+    }).eq("id", atendimento_id);
 
     const isHibrido = atendimento.modo === "hibrido";
     const contatoId = contato_id || atendimento.contato_id;
@@ -856,6 +890,11 @@ serve(async (req) => {
 
     console.log(`[RESULT] tools=${toolCalls.map((t: any) => t.function?.name).join(",") || "text"} | intent=${intencao} | human=${precisa_humano} | col=${pipeline_coluna} | validator=${validatorFlags.join(",")}`);
 
+    // Clear debounce lock
+    const currentMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+    delete currentMeta.ia_lock;
+    await supabase.from("atendimentos").update({ metadata: currentMeta }).eq("id", atendimento_id);
+
     return jsonResponse({
       status: "ok",
       tools_used: toolCalls.map((t: any) => t.function?.name) || ["text"],
@@ -868,6 +907,12 @@ serve(async (req) => {
 
   } catch (e) {
     console.error("[ERROR] ai-triage:", e);
+    // Clear lock on error too
+    try {
+      const errMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+      delete errMeta.ia_lock;
+      await supabase.from("atendimentos").update({ metadata: errMeta }).eq("id", atendimento_id);
+    } catch (_) { /* ignore lock cleanup errors */ }
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
