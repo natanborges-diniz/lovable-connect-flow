@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 const STATUS_COLUMNS = [
   { key: "agendado", label: "Agendado", color: "bg-blue-500" },
+  { key: "lembrete_enviado", label: "Lembrete Enviado", color: "bg-sky-500" },
   { key: "confirmado", label: "Confirmado", color: "bg-cyan-500" },
   { key: "atendido", label: "Atendido", color: "bg-green-500" },
   { key: "orcamento", label: "Orçamento", color: "bg-indigo-500" },

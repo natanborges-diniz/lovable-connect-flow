@@ -16,6 +16,8 @@ export interface Agendamento {
   cobranca_loja_enviada: boolean;
   loja_confirmou_presenca: boolean | null;
   tentativas_recuperacao: number;
+  tentativas_lembrete: number;
+  tentativas_cobranca_loja: number;
   valor_orcamento: number | null;
   valor_venda: number | null;
   numero_venda: string | null;
