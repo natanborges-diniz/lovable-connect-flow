@@ -58,7 +58,7 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
       } as any);
       if (error) throw error;
 
-      // Also create prohibited rule if checked
+      // Create prohibited rule if checked
       if (criarRegra && motivo.trim()) {
         const regra = respostaCorrigida
           ? `${motivo}. Correto: ${respostaCorrigida}`
@@ -70,9 +70,25 @@ export function MessageFeedback({ mensagemId, atendimentoId, conteudo }: Message
         queryClient.invalidateQueries({ queryKey: ["ia_regras_proibidas"] });
       }
 
+      // Create model example if checked
+      if (criarExemplo && respostaCorrigida.trim()) {
+        await supabase.from("ia_exemplos" as any).insert({
+          pergunta: motivo || conteudo,
+          resposta_ideal: respostaCorrigida,
+          categoria: "correcao",
+        } as any);
+        queryClient.invalidateQueries({ queryKey: ["ia_exemplos"] });
+      }
+
+      const actions = [
+        "Feedback registrado",
+        criarRegra ? "regra proibida criada" : "",
+        criarExemplo && respostaCorrigida.trim() ? "exemplo modelo criado" : "",
+      ].filter(Boolean).join(" + ");
+
       setFeedbackGiven("negativo");
       setShowDialog(false);
-      toast.success(criarRegra ? "Feedback + regra proibida criados!" : "Feedback registrado!");
+      toast.success(actions + "!");
     } catch (e: any) {
       toast.error("Erro: " + e.message);
     } finally {
