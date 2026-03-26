@@ -594,6 +594,7 @@ serve(async (req) => {
       knowledge: knowledgeStr + agendamentoCtx,
       examples: examplesStr,
       antiExamples: antiStr,
+      regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
       sentTopics,
       colunasNomes: colunas.map((c: any) => c.nome).join(", "),
       setoresNomes: setores.map((s: any) => s.nome).join(", "),
