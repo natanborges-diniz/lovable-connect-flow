@@ -190,10 +190,11 @@ async function processLembreteRetry(
     const firstName = contato?.nome?.split(" ")[0] || "Cliente";
     const dt = new Date(ag.data_horario);
     const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const quando = resolveQuando(ag.data_horario, now);
 
     // Send 2nd reminder via atendimento if available
     if (ag.atendimento_id) {
-      const msg = `Oi ${firstName}, ainda não conseguimos confirmar sua visita às *${hora}* na *${ag.loja_nome}*. Podemos manter? Responda SIM ou se preferir reagendar, é só dizer 😊`;
+      const msg = `Oi ${firstName}, ainda não conseguimos confirmar sua visita *${quando}* na *${ag.loja_nome}*. Podemos manter? Responda SIM ou se preferir reagendar, é só dizer 😊`;
       await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
         method: "POST",
         headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
