@@ -1,86 +1,81 @@
 
 
-## Plano de Contingência — Fluxo Pós-Lembrete
+## Plano: Sistema de Aprendizado Forte da IA
 
-### Cenários cobertos
+### Problema atual
 
-```text
-                    Lembrete Enviado (24h antes)
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-         Confirmou    Não respondeu   Cancelou
-         (→ Confirmado)  (ver abaixo)  (→ Cancelado)
-```
+O sistema já tem `ia_exemplos` (few-shot) e `ia_feedbacks` (👍/👎), mas é fraco:
+- Apenas 10 exemplos e 3 anti-feedbacks são carregados no prompt
+- Não existe conceito de **regra proibitiva** (ex: "NUNCA diga que fazemos exame de vista")
+- Feedbacks negativos são enterrados na aba de configurações — difícil de acessar
+- Não há prioridade: uma correção crítica (informação proibida) tem o mesmo peso que um ajuste de tom
 
-### 1. Cliente NÃO confirma o lembrete
-
-**Regra**: Se o cliente não responde ao lembrete em **4 horas** (ou até 2h antes do horário agendado, o que vier primeiro), o sistema envia uma **segunda tentativa** — uma mensagem curta tipo:
-
-> "Oi {{primeiro_nome}}, ainda não conseguimos confirmar sua visita amanhã às {{hora}} na {{loja}}. Podemos manter? Responda SIM ou se preferir reagendar, é só dizer 😊"
-
-Se após essa segunda tentativa ele ainda não responder até **1h antes do horário**, o agendamento permanece como está (não cancela automaticamente — o cliente pode simplesmente aparecer). O card fica em **"Lembrete Enviado"** e o fluxo segue normalmente para a cobrança à loja após o horário.
-
-**Nova coluna sugerida**: Não precisa. O status "Lembrete Enviado" já cobre isso. Apenas adicionamos um campo `tentativas_lembrete` no agendamento.
-
-### 2. Cobrança à loja — quem dá o gatilho de presença
-
-**Fluxo atual (correto)**:
-- Horário do agendamento passa → Cron marca `confirmacao_enviada` → Envia mensagem à loja via Bot perguntando se o cliente compareceu
-- Loja responde via **Opção 4 do Bot** → Sistema atualiza `loja_confirmou_presenca`
-  - `true` → Card move para **Atendido**
-  - `false` → Card move para **No-Show** → Dispara recuperação
-
-### 3. Contingência: loja NÃO responde
+### Solução: 3 camadas de aprendizado
 
 ```text
-Horário passou
-    │
-    ▼
-Cobrança 1 à loja (imediata ou 09h dia seguinte se fora do expediente)
-    │
-    ├── Loja responde → fluxo normal
-    │
-    ▼ (sem resposta em 3h)
-Cobrança 2 à loja (nudge mais direto)
-    │
-    ├── Loja responde → fluxo normal
-    │
-    ▼ (sem resposta em 6h após cobrança 2)
-Sistema assume NO-SHOW + cria TAREFA para operador
-    → Card move para "No-Show"
-    → Tarefa: "Loja {{loja}} não respondeu sobre {{cliente}} - verificar manualmente"
-    → Recuperação com cliente é disparada normalmente
+┌─────────────────────────────────────────┐
+│ 1. REGRAS PROIBITIVAS (peso máximo)     │
+│    "NUNCA diga X" → injetado como       │
+│    bloco # PROIBIÇÕES ABSOLUTAS         │
+│    Ex: "Não fazemos exame de vista"     │
+├─────────────────────────────────────────┤
+│ 2. CORREÇÕES (peso alto)                │
+│    "Se perguntarem Y, responda Z"       │
+│    → Exemplos modelo (ia_exemplos)      │
+│    Limite aumentado de 10 → 30          │
+├─────────────────────────────────────────┤
+│ 3. FEEDBACKS (peso contextual)          │
+│    👎 com motivo e correção             │
+│    → Anti-exemplos (ia_feedbacks)       │
+│    Limite aumentado de 3 → 10           │
+└─────────────────────────────────────────┘
 ```
 
-**Campos novos em `agendamentos`**:
-- `tentativas_lembrete` (integer, default 0) — controla quantas vezes o lembrete foi enviado ao cliente
-- `tentativas_cobranca_loja` (integer, default 0) — controla quantas vezes a loja foi cobrada
+### Mudanças
 
-### 4. Ajustes no Cron (`agendamentos-cron`)
+**1. Nova tabela `ia_regras_proibidas`**
 
-O cron ganha duas novas verificações:
+Regras absolutas que a IA nunca deve violar:
+- `id`, `regra` (texto livre, ex: "Óticas não fazem exame de vista"), `categoria` (enum: informacao_falsa, comportamento, compliance), `ativo` (boolean), `created_at`
+- Injetadas no prompt como bloco `# PROIBIÇÕES ABSOLUTAS` com peso máximo, antes dos exemplos
 
-- **Reenvio de lembrete ao cliente**: Se `status = 'lembrete_enviado'` e `tentativas_lembrete = 1` e passaram 4h sem resposta inbound → envia segunda tentativa, seta `tentativas_lembrete = 2`
-- **Segunda cobrança à loja**: Se `confirmacao_enviada = true` e `tentativas_cobranca_loja = 1` e passaram 3h sem resposta → envia segunda cobrança, seta `tentativas_cobranca_loja = 2`
-- **Timeout da loja**: Se `tentativas_cobranca_loja >= 2` e passaram 6h+ → move para `no_show` + cria tarefa manual
+**2. Atualizar `ai-triage` (buildSystemPrompt)**
 
-### 5. Automações por coluna (resumo)
+- Carregar `ia_regras_proibidas` ativas (sem limite)
+- Injetar como bloco dedicado no prompt: `# PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA`
+- Aumentar limite de exemplos de 10 → 30
+- Aumentar limite de anti-feedbacks de 3 → 10
 
-| Coluna | Gatilho | Ação |
-|---|---|---|
-| Agendado | IA confirma no chat | Mensagem livre de confirmação |
-| Lembrete Enviado | Cron 24h antes | Template `lembrete_agendamento` |
-| Confirmado | Cliente responde ao lembrete | Nenhuma automação extra |
-| Atendido | Loja confirma via Bot | Template pós-atendimento (opcional) |
-| No-Show | Loja nega OU timeout de cobrança | Mensagem de recuperação ao cliente |
-| Recuperação | Cliente responde após no-show | IA conduz conversa |
-| Abandonado | 48h sem resposta após 2 tentativas | Nenhuma |
+**3. UI: Página dedicada de Aprendizado da IA**
+
+Em vez do card pequeno atual em Configurações, criar uma seção com abas:
+
+- **Aba "Regras Proibidas"**: Lista de regras com toggle ativo/inativo, botão criar nova regra (campo texto + categoria)
+- **Aba "Exemplos Modelo"**: O que já existe no LearningCard, mas melhorado — com campo de busca e edição inline
+- **Aba "Feedbacks"**: Dashboard com stats + lista de feedbacks negativos recentes com botão "Promover a Regra" (além do já existente "Promover a Exemplo")
+- **Aba "Prompt"**: O prompt de atendimento atual (já existe em Configurações) movido para cá
+
+**4. Fluxo rápido de correção (atalho)**
+
+Na tela de Atendimentos, ao dar 👎 numa resposta da IA, adicionar opção "Criar regra proibida" além da correção atual. Ex: operador vê a IA dizendo "fazemos exame de vista" → 👎 → "Criar regra: Óticas não fazem exame de vista" → regra criada e ativa imediatamente.
 
 ### Implementação
 
-1. **Migration**: adicionar `tentativas_lembrete` e `tentativas_cobranca_loja` à tabela `agendamentos`
-2. **Cron**: adicionar lógica de reenvio de lembrete e segunda cobrança à loja com timeout
-3. **Pipeline-automations**: garantir que o move para `no_show` por timeout da loja também crie tarefa automática
-4. **UI**: atualizar cards do pipeline para mostrar indicadores de tentativas
+1. **Migration**: criar tabela `ia_regras_proibidas` com RLS
+2. **Edge Function `ai-triage`**: carregar regras proibidas, injetar no prompt, aumentar limites
+3. **UI**: refatorar LearningCard em componente com abas (Regras, Exemplos, Feedbacks, Prompt)
+4. **MessageFeedback**: adicionar opção "Criar regra proibida" no dialog de feedback negativo
+
+### Resultado para o caso citado
+
+Você criaria a regra: _"Óticas Diniz NÃO fazem exame de vista. É proibido por lei em óticas. Podemos indicar profissionais próximos e compensar com descontos."_
+
+A IA receberia isso como:
+```
+# PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA
+- Óticas Diniz NÃO fazem exame de vista. É proibido por lei em óticas. 
+  Podemos indicar profissionais próximos e compensar com descontos.
+```
+
+Isso garante que nunca mais a IA ofereça exame de vista, independente do contexto.
 
