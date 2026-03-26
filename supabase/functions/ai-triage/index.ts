@@ -53,7 +53,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
       resposta:
         "Boa! Me manda uma foto da sua receita que eu já te passo os valores certinhos. Se ainda não tem receita, posso te orientar também 😉",
       intencao: "orcamento",
-      pipeline_coluna: inboundCount >= 3 ? "Orçamento" : "Novo Contato",
+      pipeline_coluna: "Orçamento",
       precisa_humano: false,
     };
   }
@@ -422,7 +422,7 @@ Se não souber responder: "Vou encaminhar para um Consultor especializado que po
 Colunas: ${opts.colunasNomes}
 Setores: ${opts.setoresNomes || "nenhum"}
 Mensagem nº ${opts.inboundCount}.
-${opts.inboundCount < 3 ? 'Use "Novo Contato" até 3ª msg (exceto escalonamento).' : "Mova para coluna adequada."}`);
+Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.`);
 
   if (opts.isHibrido) {
     s.push(`# MODO HÍBRIDO
@@ -809,7 +809,7 @@ serve(async (req) => {
       } else if (fn === "interpretar_receita") {
         resposta = args.resposta;
         intencao = "receita_oftalmologica";
-        pipeline_coluna = inboundCount >= 3 ? "Orçamento" : "Novo Contato";
+        pipeline_coluna = "Orçamento";
 
         await supabase.from("contatos").update({
           metadata: {
@@ -991,7 +991,7 @@ serve(async (req) => {
     if (precisa_humano) {
       const col = colunas.find((c: any) => c.nome === "Atendimento Humano");
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
-    } else if (inboundCount >= 3 || pipeline_coluna !== "Novo Contato") {
+    } else if (pipeline_coluna !== "Novo Contato") {
       const col = colunas.find((c: any) => c.nome === pipeline_coluna);
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
     }
