@@ -1,59 +1,66 @@
 
 
-## Plano: Injetar Data/Hora Atual + Fortalecer Aprendizado
+## Plano: Corrigir Agendamentos Duplicados e Mensagens Redundantes
 
-### Problemas identificados
+### Problemas Identificados
 
-1. **A IA não sabe que dia é hoje.** O prompt NÃO injeta a data/hora atual. Quando o cliente diz "sábado de manhã", a IA não consegue calcular a data (DD/MM) e fica pedindo ao cliente — absurdo.
+1. **Mensagem duplicada por agendamento**: Quando a IA chama `agendar_visita`, a function `agendar-cliente` envia uma mensagem de confirmação formatada (✅ Agendamento confirmado!) via `send-whatsapp`. Depois, a IA TAMBÉM envia `args.resposta` como segunda mensagem. Resultado: cliente recebe duas mensagens por agendamento.
 
-2. **A regra proibida existe** ("Óticas não podem fazer exames") **e é carregada no prompt**, mas a IA ainda ofereceu "agendamos exame de vista com especialista". O problema é que a regra está fraca demais textualmente e a IA interpreta "clínica parceira" como diferente de "ótica fazendo exame".
+2. **Agendamento duplicado**: Não há verificação de agendamento existente. Quando o cliente confirma algo que já foi agendado, a IA chama `agendar_visita` novamente, criando um segundo registro.
 
-3. **Nenhum exemplo modelo ativo** (`ia_exemplos` retornou vazio com `ativo = true`). Os feedbacks corrigidos existem mas não foram promovidos a exemplos.
+3. **Pergunta contraditória sobre lembrete**: A confirmação diz "Vou te enviar um lembrete no dia anterior 😉" e depois a IA pergunta "Quer que eu envie um lembrete?" — redundante e confuso.
 
 ### Solução
 
-**1. Injetar data/hora atual no prompt (CRÍTICO)**
+**1. Eliminar mensagem duplicada (`ai-triage/index.ts`)**
 
-No `buildSystemPrompt`, adicionar logo no início:
+No bloco que processa `agendar_visita` / `reagendar_visita` (linha ~823), ao invés de usar `args.resposta` como resposta da IA, definir `resposta = ""` (vazio). A `agendar-cliente` já envia a mensagem bonita formatada. A IA não precisa enviar nada adicional.
 
-```
-# DATA E HORA ATUAL
-Agora: quarta-feira, 26/03/2026 às 14:35 (horário de Brasília)
-Próximo sábado: 29/03/2026
-Próximo domingo: 30/03/2026
+Ou melhor: remover o envio de WhatsApp da `agendar-cliente` e deixar só a IA responder (mais controle). A opção mais limpa é **remover o `send-whatsapp` da `agendar-cliente`**, já que a confirmação formatada pode ser montada direto no `args.resposta` da IA.
 
-REGRA: Quando o cliente disser "sábado", "segunda", etc., CALCULE a data automaticamente. 
-NUNCA peça ao cliente para informar a data em DD/MM — isso é trabalho SEU.
-```
+**Decisão**: Remover o envio de mensagem da `agendar-cliente/index.ts` (linhas 57-72). A IA já envia a resposta. O `agendar-cliente` fica responsável apenas por criar o registro e logar o evento CRM.
 
-A data será calculada dinamicamente com `new Date()` usando timezone `America/Sao_Paulo`, incluindo o dia da semana e os próximos 7 dias nomeados.
+**2. Verificar duplicata antes de criar (`ai-triage/index.ts`)**
 
-**2. Fortalecer regras proibidas no prompt**
-
-Atualmente as regras são injetadas como `- ❌ {regra}`. Vou adicionar reforço:
+No bloco `agendar_visita` (linha ~839), antes de chamar `agendar-cliente`, verificar se já existe um agendamento ativo para o mesmo contato + loja + mesma data. Se existir, pular a criação e apenas responder ao cliente que o agendamento já está confirmado.
 
 ```
-INSTRUÇÕES: Estas regras se aplicam A TODAS as situações, incluindo clínicas parceiras, 
-indicações e qualquer variação. NÃO há exceções.
+// Pseudocódigo
+const jaExiste = agendamentosAtivos.some(a => 
+  a.loja_nome === args.loja_nome && 
+  a.data_horario.startsWith(args.data_horario.substring(0, 10)) &&
+  (a.status === "agendado" || a.status === "confirmado")
+);
+if (jaExiste) {
+  // Não criar novo — apenas confirmar ao cliente
+  resposta = args.resposta; // usa resposta da IA sem criar duplicata
+  // Pular chamada a agendar-cliente
+}
 ```
 
-**3. Auto-promover feedbacks corrigidos a exemplos**
+**3. Instrução no prompt para não perguntar sobre lembrete (`ai-triage/index.ts`)**
 
-No `submitNegative` do `MessageFeedback.tsx`, quando o operador fornece `resposta_corrigida`, automaticamente criar o exemplo em `ia_exemplos` (sem precisar do toggle). O toggle "Criar exemplo" passará a vir **ligado por padrão** quando há resposta corrigida.
+Adicionar na seção de regras do prompt:
+```
+REGRA: Quando agendar uma visita, NÃO pergunte se o cliente quer lembrete — 
+o lembrete é automático. Apenas confirme os dados e encerre.
+Após confirmação do cliente, NÃO crie outro agendamento — 
+apenas confirme que está tudo certo.
+```
 
-### Arquivos alterados
+### Arquivos Alterados
 
-1. **`supabase/functions/ai-triage/index.ts`**
-   - Função `buildSystemPrompt`: adicionar seção `# DATA E HORA ATUAL` com cálculo dinâmico dos próximos 7 dias
-   - Reforçar bloco de proibições com instrução de aplicação universal
-   - Adicionar regra explícita: "NUNCA peça data DD/MM ao cliente"
+1. **`supabase/functions/agendar-cliente/index.ts`**
+   - Remover bloco de envio WhatsApp (linhas 57-72) — a IA já responde
 
-2. **`src/components/atendimentos/MessageFeedback.tsx`**
-   - Toggle "Criar exemplo" vem ligado por padrão quando `respostaCorrigida` tem conteúdo
+2. **`supabase/functions/ai-triage/index.ts`**
+   - Adicionar verificação de duplicata antes de chamar `agendar-cliente`
+   - Adicionar regra no prompt: "NÃO pergunte sobre lembrete" e "Após confirmação, NÃO crie novo agendamento"
+   - No `proximo_passo` da tool `agendar_visita`, instruir que após agendamento o próximo passo é aguardar (não perguntar sobre lembrete)
 
 ### Resultado
 
-- A IA saberá que "sábado" = 29/03/2026 e usará a tool `agendar_visita` com ISO date diretamente
-- As regras proibidas terão peso reforçado no prompt
-- Feedbacks com correção criarão exemplos automaticamente, acelerando o aprendizado
+- Cliente recebe UMA única mensagem de confirmação (da IA)
+- Confirmações subsequentes ("confirmado") não criam agendamento duplicado
+- Sem pergunta contraditória sobre lembrete
 
