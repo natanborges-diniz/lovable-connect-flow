@@ -1,29 +1,20 @@
 
 
-## Plano: Edge Function para Revelar Service Role Key
+## Plano: Remover temporariamente a autenticação do reveal-secret
 
-### O que será feito
-Criar uma edge function temporária `reveal-secret` que retorna o valor da `SUPABASE_SERVICE_ROLE_KEY`, protegida pelo `INTERNAL_SERVICE_SECRET` já configurado no projeto.
+### Problema
+Você precisa do `INTERNAL_SERVICE_SECRET` para chamar a função `reveal-secret`, mas não consegue copiar o valor dos Secrets na interface — criando um ciclo sem saída.
 
-### Como funciona
-- Endpoint: `POST /functions/v1/reveal-secret`
-- Header obrigatório: `x-internal-secret` com o valor do `INTERNAL_SERVICE_SECRET`
-- Retorna as chaves: `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL` e `SUPABASE_ANON_KEY`
+### Solução
+Modificar temporariamente a função `reveal-secret` para aceitar chamadas **sem** o header `x-internal-secret`, retornando as chaves diretamente.
 
-### Detalhes técnicos
-- Arquivo: `supabase/functions/reveal-secret/index.ts`
-- Validação do header `x-internal-secret` contra `INTERNAL_SERVICE_SECRET` (já existe nos secrets)
-- CORS habilitado
-- Após copiar as chaves, a função deve ser removida por segurança
-
-### Como usar
-Após deploy, chamar:
-```
-curl -X POST https://kvggebtnqmxydtwaumqz.supabase.co/functions/v1/reveal-secret \
-  -H "x-internal-secret: SEU_INTERNAL_SERVICE_SECRET"
-```
+### Passos
+1. Remover a validação do `x-internal-secret` na função `reveal-secret`
+2. Fazer deploy automático
+3. Você acessa via navegador: `https://kvggebtnqmxydtwaumqz.supabase.co/functions/v1/reveal-secret` e copia as chaves
+4. Imediatamente após copiar, restauramos a proteção ou deletamos a função
 
 ### Segurança
-- Função protegida por token interno
-- Recomendação: deletar a função após copiar os valores
+- A função ficará aberta por poucos minutos, apenas o tempo de copiar
+- Após copiar, deletamos a função completamente
 
