@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,11 +80,18 @@ function useContatosHomologacao() {
 // ─── Main Component ───
 
 export default function Configuracoes() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get("tab") || "ia";
+
+  const handleTabChange = (value: string) => {
+    setSearchParams({ tab: value });
+  };
+
   return (
     <>
       <PageHeader title="Configurações" description="Gerencie setores, filas, IA e integrações" />
 
-      <Tabs defaultValue="ia" className="w-full">
+      <Tabs value={currentTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="w-full grid grid-cols-5 mb-6">
           <TabsTrigger value="ia" className="flex items-center gap-1.5">
             <Brain className="h-4 w-4" /> IA

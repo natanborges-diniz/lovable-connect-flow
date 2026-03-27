@@ -1,7 +1,8 @@
 import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
-  Search as SearchIcon, Plus, List, Clock, Kanban, DollarSign, CalendarDays
+  Search as SearchIcon, Plus, List, Clock, Kanban, DollarSign, CalendarDays,
+  Brain, Building2, Store, Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -95,7 +96,11 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
     {
       label: "Configurações",
       items: [
-        { title: "Setores e Filas", url: "/configuracoes", icon: Settings },
+        { title: "IA", url: "/configuracoes?tab=ia", icon: Brain },
+        { title: "Estrutura", url: "/configuracoes?tab=estrutura", icon: Building2 },
+        { title: "Lojas", url: "/configuracoes?tab=lojas", icon: Store },
+        { title: "WhatsApp", url: "/configuracoes?tab=whatsapp", icon: MessageSquare },
+        { title: "Automações", url: "/configuracoes?tab=automacoes", icon: Zap },
       ],
     },
   ],
@@ -124,7 +129,12 @@ export function AppSidebar({ activeModule }: AppSidebarProps) {
             <SidebarGroupContent>
               <SidebarMenu>
                 {section.items.map((item) => {
-                  const isActive = location.pathname === item.url;
+                  const itemPath = item.url.split("?")[0];
+                  const itemParams = new URLSearchParams(item.url.split("?")[1] || "");
+                  const currentParams = new URLSearchParams(location.search);
+                  const isActive = item.url.includes("?")
+                    ? location.pathname === itemPath && itemParams.get("tab") === currentParams.get("tab")
+                    : location.pathname === item.url;
 
                   return (
                     <SidebarMenuItem key={item.url}>
