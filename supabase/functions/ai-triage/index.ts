@@ -459,6 +459,90 @@ function extractSentTopics(outboundTexts: string[]): string[] {
   return topics;
 }
 
+// ═══════════════════════════════════════════
+// CONTEXTUAL RETRIEVAL v1 — Signal-based prioritization
+// ═══════════════════════════════════════════
+
+type Signal = "orcamento" | "agendamento" | "acompanhamento" | "financeiro" | "reclamacao" | "informacoes";
+
+const SIGNAL_PATTERNS: [RegExp, Signal][] = [
+  [/or[çc]amento|pre[çc]o|valor|quanto custa|lente|[óo]culos|arma[çc]|comprar/i, "orcamento"],
+  [/agend|visita|marcar|hor[áa]rio|reserv|dia|data/i, "agendamento"],
+  [/status|pedido|entrega|retirada|retirar|pronto|andamento|acompanhar/i, "acompanhamento"],
+  [/pagamento|financeiro|boleto|pix|cart[aã]o|parcel|nota fiscal|nf/i, "financeiro"],
+  [/reclama|problema|defeito|insatisf|devolu|troc|quebr|errad/i, "reclamacao"],
+  [/informa|d[úu]vida|como funciona|onde fica|telefone|endere|hor[áa]rio/i, "informacoes"],
+];
+
+const SIGNAL_TO_CATEGORIES: Record<Signal, string[]> = {
+  orcamento: ["orcamento", "produtos", "lentes", "geral", "aprovado", "correcao"],
+  agendamento: ["agendamento", "lojas", "geral", "aprovado", "correcao"],
+  acompanhamento: ["acompanhamento", "status", "pedidos", "geral", "aprovado", "correcao"],
+  financeiro: ["financeiro", "pagamento", "geral", "aprovado", "correcao"],
+  reclamacao: ["reclamacao", "atendimento", "geral", "aprovado", "correcao"],
+  informacoes: ["informacoes", "lojas", "produtos", "geral", "aprovado", "correcao"],
+};
+
+function detectSignals(msg: string): Signal[] {
+  const n = norm(msg);
+  const signals: Signal[] = [];
+  for (const [re, signal] of SIGNAL_PATTERNS) {
+    if (re.test(n)) signals.push(signal);
+  }
+  return signals;
+}
+
+function prioritizeExamples(
+  exemplos: { categoria: string; pergunta: string; resposta_ideal: string }[],
+  signals: Signal[],
+  limit: number = 30,
+): typeof exemplos {
+  if (signals.length === 0 || exemplos.length === 0) return exemplos.slice(0, limit);
+
+  const relevantCats = new Set<string>();
+  for (const sig of signals) {
+    for (const cat of SIGNAL_TO_CATEGORIES[sig]) relevantCats.add(cat);
+  }
+
+  const matched: typeof exemplos = [];
+  const rest: typeof exemplos = [];
+
+  for (const ex of exemplos) {
+    if (relevantCats.has(ex.categoria.toLowerCase())) {
+      matched.push(ex);
+    } else {
+      rest.push(ex);
+    }
+  }
+
+  // Prioritized first, then fill remaining slots
+  return [...matched, ...rest].slice(0, limit);
+}
+
+function prioritizeFeedbacks(
+  feedbacks: { motivo: string | null; resposta_corrigida: string | null }[],
+  signals: Signal[],
+  currentMsg: string,
+  limit: number = 10,
+): typeof feedbacks {
+  if (signals.length === 0 || feedbacks.length === 0) return feedbacks.slice(0, limit);
+
+  const msgNorm = norm(currentMsg);
+  // Score each feedback by keyword overlap with current message
+  const scored = feedbacks.map((f) => {
+    const text = norm((f.motivo || "") + " " + (f.resposta_corrigida || ""));
+    const words = msgNorm.split(/\s+/).filter(w => w.length > 3);
+    let score = 0;
+    for (const w of words) {
+      if (text.includes(w)) score++;
+    }
+    return { f, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(s => s.f).slice(0, limit);
+}
+
 // Deterministic fallback responses
 const DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE = "Sem problemas! Me diz sobre o que quer falar agora que eu te ajudo 😊";
 
@@ -647,14 +731,21 @@ serve(async (req) => {
       }
     }
 
+    // ── 5.1 CONTEXTUAL RETRIEVAL v1 — signal-based prioritization ──
+    const signals = detectSignals(currentMsg);
+    const prioritizedExemplos = prioritizeExamples(exemplos as any[], signals);
+    const prioritizedFeedbacks = prioritizeFeedbacks(antiFeedbacks as any[], signals, currentMsg);
+
+    console.log(`[CONTEXT-v1] Signals: ${signals.join(",") || "none"} | Exemplos: ${prioritizedExemplos.length} (${exemplos.length} total) | Feedbacks: ${prioritizedFeedbacks.length} (${antiFeedbacks.length} total)`);
+
     let examplesStr = "";
-    if (exemplos.length > 0) {
-      examplesStr = exemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
+    if (prioritizedExemplos.length > 0) {
+      examplesStr = prioritizedExemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
     }
 
     let antiStr = "";
-    if (antiFeedbacks.length > 0) {
-      antiStr = antiFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
+    if (prioritizedFeedbacks.length > 0) {
+      antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
     }
 
     const systemPrompt = buildSystemPrompt({
