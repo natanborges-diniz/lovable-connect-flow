@@ -731,14 +731,21 @@ serve(async (req) => {
       }
     }
 
+    // ── 5.1 CONTEXTUAL RETRIEVAL v1 — signal-based prioritization ──
+    const signals = detectSignals(currentMsg);
+    const prioritizedExemplos = prioritizeExamples(exemplos as any[], signals);
+    const prioritizedFeedbacks = prioritizeFeedbacks(antiFeedbacks as any[], signals, currentMsg);
+
+    console.log(`[CONTEXT-v1] Signals: ${signals.join(",") || "none"} | Exemplos: ${prioritizedExemplos.length} (${exemplos.length} total) | Feedbacks: ${prioritizedFeedbacks.length} (${antiFeedbacks.length} total)`);
+
     let examplesStr = "";
-    if (exemplos.length > 0) {
-      examplesStr = exemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
+    if (prioritizedExemplos.length > 0) {
+      examplesStr = prioritizedExemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
     }
 
     let antiStr = "";
-    if (antiFeedbacks.length > 0) {
-      antiStr = antiFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
+    if (prioritizedFeedbacks.length > 0) {
+      antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
     }
 
     const systemPrompt = buildSystemPrompt({
