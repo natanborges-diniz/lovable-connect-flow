@@ -277,7 +277,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
               <p className="whitespace-pre-wrap">{m.conteudo}</p>
               <div className="flex items-center justify-between">
                 <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
-                {m.direcao === "outbound" && m.remetente_nome === "Assistente IA" && (
+                {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
                   <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
                 )}
               </div>
