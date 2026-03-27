@@ -95,7 +95,11 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
     {
       label: "Configurações",
       items: [
-        { title: "Setores e Filas", url: "/configuracoes", icon: Settings },
+        { title: "IA", url: "/configuracoes?tab=ia", icon: Settings },
+        { title: "Estrutura", url: "/configuracoes?tab=estrutura", icon: Settings },
+        { title: "Lojas", url: "/configuracoes?tab=lojas", icon: Settings },
+        { title: "WhatsApp", url: "/configuracoes?tab=whatsapp", icon: Settings },
+        { title: "Automações", url: "/configuracoes?tab=automacoes", icon: Settings },
       ],
     },
   ],
