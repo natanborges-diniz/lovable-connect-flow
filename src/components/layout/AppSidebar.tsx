@@ -1,7 +1,8 @@
 import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
-  Search as SearchIcon, Plus, List, Clock, Kanban, DollarSign, CalendarDays
+  Search as SearchIcon, Plus, List, Clock, Kanban, DollarSign, CalendarDays,
+  Brain, Building2, Store, Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -95,11 +96,11 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
     {
       label: "Configurações",
       items: [
-        { title: "IA", url: "/configuracoes?tab=ia", icon: Settings },
-        { title: "Estrutura", url: "/configuracoes?tab=estrutura", icon: Settings },
-        { title: "Lojas", url: "/configuracoes?tab=lojas", icon: Settings },
-        { title: "WhatsApp", url: "/configuracoes?tab=whatsapp", icon: Settings },
-        { title: "Automações", url: "/configuracoes?tab=automacoes", icon: Settings },
+        { title: "IA", url: "/configuracoes?tab=ia", icon: Brain },
+        { title: "Estrutura", url: "/configuracoes?tab=estrutura", icon: Building2 },
+        { title: "Lojas", url: "/configuracoes?tab=lojas", icon: Store },
+        { title: "WhatsApp", url: "/configuracoes?tab=whatsapp", icon: MessageSquare },
+        { title: "Automações", url: "/configuracoes?tab=automacoes", icon: Zap },
       ],
     },
   ],
