@@ -128,7 +128,12 @@ export function AppSidebar({ activeModule }: AppSidebarProps) {
             <SidebarGroupContent>
               <SidebarMenu>
                 {section.items.map((item) => {
-                  const isActive = location.pathname === item.url;
+                  const itemPath = item.url.split("?")[0];
+                  const itemParams = new URLSearchParams(item.url.split("?")[1] || "");
+                  const currentParams = new URLSearchParams(location.search);
+                  const isActive = item.url.includes("?")
+                    ? location.pathname === itemPath && itemParams.get("tab") === currentParams.get("tab")
+                    : location.pathname === item.url;
 
                   return (
                     <SidebarMenuItem key={item.url}>
