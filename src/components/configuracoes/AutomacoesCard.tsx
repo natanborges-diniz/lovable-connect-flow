@@ -626,6 +626,9 @@ function AutomacaoForm({
 
         <Separator />
 
+        {/* Variables reference */}
+        <VariablesReference entidade={entidade} tipoAcao={tipoAcao} />
+
         {/* Config por tipo */}
         {tipoAcao === "enviar_template" && (
           <div className="space-y-3">
