@@ -62,6 +62,7 @@ export default function PipelineFinanceiro() {
 
   const setorId = financeiroSetor?.id;
   const { data: colunas, isLoading: loadingColunas } = usePipelineColunas(setorId);
+  const { data: automacoes = [] } = useAutomacoes("solicitacao");
 
   // Load solicitações with pipeline_coluna_id in this pipeline
   const { data: solicitacoes, isLoading: loadingSolicitacoes } = useQuery({
