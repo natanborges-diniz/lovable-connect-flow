@@ -61,13 +61,13 @@ serve(async (req) => {
     else if (fluxo === "menu_principal" && etapa === "inicio") {
       if (texto === "1") {
         updateSessao = { fluxo: "link_pagamento", etapa: "valor", dados: {} };
-        resposta = "💳 *Gerar Link de Pagamento*\n\nQual o *valor* do link? (ex: 150.00)";
+        resposta = "💳 *Gerar Link de Pagamento*\n\nQual o *valor* do link? (ex: 150.00)\n\n_Digite *0* para voltar ao menu._";
       } else if (texto === "2") {
         updateSessao = { fluxo: "gerar_boleto", etapa: "valor", dados: {} };
-        resposta = "🧾 *Gerar Boleto*\n\nQual o *valor* do boleto? (ex: 250.00)";
+        resposta = "🧾 *Gerar Boleto*\n\nQual o *valor* do boleto? (ex: 250.00)\n\n_Digite *0* para voltar ao menu._";
       } else if (texto === "3") {
         updateSessao = { fluxo: "consulta_cpf", etapa: "cpf", dados: {} };
-        resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):";
+        resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):\n\n_Digite *0* para voltar ao menu._";
       } else if (texto === "4") {
         // ─── Confirmar Comparecimento ───
         updateSessao = { fluxo: "confirmar_comparecimento", etapa: "listar", dados: {} };
