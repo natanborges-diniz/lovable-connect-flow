@@ -5,15 +5,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   CheckCircle, XCircle, Upload, FileText, Download,
-  DollarSign, User, CreditCard, Clock, Loader2,
+  DollarSign, User, CreditCard, Clock, Loader2, AlertTriangle, Percent,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { cn } from "@/lib/utils";
 
 interface CpfApprovalDialogProps {
   solicitacao: any;
@@ -22,12 +24,42 @@ interface CpfApprovalDialogProps {
   colunas: any[];
 }
 
+const DADOS_POSSIVEIS = [
+  { key: "nome_cliente", label: "Nome do cliente" },
+  { key: "cpf", label: "CPF" },
+  { key: "valor_compra", label: "Valor da compra" },
+  { key: "valor_entrada", label: "Valor da entrada" },
+];
+
+function EntryPercentageBadge({ valorEntrada, valorCompra, size = "md" }: { valorEntrada: number | null; valorCompra: number | null; size?: "sm" | "md" }) {
+  if (valorEntrada == null || valorCompra == null || valorCompra === 0) return null;
+  const pct = (valorEntrada / valorCompra) * 100;
+  const color = pct >= 50 ? "text-green-600 bg-green-500/10 border-green-500/30" 
+    : pct >= 30 ? "text-yellow-600 bg-yellow-500/10 border-yellow-500/30" 
+    : "text-red-600 bg-red-500/10 border-red-500/30";
+  
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-1 font-bold rounded-md border px-1.5",
+      color,
+      size === "sm" ? "text-[10px] py-0" : "text-sm py-0.5"
+    )}>
+      <Percent className={size === "sm" ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} />
+      {pct.toFixed(0)}% entrada
+    </span>
+  );
+}
+
+export { EntryPercentageBadge };
+
 export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: CpfApprovalDialogProps) {
   const queryClient = useQueryClient();
   const [justificativa, setJustificativa] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [action, setAction] = useState<"aprovar" | "reprovar" | null>(null);
+  const [action, setAction] = useState<"aprovar" | "reprovar" | "dados_incompletos" | null>(null);
+  const [showDadosIncompletos, setShowDadosIncompletos] = useState(false);
+  const [dadosSelecionados, setDadosSelecionados] = useState<string[]>([]);
 
   const meta = solicitacao?.metadata || {};
   const nomeCliente = meta.nome_cliente || "—";
@@ -51,6 +83,80 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
     }
   };
 
+  const handleDadosIncompletos = async () => {
+    if (dadosSelecionados.length === 0) {
+      toast.error("Selecione pelo menos um dado incompleto.");
+      return;
+    }
+
+    setAction("dados_incompletos");
+    setUploading(true);
+
+    try {
+      const targetCol = findColuna("Dados Incompletos");
+      const dadosLabels = dadosSelecionados.map(k => DADOS_POSSIVEIS.find(d => d.key === k)?.label || k);
+
+      const updatedMetadata = {
+        ...meta,
+        dados_incompletos: dadosSelecionados,
+        dados_incompletos_labels: dadosLabels,
+        data_dados_incompletos: new Date().toISOString(),
+      };
+
+      const updatePayload: any = {
+        metadata: updatedMetadata,
+      };
+      if (targetCol) {
+        updatePayload.pipeline_coluna_id = targetCol.id;
+      }
+
+      const { error } = await supabase
+        .from("solicitacoes")
+        .update(updatePayload)
+        .eq("id", solicitacao.id);
+
+      if (error) throw error;
+
+      // Log CRM event
+      if (solicitacao.contato_id) {
+        await supabase.from("eventos_crm").insert({
+          contato_id: solicitacao.contato_id,
+          tipo: "dados_incompletos",
+          descricao: `Dados incompletos na consulta CPF: ${dadosLabels.join(", ")}`,
+          referencia_tipo: "solicitacao",
+          referencia_id: solicitacao.id,
+        });
+      }
+
+      // Trigger pipeline automations
+      if (targetCol) {
+        try {
+          await supabase.functions.invoke("pipeline-automations", {
+            body: {
+              entity_type: "solicitacao",
+              entity_id: solicitacao.id,
+              coluna_id: targetCol.id,
+              coluna_anterior_id: solicitacao.pipeline_coluna_id,
+            },
+          });
+        } catch (e) {
+          console.warn("Pipeline automation call failed:", e);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
+      toast.success("Card movido para Dados Incompletos.");
+      onOpenChange(false);
+      resetForm();
+    } catch (err: any) {
+      console.error("Error:", err);
+      toast.error("Erro: " + err.message);
+    } finally {
+      setUploading(false);
+      setAction(null);
+    }
+  };
+
   const handleAction = async (tipo: "aprovar" | "reprovar") => {
     if (!file && !existingDocUrl) {
       toast.error("Upload do documento de consulta é obrigatório.");
@@ -67,7 +173,6 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
     try {
       let documentoUrl = existingDocUrl;
 
-      // Upload file if new
       if (file) {
         const ext = file.name.split(".").pop() || "pdf";
         const path = `${solicitacao.id}/${Date.now()}.${ext}`;
@@ -75,15 +180,12 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           .from("cpf-documentos")
           .upload(path, file, { contentType: file.type });
         if (uploadError) throw uploadError;
-
-        documentoUrl = path; // Store path, generate signed URL on demand
+        documentoUrl = path;
       }
 
-      // Determine target column
       const targetColName = tipo === "aprovar" ? "Consulta CPF Aprovado" : "Consulta CPF Reprovada";
       const targetCol = findColuna(targetColName);
 
-      // Update metadata with document and justification
       const updatedMetadata = {
         ...meta,
         documento_path: file ? `${solicitacao.id}/${Date.now()}.${file.name.split(".").pop() || "pdf"}` : meta.documento_path,
@@ -93,10 +195,9 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         data_analise: new Date().toISOString(),
       };
 
-      // Update solicitação
       const updatePayload: any = {
         metadata: updatedMetadata,
-        status: tipo === "aprovar" ? "concluida" : "concluida",
+        status: "concluida",
       };
       if (targetCol) {
         updatePayload.pipeline_coluna_id = targetCol.id;
@@ -109,7 +210,6 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
 
       if (updateError) throw updateError;
 
-      // Log CRM event
       if (solicitacao.contato_id) {
         await supabase.from("eventos_crm").insert({
           contato_id: solicitacao.contato_id,
@@ -123,7 +223,6 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         });
       }
 
-      // Trigger pipeline automations
       if (targetCol) {
         try {
           await supabase.functions.invoke("pipeline-automations", {
@@ -156,6 +255,8 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
     setJustificativa("");
     setFile(null);
     setAction(null);
+    setShowDadosIncompletos(false);
+    setDadosSelecionados([]);
   };
 
   const handleDownloadDoc = async () => {
@@ -175,6 +276,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
 
   const isConsultaCpf = solicitacao.tipo === "consulta_cpf";
   const alreadyProcessed = meta.resultado_consulta != null;
+  const isDadosIncompletos = meta.dados_incompletos?.length > 0 && !alreadyProcessed;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) resetForm(); onOpenChange(o); }}>
@@ -233,12 +335,18 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                   </div>
                 )}
                 {valorFinanciado != null && (
-                  <div className="col-span-2">
+                  <div>
                     <span className="text-muted-foreground text-xs">Valor a financiar</span>
                     <p className="font-semibold text-lg flex items-center gap-1">
                       <DollarSign className="h-4 w-4" />
                       R$ {valorFinanciado.toFixed(2)}
                     </p>
+                  </div>
+                )}
+                {/* % de Entrada - highlighted */}
+                {valorEntrada != null && valorCompra != null && valorCompra > 0 && (
+                  <div className="flex items-end">
+                    <EntryPercentageBadge valorEntrada={valorEntrada} valorCompra={valorCompra} size="md" />
                   </div>
                 )}
                 {meta.motivo && (
@@ -247,6 +355,19 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                     <p>{meta.motivo}</p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Dados Incompletos alert */}
+          {isDadosIncompletos && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 text-yellow-700 border border-yellow-500/30">
+              <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium text-sm">Dados Incompletos</p>
+                <p className="text-xs mt-0.5">
+                  {meta.dados_incompletos_labels?.join(", ")}
+                </p>
               </div>
             </div>
           )}
@@ -299,6 +420,49 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
             </div>
           )}
 
+          {/* Dados Incompletos selection panel */}
+          {showDadosIncompletos && (
+            <div className="space-y-3 p-4 border rounded-lg bg-yellow-500/5 border-yellow-500/30">
+              <h4 className="font-semibold text-sm flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                Quais dados estão incompletos?
+              </h4>
+              <div className="space-y-2">
+                {DADOS_POSSIVEIS.map((d) => (
+                  <label key={d.key} className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={dadosSelecionados.includes(d.key)}
+                      onCheckedChange={(checked) => {
+                        setDadosSelecionados(prev =>
+                          checked ? [...prev, d.key] : prev.filter(k => k !== d.key)
+                        );
+                      }}
+                    />
+                    <span className="text-sm">{d.label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  size="sm"
+                  className="bg-yellow-600 hover:bg-yellow-700 text-white"
+                  onClick={handleDadosIncompletos}
+                  disabled={uploading || dadosSelecionados.length === 0}
+                >
+                  {uploading && action === "dados_incompletos" ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 mr-1" />
+                  )}
+                  Confirmar Dados Incompletos
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { setShowDadosIncompletos(false); setDadosSelecionados([]); }}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Action area - only for unprocessed consulta_cpf */}
           {isConsultaCpf && !alreadyProcessed && (
             <div className="space-y-4 pt-4 border-t">
@@ -342,7 +506,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
               </div>
 
               {/* Action buttons */}
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <Button
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                   onClick={() => handleAction("aprovar")}
@@ -353,7 +517,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                   ) : (
                     <CheckCircle className="h-4 w-4 mr-1" />
                   )}
-                  Aprovar CPF
+                  Aprovar
                 </Button>
                 <Button
                   variant="destructive"
@@ -366,7 +530,16 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                   ) : (
                     <XCircle className="h-4 w-4 mr-1" />
                   )}
-                  Reprovar CPF
+                  Reprovar
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 border-yellow-500/50 text-yellow-700 hover:bg-yellow-500/10"
+                  onClick={() => setShowDadosIncompletos(true)}
+                  disabled={uploading || showDadosIncompletos}
+                >
+                  <AlertTriangle className="h-4 w-4 mr-1" />
+                  Incompleto
                 </Button>
               </div>
             </div>
