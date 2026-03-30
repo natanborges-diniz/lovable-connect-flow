@@ -662,7 +662,13 @@ function AutomacaoForm({
                     .replace(/\{\{loja\}\}/g, "Ótica Centro")
                     .replace(/\{\{hora\}\}/g, "14:30")
                     .replace(/\{\{data\}\}/g, "26/03/2026")
-                    .replace(/\{\{telefone\}\}/g, "5511999999999")}
+                    .replace(/\{\{telefone\}\}/g, "5511999999999")
+                    .replace(/\{\{quando\}\}/g, "amanhã às 14:30")
+                    .replace(/\{\{dia_semana\}\}/g, "segunda-feira")
+                    .replace(/\{\{valor_compra\}\}/g, "R$ 2.500,00")
+                    .replace(/\{\{valor_entrada\}\}/g, "R$ 500,00")
+                    .replace(/\{\{valor_financiado\}\}/g, "R$ 2.000,00")
+                    .replace(/\{\{cpf\}\}/g, "123.456.789-00")}
                 </div>
               </div>
             )}
