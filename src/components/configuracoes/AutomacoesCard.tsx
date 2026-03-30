@@ -658,7 +658,8 @@ function AutomacaoForm({
                 <div className="p-3 rounded-md bg-muted/50 border text-sm whitespace-pre-wrap">
                   {texto
                     .replace(/\{\{primeiro_nome\}\}/g, "João")
-                    .replace(/\{\{nome\}\}/g, "João Silva")
+                    .replace(/\{\{nome_cliente\}\}/g, "Maria Silva")
+                    .replace(/\{\{nome\}\}/g, "Loja Centro")
                     .replace(/\{\{loja\}\}/g, "Ótica Centro")
                     .replace(/\{\{hora\}\}/g, "14:30")
                     .replace(/\{\{data\}\}/g, "26/03/2026")
@@ -728,7 +729,7 @@ function AutomacaoForm({
 /* ─── Variables Reference ─── */
 
 const VARS_CONTATO = [
-  { var: "{{nome}}", desc: "Nome completo do contato" },
+  { var: "{{nome}}", desc: "Nome do contato (WhatsApp)" },
   { var: "{{primeiro_nome}}", desc: "Primeiro nome do contato" },
   { var: "{{telefone}}", desc: "Telefone do contato" },
 ];
@@ -742,11 +743,12 @@ const VARS_AGENDAMENTO = [
 ];
 
 const VARS_FINANCEIRO = [
+  { var: "{{nome_cliente}}", desc: "Nome do cliente informado pela loja" },
   { var: "{{valor_compra}}", desc: "Valor total da compra" },
   { var: "{{valor_entrada}}", desc: "Valor da entrada" },
   { var: "{{valor_financiado}}", desc: "Valor a ser financiado" },
   { var: "{{cpf}}", desc: "CPF do cliente consultado" },
-  { var: "{{loja}}", desc: "Loja solicitante" },
+  { var: "{{loja}}", desc: "Nome da loja solicitante (= contato)" },
 ];
 
 function VariablesReference({ entidade, tipoAcao }: { entidade: string; tipoAcao: string }) {

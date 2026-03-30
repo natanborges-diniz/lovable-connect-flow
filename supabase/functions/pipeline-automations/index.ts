@@ -68,6 +68,7 @@ serve(async (req) => {
     let atendimento_id: string | null = null;
     let contato: any = null;
     let agendamento: any = null;
+    let solicitacao: any = null;
 
     if (entity_type === "agendamento") {
       const { data: ag } = await supabase
@@ -85,6 +86,7 @@ serve(async (req) => {
         .select("*, contato:contatos(*)")
         .eq("id", entity_id)
         .single();
+      solicitacao = sol;
       contato_id = sol?.contato_id;
       contato = sol?.contato;
       // Find latest atendimento for this contato
@@ -158,7 +160,7 @@ serve(async (req) => {
               body: JSON.stringify({
                 contato_id,
                 template_name: config.template_name,
-                template_params: resolveParams(config.template_params || [], contato, agendamento),
+                template_params: resolveParams(config.template_params || [], contato, agendamento, solicitacao),
               }),
             });
             results.push(`template:${config.template_name}`);
@@ -167,7 +169,7 @@ serve(async (req) => {
 
           case "enviar_mensagem": {
             if (!atendimento_id) break;
-            const texto = resolveText(config.texto || "", contato, agendamento);
+            const texto = resolveText(config.texto || "", contato, agendamento, solicitacao);
             await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
               method: "POST",
               headers: {
@@ -196,8 +198,8 @@ serve(async (req) => {
 
           case "criar_tarefa": {
             await supabase.from("tarefas").insert({
-              titulo: resolveText(config.titulo || "Tarefa automática", contato, agendamento),
-              descricao: resolveText(config.descricao || "", contato, agendamento),
+              titulo: resolveText(config.titulo || "Tarefa automática", contato, agendamento, solicitacao),
+              descricao: resolveText(config.descricao || "", contato, agendamento, solicitacao),
               prioridade: config.prioridade || "normal",
               ...(config.fila_id ? { fila_id: config.fila_id } : {}),
             });
@@ -241,8 +243,8 @@ serve(async (req) => {
 
 // ─── Helpers ───
 
-function resolveParams(params: string[], contato: any, agendamento: any): string[] {
-  return params.map((p) => resolveText(p, contato, agendamento));
+function resolveParams(params: string[], contato: any, agendamento: any, solicitacao?: any): string[] {
+  return params.map((p) => resolveText(p, contato, agendamento, solicitacao));
 }
 
 function resolveQuando(dataHorario: string): string {
@@ -267,11 +269,20 @@ function resolveQuando(dataHorario: string): string {
   return `dia ${dt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} às ${hora}`;
 }
 
-function resolveText(template: string, contato: any, agendamento: any): string {
+function resolveText(template: string, contato: any, agendamento: any, solicitacao?: any): string {
   if (!template) return "";
   
   const firstName = contato?.nome?.split(" ")[0] || "Cliente";
   const loja = agendamento?.loja_nome || "";
+  const meta = solicitacao?.metadata || {};
+  
+  // {{nome_cliente}} = end customer name informed by the store (from solicitacao metadata)
+  // {{nome}} / {{primeiro_nome}} = contact name (the store in financeiro pipeline)
+  const nomeCliente = meta.nome_cliente || meta.cliente || "";
+  const valorCompra = meta.valor_compra ? `R$ ${Number(meta.valor_compra).toFixed(2)}` : "";
+  const valorEntrada = meta.valor_entrada ? `R$ ${Number(meta.valor_entrada).toFixed(2)}` : "";
+  const valorFinanciado = meta.valor_financiado ? `R$ ${Number(meta.valor_financiado).toFixed(2)}` : "";
+  const cpf = meta.cpf || "";
   
   let hora = "";
   let quando = "";
@@ -286,11 +297,16 @@ function resolveText(template: string, contato: any, agendamento: any): string {
   return template
     .replace(/\{\{nome\}\}/g, contato?.nome || "Cliente")
     .replace(/\{\{primeiro_nome\}\}/g, firstName)
-    .replace(/\{\{loja\}\}/g, loja)
+    .replace(/\{\{nome_cliente\}\}/g, nomeCliente)
+    .replace(/\{\{loja\}\}/g, loja || contato?.nome || "")
     .replace(/\{\{hora\}\}/g, hora)
     .replace(/\{\{quando\}\}/g, quando)
     .replace(/\{\{dia_semana\}\}/g, diaSemana)
     .replace(/\{\{telefone\}\}/g, contato?.telefone || "")
+    .replace(/\{\{valor_compra\}\}/g, valorCompra)
+    .replace(/\{\{valor_entrada\}\}/g, valorEntrada)
+    .replace(/\{\{valor_financiado\}\}/g, valorFinanciado)
+    .replace(/\{\{cpf\}\}/g, cpf)
     .replace(/\{\{data\}\}/g, agendamento?.data_horario
       ? new Date(agendamento.data_horario).toLocaleDateString("pt-BR")
       : "");
