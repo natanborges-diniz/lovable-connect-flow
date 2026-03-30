@@ -391,12 +391,22 @@ export default function PipelineFinanceiro() {
                                             </Button>
                                           </div>
                                           {sol.tipo === "consulta_cpf" && sol.metadata?.valor_financiado != null && (
-                                            <div className="flex items-center gap-1 text-xs font-medium text-primary pl-6">
+                                            <div className="flex items-center gap-1 text-xs font-medium text-primary pl-6 flex-wrap">
                                               <DollarSign className="h-3 w-3" />
                                               R$ {Number(sol.metadata.valor_financiado).toFixed(2)}
+                                              <EntryPercentageBadge
+                                                valorEntrada={sol.metadata?.valor_entrada != null ? Number(sol.metadata.valor_entrada) : null}
+                                                valorCompra={sol.metadata?.valor_compra != null ? Number(sol.metadata.valor_compra) : null}
+                                                size="sm"
+                                              />
                                               {sol.metadata?.resultado_consulta && (
                                                 <Badge variant={sol.metadata.resultado_consulta === "aprovado" ? "default" : "destructive"} className="ml-1 text-[10px] px-1 py-0">
                                                   {sol.metadata.resultado_consulta === "aprovado" ? "Aprovado" : "Reprovado"}
+                                                </Badge>
+                                              )}
+                                              {sol.metadata?.dados_incompletos?.length > 0 && !sol.metadata?.resultado_consulta && (
+                                                <Badge variant="outline" className="ml-1 text-[10px] px-1 py-0 border-yellow-500/50 text-yellow-700">
+                                                  Incompleto
                                                 </Badge>
                                               )}
                                             </div>
