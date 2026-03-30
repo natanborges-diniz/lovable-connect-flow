@@ -324,6 +324,12 @@ export default function PipelineFinanceiro() {
                                               <GripVertical className="h-4 w-4" />
                                             </div>
                                             <div className="min-w-0 flex-1">
+                                              {/* Loja solicitante - primeiro campo */}
+                                              {sol.metadata?.loja_nome && (
+                                                <p className="text-xs font-semibold text-primary truncate mb-0.5">
+                                                  🏪 {sol.metadata.loja_nome}
+                                                </p>
+                                              )}
                                               <div className="flex items-center gap-1.5">
                                                 {tipoIcon(sol.tipo)}
                                                 <p className="font-medium text-sm truncate">{sol.assunto}</p>
@@ -334,6 +340,18 @@ export default function PipelineFinanceiro() {
                                                 </p>
                                               )}
                                             </div>
+                                            {/* Botão excluir card */}
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setDeleteCardConfirm(sol.id);
+                                              }}
+                                            >
+                                              <Trash2 className="h-3 w-3" />
+                                            </Button>
                                           </div>
                                           {sol.tipo === "consulta_cpf" && sol.metadata?.valor_financiado != null && (
                                             <div className="flex items-center gap-1 text-xs font-medium text-primary pl-6">
