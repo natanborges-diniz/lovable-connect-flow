@@ -86,6 +86,7 @@ serve(async (req) => {
         .select("*, contato:contatos(*)")
         .eq("id", entity_id)
         .single();
+      solicitacao = sol;
       contato_id = sol?.contato_id;
       contato = sol?.contato;
       // Find latest atendimento for this contato
