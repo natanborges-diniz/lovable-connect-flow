@@ -314,20 +314,21 @@ function buildMenu(nomeLoja: string): string {
 function handleLinkPagamento(
   etapa: string, texto: string, dados: Record<string, unknown>
 ): { resposta: string; update: Record<string, unknown> } {
+  const hint = "\n\n_Digite *0* para voltar ao menu._";
   switch (etapa) {
     case "valor": {
       const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 150.00)", update: {} };
-      return { resposta: "📝 Descreva o pagamento (ex: Lente Transition CR39)", update: { etapa: "descricao", dados: { ...dados, valor } } };
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 150.00)" + hint, update: {} };
+      return { resposta: "📝 Descreva o pagamento (ex: Lente Transition CR39)" + hint, update: { etapa: "descricao", dados: { ...dados, valor } } };
     }
     case "descricao": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta. Descreva o pagamento com mais detalhes.", update: {} };
-      return { resposta: "💳 Máximo de parcelas? (1-12)", update: { etapa: "parcelas", dados: { ...dados, descricao: texto } } };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta. Descreva o pagamento com mais detalhes." + hint, update: {} };
+      return { resposta: "💳 Máximo de parcelas? (1-12)" + hint, update: { etapa: "parcelas", dados: { ...dados, descricao: texto } } };
     }
     case "parcelas": {
       const parcelas = parseInt(texto);
-      if (isNaN(parcelas) || parcelas < 1 || parcelas > 12) return { resposta: "⚠️ Digite um número entre 1 e 12.", update: {} };
-      return { resposta: "👤 Nome do cliente (ou digite *pular*)", update: { etapa: "cliente", dados: { ...dados, parcelas } } };
+      if (isNaN(parcelas) || parcelas < 1 || parcelas > 12) return { resposta: "⚠️ Digite um número entre 1 e 12." + hint, update: {} };
+      return { resposta: "👤 Nome do cliente (ou digite *pular*)" + hint, update: { etapa: "cliente", dados: { ...dados, parcelas } } };
     }
     case "cliente": {
       const cliente = texto.toLowerCase() === "pular" ? null : texto;
@@ -339,7 +340,7 @@ function handleLinkPagamento(
     }
     case "confirmar": {
       if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { status: "concluido" } };
+        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
       }
       return { resposta: "⏳ Gerando link de pagamento...", update: {} };
     }
