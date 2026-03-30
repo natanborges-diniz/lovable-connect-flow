@@ -118,6 +118,22 @@ export default function PipelineFinanceiro() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }),
   });
 
+  const [deleteCardConfirm, setDeleteCardConfirm] = useState<string | null>(null);
+
+  const deleteSolicitacao = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("solicitacoes")
+        .update({ pipeline_coluna_id: null, status: "cancelada" as any } as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
+      toast.success("Card removido do pipeline.");
+    },
+  });
+
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
   const filteredSolicitacoes = (solicitacoes ?? []).filter((s: any) => {
