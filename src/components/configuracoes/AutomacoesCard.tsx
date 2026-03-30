@@ -658,7 +658,8 @@ function AutomacaoForm({
                 <div className="p-3 rounded-md bg-muted/50 border text-sm whitespace-pre-wrap">
                   {texto
                     .replace(/\{\{primeiro_nome\}\}/g, "João")
-                    .replace(/\{\{nome\}\}/g, "João Silva")
+                    .replace(/\{\{nome_cliente\}\}/g, "Maria Silva")
+                    .replace(/\{\{nome\}\}/g, "Loja Centro")
                     .replace(/\{\{loja\}\}/g, "Ótica Centro")
                     .replace(/\{\{hora\}\}/g, "14:30")
                     .replace(/\{\{data\}\}/g, "26/03/2026")
