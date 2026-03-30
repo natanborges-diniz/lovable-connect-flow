@@ -43,12 +43,13 @@ serve(async (req) => {
         .eq("ativo", true)
         .order("ordem");
       automacoes = data || [];
-    } else if (entity_type === "contato" && coluna_id) {
-      // For contatos, match by pipeline_coluna_id
+    } else if ((entity_type === "contato" || entity_type === "solicitacao") && coluna_id) {
+      // For contatos or solicitacoes, match by pipeline_coluna_id
+      const entidadeBusca = entity_type === "solicitacao" ? "solicitacao" : "contato";
       const { data } = await supabase
         .from("pipeline_automacoes")
         .select("*")
-        .eq("entidade", "contato")
+        .eq("entidade", entidadeBusca)
         .eq("pipeline_coluna_id", coluna_id)
         .eq("ativo", true)
         .order("ordem");
@@ -77,6 +78,27 @@ serve(async (req) => {
       agendamento = ag;
       contato_id = ag?.contato_id;
       atendimento_id = ag?.atendimento_id;
+    } else if (entity_type === "solicitacao") {
+      // For solicitacoes (financeiro pipeline), get contato from the solicitacao
+      const { data: sol } = await supabase
+        .from("solicitacoes")
+        .select("*, contato:contatos(*)")
+        .eq("id", entity_id)
+        .single();
+      contato_id = sol?.contato_id;
+      contato = sol?.contato;
+      // Find latest atendimento for this contato
+      if (contato_id) {
+        const { data: at } = await supabase
+          .from("atendimentos")
+          .select("id")
+          .eq("contato_id", contato_id)
+          .neq("status", "encerrado")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+        atendimento_id = at?.id || null;
+      }
     } else {
       contato_id = entity_id;
       // Find latest atendimento for this contato

@@ -13,8 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Plus, Pencil, Trash2, Check, X, Search, GripVertical,
-  CreditCard, FileText, Clock, DollarSign, ShieldCheck,
+  CreditCard, FileText, Clock, DollarSign, ShieldCheck, Zap,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -38,6 +39,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { CpfApprovalDialog } from "@/components/financeiro/CpfApprovalDialog";
+import { useAutomacoes } from "@/hooks/useAutomacoes";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
@@ -60,6 +62,7 @@ export default function PipelineFinanceiro() {
 
   const setorId = financeiroSetor?.id;
   const { data: colunas, isLoading: loadingColunas } = usePipelineColunas(setorId);
+  const { data: automacoes = [] } = useAutomacoes("solicitacao");
 
   // Load solicitações with pipeline_coluna_id in this pipeline
   const { data: solicitacoes, isLoading: loadingSolicitacoes } = useQuery({
@@ -170,7 +173,20 @@ export default function PipelineFinanceiro() {
 
     const solicitacaoId = result.draggableId;
     const destColunaId = result.destination.droppableId;
+    const sourceColunaId = result.source.droppableId;
     updateSolicitacaoColuna.mutate({ id: solicitacaoId, pipeline_coluna_id: destColunaId });
+
+    // Trigger pipeline automations
+    if (destColunaId !== sourceColunaId) {
+      supabase.functions.invoke("pipeline-automations", {
+        body: {
+          entity_type: "solicitacao",
+          entity_id: solicitacaoId,
+          coluna_id: destColunaId,
+          coluna_anterior_id: sourceColunaId,
+        },
+      }).catch(e => console.warn("Automation call failed:", e));
+    }
   };
 
   const startEditColuna = (id: string, nome: string) => {
@@ -274,8 +290,29 @@ export default function PipelineFinanceiro() {
                                 </div>
                               ) : (
                                 <>
-                                  <CardTitle className="text-sm font-semibold truncate">
+                                  <CardTitle className="text-sm font-semibold truncate flex items-center gap-1">
                                     {coluna.nome}
+                                    {automacoes.some(a => a.pipeline_coluna_id === coluna.id) && (
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <span className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-primary/10 cursor-pointer"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                window.location.href = "/configuracoes?tab=automacoes";
+                                              }}
+                                            >
+                                              <Zap className="h-2.5 w-2.5 text-primary" />
+                                            </span>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p className="text-xs">
+                                              {automacoes.filter(a => a.pipeline_coluna_id === coluna.id).length} automação(ões) ativa(s) — clique para editar
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
                                   </CardTitle>
                                   <div className="flex items-center gap-0.5">
                                     <span className="text-xs font-medium bg-muted px-1.5 py-0.5 rounded-full mr-1 text-muted-foreground">
