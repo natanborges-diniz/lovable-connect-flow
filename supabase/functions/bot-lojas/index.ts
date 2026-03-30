@@ -44,6 +44,8 @@ serve(async (req) => {
 
     const nomeLoja = loja_info?.nome_loja || "Loja";
     const codEmpresa = loja_info?.cod_empresa || "";
+    // Use nome_loja as alias to identify the store in Optical Business (maps to nome_fantasia in empresa table)
+    const aliasLoja = nomeLoja;
     const texto = (mensagem_texto || "").trim();
     const textoLower = texto.toLowerCase();
 
@@ -128,7 +130,8 @@ serve(async (req) => {
               },
               body: JSON.stringify({
                 action: "criar",
-                cod_empresa: codEmpresa,
+                alias: aliasLoja,
+                cod_empresa: codEmpresa || undefined,
                 valor: paymentData.valor,
                 descricao: paymentData.descricao,
                 parcelas_max: paymentData.parcelas || 1,
@@ -154,7 +157,7 @@ serve(async (req) => {
                 descricao: `${paymentData.descricao}${paymentData.cliente ? ` | Cliente: ${paymentData.cliente}` : ""} | Parcelas: ${paymentData.parcelas}x`,
                 tipo: "link_pagamento",
                 coluna_nome: "Link Enviado",
-                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, cod_empresa: codEmpresa },
+                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, alias_loja: aliasLoja, cod_empresa: codEmpresa || payResult.cod_empresa },
                 evento_descricao: `Link de pagamento R$ ${Number(paymentData.valor).toFixed(2)} gerado via bot. ${paymentData.descricao}`,
                 evento_tipo: "link_pagamento_gerado",
               });
@@ -183,7 +186,7 @@ serve(async (req) => {
           descricao: `Cliente: ${boletoData.cliente} | Doc: ${boletoData.documento} | ${boletoData.descricao}`,
           tipo: "boleto",
           coluna_nome: "Solicitação de Boleto",
-          metadata: { cliente: boletoData.cliente, documento: boletoData.documento, cod_empresa: codEmpresa },
+          metadata: { cliente: boletoData.cliente, documento: boletoData.documento, alias_loja: aliasLoja, cod_empresa: codEmpresa },
           evento_descricao: `Solicitação de boleto R$ ${Number(boletoData.valor).toFixed(2)} via bot. Cliente: ${boletoData.cliente}`,
           evento_tipo: "boleto_solicitado",
         });
@@ -213,6 +216,7 @@ serve(async (req) => {
             valor_entrada: cpfData.valor_entrada,
             valor_financiado: valorFinanciado,
             motivo: cpfData.motivo,
+            alias_loja: aliasLoja,
             cod_empresa: codEmpresa,
           },
           evento_descricao: `Consulta de CPF ${cpfData.cpf} solicitada via bot. Nome: ${cpfData.nome_cliente} | Financiar: R$ ${valorFinanciado.toFixed(2)}`,
