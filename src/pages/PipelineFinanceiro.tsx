@@ -173,7 +173,20 @@ export default function PipelineFinanceiro() {
 
     const solicitacaoId = result.draggableId;
     const destColunaId = result.destination.droppableId;
+    const sourceColunaId = result.source.droppableId;
     updateSolicitacaoColuna.mutate({ id: solicitacaoId, pipeline_coluna_id: destColunaId });
+
+    // Trigger pipeline automations
+    if (destColunaId !== sourceColunaId) {
+      supabase.functions.invoke("pipeline-automations", {
+        body: {
+          entity_type: "solicitacao",
+          entity_id: solicitacaoId,
+          coluna_id: destColunaId,
+          coluna_anterior_id: sourceColunaId,
+        },
+      }).catch(e => console.warn("Automation call failed:", e));
+    }
   };
 
   const startEditColuna = (id: string, nome: string) => {
