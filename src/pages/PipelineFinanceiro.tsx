@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Plus, Pencil, Trash2, Check, X, Search, GripVertical,
-  CreditCard, FileText, Clock, DollarSign,
+  CreditCard, FileText, Clock, DollarSign, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -37,6 +37,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { CpfApprovalDialog } from "@/components/financeiro/CpfApprovalDialog";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
@@ -185,6 +186,7 @@ export default function PipelineFinanceiro() {
     switch (tipo) {
       case "link_pagamento": return <CreditCard className="h-3.5 w-3.5 text-primary" />;
       case "boleto": return <FileText className="h-3.5 w-3.5 text-info" />;
+      case "consulta_cpf": return <ShieldCheck className="h-3.5 w-3.5 text-warning" />;
       default: return <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />;
     }
   };
@@ -317,7 +319,18 @@ export default function PipelineFinanceiro() {
                                               )}
                                             </div>
                                           </div>
-                                          {sol.descricao && (
+                                          {sol.tipo === "consulta_cpf" && sol.metadata?.valor_financiado != null && (
+                                            <div className="flex items-center gap-1 text-xs font-medium text-primary pl-6">
+                                              <DollarSign className="h-3 w-3" />
+                                              R$ {Number(sol.metadata.valor_financiado).toFixed(2)}
+                                              {sol.metadata?.resultado_consulta && (
+                                                <Badge variant={sol.metadata.resultado_consulta === "aprovado" ? "default" : "destructive"} className="ml-1 text-[10px] px-1 py-0">
+                                                  {sol.metadata.resultado_consulta === "aprovado" ? "Aprovado" : "Reprovado"}
+                                                </Badge>
+                                              )}
+                                            </div>
+                                          )}
+                                          {sol.descricao && sol.tipo !== "consulta_cpf" && (
                                             <p className="text-xs text-muted-foreground pl-6 truncate">
                                               {sol.descricao}
                                             </p>
@@ -376,10 +389,20 @@ export default function PipelineFinanceiro() {
         </DragDropContext>
       )}
 
-      {/* Detail dialog */}
-      <Dialog open={!!selectedSolicitacao} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
+      {/* CPF Approval Dialog */}
+      {selectedSolicitacao?.tipo === "consulta_cpf" && (
+        <CpfApprovalDialog
+          solicitacao={selectedSolicitacao}
+          open={!!selectedSolicitacao}
+          onOpenChange={(open) => !open && setSelectedSolicitacao(null)}
+          colunas={colunas ?? []}
+        />
+      )}
+
+      {/* Generic detail dialog (non-CPF) */}
+      <Dialog open={!!selectedSolicitacao && selectedSolicitacao?.tipo !== "consulta_cpf"} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
         <DialogContent className="max-w-lg">
-          {selectedSolicitacao && (
+          {selectedSolicitacao && selectedSolicitacao.tipo !== "consulta_cpf" && (
             <div className="space-y-4">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">

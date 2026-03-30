@@ -197,16 +197,25 @@ serve(async (req) => {
 
       if (etapa === "confirmar" && (textoLower === "sim" || textoLower === "s")) {
         const cpfData = dados as Record<string, unknown>;
-        resposta = `✅ *Consulta de CPF registrada!*\n\n📄 CPF: ${cpfData.cpf}\n👤 Nome: ${cpfData.nome_cliente}\n📝 Motivo: ${cpfData.motivo}\n\nO setor financeiro irá processar a consulta.\n\nDigite *menu* para nova operação.`;
+        const valorFinanciado = Number(cpfData.valor_financiado);
+        resposta = `✅ *Consulta de CPF registrada!*\n\n📄 CPF: ${cpfData.cpf}\n👤 Nome: ${cpfData.nome_cliente}\n💰 Compra: R$ ${Number(cpfData.valor_compra).toFixed(2)}\n💵 Entrada: R$ ${Number(cpfData.valor_entrada).toFixed(2)}\n🏷️ A financiar: R$ ${valorFinanciado.toFixed(2)}\n📝 Motivo: ${cpfData.motivo}\n\nO setor financeiro irá processar a consulta.\n\nDigite *menu* para nova operação.`;
         updateSessao = { status: "concluido" };
 
         await createFinanceiroSolicitacao(supabase, contato_id, {
-          assunto: `Consulta CPF - ${cpfData.cpf}`,
-          descricao: `Nome: ${cpfData.nome_cliente} | Motivo: ${cpfData.motivo}`,
+          assunto: `Consulta CPF - ${cpfData.nome_cliente}`,
+          descricao: `CPF: ${cpfData.cpf} | Compra: R$ ${Number(cpfData.valor_compra).toFixed(2)} | Entrada: R$ ${Number(cpfData.valor_entrada).toFixed(2)} | Financiar: R$ ${valorFinanciado.toFixed(2)} | Motivo: ${cpfData.motivo}`,
           tipo: "consulta_cpf",
           coluna_nome: "Consulta CPF",
-          metadata: { cpf: cpfData.cpf, nome_cliente: cpfData.nome_cliente, cod_empresa: codEmpresa },
-          evento_descricao: `Consulta de CPF ${cpfData.cpf} solicitada via bot. Nome: ${cpfData.nome_cliente}`,
+          metadata: {
+            cpf: cpfData.cpf,
+            nome_cliente: cpfData.nome_cliente,
+            valor_compra: cpfData.valor_compra,
+            valor_entrada: cpfData.valor_entrada,
+            valor_financiado: valorFinanciado,
+            motivo: cpfData.motivo,
+            cod_empresa: codEmpresa,
+          },
+          evento_descricao: `Consulta de CPF ${cpfData.cpf} solicitada via bot. Nome: ${cpfData.nome_cliente} | Financiar: R$ ${valorFinanciado.toFixed(2)}`,
           evento_tipo: "consulta_cpf_solicitada",
         });
       }
@@ -391,13 +400,27 @@ function handleConsultaCPF(
     }
     case "nome_cliente": {
       if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome do cliente.", update: {} };
-      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):", update: { etapa: "motivo", dados: { ...dados, nome_cliente: texto } } };
+      return { resposta: "💰 Qual o *valor total da compra*? (ex: 1500.00)", update: { etapa: "valor_compra", dados: { ...dados, nome_cliente: texto } } };
+    }
+    case "valor_compra": {
+      const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 1500.00)", update: {} };
+      return { resposta: "💵 Qual o *valor da entrada*? (ex: 500.00 ou 0 se não houver)", update: { etapa: "valor_entrada", dados: { ...dados, valor_compra: valor } } };
+    }
+    case "valor_entrada": {
+      const entrada = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
+      if (isNaN(entrada) || entrada < 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 500.00 ou 0)", update: {} };
+      const valorCompra = Number(dados.valor_compra);
+      if (entrada > valorCompra) return { resposta: `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${valorCompra.toFixed(2)}). Digite novamente:`, update: {} };
+      const valorFinanciado = valorCompra - entrada;
+      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):", update: { etapa: "motivo", dados: { ...dados, valor_entrada: entrada, valor_financiado: valorFinanciado } } };
     }
     case "motivo": {
       if (!texto || texto.length < 3) return { resposta: "⚠️ Motivo muito curto.", update: {} };
       const d = { ...dados, motivo: texto };
+      const valorFinanciado = Number(d.valor_financiado);
       return {
-        resposta: `📋 *Confirme a consulta:*\n\n📄 CPF: ${d.cpf}\n👤 Nome: ${d.nome_cliente}\n📝 Motivo: ${d.motivo}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
+        resposta: `📋 *Confirme a consulta:*\n\n📄 CPF: ${d.cpf}\n👤 Nome: ${d.nome_cliente}\n💰 Valor da compra: R$ ${Number(d.valor_compra).toFixed(2)}\n💵 Entrada: R$ ${Number(d.valor_entrada).toFixed(2)}\n🏷️ Valor a financiar: R$ ${valorFinanciado.toFixed(2)}\n📝 Motivo: ${d.motivo}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
         update: { etapa: "confirmar", dados: d },
       };
     }
