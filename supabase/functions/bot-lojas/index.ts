@@ -391,13 +391,27 @@ function handleConsultaCPF(
     }
     case "nome_cliente": {
       if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome do cliente.", update: {} };
-      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):", update: { etapa: "motivo", dados: { ...dados, nome_cliente: texto } } };
+      return { resposta: "💰 Qual o *valor total da compra*? (ex: 1500.00)", update: { etapa: "valor_compra", dados: { ...dados, nome_cliente: texto } } };
+    }
+    case "valor_compra": {
+      const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 1500.00)", update: {} };
+      return { resposta: "💵 Qual o *valor da entrada*? (ex: 500.00 ou 0 se não houver)", update: { etapa: "valor_entrada", dados: { ...dados, valor_compra: valor } } };
+    }
+    case "valor_entrada": {
+      const entrada = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
+      if (isNaN(entrada) || entrada < 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 500.00 ou 0)", update: {} };
+      const valorCompra = Number(dados.valor_compra);
+      if (entrada > valorCompra) return { resposta: `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${valorCompra.toFixed(2)}). Digite novamente:`, update: {} };
+      const valorFinanciado = valorCompra - entrada;
+      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):", update: { etapa: "motivo", dados: { ...dados, valor_entrada: entrada, valor_financiado: valorFinanciado } } };
     }
     case "motivo": {
       if (!texto || texto.length < 3) return { resposta: "⚠️ Motivo muito curto.", update: {} };
       const d = { ...dados, motivo: texto };
+      const valorFinanciado = Number(d.valor_financiado);
       return {
-        resposta: `📋 *Confirme a consulta:*\n\n📄 CPF: ${d.cpf}\n👤 Nome: ${d.nome_cliente}\n📝 Motivo: ${d.motivo}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
+        resposta: `📋 *Confirme a consulta:*\n\n📄 CPF: ${d.cpf}\n👤 Nome: ${d.nome_cliente}\n💰 Valor da compra: R$ ${Number(d.valor_compra).toFixed(2)}\n💵 Entrada: R$ ${Number(d.valor_entrada).toFixed(2)}\n🏷️ Valor a financiar: R$ ${valorFinanciado.toFixed(2)}\n📝 Motivo: ${d.motivo}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
         update: { etapa: "confirmar", dados: d },
       };
     }
