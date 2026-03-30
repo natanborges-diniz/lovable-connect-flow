@@ -191,11 +191,12 @@ serve(async (req) => {
                 descricao: `${paymentData.descricao}${paymentData.cliente ? ` | Cliente: ${paymentData.cliente}` : ""} | Parcelas: ${paymentData.parcelas}x`,
                 tipo: "link_pagamento",
                 coluna_nome: "Link Enviado",
-                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, alias_loja: aliasLoja, cod_empresa: codEmpresa || payResult.cod_empresa },
+                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, alias_loja: aliasLoja, cod_empresa: resolvedCodEmpresa },
                 evento_descricao: `Link de pagamento R$ ${Number(paymentData.valor).toFixed(2)} gerado via bot. ${paymentData.descricao}`,
                 evento_tipo: "link_pagamento_gerado",
               });
             }
+            } // close else (resolvedCodEmpresa found)
           } catch (e) {
             console.error("Payment link error:", e);
             resposta = `❌ Erro na comunicação com o sistema de pagamento. Tente novamente.\n\nDigite *menu* para voltar.`;
