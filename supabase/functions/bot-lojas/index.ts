@@ -216,6 +216,7 @@ serve(async (req) => {
             valor_entrada: cpfData.valor_entrada,
             valor_financiado: valorFinanciado,
             motivo: cpfData.motivo,
+            alias_loja: aliasLoja,
             cod_empresa: codEmpresa,
           },
           evento_descricao: `Consulta de CPF ${cpfData.cpf} solicitada via bot. Nome: ${cpfData.nome_cliente} | Financiar: R$ ${valorFinanciado.toFixed(2)}`,
