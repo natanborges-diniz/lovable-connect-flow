@@ -68,6 +68,7 @@ serve(async (req) => {
     let atendimento_id: string | null = null;
     let contato: any = null;
     let agendamento: any = null;
+    let solicitacao: any = null;
 
     if (entity_type === "agendamento") {
       const { data: ag } = await supabase
