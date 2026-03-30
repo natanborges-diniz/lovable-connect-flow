@@ -43,12 +43,13 @@ serve(async (req) => {
         .eq("ativo", true)
         .order("ordem");
       automacoes = data || [];
-    } else if (entity_type === "contato" && coluna_id) {
-      // For contatos, match by pipeline_coluna_id
+    } else if ((entity_type === "contato" || entity_type === "solicitacao") && coluna_id) {
+      // For contatos or solicitacoes, match by pipeline_coluna_id
+      const entidadeBusca = entity_type === "solicitacao" ? "solicitacao" : "contato";
       const { data } = await supabase
         .from("pipeline_automacoes")
         .select("*")
-        .eq("entidade", "contato")
+        .eq("entidade", entidadeBusca)
         .eq("pipeline_coluna_id", coluna_id)
         .eq("ativo", true)
         .order("ordem");
