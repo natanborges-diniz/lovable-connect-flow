@@ -198,8 +198,8 @@ serve(async (req) => {
 
           case "criar_tarefa": {
             await supabase.from("tarefas").insert({
-              titulo: resolveText(config.titulo || "Tarefa automática", contato, agendamento),
-              descricao: resolveText(config.descricao || "", contato, agendamento),
+              titulo: resolveText(config.titulo || "Tarefa automática", contato, agendamento, solicitacao),
+              descricao: resolveText(config.descricao || "", contato, agendamento, solicitacao),
               prioridade: config.prioridade || "normal",
               ...(config.fila_id ? { fila_id: config.fila_id } : {}),
             });
