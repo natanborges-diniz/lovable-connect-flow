@@ -160,7 +160,7 @@ serve(async (req) => {
               body: JSON.stringify({
                 contato_id,
                 template_name: config.template_name,
-                template_params: resolveParams(config.template_params || [], contato, agendamento),
+                template_params: resolveParams(config.template_params || [], contato, agendamento, solicitacao),
               }),
             });
             results.push(`template:${config.template_name}`);
