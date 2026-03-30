@@ -167,7 +167,7 @@ serve(async (req) => {
           try {
             const paymentData = dados as Record<string, unknown>;
             // Resolve nome_loja → cod_empresa from Optical Business DB
-            const resolvedCodEmpresa = codEmpresa || await resolveCodEmpresa(nomeLoja);
+            const resolvedCodEmpresa = codEmpresa || await resolveCodEmpresa(nomeLoja, supabase);
             if (!resolvedCodEmpresa) {
               resposta = `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
               updateSessao = { status: "concluido" };
