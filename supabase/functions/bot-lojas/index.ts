@@ -16,6 +16,35 @@ serve(async (req) => {
   const OPTICAL_BUSINESS_URL = Deno.env.get("OPTICAL_BUSINESS_URL");
   const INTERNAL_SERVICE_SECRET = Deno.env.get("INTERNAL_SERVICE_SECRET");
 
+  // Optical Business DB access (publishable anon key) for empresa lookup
+  const OB_SUPABASE_URL = "https://zmsfntqgxsstnbpzdled.supabase.co";
+  const OB_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inptc2ZudHFneHNzdG5icHpkbGVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MzI0NTEsImV4cCI6MjA4MDEwODQ1MX0.Ek7_2uk0SXrcEnl1HT8ORELZyyvUQEfD8p-rq1r_Tt0";
+
+  /** Resolve nome_loja → cod_empresa querying Optical Business empresa table */
+  async function resolveCodEmpresa(nomeLoja: string): Promise<string | null> {
+    try {
+      const res = await fetch(
+        `${OB_SUPABASE_URL}/rest/v1/empresa?nome_fantasia=ilike.${encodeURIComponent(nomeLoja)}&select=cod_empresa&limit=1`,
+        {
+          headers: {
+            "apikey": OB_ANON_KEY,
+            "Authorization": `Bearer ${OB_ANON_KEY}`,
+          },
+        }
+      );
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0 && data[0].cod_empresa) {
+        console.log(`[bot-lojas] Resolved "${nomeLoja}" → cod_empresa: ${data[0].cod_empresa}`);
+        return String(data[0].cod_empresa);
+      }
+      console.warn(`[bot-lojas] Could not resolve "${nomeLoja}" in empresa table`);
+      return null;
+    } catch (e) {
+      console.error("[bot-lojas] resolveCodEmpresa error:", e);
+      return null;
+    }
+  }
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
@@ -122,6 +151,12 @@ serve(async (req) => {
         } else {
           try {
             const paymentData = dados as Record<string, unknown>;
+            // Resolve nome_loja → cod_empresa from Optical Business DB
+            const resolvedCodEmpresa = codEmpresa || await resolveCodEmpresa(nomeLoja);
+            if (!resolvedCodEmpresa) {
+              resposta = `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
+              updateSessao = { status: "concluido" };
+            } else {
             const payRes = await fetch(`${OPTICAL_BUSINESS_URL}/functions/v1/payment-links`, {
               method: "POST",
               headers: {
@@ -130,8 +165,7 @@ serve(async (req) => {
               },
               body: JSON.stringify({
                 action: "criar",
-                alias: aliasLoja,
-                cod_empresa: codEmpresa || undefined,
+                cod_empresa: resolvedCodEmpresa,
                 valor: paymentData.valor,
                 descricao: paymentData.descricao,
                 parcelas_max: paymentData.parcelas || 1,
@@ -157,11 +191,12 @@ serve(async (req) => {
                 descricao: `${paymentData.descricao}${paymentData.cliente ? ` | Cliente: ${paymentData.cliente}` : ""} | Parcelas: ${paymentData.parcelas}x`,
                 tipo: "link_pagamento",
                 coluna_nome: "Link Enviado",
-                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, alias_loja: aliasLoja, cod_empresa: codEmpresa || payResult.cod_empresa },
+                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, alias_loja: aliasLoja, cod_empresa: resolvedCodEmpresa },
                 evento_descricao: `Link de pagamento R$ ${Number(paymentData.valor).toFixed(2)} gerado via bot. ${paymentData.descricao}`,
                 evento_tipo: "link_pagamento_gerado",
               });
             }
+            } // close else (resolvedCodEmpresa found)
           } catch (e) {
             console.error("Payment link error:", e);
             resposta = `❌ Erro na comunicação com o sistema de pagamento. Tente novamente.\n\nDigite *menu* para voltar.`;
