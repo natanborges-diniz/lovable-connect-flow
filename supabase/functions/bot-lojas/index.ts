@@ -186,7 +186,7 @@ serve(async (req) => {
           descricao: `Cliente: ${boletoData.cliente} | Doc: ${boletoData.documento} | ${boletoData.descricao}`,
           tipo: "boleto",
           coluna_nome: "Solicitação de Boleto",
-          metadata: { cliente: boletoData.cliente, documento: boletoData.documento, cod_empresa: codEmpresa },
+          metadata: { cliente: boletoData.cliente, documento: boletoData.documento, alias_loja: aliasLoja, cod_empresa: codEmpresa },
           evento_descricao: `Solicitação de boleto R$ ${Number(boletoData.valor).toFixed(2)} via bot. Cliente: ${boletoData.cliente}`,
           evento_tipo: "boleto_solicitado",
         });
