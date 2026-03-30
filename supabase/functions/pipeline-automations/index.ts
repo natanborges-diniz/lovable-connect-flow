@@ -243,8 +243,8 @@ serve(async (req) => {
 
 // ─── Helpers ───
 
-function resolveParams(params: string[], contato: any, agendamento: any): string[] {
-  return params.map((p) => resolveText(p, contato, agendamento));
+function resolveParams(params: string[], contato: any, agendamento: any, solicitacao?: any): string[] {
+  return params.map((p) => resolveText(p, contato, agendamento, solicitacao));
 }
 
 function resolveQuando(dataHorario: string): string {
