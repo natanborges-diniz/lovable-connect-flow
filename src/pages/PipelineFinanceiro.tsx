@@ -118,6 +118,22 @@ export default function PipelineFinanceiro() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }),
   });
 
+  const [deleteCardConfirm, setDeleteCardConfirm] = useState<string | null>(null);
+
+  const deleteSolicitacao = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("solicitacoes")
+        .update({ pipeline_coluna_id: null, status: "cancelada" as any } as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
+      toast.success("Card removido do pipeline.");
+    },
+  });
+
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
   const filteredSolicitacoes = (solicitacoes ?? []).filter((s: any) => {
@@ -308,6 +324,12 @@ export default function PipelineFinanceiro() {
                                               <GripVertical className="h-4 w-4" />
                                             </div>
                                             <div className="min-w-0 flex-1">
+                                              {/* Loja solicitante - primeiro campo */}
+                                              {sol.metadata?.loja_nome && (
+                                                <p className="text-xs font-semibold text-primary truncate mb-0.5">
+                                                  🏪 {sol.metadata.loja_nome}
+                                                </p>
+                                              )}
                                               <div className="flex items-center gap-1.5">
                                                 {tipoIcon(sol.tipo)}
                                                 <p className="font-medium text-sm truncate">{sol.assunto}</p>
@@ -318,6 +340,18 @@ export default function PipelineFinanceiro() {
                                                 </p>
                                               )}
                                             </div>
+                                            {/* Botão excluir card */}
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setDeleteCardConfirm(sol.id);
+                                              }}
+                                            >
+                                              <Trash2 className="h-3 w-3" />
+                                            </Button>
                                           </div>
                                           {sol.tipo === "consulta_cpf" && sol.metadata?.valor_financiado != null && (
                                             <div className="flex items-center gap-1 text-xs font-medium text-primary pl-6">
@@ -456,7 +490,7 @@ export default function PipelineFinanceiro() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm delete dialog */}
+      {/* Confirm delete column dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -468,6 +502,32 @@ export default function PipelineFinanceiro() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => deleteConfirm && confirmDelete(deleteConfirm)}>
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm delete card dialog */}
+      <AlertDialog open={!!deleteCardConfirm} onOpenChange={() => setDeleteCardConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir card?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O card será removido do pipeline e marcado como cancelado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteCardConfirm) {
+                  deleteSolicitacao.mutate(deleteCardConfirm);
+                  setDeleteCardConfirm(null);
+                }
+              }}
+            >
               Excluir
             </AlertDialogAction>
           </AlertDialogFooter>
