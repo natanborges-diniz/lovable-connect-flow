@@ -130,7 +130,8 @@ serve(async (req) => {
               },
               body: JSON.stringify({
                 action: "criar",
-                cod_empresa: codEmpresa,
+                alias: aliasLoja,
+                cod_empresa: codEmpresa || undefined,
                 valor: paymentData.valor,
                 descricao: paymentData.descricao,
                 parcelas_max: paymentData.parcelas || 1,
