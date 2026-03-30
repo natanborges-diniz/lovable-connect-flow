@@ -290,8 +290,29 @@ export default function PipelineFinanceiro() {
                                 </div>
                               ) : (
                                 <>
-                                  <CardTitle className="text-sm font-semibold truncate">
+                                  <CardTitle className="text-sm font-semibold truncate flex items-center gap-1">
                                     {coluna.nome}
+                                    {automacoes.some(a => a.pipeline_coluna_id === coluna.id) && (
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <span className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-primary/10 cursor-pointer"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                window.location.href = "/configuracoes?tab=automacoes";
+                                              }}
+                                            >
+                                              <Zap className="h-2.5 w-2.5 text-primary" />
+                                            </span>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p className="text-xs">
+                                              {automacoes.filter(a => a.pipeline_coluna_id === coluna.id).length} automação(ões) ativa(s) — clique para editar
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
                                   </CardTitle>
                                   <div className="flex items-center gap-0.5">
                                     <span className="text-xs font-medium bg-muted px-1.5 py-0.5 rounded-full mr-1 text-muted-foreground">
