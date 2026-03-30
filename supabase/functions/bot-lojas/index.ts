@@ -44,6 +44,8 @@ serve(async (req) => {
 
     const nomeLoja = loja_info?.nome_loja || "Loja";
     const codEmpresa = loja_info?.cod_empresa || "";
+    // Use nome_loja as alias to identify the store in Optical Business (maps to nome_fantasia in empresa table)
+    const aliasLoja = nomeLoja;
     const texto = (mensagem_texto || "").trim();
     const textoLower = texto.toLowerCase();
 
