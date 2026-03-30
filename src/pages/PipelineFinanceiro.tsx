@@ -389,10 +389,20 @@ export default function PipelineFinanceiro() {
         </DragDropContext>
       )}
 
-      {/* Detail dialog */}
-      <Dialog open={!!selectedSolicitacao} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
+      {/* CPF Approval Dialog */}
+      {selectedSolicitacao?.tipo === "consulta_cpf" && (
+        <CpfApprovalDialog
+          solicitacao={selectedSolicitacao}
+          open={!!selectedSolicitacao}
+          onOpenChange={(open) => !open && setSelectedSolicitacao(null)}
+          colunas={colunas ?? []}
+        />
+      )}
+
+      {/* Generic detail dialog (non-CPF) */}
+      <Dialog open={!!selectedSolicitacao && selectedSolicitacao?.tipo !== "consulta_cpf"} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
         <DialogContent className="max-w-lg">
-          {selectedSolicitacao && (
+          {selectedSolicitacao && selectedSolicitacao.tipo !== "consulta_cpf" && (
             <div className="space-y-4">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
