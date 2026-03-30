@@ -354,23 +354,24 @@ function handleLinkPagamento(
 function handleGerarBoleto(
   etapa: string, texto: string, dados: Record<string, unknown>
 ): { resposta: string; update: Record<string, unknown> } {
+  const hint = "\n\n_Digite *0* para voltar ao menu._";
   switch (etapa) {
     case "valor": {
       const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 250.00)", update: {} };
-      return { resposta: "👤 Nome completo do cliente:", update: { etapa: "cliente", dados: { ...dados, valor } } };
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 250.00)" + hint, update: {} };
+      return { resposta: "👤 Nome completo do cliente:" + hint, update: { etapa: "cliente", dados: { ...dados, valor } } };
     }
     case "cliente": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome completo do cliente.", update: {} };
-      return { resposta: "📄 CPF ou CNPJ do cliente (somente números):", update: { etapa: "documento", dados: { ...dados, cliente: texto } } };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome completo do cliente." + hint, update: {} };
+      return { resposta: "📄 CPF ou CNPJ do cliente (somente números):" + hint, update: { etapa: "documento", dados: { ...dados, cliente: texto } } };
     }
     case "documento": {
       const doc = texto.replace(/\D/g, "");
-      if (doc.length !== 11 && doc.length !== 14) return { resposta: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos. Digite novamente:", update: {} };
-      return { resposta: "📝 Descrição do boleto (ex: Armação Ray-Ban + Lentes):", update: { etapa: "descricao", dados: { ...dados, documento: doc } } };
+      if (doc.length !== 11 && doc.length !== 14) return { resposta: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos. Digite novamente:" + hint, update: {} };
+      return { resposta: "📝 Descrição do boleto (ex: Armação Ray-Ban + Lentes):" + hint, update: { etapa: "descricao", dados: { ...dados, documento: doc } } };
     }
     case "descricao": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta.", update: {} };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta." + hint, update: {} };
       const d = { ...dados, descricao: texto };
       return {
         resposta: `📋 *Confirme os dados do boleto:*\n\n💰 Valor: R$ ${Number(d.valor).toFixed(2)}\n👤 Cliente: ${d.cliente}\n📄 Doc: ${d.documento}\n📝 ${d.descricao}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
@@ -379,7 +380,7 @@ function handleGerarBoleto(
     }
     case "confirmar": {
       if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { status: "concluido" } };
+        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
       }
       return { resposta: "⏳ Registrando solicitação de boleto...", update: {} };
     }
