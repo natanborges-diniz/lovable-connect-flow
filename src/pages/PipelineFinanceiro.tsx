@@ -186,6 +186,7 @@ export default function PipelineFinanceiro() {
     switch (tipo) {
       case "link_pagamento": return <CreditCard className="h-3.5 w-3.5 text-primary" />;
       case "boleto": return <FileText className="h-3.5 w-3.5 text-info" />;
+      case "consulta_cpf": return <ShieldCheck className="h-3.5 w-3.5 text-warning" />;
       default: return <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />;
     }
   };
