@@ -61,13 +61,13 @@ serve(async (req) => {
     else if (fluxo === "menu_principal" && etapa === "inicio") {
       if (texto === "1") {
         updateSessao = { fluxo: "link_pagamento", etapa: "valor", dados: {} };
-        resposta = "💳 *Gerar Link de Pagamento*\n\nQual o *valor* do link? (ex: 150.00)";
+        resposta = "💳 *Gerar Link de Pagamento*\n\nQual o *valor* do link? (ex: 150.00)\n\n_Digite *0* para voltar ao menu._";
       } else if (texto === "2") {
         updateSessao = { fluxo: "gerar_boleto", etapa: "valor", dados: {} };
-        resposta = "🧾 *Gerar Boleto*\n\nQual o *valor* do boleto? (ex: 250.00)";
+        resposta = "🧾 *Gerar Boleto*\n\nQual o *valor* do boleto? (ex: 250.00)\n\n_Digite *0* para voltar ao menu._";
       } else if (texto === "3") {
         updateSessao = { fluxo: "consulta_cpf", etapa: "cpf", dados: {} };
-        resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):";
+        resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):\n\n_Digite *0* para voltar ao menu._";
       } else if (texto === "4") {
         // ─── Confirmar Comparecimento ───
         updateSessao = { fluxo: "confirmar_comparecimento", etapa: "listar", dados: {} };
@@ -306,7 +306,7 @@ serve(async (req) => {
 // ─── Menu ───
 
 function buildMenu(nomeLoja: string): string {
-  return `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n1️⃣ Gerar Link de Pagamento\n2️⃣ Gerar Boleto\n3️⃣ Consultar CPF\n4️⃣ Confirmar Comparecimento de Cliente\n\n_Digite o número da opção desejada._`;
+  return `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n1️⃣ Gerar Link de Pagamento\n2️⃣ Gerar Boleto\n3️⃣ Consultar CPF\n4️⃣ Confirmar Comparecimento de Cliente\n\n_Digite o número da opção desejada._\n_A qualquer momento, digite *0* para voltar ao menu._`;
 }
 
 // ─── Link de Pagamento Flow ───
@@ -314,20 +314,21 @@ function buildMenu(nomeLoja: string): string {
 function handleLinkPagamento(
   etapa: string, texto: string, dados: Record<string, unknown>
 ): { resposta: string; update: Record<string, unknown> } {
+  const hint = "\n\n_Digite *0* para voltar ao menu._";
   switch (etapa) {
     case "valor": {
       const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 150.00)", update: {} };
-      return { resposta: "📝 Descreva o pagamento (ex: Lente Transition CR39)", update: { etapa: "descricao", dados: { ...dados, valor } } };
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 150.00)" + hint, update: {} };
+      return { resposta: "📝 Descreva o pagamento (ex: Lente Transition CR39)" + hint, update: { etapa: "descricao", dados: { ...dados, valor } } };
     }
     case "descricao": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta. Descreva o pagamento com mais detalhes.", update: {} };
-      return { resposta: "💳 Máximo de parcelas? (1-12)", update: { etapa: "parcelas", dados: { ...dados, descricao: texto } } };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta. Descreva o pagamento com mais detalhes." + hint, update: {} };
+      return { resposta: "💳 Máximo de parcelas? (1-12)" + hint, update: { etapa: "parcelas", dados: { ...dados, descricao: texto } } };
     }
     case "parcelas": {
       const parcelas = parseInt(texto);
-      if (isNaN(parcelas) || parcelas < 1 || parcelas > 12) return { resposta: "⚠️ Digite um número entre 1 e 12.", update: {} };
-      return { resposta: "👤 Nome do cliente (ou digite *pular*)", update: { etapa: "cliente", dados: { ...dados, parcelas } } };
+      if (isNaN(parcelas) || parcelas < 1 || parcelas > 12) return { resposta: "⚠️ Digite um número entre 1 e 12." + hint, update: {} };
+      return { resposta: "👤 Nome do cliente (ou digite *pular*)" + hint, update: { etapa: "cliente", dados: { ...dados, parcelas } } };
     }
     case "cliente": {
       const cliente = texto.toLowerCase() === "pular" ? null : texto;
@@ -339,7 +340,7 @@ function handleLinkPagamento(
     }
     case "confirmar": {
       if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { status: "concluido" } };
+        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
       }
       return { resposta: "⏳ Gerando link de pagamento...", update: {} };
     }
@@ -353,23 +354,24 @@ function handleLinkPagamento(
 function handleGerarBoleto(
   etapa: string, texto: string, dados: Record<string, unknown>
 ): { resposta: string; update: Record<string, unknown> } {
+  const hint = "\n\n_Digite *0* para voltar ao menu._";
   switch (etapa) {
     case "valor": {
       const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 250.00)", update: {} };
-      return { resposta: "👤 Nome completo do cliente:", update: { etapa: "cliente", dados: { ...dados, valor } } };
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 250.00)" + hint, update: {} };
+      return { resposta: "👤 Nome completo do cliente:" + hint, update: { etapa: "cliente", dados: { ...dados, valor } } };
     }
     case "cliente": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome completo do cliente.", update: {} };
-      return { resposta: "📄 CPF ou CNPJ do cliente (somente números):", update: { etapa: "documento", dados: { ...dados, cliente: texto } } };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome completo do cliente." + hint, update: {} };
+      return { resposta: "📄 CPF ou CNPJ do cliente (somente números):" + hint, update: { etapa: "documento", dados: { ...dados, cliente: texto } } };
     }
     case "documento": {
       const doc = texto.replace(/\D/g, "");
-      if (doc.length !== 11 && doc.length !== 14) return { resposta: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos. Digite novamente:", update: {} };
-      return { resposta: "📝 Descrição do boleto (ex: Armação Ray-Ban + Lentes):", update: { etapa: "descricao", dados: { ...dados, documento: doc } } };
+      if (doc.length !== 11 && doc.length !== 14) return { resposta: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos. Digite novamente:" + hint, update: {} };
+      return { resposta: "📝 Descrição do boleto (ex: Armação Ray-Ban + Lentes):" + hint, update: { etapa: "descricao", dados: { ...dados, documento: doc } } };
     }
     case "descricao": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta.", update: {} };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta." + hint, update: {} };
       const d = { ...dados, descricao: texto };
       return {
         resposta: `📋 *Confirme os dados do boleto:*\n\n💰 Valor: R$ ${Number(d.valor).toFixed(2)}\n👤 Cliente: ${d.cliente}\n📄 Doc: ${d.documento}\n📝 ${d.descricao}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
@@ -378,7 +380,7 @@ function handleGerarBoleto(
     }
     case "confirmar": {
       if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { status: "concluido" } };
+        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
       }
       return { resposta: "⏳ Registrando solicitação de boleto...", update: {} };
     }
@@ -392,31 +394,32 @@ function handleGerarBoleto(
 function handleConsultaCPF(
   etapa: string, texto: string, dados: Record<string, unknown>
 ): { resposta: string; update: Record<string, unknown> } {
+  const hint = "\n\n_Digite *0* para voltar ao menu._";
   switch (etapa) {
     case "cpf": {
       const cpf = texto.replace(/\D/g, "");
-      if (cpf.length !== 11) return { resposta: "⚠️ CPF inválido. Digite os 11 dígitos:", update: {} };
-      return { resposta: "👤 Nome do cliente:", update: { etapa: "nome_cliente", dados: { ...dados, cpf } } };
+      if (cpf.length !== 11) return { resposta: "⚠️ CPF inválido. Digite os 11 dígitos:" + hint, update: {} };
+      return { resposta: "👤 Nome do cliente:" + hint, update: { etapa: "nome_cliente", dados: { ...dados, cpf } } };
     }
     case "nome_cliente": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome do cliente.", update: {} };
-      return { resposta: "💰 Qual o *valor total da compra*? (ex: 1500.00)", update: { etapa: "valor_compra", dados: { ...dados, nome_cliente: texto } } };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome do cliente." + hint, update: {} };
+      return { resposta: "💰 Qual o *valor total da compra*? (ex: 1500.00)" + hint, update: { etapa: "valor_compra", dados: { ...dados, nome_cliente: texto } } };
     }
     case "valor_compra": {
       const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 1500.00)", update: {} };
-      return { resposta: "💵 Qual o *valor da entrada*? (ex: 500.00 ou 0 se não houver)", update: { etapa: "valor_entrada", dados: { ...dados, valor_compra: valor } } };
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 1500.00)" + hint, update: {} };
+      return { resposta: "💵 Qual o *valor da entrada*? (ex: 500.00 ou 0 se não houver)" + hint, update: { etapa: "valor_entrada", dados: { ...dados, valor_compra: valor } } };
     }
     case "valor_entrada": {
       const entrada = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(entrada) || entrada < 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 500.00 ou 0)", update: {} };
+      if (isNaN(entrada) || entrada < 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 500.00 ou 0)" + hint, update: {} };
       const valorCompra = Number(dados.valor_compra);
-      if (entrada > valorCompra) return { resposta: `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${valorCompra.toFixed(2)}). Digite novamente:`, update: {} };
+      if (entrada > valorCompra) return { resposta: `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${valorCompra.toFixed(2)}). Digite novamente:` + hint, update: {} };
       const valorFinanciado = valorCompra - entrada;
-      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):", update: { etapa: "motivo", dados: { ...dados, valor_entrada: entrada, valor_financiado: valorFinanciado } } };
+      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):" + hint, update: { etapa: "motivo", dados: { ...dados, valor_entrada: entrada, valor_financiado: valorFinanciado } } };
     }
     case "motivo": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Motivo muito curto.", update: {} };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Motivo muito curto." + hint, update: {} };
       const d = { ...dados, motivo: texto };
       const valorFinanciado = Number(d.valor_financiado);
       return {
@@ -426,7 +429,7 @@ function handleConsultaCPF(
     }
     case "confirmar": {
       if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { status: "concluido" } };
+        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
       }
       return { resposta: "⏳ Registrando consulta de CPF...", update: {} };
     }
