@@ -151,6 +151,12 @@ serve(async (req) => {
         } else {
           try {
             const paymentData = dados as Record<string, unknown>;
+            // Resolve nome_loja → cod_empresa from Optical Business DB
+            const resolvedCodEmpresa = codEmpresa || await resolveCodEmpresa(nomeLoja);
+            if (!resolvedCodEmpresa) {
+              resposta = `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
+              updateSessao = { status: "concluido" };
+            } else {
             const payRes = await fetch(`${OPTICAL_BUSINESS_URL}/functions/v1/payment-links`, {
               method: "POST",
               headers: {
@@ -159,8 +165,7 @@ serve(async (req) => {
               },
               body: JSON.stringify({
                 action: "criar",
-                alias: aliasLoja,
-                cod_empresa: codEmpresa || undefined,
+                cod_empresa: resolvedCodEmpresa,
                 valor: paymentData.valor,
                 descricao: paymentData.descricao,
                 parcelas_max: paymentData.parcelas || 1,
