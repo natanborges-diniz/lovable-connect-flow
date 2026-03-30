@@ -16,28 +16,43 @@ serve(async (req) => {
   const OPTICAL_BUSINESS_URL = Deno.env.get("OPTICAL_BUSINESS_URL");
   const INTERNAL_SERVICE_SECRET = Deno.env.get("INTERNAL_SERVICE_SECRET");
 
-  // Optical Business DB access (publishable anon key) for empresa lookup
-  const OB_SUPABASE_URL = "https://zmsfntqgxsstnbpzdled.supabase.co";
-  const OB_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inptc2ZudHFneHNzdG5icHpkbGVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MzI0NTEsImV4cCI6MjA4MDEwODQ1MX0.Ek7_2uk0SXrcEnl1HT8ORELZyyvUQEfD8p-rq1r_Tt0";
-
-  /** Resolve nome_loja → cod_empresa querying Optical Business empresa table */
-  async function resolveCodEmpresa(nomeLoja: string): Promise<string | null> {
+  /** Resolve nome_loja → cod_empresa querying local telefones_lojas first,
+   *  then falling back to Optical Business empresa table via REST API */
+  async function resolveCodEmpresa(nomeLoja: string, localSupabase: ReturnType<typeof createClient>): Promise<string | null> {
     try {
-      const res = await fetch(
-        `${OB_SUPABASE_URL}/rest/v1/empresa?nome_fantasia=ilike.${encodeURIComponent(nomeLoja)}&select=cod_empresa&limit=1`,
-        {
-          headers: {
-            "apikey": OB_ANON_KEY,
-            "Authorization": `Bearer ${OB_ANON_KEY}`,
-          },
-        }
-      );
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0 && data[0].cod_empresa) {
-        console.log(`[bot-lojas] Resolved "${nomeLoja}" → cod_empresa: ${data[0].cod_empresa}`);
-        return String(data[0].cod_empresa);
+      // 1. Try local telefones_lojas table first
+      const { data: localMatch } = await localSupabase
+        .from("telefones_lojas")
+        .select("cod_empresa")
+        .ilike("nome_loja", `%${nomeLoja}%`)
+        .eq("ativo", true)
+        .limit(1);
+
+      if (localMatch && localMatch.length > 0 && localMatch[0].cod_empresa) {
+        console.log(`[bot-lojas] Resolved "${nomeLoja}" → cod_empresa: ${localMatch[0].cod_empresa} (local)`);
+        return String(localMatch[0].cod_empresa);
       }
-      console.warn(`[bot-lojas] Could not resolve "${nomeLoja}" in empresa table`);
+
+      // 2. Fallback: query Optical Business empresa table using OPTICAL_BUSINESS_URL + service role
+      if (OPTICAL_BUSINESS_URL) {
+        const obUrl = OPTICAL_BUSINESS_URL.replace("/functions/v1", "").replace(/\/$/, "");
+        const res = await fetch(
+          `${obUrl}/rest/v1/empresa?nome_fantasia=ilike.*${encodeURIComponent(nomeLoja)}*&select=cod_empresa&limit=1`,
+          {
+            headers: {
+              "apikey": INTERNAL_SERVICE_SECRET || "",
+              "Authorization": `Bearer ${INTERNAL_SERVICE_SECRET || ""}`,
+            },
+          }
+        );
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0 && data[0].cod_empresa) {
+          console.log(`[bot-lojas] Resolved "${nomeLoja}" → cod_empresa: ${data[0].cod_empresa} (OB remote)`);
+          return String(data[0].cod_empresa);
+        }
+      }
+
+      console.warn(`[bot-lojas] Could not resolve "${nomeLoja}" in any source`);
       return null;
     } catch (e) {
       console.error("[bot-lojas] resolveCodEmpresa error:", e);
