@@ -269,11 +269,20 @@ function resolveQuando(dataHorario: string): string {
   return `dia ${dt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} às ${hora}`;
 }
 
-function resolveText(template: string, contato: any, agendamento: any): string {
+function resolveText(template: string, contato: any, agendamento: any, solicitacao?: any): string {
   if (!template) return "";
   
   const firstName = contato?.nome?.split(" ")[0] || "Cliente";
   const loja = agendamento?.loja_nome || "";
+  const meta = solicitacao?.metadata || {};
+  
+  // {{nome_cliente}} = end customer name informed by the store (from solicitacao metadata)
+  // {{nome}} / {{primeiro_nome}} = contact name (the store in financeiro pipeline)
+  const nomeCliente = meta.nome_cliente || meta.cliente || "";
+  const valorCompra = meta.valor_compra ? `R$ ${Number(meta.valor_compra).toFixed(2)}` : "";
+  const valorEntrada = meta.valor_entrada ? `R$ ${Number(meta.valor_entrada).toFixed(2)}` : "";
+  const valorFinanciado = meta.valor_financiado ? `R$ ${Number(meta.valor_financiado).toFixed(2)}` : "";
+  const cpf = meta.cpf || "";
   
   let hora = "";
   let quando = "";
@@ -288,11 +297,16 @@ function resolveText(template: string, contato: any, agendamento: any): string {
   return template
     .replace(/\{\{nome\}\}/g, contato?.nome || "Cliente")
     .replace(/\{\{primeiro_nome\}\}/g, firstName)
-    .replace(/\{\{loja\}\}/g, loja)
+    .replace(/\{\{nome_cliente\}\}/g, nomeCliente)
+    .replace(/\{\{loja\}\}/g, loja || contato?.nome || "")
     .replace(/\{\{hora\}\}/g, hora)
     .replace(/\{\{quando\}\}/g, quando)
     .replace(/\{\{dia_semana\}\}/g, diaSemana)
     .replace(/\{\{telefone\}\}/g, contato?.telefone || "")
+    .replace(/\{\{valor_compra\}\}/g, valorCompra)
+    .replace(/\{\{valor_entrada\}\}/g, valorEntrada)
+    .replace(/\{\{valor_financiado\}\}/g, valorFinanciado)
+    .replace(/\{\{cpf\}\}/g, cpf)
     .replace(/\{\{data\}\}/g, agendamento?.data_horario
       ? new Date(agendamento.data_horario).toLocaleDateString("pt-BR")
       : "");
