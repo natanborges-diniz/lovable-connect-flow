@@ -169,7 +169,7 @@ serve(async (req) => {
 
           case "enviar_mensagem": {
             if (!atendimento_id) break;
-            const texto = resolveText(config.texto || "", contato, agendamento);
+            const texto = resolveText(config.texto || "", contato, agendamento, solicitacao);
             await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
               method: "POST",
               headers: {
