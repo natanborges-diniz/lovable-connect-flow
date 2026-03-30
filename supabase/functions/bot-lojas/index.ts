@@ -157,7 +157,7 @@ serve(async (req) => {
                 descricao: `${paymentData.descricao}${paymentData.cliente ? ` | Cliente: ${paymentData.cliente}` : ""} | Parcelas: ${paymentData.parcelas}x`,
                 tipo: "link_pagamento",
                 coluna_nome: "Link Enviado",
-                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, cod_empresa: codEmpresa },
+                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, alias_loja: aliasLoja, cod_empresa: codEmpresa || payResult.cod_empresa },
                 evento_descricao: `Link de pagamento R$ ${Number(paymentData.valor).toFixed(2)} gerado via bot. ${paymentData.descricao}`,
                 evento_tipo: "link_pagamento_gerado",
               });
