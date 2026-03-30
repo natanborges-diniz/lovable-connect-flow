@@ -197,16 +197,25 @@ serve(async (req) => {
 
       if (etapa === "confirmar" && (textoLower === "sim" || textoLower === "s")) {
         const cpfData = dados as Record<string, unknown>;
-        resposta = `✅ *Consulta de CPF registrada!*\n\n📄 CPF: ${cpfData.cpf}\n👤 Nome: ${cpfData.nome_cliente}\n📝 Motivo: ${cpfData.motivo}\n\nO setor financeiro irá processar a consulta.\n\nDigite *menu* para nova operação.`;
+        const valorFinanciado = Number(cpfData.valor_financiado);
+        resposta = `✅ *Consulta de CPF registrada!*\n\n📄 CPF: ${cpfData.cpf}\n👤 Nome: ${cpfData.nome_cliente}\n💰 Compra: R$ ${Number(cpfData.valor_compra).toFixed(2)}\n💵 Entrada: R$ ${Number(cpfData.valor_entrada).toFixed(2)}\n🏷️ A financiar: R$ ${valorFinanciado.toFixed(2)}\n📝 Motivo: ${cpfData.motivo}\n\nO setor financeiro irá processar a consulta.\n\nDigite *menu* para nova operação.`;
         updateSessao = { status: "concluido" };
 
         await createFinanceiroSolicitacao(supabase, contato_id, {
-          assunto: `Consulta CPF - ${cpfData.cpf}`,
-          descricao: `Nome: ${cpfData.nome_cliente} | Motivo: ${cpfData.motivo}`,
+          assunto: `Consulta CPF - ${cpfData.nome_cliente}`,
+          descricao: `CPF: ${cpfData.cpf} | Compra: R$ ${Number(cpfData.valor_compra).toFixed(2)} | Entrada: R$ ${Number(cpfData.valor_entrada).toFixed(2)} | Financiar: R$ ${valorFinanciado.toFixed(2)} | Motivo: ${cpfData.motivo}`,
           tipo: "consulta_cpf",
           coluna_nome: "Consulta CPF",
-          metadata: { cpf: cpfData.cpf, nome_cliente: cpfData.nome_cliente, cod_empresa: codEmpresa },
-          evento_descricao: `Consulta de CPF ${cpfData.cpf} solicitada via bot. Nome: ${cpfData.nome_cliente}`,
+          metadata: {
+            cpf: cpfData.cpf,
+            nome_cliente: cpfData.nome_cliente,
+            valor_compra: cpfData.valor_compra,
+            valor_entrada: cpfData.valor_entrada,
+            valor_financiado: valorFinanciado,
+            motivo: cpfData.motivo,
+            cod_empresa: codEmpresa,
+          },
+          evento_descricao: `Consulta de CPF ${cpfData.cpf} solicitada via bot. Nome: ${cpfData.nome_cliente} | Financiar: R$ ${valorFinanciado.toFixed(2)}`,
           evento_tipo: "consulta_cpf_solicitada",
         });
       }
