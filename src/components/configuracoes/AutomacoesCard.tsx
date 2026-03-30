@@ -626,6 +626,9 @@ function AutomacaoForm({
 
         <Separator />
 
+        {/* Variables reference */}
+        <VariablesReference entidade={entidade} tipoAcao={tipoAcao} />
+
         {/* Config por tipo */}
         {tipoAcao === "enviar_template" && (
           <div className="space-y-3">
@@ -659,7 +662,13 @@ function AutomacaoForm({
                     .replace(/\{\{loja\}\}/g, "Ótica Centro")
                     .replace(/\{\{hora\}\}/g, "14:30")
                     .replace(/\{\{data\}\}/g, "26/03/2026")
-                    .replace(/\{\{telefone\}\}/g, "5511999999999")}
+                    .replace(/\{\{telefone\}\}/g, "5511999999999")
+                    .replace(/\{\{quando\}\}/g, "amanhã às 14:30")
+                    .replace(/\{\{dia_semana\}\}/g, "segunda-feira")
+                    .replace(/\{\{valor_compra\}\}/g, "R$ 2.500,00")
+                    .replace(/\{\{valor_entrada\}\}/g, "R$ 500,00")
+                    .replace(/\{\{valor_financiado\}\}/g, "R$ 2.000,00")
+                    .replace(/\{\{cpf\}\}/g, "123.456.789-00")}
                 </div>
               </div>
             )}
@@ -713,6 +722,63 @@ function AutomacaoForm({
         </DialogFooter>
       </form>
     </>
+  );
+}
+
+/* ─── Variables Reference ─── */
+
+const VARS_CONTATO = [
+  { var: "{{nome}}", desc: "Nome completo do contato" },
+  { var: "{{primeiro_nome}}", desc: "Primeiro nome do contato" },
+  { var: "{{telefone}}", desc: "Telefone do contato" },
+];
+
+const VARS_AGENDAMENTO = [
+  { var: "{{loja}}", desc: "Nome da loja do agendamento" },
+  { var: "{{hora}}", desc: "Horário (ex: 14:30)" },
+  { var: "{{data}}", desc: "Data (ex: 30/03/2026)" },
+  { var: "{{quando}}", desc: "Data relativa (hoje às 14:30, amanhã às 10:00)" },
+  { var: "{{dia_semana}}", desc: "Dia da semana (segunda-feira, terça...)" },
+];
+
+const VARS_FINANCEIRO = [
+  { var: "{{valor_compra}}", desc: "Valor total da compra" },
+  { var: "{{valor_entrada}}", desc: "Valor da entrada" },
+  { var: "{{valor_financiado}}", desc: "Valor a ser financiado" },
+  { var: "{{cpf}}", desc: "CPF do cliente consultado" },
+  { var: "{{loja}}", desc: "Loja solicitante" },
+];
+
+function VariablesReference({ entidade, tipoAcao }: { entidade: string; tipoAcao: string }) {
+  if (tipoAcao !== "enviar_mensagem" && tipoAcao !== "enviar_template" && tipoAcao !== "criar_tarefa") return null;
+
+  const vars = [
+    ...VARS_CONTATO,
+    ...(entidade === "agendamento" ? VARS_AGENDAMENTO : []),
+    ...(entidade === "solicitacao" ? VARS_FINANCEIRO : []),
+    ...(entidade === "contato" ? [{ var: "{{loja}}", desc: "Nome da loja (se disponível)" }] : []),
+  ];
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center gap-2 p-2 rounded-md bg-muted/50 border border-border text-xs text-muted-foreground hover:bg-muted transition-colors cursor-pointer">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-medium">Variáveis disponíveis</span>
+          <span className="ml-auto text-[10px]">clique para expandir</span>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="grid grid-cols-2 gap-1 p-2 mt-1 rounded-md bg-muted/30 border border-border">
+          {vars.map(v => (
+            <div key={v.var} className="flex items-start gap-1.5 p-1">
+              <code className="bg-background px-1.5 py-0.5 rounded text-[10px] border font-mono shrink-0 select-all cursor-pointer">{v.var}</code>
+              <span className="text-[10px] text-muted-foreground leading-tight">{v.desc}</span>
+            </div>
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
