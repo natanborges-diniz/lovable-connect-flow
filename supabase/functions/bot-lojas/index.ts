@@ -394,31 +394,32 @@ function handleGerarBoleto(
 function handleConsultaCPF(
   etapa: string, texto: string, dados: Record<string, unknown>
 ): { resposta: string; update: Record<string, unknown> } {
+  const hint = "\n\n_Digite *0* para voltar ao menu._";
   switch (etapa) {
     case "cpf": {
       const cpf = texto.replace(/\D/g, "");
-      if (cpf.length !== 11) return { resposta: "⚠️ CPF inválido. Digite os 11 dígitos:", update: {} };
-      return { resposta: "👤 Nome do cliente:", update: { etapa: "nome_cliente", dados: { ...dados, cpf } } };
+      if (cpf.length !== 11) return { resposta: "⚠️ CPF inválido. Digite os 11 dígitos:" + hint, update: {} };
+      return { resposta: "👤 Nome do cliente:" + hint, update: { etapa: "nome_cliente", dados: { ...dados, cpf } } };
     }
     case "nome_cliente": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome do cliente.", update: {} };
-      return { resposta: "💰 Qual o *valor total da compra*? (ex: 1500.00)", update: { etapa: "valor_compra", dados: { ...dados, nome_cliente: texto } } };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome do cliente." + hint, update: {} };
+      return { resposta: "💰 Qual o *valor total da compra*? (ex: 1500.00)" + hint, update: { etapa: "valor_compra", dados: { ...dados, nome_cliente: texto } } };
     }
     case "valor_compra": {
       const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 1500.00)", update: {} };
-      return { resposta: "💵 Qual o *valor da entrada*? (ex: 500.00 ou 0 se não houver)", update: { etapa: "valor_entrada", dados: { ...dados, valor_compra: valor } } };
+      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 1500.00)" + hint, update: {} };
+      return { resposta: "💵 Qual o *valor da entrada*? (ex: 500.00 ou 0 se não houver)" + hint, update: { etapa: "valor_entrada", dados: { ...dados, valor_compra: valor } } };
     }
     case "valor_entrada": {
       const entrada = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(entrada) || entrada < 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 500.00 ou 0)", update: {} };
+      if (isNaN(entrada) || entrada < 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 500.00 ou 0)" + hint, update: {} };
       const valorCompra = Number(dados.valor_compra);
-      if (entrada > valorCompra) return { resposta: `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${valorCompra.toFixed(2)}). Digite novamente:`, update: {} };
+      if (entrada > valorCompra) return { resposta: `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${valorCompra.toFixed(2)}). Digite novamente:` + hint, update: {} };
       const valorFinanciado = valorCompra - entrada;
-      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):", update: { etapa: "motivo", dados: { ...dados, valor_entrada: entrada, valor_financiado: valorFinanciado } } };
+      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):" + hint, update: { etapa: "motivo", dados: { ...dados, valor_entrada: entrada, valor_financiado: valorFinanciado } } };
     }
     case "motivo": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Motivo muito curto.", update: {} };
+      if (!texto || texto.length < 3) return { resposta: "⚠️ Motivo muito curto." + hint, update: {} };
       const d = { ...dados, motivo: texto };
       const valorFinanciado = Number(d.valor_financiado);
       return {
@@ -428,7 +429,7 @@ function handleConsultaCPF(
     }
     case "confirmar": {
       if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { status: "concluido" } };
+        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
       }
       return { resposta: "⏳ Registrando consulta de CPF...", update: {} };
     }
