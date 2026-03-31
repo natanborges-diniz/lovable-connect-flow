@@ -323,6 +323,82 @@ NUNCA peça ao cliente para informar a data em DD/MM — isso é trabalho SEU.
 Use formato ISO 8601 na tool agendar_visita (ex: ${yyyy}-${mm}-${dd}T10:00:00-03:00).`;
 }
 
+function buildProhibitionsBlock(regrasProibidas: { regra: string; categoria: string }[]): string {
+  if (regrasProibidas.length === 0) return "";
+  const grouped: Record<string, string[]> = {};
+  for (const r of regrasProibidas) {
+    const cat = r.categoria || "geral";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(r.regra);
+  }
+  let block = `# ⛔ PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA
+As regras abaixo são INVIOLÁVEIS. Quebrá-las é um erro gravíssimo.
+INSTRUÇÕES: Estas regras se aplicam A TODAS as situações, incluindo clínicas parceiras, 
+indicações, parcerias e qualquer variação ou reformulação. NÃO há exceções.
+Se uma regra diz "NÃO fazemos X", você NÃO pode oferecer X de nenhuma forma, 
+nem como serviço próprio, nem como parceria, nem como indicação.\n`;
+  for (const [cat, rules] of Object.entries(grouped)) {
+    block += `\n## ${cat.toUpperCase()}\n`;
+    for (const rule of rules) {
+      block += `- ❌ ${rule}\n`;
+    }
+  }
+  return block;
+}
+
+function buildSystemPromptFromCompiled(opts: {
+  compiledPrompt: string;
+  regrasProibidas: { regra: string; categoria: string }[];
+  knowledge: string;
+  agendamentoCtx: string;
+  lojasStr: string;
+  sentTopics: string[];
+  colunasNomes: string;
+  setoresNomes: string;
+  inboundCount: number;
+  isHibrido: boolean;
+  hasKnowledge: boolean;
+}): string {
+  const s: string[] = [];
+
+  s.push(buildDateContext());
+
+  // Replace slots in compiled prompt
+  let prompt = opts.compiledPrompt;
+  prompt = prompt.replace("{{PROIBICOES}}", buildProhibitionsBlock(opts.regrasProibidas));
+  prompt = prompt.replace("{{CONHECIMENTO}}", opts.hasKnowledge ? opts.knowledge : "");
+  prompt = prompt.replace("{{LOJAS}}", opts.lojasStr);
+  prompt = prompt.replace("{{AGENDAMENTOS}}", opts.agendamentoCtx);
+
+  s.push(prompt);
+
+  // Inject prohibition block even if slot was missing (safety)
+  if (!opts.compiledPrompt.includes("{{PROIBICOES}}") && opts.regrasProibidas.length > 0) {
+    s.push(buildProhibitionsBlock(opts.regrasProibidas));
+  }
+
+  if (opts.sentTopics.length > 0) {
+    s.push(`# TÓPICOS JÁ COBERTOS (NÃO REPITA)
+${opts.sentTopics.map((t) => `- ❌ ${t}`).join("\n")}
+Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assunto novo.`);
+  }
+
+  s.push(`# CLASSIFICAÇÃO
+Colunas: ${opts.colunasNomes}
+Setores: ${opts.setoresNomes || "nenhum"}
+Mensagem nº ${opts.inboundCount}.
+Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.`);
+
+  if (opts.isHibrido) {
+    s.push(`# MODO HÍBRIDO
+Consultor solicitado mas não respondeu. Continue atendendo.
+Para mensagens vagas: faça pergunta objetiva ("Sobre qual tema: orçamento, lentes, pedidos, financeiro?").
+NUNCA responda com CTA genérico de visita.`);
+  }
+
+  return s.join("\n\n");
+}
+
 function buildSystemPrompt(opts: {
   businessRules: string;
   knowledge: string;
@@ -351,27 +427,8 @@ ${opts.businessRules}
 - Pessoa real = "Consultor especializado". NUNCA "atendente", "operador", "humano".`);
 
   // Inject prohibited rules FIRST — maximum weight
-  if (opts.regrasProibidas.length > 0) {
-    const grouped: Record<string, string[]> = {};
-    for (const r of opts.regrasProibidas) {
-      const cat = r.categoria || "geral";
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(r.regra);
-    }
-    let block = `# ⛔ PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA
-As regras abaixo são INVIOLÁVEIS. Quebrá-las é um erro gravíssimo.
-INSTRUÇÕES: Estas regras se aplicam A TODAS as situações, incluindo clínicas parceiras, 
-indicações, parcerias e qualquer variação ou reformulação. NÃO há exceções.
-Se uma regra diz "NÃO fazemos X", você NÃO pode oferecer X de nenhuma forma, 
-nem como serviço próprio, nem como parceria, nem como indicação.\n`;
-    for (const [cat, rules] of Object.entries(grouped)) {
-      block += `\n## ${cat.toUpperCase()}\n`;
-      for (const rule of rules) {
-        block += `- ❌ ${rule}\n`;
-      }
-    }
-    s.push(block);
-  }
+  const prohibBlock = buildProhibitionsBlock(opts.regrasProibidas);
+  if (prohibBlock) s.push(prohibBlock);
 
   s.push(`# REGRAS DE PRECISÃO
 1. NUNCA invente dados. Sem dados → escale para Consultor.
@@ -656,8 +713,9 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
+    const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
+      supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_compilado").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
       supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(30),
       supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").in("avaliacao", ["negativo", "corrigido"]).order("created_at", { ascending: false }).limit(10),
@@ -673,6 +731,7 @@ serve(async (req) => {
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
+    const compiledPrompt = compiledRes.data?.valor || "";
     const conhecimentos = kbRes.data || [];
     const exemplos = exRes.data || [];
     const antiFeedbacks = antiRes.data || [];
@@ -731,36 +790,71 @@ serve(async (req) => {
       }
     }
 
-    // ── 5.1 CONTEXTUAL RETRIEVAL v1 — signal-based prioritization ──
-    const signals = detectSignals(currentMsg);
-    const prioritizedExemplos = prioritizeExamples(exemplos as any[], signals);
-    const prioritizedFeedbacks = prioritizeFeedbacks(antiFeedbacks as any[], signals, currentMsg);
+    // ── 5.1 DECIDE: compiled prompt vs legacy ──
+    let systemPrompt: string;
 
-    console.log(`[CONTEXT-v1] Signals: ${signals.join(",") || "none"} | Exemplos: ${prioritizedExemplos.length} (${exemplos.length} total) | Feedbacks: ${prioritizedFeedbacks.length} (${antiFeedbacks.length} total)`);
+    if (compiledPrompt) {
+      // USE COMPILED PROMPT with slot replacement
+      let lojasStr = "";
+      if (lojas.length > 0) {
+        lojasStr = "## LOJAS DISPONÍVEIS\n";
+        for (const l of lojas) {
+          const parts = [`**${l.nome_loja}**`];
+          if (l.endereco) parts.push(l.endereco);
+          if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
+          if (l.telefone) parts.push(`Tel: ${l.telefone}`);
+          if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
+          lojasStr += `- ${parts.join(" | ")}\n`;
+        }
+      }
 
-    let examplesStr = "";
-    if (prioritizedExemplos.length > 0) {
-      examplesStr = prioritizedExemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
+      systemPrompt = buildSystemPromptFromCompiled({
+        compiledPrompt,
+        regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
+        knowledge: knowledgeStr,
+        agendamentoCtx,
+        lojasStr,
+        sentTopics,
+        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        setoresNomes: setores.map((s: any) => s.nome).join(", "),
+        inboundCount,
+        isHibrido,
+        hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+      });
+
+      console.log(`[CONTEXT] Using COMPILED prompt (${compiledPrompt.length}ch) with slot replacement`);
+    } else {
+      // LEGACY: contextual retrieval + separate blocks
+      const signals = detectSignals(currentMsg);
+      const prioritizedExemplos = prioritizeExamples(exemplos as any[], signals);
+      const prioritizedFeedbacks = prioritizeFeedbacks(antiFeedbacks as any[], signals, currentMsg);
+
+      console.log(`[CONTEXT-v1] Signals: ${signals.join(",") || "none"} | Exemplos: ${prioritizedExemplos.length} (${exemplos.length} total) | Feedbacks: ${prioritizedFeedbacks.length} (${antiFeedbacks.length} total)`);
+
+      let examplesStr = "";
+      if (prioritizedExemplos.length > 0) {
+        examplesStr = prioritizedExemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
+      }
+
+      let antiStr = "";
+      if (prioritizedFeedbacks.length > 0) {
+        antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
+      }
+
+      systemPrompt = buildSystemPrompt({
+        businessRules,
+        knowledge: knowledgeStr + agendamentoCtx,
+        examples: examplesStr,
+        antiExamples: antiStr,
+        regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
+        sentTopics,
+        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        setoresNomes: setores.map((s: any) => s.nome).join(", "),
+        inboundCount,
+        isHibrido,
+        hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+      });
     }
-
-    let antiStr = "";
-    if (prioritizedFeedbacks.length > 0) {
-      antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
-    }
-
-    const systemPrompt = buildSystemPrompt({
-      businessRules,
-      knowledge: knowledgeStr + agendamentoCtx,
-      examples: examplesStr,
-      antiExamples: antiStr,
-      regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
-      sentTopics,
-      colunasNomes: colunas.map((c: any) => c.nome).join(", "),
-      setoresNomes: setores.map((s: any) => s.nome).join(", "),
-      inboundCount,
-      isHibrido,
-      hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
-    });
 
     // ── 6. BUILD MESSAGES — use last 20 from the 60 loaded ──
     const contextWindow = allMsgs.slice(-20);
