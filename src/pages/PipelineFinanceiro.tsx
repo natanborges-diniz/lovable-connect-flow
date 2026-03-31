@@ -416,6 +416,11 @@ export default function PipelineFinanceiro() {
                                               {sol.descricao}
                                             </p>
                                           )}
+                                          {sol.metadata?.payment_status === "PAGO" && sol.metadata?.nsu && (
+                                            <Badge className="ml-6 bg-green-100 text-green-800 text-[10px] border-green-300">
+                                              🔑 NSU: {sol.metadata.nsu}
+                                            </Badge>
+                                          )}
                                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-6">
                                             <Clock className="h-3 w-3 shrink-0" />
                                             <span>
