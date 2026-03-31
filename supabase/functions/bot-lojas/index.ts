@@ -179,8 +179,11 @@ serve(async (req) => {
           resposta = lista;
           updateSessao = { fluxo: "confirmar_comparecimento", etapa: "selecionar", dados: { agendamentos: agMap } };
         }
+        } else {
+          resposta = `⚠️ Opção não reconhecida. ${buildMenuDynamic(nomeLoja, menuOpcoes)}`;
+        }
       } else {
-        resposta = buildMenu(nomeLoja);
+        resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
       }
     }
     // ─── Link de Pagamento ───
