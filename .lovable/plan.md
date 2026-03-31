@@ -1,36 +1,89 @@
 
 
-## Plano: Preencher cod_empresa e Corrigir Fallback
+# Plano: Comprovante de Pagamento ("Picote")
 
-### Problema
-- Nenhuma das 10 lojas em `telefones_lojas` tem `cod_empresa` preenchido
-- O fallback `resolveCodEmpresa` usa a **anon key** do Optical Business, mas a tabela `empresa` tem RLS que bloqueia acesso anônimo — por isso retorna vazio
-- Resultado: toda geração de link falha com "Não foi possível identificar a loja"
+## Contexto
 
-### O que será feito
+Quando o OB confirma um pagamento, o `payment-webhook` já recebe `tid`, `authorization`, `valor`. Precisamos:
+1. Receber campos adicionais do OB (NSU, last4, parcelas, descrição, nome do cliente)
+2. Armazenar tudo no metadata da solicitação
+3. Enviar comprovante WhatsApp à loja solicitante
+4. Exibir o "picote" visualmente no card/dialog do Pipeline Financeiro
 
-#### 1. Consultar o banco do Optical Business para mapear os códigos
-Usar uma edge function temporária (ou `curl` via service role) para buscar `SELECT cod_empresa, nome_fantasia FROM empresa` no Optical Business e obter o mapeamento correto.
+---
 
-#### 2. Preencher cod_empresa na tabela telefones_lojas
-Executar uma migração SQL com UPDATE para cada loja, baseado no mapeamento obtido:
-```sql
-UPDATE telefones_lojas SET cod_empresa = '1' WHERE nome_loja = 'DINIZ PRIMITIVA I';
-UPDATE telefones_lojas SET cod_empresa = '2' WHERE nome_loja = 'DINIZ PRIMITIVA II';
--- etc para as 10 lojas
+## Alterações
+
+### 1. Edge Function `payment-webhook/index.ts`
+
+**Aceitar novos campos no payload:**
+- `nsu`, `last4`, `installments`, `descricao`, `nome_cliente`
+
+**Armazenar no metadata da solicitação:**
+```
+nsu, last4, installments, descricao, nome_cliente
 ```
 
-#### 3. Corrigir o fallback resolveCodEmpresa
-Atualizar `supabase/functions/bot-lojas/index.ts` para usar a **service role key** do Optical Business em vez da anon key no fallback. A key já pode ser derivada ou adicionada como secret (`OB_SERVICE_ROLE_KEY`). Também adicionar wildcards `*...*` no filtro ilike para tolerância a variações de nome.
+**Após atualizar a solicitação (quando status === "PAGO"), enviar WhatsApp à loja:**
+- Buscar `contato_id` da solicitação → buscar contato → telefone (a loja que solicitou)
+- Buscar o `atendimento_id` do atendimento da loja (canal `whatsapp`, contato_id da loja)
+- Montar a mensagem com o template do picote:
 
-### Resumo de alterações
+```text
+📩 *Segue comprovante de pagamento da cliente {nome_cliente}*
 
-| Item | Tipo |
-|------|------|
-| `telefones_lojas` (10 registros) | UPDATE cod_empresa via migração |
-| `bot-lojas/index.ts` | Trocar anon key por service role key no fallback |
-| Secrets | Possivelmente adicionar `OB_SERVICE_ROLE_KEY` |
+✅ *Pagamento Confirmado!*
 
-### Primeira etapa
-Antes de aplicar, preciso consultar a tabela `empresa` do Optical Business para confirmar o mapeamento nome_fantasia ↔ cod_empresa. Farei isso automaticamente na implementação.
+💰 Valor: R$ {valor}
+📋 {descricao}
+
+━━━━━━━━━━━━━━━━━━
+🔑 *NSU: {nsu}*
+   ↳ Use este número para baixa no sistema
+━━━━━━━━━━━━━━━━━━
+
+🆔 TID: {tid}
+🔐 Autorização: {authorization}
+📅 Data: {date} às {time}
+💳 Cartão: **** {last4}
+📦 Parcelas: {installments}x
+```
+
+- Enviar via `send-whatsapp` (invoke interno) ou diretamente via Evolution API (usando o provedor do atendimento da loja)
+
+### 2. Frontend — `PipelineFinanceiro.tsx`
+
+**No card (visão resumida):** Quando `metadata.payment_status === "PAGO"` e `metadata.nsu` existe, exibir badge verde com `NSU: {nsu}` abaixo do valor.
+
+**No dialog de detalhes (non-CPF):** Renderizar um bloco visual "Comprovante de Pagamento" estilizado como picote, com bordas tracejadas e fundo verde claro, exibindo todos os campos: NSU (destaque), TID, autorização, data, cartão, parcelas.
+
+### 3. Contrato esperado do OB
+
+O OB precisa enviar estes campos adicionais no POST para `/payment-webhook`:
+
+```json
+{
+  "payment_link_id": "...",
+  "status": "PAGO",
+  "tid": "...",
+  "authorization": "...",
+  "valor": 150.00,
+  "nsu": "123456",
+  "last4": "1234",
+  "installments": 3,
+  "descricao": "Óculos Ray-Ban",
+  "nome_cliente": "Maria Silva"
+}
+```
+
+---
+
+## Resumo de arquivos
+
+| Arquivo | Ação |
+|---------|------|
+| `supabase/functions/payment-webhook/index.ts` | Aceitar novos campos, armazenar, enviar WhatsApp à loja |
+| `src/pages/PipelineFinanceiro.tsx` | Exibir picote no card e no dialog |
+
+Nenhuma migração de banco necessária — os dados são armazenados no campo `metadata` (jsonb) existente.
 
