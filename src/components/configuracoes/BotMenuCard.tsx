@@ -276,3 +276,83 @@ function CreateOpcaoForm({ nextOrdem, onSubmit }: { nextOrdem: number; onSubmit:
     </div>
   );
 }
+
+function EditOpcaoForm({ item, onSubmit }: { item: MenuOpcao; onSubmit: () => void }) {
+  const [titulo, setTitulo] = useState(item.titulo);
+  const [emoji, setEmoji] = useState(item.emoji);
+  const [tipoBot, setTipoBot] = useState(item.tipo_bot);
+  const [fluxo, setFluxo] = useState(item.fluxo);
+  const [ordem, setOrdem] = useState(item.ordem);
+  const [descricao, setDescricao] = useState(item.descricao || "");
+  const [loading, setLoading] = useState(false);
+  const { data: fluxos } = useFluxosForSelect(tipoBot);
+
+  const handleSave = async () => {
+    if (!titulo.trim() || !fluxo) return;
+    setLoading(true);
+    try {
+      const chave = titulo
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "");
+      const { error } = await (supabase as any)
+        .from("bot_menu_opcoes")
+        .update({ titulo, emoji, fluxo, ordem, tipo_bot: tipoBot, chave, descricao: descricao || null })
+        .eq("id", item.id);
+      if (error) throw error;
+      toast.success("Opção atualizada");
+      onSubmit();
+    } catch (e: any) {
+      toast.error("Erro: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label>Título</Label>
+        <Input value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <Label>Emoji</Label>
+          <Input value={emoji} onChange={(e) => setEmoji(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Ordem</Label>
+          <Input type="number" value={ordem} onChange={(e) => setOrdem(Number(e.target.value))} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Tipo de Bot</Label>
+          <Select value={tipoBot} onValueChange={(v) => { setTipoBot(v); setFluxo(""); }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TIPOS_BOT.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Fluxo</Label>
+        <Select value={fluxo} onValueChange={setFluxo}>
+          <SelectTrigger><SelectValue placeholder="Selecione um fluxo" /></SelectTrigger>
+          <SelectContent>
+            {fluxos?.map(f => <SelectItem key={f.chave} value={f.chave}>{f.nome}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Descrição (opcional)</Label>
+        <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Texto auxiliar para o menu" />
+      </div>
+      <Button onClick={handleSave} disabled={loading || !titulo.trim() || !fluxo} className="w-full">
+        {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+        Salvar Alterações
+      </Button>
+    </div>
+  );
+}
