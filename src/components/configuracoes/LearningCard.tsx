@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Brain, ShieldAlert, BookOpen, ThumbsDown, Wand2 } from "lucide-react";
@@ -17,15 +16,18 @@ export function LearningCard() {
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="regras" className="w-full">
-          <TabsList className="w-full grid grid-cols-3 mb-4">
+          <TabsList className="w-full grid grid-cols-4 mb-4">
             <TabsTrigger value="regras" className="flex items-center gap-1 text-xs">
-              <ShieldAlert className="h-3.5 w-3.5" /> Regras Proibidas
+              <ShieldAlert className="h-3.5 w-3.5" /> Regras
             </TabsTrigger>
             <TabsTrigger value="exemplos" className="flex items-center gap-1 text-xs">
               <BookOpen className="h-3.5 w-3.5" /> Exemplos
             </TabsTrigger>
             <TabsTrigger value="feedbacks" className="flex items-center gap-1 text-xs">
               <ThumbsDown className="h-3.5 w-3.5" /> Feedbacks
+            </TabsTrigger>
+            <TabsTrigger value="compilador" className="flex items-center gap-1 text-xs">
+              <Wand2 className="h-3.5 w-3.5" /> Prompt IA
             </TabsTrigger>
           </TabsList>
 
@@ -37,6 +39,9 @@ export function LearningCard() {
           </TabsContent>
           <TabsContent value="feedbacks">
             <FeedbacksTab />
+          </TabsContent>
+          <TabsContent value="compilador">
+            <PromptCompilerTab />
           </TabsContent>
         </Tabs>
       </CardContent>
