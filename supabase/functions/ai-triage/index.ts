@@ -323,6 +323,82 @@ NUNCA peça ao cliente para informar a data em DD/MM — isso é trabalho SEU.
 Use formato ISO 8601 na tool agendar_visita (ex: ${yyyy}-${mm}-${dd}T10:00:00-03:00).`;
 }
 
+function buildProhibitionsBlock(regrasProibidas: { regra: string; categoria: string }[]): string {
+  if (regrasProibidas.length === 0) return "";
+  const grouped: Record<string, string[]> = {};
+  for (const r of regrasProibidas) {
+    const cat = r.categoria || "geral";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(r.regra);
+  }
+  let block = `# ⛔ PROIBIÇÕES ABSOLUTAS — VIOLAR = FALHA CRÍTICA
+As regras abaixo são INVIOLÁVEIS. Quebrá-las é um erro gravíssimo.
+INSTRUÇÕES: Estas regras se aplicam A TODAS as situações, incluindo clínicas parceiras, 
+indicações, parcerias e qualquer variação ou reformulação. NÃO há exceções.
+Se uma regra diz "NÃO fazemos X", você NÃO pode oferecer X de nenhuma forma, 
+nem como serviço próprio, nem como parceria, nem como indicação.\n`;
+  for (const [cat, rules] of Object.entries(grouped)) {
+    block += `\n## ${cat.toUpperCase()}\n`;
+    for (const rule of rules) {
+      block += `- ❌ ${rule}\n`;
+    }
+  }
+  return block;
+}
+
+function buildSystemPromptFromCompiled(opts: {
+  compiledPrompt: string;
+  regrasProibidas: { regra: string; categoria: string }[];
+  knowledge: string;
+  agendamentoCtx: string;
+  lojasStr: string;
+  sentTopics: string[];
+  colunasNomes: string;
+  setoresNomes: string;
+  inboundCount: number;
+  isHibrido: boolean;
+  hasKnowledge: boolean;
+}): string {
+  const s: string[] = [];
+
+  s.push(buildDateContext());
+
+  // Replace slots in compiled prompt
+  let prompt = opts.compiledPrompt;
+  prompt = prompt.replace("{{PROIBICOES}}", buildProhibitionsBlock(opts.regrasProibidas));
+  prompt = prompt.replace("{{CONHECIMENTO}}", opts.hasKnowledge ? opts.knowledge : "");
+  prompt = prompt.replace("{{LOJAS}}", opts.lojasStr);
+  prompt = prompt.replace("{{AGENDAMENTOS}}", opts.agendamentoCtx);
+
+  s.push(prompt);
+
+  // Inject prohibition block even if slot was missing (safety)
+  if (!opts.compiledPrompt.includes("{{PROIBICOES}}") && opts.regrasProibidas.length > 0) {
+    s.push(buildProhibitionsBlock(opts.regrasProibidas));
+  }
+
+  if (opts.sentTopics.length > 0) {
+    s.push(`# TÓPICOS JÁ COBERTOS (NÃO REPITA)
+${opts.sentTopics.map((t) => `- ❌ ${t}`).join("\n")}
+Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assunto novo.`);
+  }
+
+  s.push(`# CLASSIFICAÇÃO
+Colunas: ${opts.colunasNomes}
+Setores: ${opts.setoresNomes || "nenhum"}
+Mensagem nº ${opts.inboundCount}.
+Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.`);
+
+  if (opts.isHibrido) {
+    s.push(`# MODO HÍBRIDO
+Consultor solicitado mas não respondeu. Continue atendendo.
+Para mensagens vagas: faça pergunta objetiva ("Sobre qual tema: orçamento, lentes, pedidos, financeiro?").
+NUNCA responda com CTA genérico de visita.`);
+  }
+
+  return s.join("\n\n");
+}
+
 function buildSystemPrompt(opts: {
   businessRules: string;
   knowledge: string;
