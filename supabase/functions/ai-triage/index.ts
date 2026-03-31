@@ -656,8 +656,9 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
+    const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
+      supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_compilado").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
       supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(30),
       supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").in("avaliacao", ["negativo", "corrigido"]).order("created_at", { ascending: false }).limit(10),
@@ -673,6 +674,7 @@ serve(async (req) => {
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
+    const compiledPrompt = compiledRes.data?.valor || "";
     const conhecimentos = kbRes.data || [];
     const exemplos = exRes.data || [];
     const antiFeedbacks = antiRes.data || [];
