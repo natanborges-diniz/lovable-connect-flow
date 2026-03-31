@@ -62,7 +62,7 @@ serve(async (req) => {
     // Determine target column based on payment status
     let targetColunaNome: string | null = null;
     if (status === "PAGO") {
-      targetColunaNome = "Pago";
+      targetColunaNome = "Link Pago";
     } else if (status === "CANCELADO" || status === "EXPIRADO") {
       targetColunaNome = "Cancelado";
     }
