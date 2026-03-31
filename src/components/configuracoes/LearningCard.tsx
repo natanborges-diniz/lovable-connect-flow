@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Brain, ShieldAlert, BookOpen, ThumbsDown } from "lucide-react";
+import { Brain, ShieldAlert, BookOpen, ThumbsDown, Wand2 } from "lucide-react";
 import { RegrasProibidasTab } from "./learning/RegrasProibidasTab";
 import { ExemplosTab } from "./learning/ExemplosTab";
 import { FeedbacksTab } from "./learning/FeedbacksTab";
+import { PromptCompilerTab } from "./learning/PromptCompilerTab";
 
 export function LearningCard() {
   return (
