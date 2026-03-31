@@ -124,7 +124,7 @@ serve(async (req) => {
     // ─── Global navigation ───
     if (textoLower === "menu" || textoLower === "voltar" || textoLower === "0") {
       updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
-      resposta = buildMenu(nomeLoja);
+      resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
     }
     // ─── Menu principal ───
     else if (fluxo === "menu_principal" && etapa === "inicio") {
