@@ -16,43 +16,36 @@ serve(async (req) => {
   const OPTICAL_BUSINESS_URL = Deno.env.get("OPTICAL_BUSINESS_URL");
   const INTERNAL_SERVICE_SECRET = Deno.env.get("INTERNAL_SERVICE_SECRET");
 
-  /** Resolve nome_loja → cod_empresa querying local telefones_lojas first,
-   *  then falling back to Optical Business empresa table via REST API */
-  async function resolveCodEmpresa(nomeLoja: string, localSupabase: ReturnType<typeof createClient>): Promise<string | null> {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  // ─── Helper: resolve cod_empresa ───
+  async function resolveCodEmpresa(nomeLoja: string): Promise<string | null> {
     try {
-      // 1. Try local telefones_lojas table first
-      const { data: localMatch } = await localSupabase
+      const { data: localMatch } = await supabase
         .from("telefones_lojas")
         .select("cod_empresa")
         .ilike("nome_loja", `%${nomeLoja}%`)
         .eq("ativo", true)
         .limit(1);
 
-      if (localMatch && localMatch.length > 0 && localMatch[0].cod_empresa) {
+      if (localMatch?.[0]?.cod_empresa) {
         console.log(`[bot-lojas] Resolved "${nomeLoja}" → cod_empresa: ${localMatch[0].cod_empresa} (local)`);
         return String(localMatch[0].cod_empresa);
       }
 
-      // 2. Fallback: query Optical Business empresa table using OPTICAL_BUSINESS_URL + service role
       if (OPTICAL_BUSINESS_URL) {
         const obUrl = OPTICAL_BUSINESS_URL.replace("/functions/v1", "").replace(/\/$/, "");
         const res = await fetch(
           `${obUrl}/rest/v1/empresa?nome_fantasia=ilike.*${encodeURIComponent(nomeLoja)}*&select=cod_empresa&limit=1`,
-          {
-            headers: {
-              "apikey": INTERNAL_SERVICE_SECRET || "",
-              "Authorization": `Bearer ${INTERNAL_SERVICE_SECRET || ""}`,
-            },
-          }
+          { headers: { "apikey": INTERNAL_SERVICE_SECRET || "", "Authorization": `Bearer ${INTERNAL_SERVICE_SECRET || ""}` } }
         );
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0 && data[0].cod_empresa) {
+        if (Array.isArray(data) && data[0]?.cod_empresa) {
           console.log(`[bot-lojas] Resolved "${nomeLoja}" → cod_empresa: ${data[0].cod_empresa} (OB remote)`);
           return String(data[0].cod_empresa);
         }
       }
-
-      console.warn(`[bot-lojas] Could not resolve "${nomeLoja}" in any source`);
+      console.warn(`[bot-lojas] Could not resolve "${nomeLoja}"`);
       return null;
     } catch (e) {
       console.error("[bot-lojas] resolveCodEmpresa error:", e);
@@ -60,26 +53,184 @@ serve(async (req) => {
     }
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  // ─── Load flow definition from DB ───
+  async function loadFluxo(chave: string): Promise<any | null> {
+    const { data } = await supabase
+      .from("bot_fluxos")
+      .select("*")
+      .eq("chave", chave)
+      .eq("ativo", true)
+      .single();
+    return data;
+  }
 
-  // Load dynamic menu options from database
-  async function loadMenuOpcoes(): Promise<Array<{ chave: string; titulo: string; emoji: string; fluxo: string; ordem: number }>> {
+  // ─── Load menu options filtered by tipo_bot ───
+  async function loadMenuOpcoes(tipoBot = "loja"): Promise<Array<{ chave: string; titulo: string; emoji: string; fluxo: string; ordem: number }>> {
     try {
       const { data } = await supabase
         .from("bot_menu_opcoes")
         .select("chave, titulo, emoji, fluxo, ordem")
         .eq("ativo", true)
+        .eq("tipo_bot", tipoBot)
         .order("ordem");
       return data || [];
     } catch {
-      // Fallback to hardcoded defaults
       return [
         { chave: "link_pagamento", titulo: "Gerar Link de Pagamento", emoji: "1️⃣", fluxo: "link_pagamento", ordem: 1 },
         { chave: "gerar_boleto", titulo: "Gerar Boleto", emoji: "2️⃣", fluxo: "gerar_boleto", ordem: 2 },
         { chave: "consulta_cpf", titulo: "Consultar CPF", emoji: "3️⃣", fluxo: "consulta_cpf", ordem: 3 },
-        { chave: "confirmar_comparecimento", titulo: "Confirmar Comparecimento de Cliente", emoji: "4️⃣", fluxo: "confirmar_comparecimento", ordem: 4 },
+        { chave: "confirmar_comparecimento", titulo: "Confirmar Comparecimento", emoji: "4️⃣", fluxo: "confirmar_comparecimento", ordem: 4 },
       ];
     }
+  }
+
+  // ─── Validate input by tipo_input ───
+  function validateInput(texto: string, etapa: any): { valid: boolean; value: any; error?: string } {
+    const hint = "\n\n_Digite *0* para voltar ao menu._";
+    const tipo = etapa.tipo_input || "texto";
+    const validacao = etapa.validacao || {};
+
+    switch (tipo) {
+      case "decimal": {
+        const val = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
+        if (isNaN(val)) return { valid: false, value: null, error: "⚠️ Valor inválido. Digite um número válido (ex: 150.00)" + hint };
+        if (validacao.min !== undefined && val < validacao.min) return { valid: false, value: null, error: `⚠️ Valor mínimo: ${validacao.min}` + hint };
+        if (validacao.max !== undefined && val > validacao.max) return { valid: false, value: null, error: `⚠️ Valor máximo: ${validacao.max}` + hint };
+        return { valid: true, value: val };
+      }
+      case "inteiro": {
+        const val = parseInt(texto);
+        if (isNaN(val)) return { valid: false, value: null, error: "⚠️ Digite um número inteiro válido." + hint };
+        if (validacao.min !== undefined && val < validacao.min) return { valid: false, value: null, error: `⚠️ Mínimo: ${validacao.min}` + hint };
+        if (validacao.max !== undefined && val > validacao.max) return { valid: false, value: null, error: `⚠️ Máximo: ${validacao.max}` + hint };
+        return { valid: true, value: val };
+      }
+      case "cpf": {
+        const cpf = texto.replace(/\D/g, "");
+        if (cpf.length !== 11) return { valid: false, value: null, error: "⚠️ CPF inválido. Digite os 11 dígitos:" + hint };
+        return { valid: true, value: cpf };
+      }
+      case "documento": {
+        const doc = texto.replace(/\D/g, "");
+        if (doc.length !== 11 && doc.length !== 14) return { valid: false, value: null, error: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos." + hint };
+        return { valid: true, value: doc };
+      }
+      case "texto":
+      default: {
+        if (validacao.min_length && texto.length < validacao.min_length) {
+          return { valid: false, value: null, error: `⚠️ Texto muito curto (mínimo ${validacao.min_length} caracteres).` + hint };
+        }
+        return { valid: true, value: texto };
+      }
+    }
+  }
+
+  // ─── Build confirmation message from collected data ───
+  function buildConfirmacao(fluxo: any, dados: Record<string, any>): string {
+    const etapas = fluxo.etapas as any[];
+    let msg = "📋 *Confirme os dados:*\n\n";
+    for (const et of etapas) {
+      const val = dados[et.campo];
+      if (val === null || val === undefined) continue;
+      const displayVal = et.tipo_input === "decimal" ? `R$ ${Number(val).toFixed(2)}` : val;
+      msg += `• ${et.campo}: ${displayVal}\n`;
+    }
+    msg += "\nResponda *SIM* para confirmar ou *NÃO* para cancelar.";
+    return msg;
+  }
+
+  // ─── Execute final action ───
+  async function executarAcaoFinal(
+    fluxo: any, dados: Record<string, any>,
+    contato_id: string, atendimento_id: string,
+    nomeLoja: string, codEmpresa: string
+  ): Promise<string> {
+    const acao = fluxo.acao_final;
+    const tipo = acao.tipo;
+
+    if (tipo === "criar_solicitacao") {
+      // For link_pagamento, call OB API first
+      if (acao.endpoint === "payment-links") {
+        if (!OPTICAL_BUSINESS_URL || !INTERNAL_SERVICE_SECRET) {
+          return "⚠️ Integração de pagamento não configurada. Contate o administrador.";
+        }
+        const resolvedCod = codEmpresa || await resolveCodEmpresa(nomeLoja);
+        if (!resolvedCod) {
+          return `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
+        }
+
+        try {
+          const payRes = await fetch(`${OPTICAL_BUSINESS_URL}/functions/v1/payment-links`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-service-key": INTERNAL_SERVICE_SECRET },
+            body: JSON.stringify({
+              action: "criar",
+              cod_empresa: resolvedCod,
+              valor: dados.valor,
+              descricao: dados.descricao,
+              parcelas_max: dados.parcelas || 1,
+              cliente_nome: dados.cliente || null,
+              origem: "CHATBOT",
+              origem_ref: atendimento_id,
+            }),
+          });
+          const payResult = await payRes.json();
+          if (payResult.error) return `❌ Erro ao gerar link: ${payResult.error}\n\nDigite *menu* para voltar.`;
+
+          const url = payResult.url_pagamento || "Link em processamento";
+          dados.url = url;
+          dados.payment_link_id = payResult.id;
+
+          await createFinanceiroSolicitacao(supabase, contato_id, {
+            assunto: `Link de Pagamento - R$ ${Number(dados.valor).toFixed(2)}`,
+            descricao: `${dados.descricao}${dados.cliente ? ` | Cliente: ${dados.cliente}` : ""} | Parcelas: ${dados.parcelas}x`,
+            tipo: acao.tipo_solicitacao,
+            coluna_nome: acao.coluna_destino,
+            metadata: { payment_link_id: payResult.id, url, alias_loja: nomeLoja, cod_empresa: resolvedCod },
+            evento_descricao: `Link de pagamento R$ ${Number(dados.valor).toFixed(2)} gerado via bot. ${dados.descricao}`,
+            evento_tipo: "link_pagamento_gerado",
+          });
+        } catch (e) {
+          console.error("Payment link error:", e);
+          return "❌ Erro na comunicação com o sistema de pagamento. Tente novamente.\n\nDigite *menu* para voltar.";
+        }
+      } else {
+        // Generic solicitação creation (boleto, consulta_cpf, etc.)
+        // Compute valor_financiado for consulta_cpf
+        if (acao.tipo_solicitacao === "consulta_cpf" && dados.valor_compra !== undefined && dados.valor_entrada !== undefined) {
+          dados.valor_financiado = Number(dados.valor_compra) - Number(dados.valor_entrada);
+        }
+
+        const descParts = Object.entries(dados).map(([k, v]) => `${k}: ${v}`).join(" | ");
+        await createFinanceiroSolicitacao(supabase, contato_id, {
+          assunto: `${fluxo.nome} - ${dados.valor ? `R$ ${Number(dados.valor).toFixed(2)}` : (dados.nome_cliente || dados.cliente || "")}`,
+          descricao: descParts,
+          tipo: acao.tipo_solicitacao,
+          coluna_nome: acao.coluna_destino,
+          metadata: { ...dados, alias_loja: nomeLoja, cod_empresa: codEmpresa },
+          evento_descricao: `${fluxo.nome} solicitado via bot`,
+          evento_tipo: `${acao.tipo_solicitacao}_solicitado`,
+        });
+      }
+
+      // Build response from template
+      let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
+      for (const [k, v] of Object.entries(dados)) {
+        const displayVal = typeof v === "number" ? Number(v).toFixed(2) : String(v || "");
+        template = template.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), displayVal);
+      }
+      return template + "\n\nDigite *menu* para nova operação.";
+    }
+
+    if (tipo === "apenas_mensagem") {
+      let template = acao.template_confirmacao || "✅ Operação concluída.";
+      for (const [k, v] of Object.entries(dados)) {
+        template = template.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), String(v || ""));
+      }
+      return template + "\n\nDigite *menu* para nova operação.";
+    }
+
+    return "✅ Operação concluída.\n\nDigite *menu* para nova operação.";
   }
 
   try {
@@ -108,16 +259,15 @@ serve(async (req) => {
 
     const nomeLoja = loja_info?.nome_loja || "Loja";
     const codEmpresa = loja_info?.cod_empresa || "";
-    // Use nome_loja as alias to identify the store in Optical Business (maps to nome_fantasia in empresa table)
-    const aliasLoja = nomeLoja;
     const texto = (mensagem_texto || "").trim();
     const textoLower = texto.toLowerCase();
 
     let resposta = "";
     let updateSessao: Record<string, unknown> = {};
 
-    // Load menu options
-    const menuOpcoes = await loadMenuOpcoes();
+    // Determine tipo_bot from loja_info or default
+    const tipoBot = loja_info?.tipo_bot || "loja";
+    const menuOpcoes = await loadMenuOpcoes(tipoBot);
 
     const { fluxo, etapa, dados } = sessao;
 
@@ -128,186 +278,37 @@ serve(async (req) => {
     }
     // ─── Menu principal ───
     else if (fluxo === "menu_principal" && etapa === "inicio") {
-      // Dynamic menu routing based on user input number
       const selectedIndex = parseInt(texto) - 1;
       const selectedOption = menuOpcoes[selectedIndex];
 
       if (selectedOption) {
         const selectedFluxo = selectedOption.fluxo;
+        const fluxoDef = await loadFluxo(selectedFluxo);
 
-        if (selectedFluxo === "link_pagamento") {
-          updateSessao = { fluxo: "link_pagamento", etapa: "valor", dados: {} };
-          resposta = "💳 *Gerar Link de Pagamento*\n\nQual o *valor* do link? (ex: 150.00)\n\n_Digite *0* para voltar ao menu._";
-        } else if (selectedFluxo === "gerar_boleto") {
-          updateSessao = { fluxo: "gerar_boleto", etapa: "valor", dados: {} };
-          resposta = "🧾 *Gerar Boleto*\n\nQual o *valor* do boleto? (ex: 250.00)\n\n_Digite *0* para voltar ao menu._";
-        } else if (selectedFluxo === "consulta_cpf") {
-          updateSessao = { fluxo: "consulta_cpf", etapa: "cpf", dados: {} };
-          resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):\n\n_Digite *0* para voltar ao menu._";
-        } else if (selectedFluxo === "confirmar_comparecimento") {
-        // ─── Confirmar Comparecimento ───
-        updateSessao = { fluxo: "confirmar_comparecimento", etapa: "listar", dados: {} };
-        // Fetch today's pending appointments for this store
-        const today = new Date();
-        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
-
-        const cleanLojaTel = (loja_info?.telefone || "").replace(/\D/g, "");
-        const { data: agendamentosHoje } = await supabase
-          .from("agendamentos")
-          .select("id, contato_id, data_horario, loja_nome, status, contato:contatos(nome)")
-          .eq("loja_telefone", cleanLojaTel)
-          .in("status", ["agendado", "confirmado"])
-          .gte("data_horario", todayStart)
-          .lt("data_horario", todayEnd)
-          .order("data_horario", { ascending: true });
-
-        if (!agendamentosHoje?.length) {
-          resposta = "📋 Não há agendamentos pendentes para hoje.\n\nDigite *menu* para voltar.";
-          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        if (!fluxoDef) {
+          resposta = `⚠️ Fluxo "${selectedFluxo}" não encontrado. ${buildMenuDynamic(nomeLoja, menuOpcoes)}`;
+        } else if (fluxoDef.acao_final?.tipo === "fluxo_especial" && fluxoDef.acao_final?.fluxo_especial === "confirmar_comparecimento") {
+          // Special flow: confirmar_comparecimento (requires appointment listing)
+          const result = await handleConfirmarComparecimento(supabase, loja_info, dados);
+          resposta = result.resposta;
+          updateSessao = result.update;
         } else {
-          let lista = "📋 *Agendamentos de Hoje*\n\n";
-          const agMap: Record<string, string> = {};
-          agendamentosHoje.forEach((ag: any, i: number) => {
-            const dt = new Date(ag.data_horario);
-            const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
-            const nomeCliente = ag.contato?.nome || "Cliente";
-            lista += `${i + 1}️⃣ ${nomeCliente} — ${hora}\n`;
-            agMap[String(i + 1)] = ag.id;
-          });
-          lista += "\nDigite o *número* do agendamento para confirmar.";
-          resposta = lista;
-          updateSessao = { fluxo: "confirmar_comparecimento", etapa: "selecionar", dados: { agendamentos: agMap } };
-        }
-        } else {
-          resposta = `⚠️ Opção não reconhecida. ${buildMenuDynamic(nomeLoja, menuOpcoes)}`;
+          // Generic flow: start at first step
+          const etapas = fluxoDef.etapas as any[];
+          if (etapas.length > 0) {
+            const primeiraEtapa = etapas[0];
+            resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
+            updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
+          } else {
+            resposta = "⚠️ Fluxo sem etapas configuradas.";
+            updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+          }
         }
       } else {
         resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
       }
     }
-    // ─── Link de Pagamento ───
-    else if (fluxo === "link_pagamento") {
-      const result = handleLinkPagamento(etapa, texto, dados as Record<string, unknown>);
-      resposta = result.resposta;
-      updateSessao = result.update;
-
-      if (etapa === "confirmar" && (textoLower === "sim" || textoLower === "s")) {
-        if (!OPTICAL_BUSINESS_URL || !INTERNAL_SERVICE_SECRET) {
-          resposta = "⚠️ Integração de pagamento não configurada. Contate o administrador.";
-          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {}, status: "ativo" };
-        } else {
-          try {
-            const paymentData = dados as Record<string, unknown>;
-            // Resolve nome_loja → cod_empresa from Optical Business DB
-            const resolvedCodEmpresa = codEmpresa || await resolveCodEmpresa(nomeLoja, supabase);
-            if (!resolvedCodEmpresa) {
-              resposta = `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
-              updateSessao = { status: "concluido" };
-            } else {
-            const payRes = await fetch(`${OPTICAL_BUSINESS_URL}/functions/v1/payment-links`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-service-key": INTERNAL_SERVICE_SECRET,
-              },
-              body: JSON.stringify({
-                action: "criar",
-                cod_empresa: resolvedCodEmpresa,
-                valor: paymentData.valor,
-                descricao: paymentData.descricao,
-                parcelas_max: paymentData.parcelas || 1,
-                cliente_nome: paymentData.cliente || null,
-                origem: "CHATBOT",
-                origem_ref: atendimento_id,
-              }),
-            });
-
-            const payResult = await payRes.json();
-
-            if (payResult.error) {
-              resposta = `❌ Erro ao gerar link: ${payResult.error}\n\nDigite *menu* para voltar.`;
-              updateSessao = { status: "concluido" };
-            } else {
-              const url = payResult.url_pagamento || "Link em processamento";
-              resposta = `✅ *Link gerado com sucesso!*\n\n🔗 ${url}\n💰 R$ ${Number(paymentData.valor).toFixed(2)}\n📝 ${paymentData.descricao}\n💳 Até ${paymentData.parcelas || 1}x\n⏰ Válido por 24h\n\nDigite *menu* para nova operação.`;
-              updateSessao = { status: "concluido" };
-
-              // Create solicitação in "Link Enviado" column
-              await createFinanceiroSolicitacao(supabase, contato_id, {
-                assunto: `Link de Pagamento - R$ ${Number(paymentData.valor).toFixed(2)}`,
-                descricao: `${paymentData.descricao}${paymentData.cliente ? ` | Cliente: ${paymentData.cliente}` : ""} | Parcelas: ${paymentData.parcelas}x`,
-                tipo: "link_pagamento",
-                coluna_nome: "Link Enviado",
-                metadata: { payment_link_id: payResult.id, url: payResult.url_pagamento, alias_loja: aliasLoja, cod_empresa: resolvedCodEmpresa },
-                evento_descricao: `Link de pagamento R$ ${Number(paymentData.valor).toFixed(2)} gerado via bot. ${paymentData.descricao}`,
-                evento_tipo: "link_pagamento_gerado",
-              });
-            }
-            } // close else (resolvedCodEmpresa found)
-          } catch (e) {
-            console.error("Payment link error:", e);
-            resposta = `❌ Erro na comunicação com o sistema de pagamento. Tente novamente.\n\nDigite *menu* para voltar.`;
-            updateSessao = { status: "concluido" };
-          }
-        }
-      }
-    }
-    // ─── Gerar Boleto ───
-    else if (fluxo === "gerar_boleto") {
-      const result = handleGerarBoleto(etapa, texto, dados as Record<string, unknown>);
-      resposta = result.resposta;
-      updateSessao = result.update;
-
-      if (etapa === "confirmar" && (textoLower === "sim" || textoLower === "s")) {
-        const boletoData = dados as Record<string, unknown>;
-        resposta = `✅ *Solicitação de boleto registrada!*\n\n💰 Valor: R$ ${Number(boletoData.valor).toFixed(2)}\n👤 Cliente: ${boletoData.cliente}\n📄 CPF/CNPJ: ${boletoData.documento}\n📝 ${boletoData.descricao}\n\nO setor financeiro irá processar e enviar o boleto.\n\nDigite *menu* para nova operação.`;
-        updateSessao = { status: "concluido" };
-
-        await createFinanceiroSolicitacao(supabase, contato_id, {
-          assunto: `Solicitação de Boleto - R$ ${Number(boletoData.valor).toFixed(2)}`,
-          descricao: `Cliente: ${boletoData.cliente} | Doc: ${boletoData.documento} | ${boletoData.descricao}`,
-          tipo: "boleto",
-          coluna_nome: "Solicitação de Boleto",
-          metadata: { cliente: boletoData.cliente, documento: boletoData.documento, alias_loja: aliasLoja, cod_empresa: codEmpresa },
-          evento_descricao: `Solicitação de boleto R$ ${Number(boletoData.valor).toFixed(2)} via bot. Cliente: ${boletoData.cliente}`,
-          evento_tipo: "boleto_solicitado",
-        });
-      }
-    }
-    // ─── Consulta CPF ───
-    else if (fluxo === "consulta_cpf") {
-      const result = handleConsultaCPF(etapa, texto, dados as Record<string, unknown>);
-      resposta = result.resposta;
-      updateSessao = result.update;
-
-      if (etapa === "confirmar" && (textoLower === "sim" || textoLower === "s")) {
-        const cpfData = dados as Record<string, unknown>;
-        const valorFinanciado = Number(cpfData.valor_financiado);
-        resposta = `✅ *Consulta de CPF registrada!*\n\n📄 CPF: ${cpfData.cpf}\n👤 Nome: ${cpfData.nome_cliente}\n💰 Compra: R$ ${Number(cpfData.valor_compra).toFixed(2)}\n💵 Entrada: R$ ${Number(cpfData.valor_entrada).toFixed(2)}\n🏷️ A financiar: R$ ${valorFinanciado.toFixed(2)}\n📝 Motivo: ${cpfData.motivo}\n\nO setor financeiro irá processar a consulta.\n\nDigite *menu* para nova operação.`;
-        updateSessao = { status: "concluido" };
-
-        await createFinanceiroSolicitacao(supabase, contato_id, {
-          assunto: `Consulta CPF - ${cpfData.nome_cliente}`,
-          descricao: `CPF: ${cpfData.cpf} | Compra: R$ ${Number(cpfData.valor_compra).toFixed(2)} | Entrada: R$ ${Number(cpfData.valor_entrada).toFixed(2)} | Financiar: R$ ${valorFinanciado.toFixed(2)} | Motivo: ${cpfData.motivo}`,
-          tipo: "consulta_cpf",
-          coluna_nome: "Consulta CPF",
-          metadata: {
-            cpf: cpfData.cpf,
-            nome_cliente: cpfData.nome_cliente,
-            valor_compra: cpfData.valor_compra,
-            valor_entrada: cpfData.valor_entrada,
-            valor_financiado: valorFinanciado,
-            motivo: cpfData.motivo,
-            alias_loja: aliasLoja,
-            cod_empresa: codEmpresa,
-          },
-          evento_descricao: `Consulta de CPF ${cpfData.cpf} solicitada via bot. Nome: ${cpfData.nome_cliente} | Financiar: R$ ${valorFinanciado.toFixed(2)}`,
-          evento_tipo: "consulta_cpf_solicitada",
-        });
-      }
-    }
-    // ─── Confirmar Comparecimento ───
+    // ─── Confirmar Comparecimento (special flow) ───
     else if (fluxo === "confirmar_comparecimento") {
       if (etapa === "selecionar") {
         const agMap = (dados as any).agendamentos || {};
@@ -315,7 +316,6 @@ serve(async (req) => {
         if (!agId) {
           resposta = "⚠️ Número inválido. Digite o número do agendamento da lista ou *menu* para voltar.";
         } else {
-          // Get client name for confirmation
           const { data: agData } = await supabase
             .from("agendamentos")
             .select("contato_id, contato:contatos(nome)")
@@ -330,19 +330,11 @@ serve(async (req) => {
         const clienteNome = (dados as any).cliente_nome || "Cliente";
 
         if (textoLower === "sim" || textoLower === "s") {
-          await supabase.from("agendamentos").update({
-            status: "atendido",
-            loja_confirmou_presenca: true,
-          }).eq("id", agId);
-
+          await supabase.from("agendamentos").update({ status: "atendido", loja_confirmou_presenca: true }).eq("id", agId);
           resposta = `✅ Comparecimento de *${clienteNome}* confirmado!\n\nDigite *menu* para nova operação.`;
           updateSessao = { status: "concluido" };
-        } else if (textoLower === "nao" || textoLower === "não" || textoLower === "n") {
-          await supabase.from("agendamentos").update({
-            status: "no_show",
-            loja_confirmou_presenca: false,
-          }).eq("id", agId);
-
+        } else if (["nao", "não", "n"].includes(textoLower)) {
+          await supabase.from("agendamentos").update({ status: "no_show", loja_confirmou_presenca: false }).eq("id", agId);
           resposta = `❌ No-show registrado para *${clienteNome}*. O sistema irá acionar o plano de recuperação automaticamente.\n\nDigite *menu* para nova operação.`;
           updateSessao = { status: "concluido" };
         } else {
@@ -351,6 +343,86 @@ serve(async (req) => {
       } else {
         resposta = "⚠️ Etapa não reconhecida. Digite *menu* para recomeçar.";
         updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+      }
+    }
+    // ─── Generic flow engine (step_N) ───
+    else if (etapa.startsWith("step_")) {
+      const fluxoDef = await loadFluxo(fluxo);
+      if (!fluxoDef) {
+        resposta = "⚠️ Fluxo não encontrado. Digite *menu* para recomeçar.";
+        updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+      } else {
+        const etapas = fluxoDef.etapas as any[];
+        const stepIndex = parseInt(etapa.replace("step_", ""));
+        const currentEtapa = etapas[stepIndex];
+
+        if (!currentEtapa) {
+          resposta = "⚠️ Etapa inválida. Digite *menu* para recomeçar.";
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        } else {
+          // Handle skip for optional fields
+          if (!currentEtapa.obrigatorio && textoLower === "pular") {
+            const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: null };
+            const nextIndex = stepIndex + 1;
+
+            if (nextIndex >= etapas.length) {
+              // Show confirmation
+              resposta = buildConfirmacao(fluxoDef, newDados);
+              updateSessao = { etapa: "confirmar", dados: newDados };
+            } else {
+              resposta = etapas[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+              updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+            }
+          } else {
+            // Validate input
+            const validation = validateInput(texto, currentEtapa);
+            if (!validation.valid) {
+              resposta = validation.error!;
+            } else {
+              const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: validation.value };
+
+              // Special: compute valor_financiado after valor_entrada
+              if (currentEtapa.campo === "valor_entrada" && newDados.valor_compra !== undefined) {
+                const entrada = Number(newDados.valor_entrada);
+                const compra = Number(newDados.valor_compra);
+                if (entrada > compra) {
+                  resposta = `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${compra.toFixed(2)}). Digite novamente:\n\n_Digite *0* para voltar ao menu._`;
+                } else {
+                  newDados.valor_financiado = compra - entrada;
+                }
+              }
+
+              if (!resposta) {
+                const nextIndex = stepIndex + 1;
+                if (nextIndex >= etapas.length) {
+                  resposta = buildConfirmacao(fluxoDef, newDados);
+                  updateSessao = { etapa: "confirmar", dados: newDados };
+                } else {
+                  resposta = etapas[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+                  updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // ─── Confirmation step ───
+    else if (etapa === "confirmar") {
+      if (["nao", "não", "n"].includes(textoLower)) {
+        resposta = "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.";
+        updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+      } else if (["sim", "s"].includes(textoLower)) {
+        const fluxoDef = await loadFluxo(fluxo);
+        if (!fluxoDef) {
+          resposta = "⚠️ Fluxo não encontrado.";
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        } else {
+          resposta = await executarAcaoFinal(fluxoDef, dados as Record<string, any>, contato_id, atendimento_id, nomeLoja, codEmpresa);
+          updateSessao = { status: "concluido" };
+        }
+      } else {
+        resposta = "Responda *SIM* para confirmar ou *NÃO* para cancelar.";
       }
     }
     // ─── Fallback ───
@@ -364,18 +436,11 @@ serve(async (req) => {
       await supabase.from("bot_sessoes").update(updateSessao).eq("id", sessao.id);
     }
 
-    // 3. Send response via send-whatsapp
+    // 3. Send response
     await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        atendimento_id,
-        texto: resposta,
-        remetente_nome: "Bot Lojas",
-      }),
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id, texto: resposta, remetente_nome: "Bot Lojas" }),
     });
 
     return new Response(JSON.stringify({ status: "ok", resposta }), {
@@ -390,8 +455,7 @@ serve(async (req) => {
   }
 });
 
-// ─── Menu (dynamic from DB) ───
-
+// ─── Menu builder ───
 function buildMenuDynamic(nomeLoja: string, opcoes: Array<{ emoji: string; titulo: string }>): string {
   let menu = `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n`;
   opcoes.forEach((op, i) => {
@@ -401,137 +465,47 @@ function buildMenuDynamic(nomeLoja: string, opcoes: Array<{ emoji: string; titul
   return menu;
 }
 
-// ─── Link de Pagamento Flow ───
+// ─── Confirmar Comparecimento (special handler) ───
+async function handleConfirmarComparecimento(supabase: any, loja_info: any, dados: any) {
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+  const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
 
-function handleLinkPagamento(
-  etapa: string, texto: string, dados: Record<string, unknown>
-): { resposta: string; update: Record<string, unknown> } {
-  const hint = "\n\n_Digite *0* para voltar ao menu._";
-  switch (etapa) {
-    case "valor": {
-      const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 150.00)" + hint, update: {} };
-      return { resposta: "📝 Descreva o pagamento (ex: Lente Transition CR39)" + hint, update: { etapa: "descricao", dados: { ...dados, valor } } };
-    }
-    case "descricao": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta. Descreva o pagamento com mais detalhes." + hint, update: {} };
-      return { resposta: "💳 Máximo de parcelas? (1-12)" + hint, update: { etapa: "parcelas", dados: { ...dados, descricao: texto } } };
-    }
-    case "parcelas": {
-      const parcelas = parseInt(texto);
-      if (isNaN(parcelas) || parcelas < 1 || parcelas > 12) return { resposta: "⚠️ Digite um número entre 1 e 12." + hint, update: {} };
-      return { resposta: "👤 Nome do cliente (ou digite *pular*)" + hint, update: { etapa: "cliente", dados: { ...dados, parcelas } } };
-    }
-    case "cliente": {
-      const cliente = texto.toLowerCase() === "pular" ? null : texto;
-      const d = { ...dados, cliente };
-      return {
-        resposta: `📋 *Confirme os dados:*\n\n💰 Valor: R$ ${Number(d.valor).toFixed(2)}\n📝 Descrição: ${d.descricao}\n💳 Parcelas: até ${d.parcelas}x${cliente ? `\n👤 Cliente: ${cliente}` : ""}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
-        update: { etapa: "confirmar", dados: d },
-      };
-    }
-    case "confirmar": {
-      if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
-      }
-      return { resposta: "⏳ Gerando link de pagamento...", update: {} };
-    }
-    default:
-      return { resposta: "⚠️ Etapa não reconhecida. Digite *menu* para recomeçar.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
+  const cleanLojaTel = (loja_info?.telefone || "").replace(/\D/g, "");
+  const { data: agendamentosHoje } = await supabase
+    .from("agendamentos")
+    .select("id, contato_id, data_horario, loja_nome, status, contato:contatos(nome)")
+    .eq("loja_telefone", cleanLojaTel)
+    .in("status", ["agendado", "confirmado"])
+    .gte("data_horario", todayStart)
+    .lt("data_horario", todayEnd)
+    .order("data_horario", { ascending: true });
+
+  if (!agendamentosHoje?.length) {
+    return {
+      resposta: "📋 Não há agendamentos pendentes para hoje.\n\nDigite *menu* para voltar.",
+      update: { fluxo: "menu_principal", etapa: "inicio", dados: {} },
+    };
   }
-}
 
-// ─── Gerar Boleto Flow ───
+  let lista = "📋 *Agendamentos de Hoje*\n\n";
+  const agMap: Record<string, string> = {};
+  agendamentosHoje.forEach((ag: any, i: number) => {
+    const dt = new Date(ag.data_horario);
+    const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const nomeCliente = ag.contato?.nome || "Cliente";
+    lista += `${i + 1}️⃣ ${nomeCliente} — ${hora}\n`;
+    agMap[String(i + 1)] = ag.id;
+  });
+  lista += "\nDigite o *número* do agendamento para confirmar.";
 
-function handleGerarBoleto(
-  etapa: string, texto: string, dados: Record<string, unknown>
-): { resposta: string; update: Record<string, unknown> } {
-  const hint = "\n\n_Digite *0* para voltar ao menu._";
-  switch (etapa) {
-    case "valor": {
-      const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 250.00)" + hint, update: {} };
-      return { resposta: "👤 Nome completo do cliente:" + hint, update: { etapa: "cliente", dados: { ...dados, valor } } };
-    }
-    case "cliente": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome completo do cliente." + hint, update: {} };
-      return { resposta: "📄 CPF ou CNPJ do cliente (somente números):" + hint, update: { etapa: "documento", dados: { ...dados, cliente: texto } } };
-    }
-    case "documento": {
-      const doc = texto.replace(/\D/g, "");
-      if (doc.length !== 11 && doc.length !== 14) return { resposta: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos. Digite novamente:" + hint, update: {} };
-      return { resposta: "📝 Descrição do boleto (ex: Armação Ray-Ban + Lentes):" + hint, update: { etapa: "descricao", dados: { ...dados, documento: doc } } };
-    }
-    case "descricao": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Descrição muito curta." + hint, update: {} };
-      const d = { ...dados, descricao: texto };
-      return {
-        resposta: `📋 *Confirme os dados do boleto:*\n\n💰 Valor: R$ ${Number(d.valor).toFixed(2)}\n👤 Cliente: ${d.cliente}\n📄 Doc: ${d.documento}\n📝 ${d.descricao}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
-        update: { etapa: "confirmar", dados: d },
-      };
-    }
-    case "confirmar": {
-      if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
-      }
-      return { resposta: "⏳ Registrando solicitação de boleto...", update: {} };
-    }
-    default:
-      return { resposta: "⚠️ Etapa não reconhecida. Digite *menu* para recomeçar.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
-  }
-}
-
-// ─── Consulta CPF Flow ───
-
-function handleConsultaCPF(
-  etapa: string, texto: string, dados: Record<string, unknown>
-): { resposta: string; update: Record<string, unknown> } {
-  const hint = "\n\n_Digite *0* para voltar ao menu._";
-  switch (etapa) {
-    case "cpf": {
-      const cpf = texto.replace(/\D/g, "");
-      if (cpf.length !== 11) return { resposta: "⚠️ CPF inválido. Digite os 11 dígitos:" + hint, update: {} };
-      return { resposta: "👤 Nome do cliente:" + hint, update: { etapa: "nome_cliente", dados: { ...dados, cpf } } };
-    }
-    case "nome_cliente": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Nome muito curto. Digite o nome do cliente." + hint, update: {} };
-      return { resposta: "💰 Qual o *valor total da compra*? (ex: 1500.00)" + hint, update: { etapa: "valor_compra", dados: { ...dados, nome_cliente: texto } } };
-    }
-    case "valor_compra": {
-      const valor = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(valor) || valor <= 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 1500.00)" + hint, update: {} };
-      return { resposta: "💵 Qual o *valor da entrada*? (ex: 500.00 ou 0 se não houver)" + hint, update: { etapa: "valor_entrada", dados: { ...dados, valor_compra: valor } } };
-    }
-    case "valor_entrada": {
-      const entrada = parseFloat(texto.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(entrada) || entrada < 0) return { resposta: "⚠️ Valor inválido. Digite um número válido (ex: 500.00 ou 0)" + hint, update: {} };
-      const valorCompra = Number(dados.valor_compra);
-      if (entrada > valorCompra) return { resposta: `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${valorCompra.toFixed(2)}). Digite novamente:` + hint, update: {} };
-      const valorFinanciado = valorCompra - entrada;
-      return { resposta: "📝 Motivo da consulta (ex: Venda a prazo, Crediário):" + hint, update: { etapa: "motivo", dados: { ...dados, valor_entrada: entrada, valor_financiado: valorFinanciado } } };
-    }
-    case "motivo": {
-      if (!texto || texto.length < 3) return { resposta: "⚠️ Motivo muito curto." + hint, update: {} };
-      const d = { ...dados, motivo: texto };
-      const valorFinanciado = Number(d.valor_financiado);
-      return {
-        resposta: `📋 *Confirme a consulta:*\n\n📄 CPF: ${d.cpf}\n👤 Nome: ${d.nome_cliente}\n💰 Valor da compra: R$ ${Number(d.valor_compra).toFixed(2)}\n💵 Entrada: R$ ${Number(d.valor_entrada).toFixed(2)}\n🏷️ Valor a financiar: R$ ${valorFinanciado.toFixed(2)}\n📝 Motivo: ${d.motivo}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.`,
-        update: { etapa: "confirmar", dados: d },
-      };
-    }
-    case "confirmar": {
-      if (["nao", "não", "n"].includes(texto.toLowerCase())) {
-        return { resposta: "❌ Operação cancelada.\n\nDigite *menu* para voltar ao início.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
-      }
-      return { resposta: "⏳ Registrando consulta de CPF...", update: {} };
-    }
-    default:
-      return { resposta: "⚠️ Etapa não reconhecida. Digite *menu* para recomeçar.", update: { fluxo: "menu_principal", etapa: "inicio", dados: {} } };
-  }
+  return {
+    resposta: lista,
+    update: { fluxo: "confirmar_comparecimento", etapa: "selecionar", dados: { agendamentos: agMap } },
+  };
 }
 
 // ─── Unified solicitação creator ───
-
 interface SolicitacaoParams {
   assunto: string;
   descricao: string;
@@ -542,11 +516,7 @@ interface SolicitacaoParams {
   evento_tipo: string;
 }
 
-async function createFinanceiroSolicitacao(
-  supabase: any,
-  contatoId: string,
-  params: SolicitacaoParams
-) {
+async function createFinanceiroSolicitacao(supabase: any, contatoId: string, params: SolicitacaoParams) {
   try {
     const { data: financeiroSetor } = await supabase
       .from("setores")
@@ -565,14 +535,12 @@ async function createFinanceiroSolicitacao(
         .order("ordem", { ascending: true });
 
       const activeCols = (colunasAtivas || []) as Array<{ id: string; nome: string; ordem: number }>;
-
       const nomesPrioritarios = [
         params.coluna_nome,
         ...(params.tipo === "link_pagamento" ? ["Link Enviado", "Novo"] : []),
         ...(params.tipo === "boleto" ? ["Solicitação de Boleto", "Boleto Enviado"] : []),
         ...(params.tipo === "consulta_cpf" ? ["Consulta CPF"] : []),
       ];
-
       const colunaEncontrada = activeCols.find((c) => nomesPrioritarios.includes(c.nome));
       colunaId = colunaEncontrada?.id || activeCols[0]?.id || null;
     }

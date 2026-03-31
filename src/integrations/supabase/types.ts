@@ -183,6 +183,45 @@ export type Database = {
           },
         ]
       }
+      bot_fluxos: {
+        Row: {
+          acao_final: Json
+          ativo: boolean
+          chave: string
+          created_at: string
+          descricao: string | null
+          etapas: Json
+          id: string
+          nome: string
+          tipo_bot: string
+          updated_at: string
+        }
+        Insert: {
+          acao_final?: Json
+          ativo?: boolean
+          chave: string
+          created_at?: string
+          descricao?: string | null
+          etapas?: Json
+          id?: string
+          nome: string
+          tipo_bot?: string
+          updated_at?: string
+        }
+        Update: {
+          acao_final?: Json
+          ativo?: boolean
+          chave?: string
+          created_at?: string
+          descricao?: string | null
+          etapas?: Json
+          id?: string
+          nome?: string
+          tipo_bot?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bot_menu_opcoes: {
         Row: {
           ativo: boolean
@@ -193,6 +232,7 @@ export type Database = {
           fluxo: string
           id: string
           ordem: number
+          tipo_bot: string
           titulo: string
           updated_at: string
         }
@@ -205,6 +245,7 @@ export type Database = {
           fluxo: string
           id?: string
           ordem?: number
+          tipo_bot?: string
           titulo: string
           updated_at?: string
         }
@@ -217,6 +258,7 @@ export type Database = {
           fluxo?: string
           id?: string
           ordem?: number
+          tipo_bot?: string
           titulo?: string
           updated_at?: string
         }
