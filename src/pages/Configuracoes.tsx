@@ -16,6 +16,7 @@ import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2, MessageS
 import { KnowledgeBaseCard } from "@/components/configuracoes/KnowledgeBaseCard";
 import { LearningCard } from "@/components/configuracoes/LearningCard";
 import { TelefonesLojasCard } from "@/components/configuracoes/TelefonesLojasCard";
+import { BotMenuCard } from "@/components/configuracoes/BotMenuCard";
 import { WhatsAppTemplatesCard } from "@/components/configuracoes/WhatsAppTemplatesCard";
 import { AutomacoesCard } from "@/components/configuracoes/AutomacoesCard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -131,6 +132,7 @@ export default function Configuracoes() {
         <TabsContent value="lojas">
           <div className="grid gap-6">
             <TelefonesLojasCard />
+            <BotMenuCard />
           </div>
         </TabsContent>
 

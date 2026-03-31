@@ -62,6 +62,26 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+  // Load dynamic menu options from database
+  async function loadMenuOpcoes(): Promise<Array<{ chave: string; titulo: string; emoji: string; fluxo: string; ordem: number }>> {
+    try {
+      const { data } = await supabase
+        .from("bot_menu_opcoes")
+        .select("chave, titulo, emoji, fluxo, ordem")
+        .eq("ativo", true)
+        .order("ordem");
+      return data || [];
+    } catch {
+      // Fallback to hardcoded defaults
+      return [
+        { chave: "link_pagamento", titulo: "Gerar Link de Pagamento", emoji: "1️⃣", fluxo: "link_pagamento", ordem: 1 },
+        { chave: "gerar_boleto", titulo: "Gerar Boleto", emoji: "2️⃣", fluxo: "gerar_boleto", ordem: 2 },
+        { chave: "consulta_cpf", titulo: "Consultar CPF", emoji: "3️⃣", fluxo: "consulta_cpf", ordem: 3 },
+        { chave: "confirmar_comparecimento", titulo: "Confirmar Comparecimento de Cliente", emoji: "4️⃣", fluxo: "confirmar_comparecimento", ordem: 4 },
+      ];
+    }
+  }
+
   try {
     const { atendimento_id, contato_id, mensagem_texto, loja_info } = await req.json();
     if (!atendimento_id) throw new Error("atendimento_id is required");
@@ -96,25 +116,35 @@ serve(async (req) => {
     let resposta = "";
     let updateSessao: Record<string, unknown> = {};
 
+    // Load menu options
+    const menuOpcoes = await loadMenuOpcoes();
+
     const { fluxo, etapa, dados } = sessao;
 
     // ─── Global navigation ───
     if (textoLower === "menu" || textoLower === "voltar" || textoLower === "0") {
       updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
-      resposta = buildMenu(nomeLoja);
+      resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
     }
     // ─── Menu principal ───
     else if (fluxo === "menu_principal" && etapa === "inicio") {
-      if (texto === "1") {
-        updateSessao = { fluxo: "link_pagamento", etapa: "valor", dados: {} };
-        resposta = "💳 *Gerar Link de Pagamento*\n\nQual o *valor* do link? (ex: 150.00)\n\n_Digite *0* para voltar ao menu._";
-      } else if (texto === "2") {
-        updateSessao = { fluxo: "gerar_boleto", etapa: "valor", dados: {} };
-        resposta = "🧾 *Gerar Boleto*\n\nQual o *valor* do boleto? (ex: 250.00)\n\n_Digite *0* para voltar ao menu._";
-      } else if (texto === "3") {
-        updateSessao = { fluxo: "consulta_cpf", etapa: "cpf", dados: {} };
-        resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):\n\n_Digite *0* para voltar ao menu._";
-      } else if (texto === "4") {
+      // Dynamic menu routing based on user input number
+      const selectedIndex = parseInt(texto) - 1;
+      const selectedOption = menuOpcoes[selectedIndex];
+
+      if (selectedOption) {
+        const selectedFluxo = selectedOption.fluxo;
+
+        if (selectedFluxo === "link_pagamento") {
+          updateSessao = { fluxo: "link_pagamento", etapa: "valor", dados: {} };
+          resposta = "💳 *Gerar Link de Pagamento*\n\nQual o *valor* do link? (ex: 150.00)\n\n_Digite *0* para voltar ao menu._";
+        } else if (selectedFluxo === "gerar_boleto") {
+          updateSessao = { fluxo: "gerar_boleto", etapa: "valor", dados: {} };
+          resposta = "🧾 *Gerar Boleto*\n\nQual o *valor* do boleto? (ex: 250.00)\n\n_Digite *0* para voltar ao menu._";
+        } else if (selectedFluxo === "consulta_cpf") {
+          updateSessao = { fluxo: "consulta_cpf", etapa: "cpf", dados: {} };
+          resposta = "🔍 *Consultar CPF*\n\nDigite o *CPF* para consulta (somente números):\n\n_Digite *0* para voltar ao menu._";
+        } else if (selectedFluxo === "confirmar_comparecimento") {
         // ─── Confirmar Comparecimento ───
         updateSessao = { fluxo: "confirmar_comparecimento", etapa: "listar", dados: {} };
         // Fetch today's pending appointments for this store
@@ -149,8 +179,11 @@ serve(async (req) => {
           resposta = lista;
           updateSessao = { fluxo: "confirmar_comparecimento", etapa: "selecionar", dados: { agendamentos: agMap } };
         }
+        } else {
+          resposta = `⚠️ Opção não reconhecida. ${buildMenuDynamic(nomeLoja, menuOpcoes)}`;
+        }
       } else {
-        resposta = buildMenu(nomeLoja);
+        resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
       }
     }
     // ─── Link de Pagamento ───
@@ -322,7 +355,7 @@ serve(async (req) => {
     }
     // ─── Fallback ───
     else {
-      resposta = buildMenu(nomeLoja);
+      resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
       updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
     }
 
@@ -357,10 +390,15 @@ serve(async (req) => {
   }
 });
 
-// ─── Menu ───
+// ─── Menu (dynamic from DB) ───
 
-function buildMenu(nomeLoja: string): string {
-  return `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n1️⃣ Gerar Link de Pagamento\n2️⃣ Gerar Boleto\n3️⃣ Consultar CPF\n4️⃣ Confirmar Comparecimento de Cliente\n\n_Digite o número da opção desejada._\n_A qualquer momento, digite *0* para voltar ao menu._`;
+function buildMenuDynamic(nomeLoja: string, opcoes: Array<{ emoji: string; titulo: string }>): string {
+  let menu = `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n`;
+  opcoes.forEach((op, i) => {
+    menu += `${op.emoji || `${i + 1}️⃣`} ${op.titulo}\n`;
+  });
+  menu += `\n_Digite o número da opção desejada._\n_A qualquer momento, digite *0* para voltar ao menu._`;
+  return menu;
 }
 
 // ─── Link de Pagamento Flow ───

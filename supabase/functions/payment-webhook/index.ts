@@ -150,7 +150,7 @@ serve(async (req) => {
             .eq("status", "em_atendimento")
             .order("created_at", { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle();
 
           const dateStr = now.toLocaleDateString("pt-BR");
           const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -177,14 +177,41 @@ serve(async (req) => {
           receiptMsg += `💳 Cartão: **** ${last4Fmt}\n`;
           receiptMsg += `📦 Parcelas: ${installmentsFmt}x`;
 
-          await supabase.functions.invoke("send-whatsapp", {
-            body: {
-              telefone: contato.telefone,
-              mensagem: receiptMsg,
-              atendimento_id: atendimento?.id || null,
-              provedor: atendimento?.canal_provedor || "evolution",
-            },
-          });
+          if (atendimento?.id) {
+            // Use send-whatsapp via direct fetch (service role auth)
+            const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                atendimento_id: atendimento.id,
+                texto: receiptMsg,
+                remetente_nome: "Sistema Financeiro",
+              }),
+            });
+            const sendResult = await sendRes.json();
+            console.log("[payment-webhook] Receipt sent via send-whatsapp:", sendResult);
+          } else {
+            // No active atendimento — send directly via Evolution API
+            const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL");
+            const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY");
+            const EVOLUTION_INSTANCE_NAME = Deno.env.get("EVOLUTION_INSTANCE_NAME");
+
+            if (EVOLUTION_API_URL && EVOLUTION_API_KEY && EVOLUTION_INSTANCE_NAME) {
+              const cleanPhone = contato.telefone.replace(/\D/g, "");
+              const evoRes = await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE_NAME}`, {
+                method: "POST",
+                headers: { apikey: EVOLUTION_API_KEY, "Content-Type": "application/json" },
+                body: JSON.stringify({ number: cleanPhone, text: receiptMsg }),
+              });
+              const evoResult = await evoRes.json();
+              console.log("[payment-webhook] Receipt sent directly via Evolution:", evoResult);
+            } else {
+              console.warn("[payment-webhook] No atendimento and no Evolution credentials — cannot send receipt");
+            }
+          }
 
           console.log("[payment-webhook] Receipt sent to store:", contato.telefone);
         }
