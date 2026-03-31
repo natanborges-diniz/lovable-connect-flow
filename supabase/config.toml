@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.pipeline-automations]
 verify_jwt = false
+
+[functions.compile-prompt]
+verify_jwt = false

@@ -809,36 +809,71 @@ serve(async (req) => {
       }
     }
 
-    // ── 5.1 CONTEXTUAL RETRIEVAL v1 — signal-based prioritization ──
-    const signals = detectSignals(currentMsg);
-    const prioritizedExemplos = prioritizeExamples(exemplos as any[], signals);
-    const prioritizedFeedbacks = prioritizeFeedbacks(antiFeedbacks as any[], signals, currentMsg);
+    // ── 5.1 DECIDE: compiled prompt vs legacy ──
+    let systemPrompt: string;
 
-    console.log(`[CONTEXT-v1] Signals: ${signals.join(",") || "none"} | Exemplos: ${prioritizedExemplos.length} (${exemplos.length} total) | Feedbacks: ${prioritizedFeedbacks.length} (${antiFeedbacks.length} total)`);
+    if (compiledPrompt) {
+      // USE COMPILED PROMPT with slot replacement
+      let lojasStr = "";
+      if (lojas.length > 0) {
+        lojasStr = "## LOJAS DISPONÍVEIS\n";
+        for (const l of lojas) {
+          const parts = [`**${l.nome_loja}**`];
+          if (l.endereco) parts.push(l.endereco);
+          if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
+          if (l.telefone) parts.push(`Tel: ${l.telefone}`);
+          if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
+          lojasStr += `- ${parts.join(" | ")}\n`;
+        }
+      }
 
-    let examplesStr = "";
-    if (prioritizedExemplos.length > 0) {
-      examplesStr = prioritizedExemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
+      systemPrompt = buildSystemPromptFromCompiled({
+        compiledPrompt,
+        regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
+        knowledge: knowledgeStr,
+        agendamentoCtx,
+        lojasStr,
+        sentTopics,
+        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        setoresNomes: setores.map((s: any) => s.nome).join(", "),
+        inboundCount,
+        isHibrido,
+        hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+      });
+
+      console.log(`[CONTEXT] Using COMPILED prompt (${compiledPrompt.length}ch) with slot replacement`);
+    } else {
+      // LEGACY: contextual retrieval + separate blocks
+      const signals = detectSignals(currentMsg);
+      const prioritizedExemplos = prioritizeExamples(exemplos as any[], signals);
+      const prioritizedFeedbacks = prioritizeFeedbacks(antiFeedbacks as any[], signals, currentMsg);
+
+      console.log(`[CONTEXT-v1] Signals: ${signals.join(",") || "none"} | Exemplos: ${prioritizedExemplos.length} (${exemplos.length} total) | Feedbacks: ${prioritizedFeedbacks.length} (${antiFeedbacks.length} total)`);
+
+      let examplesStr = "";
+      if (prioritizedExemplos.length > 0) {
+        examplesStr = prioritizedExemplos.map((e: any) => `[${e.categoria}] P: "${e.pergunta}" → R: "${e.resposta_ideal}"`).join("\n");
+      }
+
+      let antiStr = "";
+      if (prioritizedFeedbacks.length > 0) {
+        antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
+      }
+
+      systemPrompt = buildSystemPrompt({
+        businessRules,
+        knowledge: knowledgeStr + agendamentoCtx,
+        examples: examplesStr,
+        antiExamples: antiStr,
+        regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
+        sentTopics,
+        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        setoresNomes: setores.map((s: any) => s.nome).join(", "),
+        inboundCount,
+        isHibrido,
+        hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+      });
     }
-
-    let antiStr = "";
-    if (prioritizedFeedbacks.length > 0) {
-      antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
-    }
-
-    const systemPrompt = buildSystemPrompt({
-      businessRules,
-      knowledge: knowledgeStr + agendamentoCtx,
-      examples: examplesStr,
-      antiExamples: antiStr,
-      regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
-      sentTopics,
-      colunasNomes: colunas.map((c: any) => c.nome).join(", "),
-      setoresNomes: setores.map((s: any) => s.nome).join(", "),
-      inboundCount,
-      isHibrido,
-      hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
-    });
 
     // ── 6. BUILD MESSAGES — use last 20 from the 60 loaded ──
     const contextWindow = allMsgs.slice(-20);
