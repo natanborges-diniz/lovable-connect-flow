@@ -355,7 +355,7 @@ serve(async (req) => {
     }
     // ─── Fallback ───
     else {
-      resposta = buildMenu(nomeLoja);
+      resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
       updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
     }
 
