@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Bot, GripVertical, Trash2, Loader2 } from "lucide-react";
+import { Plus, Bot, GripVertical, Trash2, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 interface MenuOpcao {
@@ -71,6 +71,7 @@ function useFluxosForSelect(tipoBot: string) {
 export function BotMenuCard() {
   const { data: opcoes, isLoading } = useMenuOpcoes();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editItem, setEditItem] = useState<MenuOpcao | null>(null);
   const [filterTipoBot, setFilterTipoBot] = useState<string>("all");
   const queryClient = useQueryClient();
 
@@ -147,7 +148,7 @@ export function BotMenuCard() {
                 <TableHead>Fluxo</TableHead>
                 <TableHead>Bot</TableHead>
                 <TableHead className="w-20">Ativo</TableHead>
-                <TableHead className="w-12"></TableHead>
+                <TableHead className="w-24"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -169,9 +170,14 @@ export function BotMenuCard() {
                     <Switch checked={op.ativo} onCheckedChange={(v) => toggleAtivo.mutate({ id: op.id, ativo: v })} />
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteOpcao.mutate(op.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditItem(op)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteOpcao.mutate(op.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -179,6 +185,21 @@ export function BotMenuCard() {
           </Table>
         )}
       </CardContent>
+
+      <Dialog open={!!editItem} onOpenChange={(open) => { if (!open) setEditItem(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Editar Opção do Menu</DialogTitle></DialogHeader>
+          {editItem && (
+            <EditOpcaoForm
+              item={editItem}
+              onSubmit={() => {
+                queryClient.invalidateQueries({ queryKey: ["bot_menu_opcoes"] });
+                setEditItem(null);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -251,6 +272,86 @@ function CreateOpcaoForm({ nextOrdem, onSubmit }: { nextOrdem: number; onSubmit:
       <Button onClick={handleCreate} disabled={loading || !titulo.trim() || !fluxo} className="w-full">
         {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
         Criar Opção
+      </Button>
+    </div>
+  );
+}
+
+function EditOpcaoForm({ item, onSubmit }: { item: MenuOpcao; onSubmit: () => void }) {
+  const [titulo, setTitulo] = useState(item.titulo);
+  const [emoji, setEmoji] = useState(item.emoji);
+  const [tipoBot, setTipoBot] = useState(item.tipo_bot);
+  const [fluxo, setFluxo] = useState(item.fluxo);
+  const [ordem, setOrdem] = useState(item.ordem);
+  const [descricao, setDescricao] = useState(item.descricao || "");
+  const [loading, setLoading] = useState(false);
+  const { data: fluxos } = useFluxosForSelect(tipoBot);
+
+  const handleSave = async () => {
+    if (!titulo.trim() || !fluxo) return;
+    setLoading(true);
+    try {
+      const chave = titulo
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "");
+      const { error } = await (supabase as any)
+        .from("bot_menu_opcoes")
+        .update({ titulo, emoji, fluxo, ordem, tipo_bot: tipoBot, chave, descricao: descricao || null })
+        .eq("id", item.id);
+      if (error) throw error;
+      toast.success("Opção atualizada");
+      onSubmit();
+    } catch (e: any) {
+      toast.error("Erro: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label>Título</Label>
+        <Input value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <Label>Emoji</Label>
+          <Input value={emoji} onChange={(e) => setEmoji(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Ordem</Label>
+          <Input type="number" value={ordem} onChange={(e) => setOrdem(Number(e.target.value))} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Tipo de Bot</Label>
+          <Select value={tipoBot} onValueChange={(v) => { setTipoBot(v); setFluxo(""); }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TIPOS_BOT.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Fluxo</Label>
+        <Select value={fluxo} onValueChange={setFluxo}>
+          <SelectTrigger><SelectValue placeholder="Selecione um fluxo" /></SelectTrigger>
+          <SelectContent>
+            {fluxos?.map(f => <SelectItem key={f.chave} value={f.chave}>{f.nome}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Descrição (opcional)</Label>
+        <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Texto auxiliar para o menu" />
+      </div>
+      <Button onClick={handleSave} disabled={loading || !titulo.trim() || !fluxo} className="w-full">
+        {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+        Salvar Alterações
       </Button>
     </div>
   );
