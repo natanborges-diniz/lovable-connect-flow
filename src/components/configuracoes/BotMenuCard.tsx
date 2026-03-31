@@ -71,6 +71,7 @@ function useFluxosForSelect(tipoBot: string) {
 export function BotMenuCard() {
   const { data: opcoes, isLoading } = useMenuOpcoes();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editItem, setEditItem] = useState<MenuOpcao | null>(null);
   const [filterTipoBot, setFilterTipoBot] = useState<string>("all");
   const queryClient = useQueryClient();
 
@@ -147,7 +148,7 @@ export function BotMenuCard() {
                 <TableHead>Fluxo</TableHead>
                 <TableHead>Bot</TableHead>
                 <TableHead className="w-20">Ativo</TableHead>
-                <TableHead className="w-12"></TableHead>
+                <TableHead className="w-24"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -169,9 +170,14 @@ export function BotMenuCard() {
                     <Switch checked={op.ativo} onCheckedChange={(v) => toggleAtivo.mutate({ id: op.id, ativo: v })} />
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteOpcao.mutate(op.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditItem(op)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteOpcao.mutate(op.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -179,6 +185,21 @@ export function BotMenuCard() {
           </Table>
         )}
       </CardContent>
+
+      <Dialog open={!!editItem} onOpenChange={(open) => { if (!open) setEditItem(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Editar Opção do Menu</DialogTitle></DialogHeader>
+          {editItem && (
+            <EditOpcaoForm
+              item={editItem}
+              onSubmit={() => {
+                queryClient.invalidateQueries({ queryKey: ["bot_menu_opcoes"] });
+                setEditItem(null);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
