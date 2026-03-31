@@ -416,6 +416,11 @@ export default function PipelineFinanceiro() {
                                               {sol.descricao}
                                             </p>
                                           )}
+                                          {sol.metadata?.payment_status === "PAGO" && sol.metadata?.nsu && (
+                                            <Badge className="ml-6 bg-green-100 text-green-800 text-[10px] border-green-300">
+                                              🔑 NSU: {sol.metadata.nsu}
+                                            </Badge>
+                                          )}
                                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-6">
                                             <Clock className="h-3 w-3 shrink-0" />
                                             <span>
@@ -529,6 +534,47 @@ export default function PipelineFinanceiro() {
                     >
                       {selectedSolicitacao.metadata.url}
                     </a>
+                  </div>
+                )}
+                {/* Comprovante de Pagamento (Picote) */}
+                {selectedSolicitacao.metadata?.payment_status === "PAGO" && (
+                  <div className="pt-2 border-t">
+                    <div className="border-2 border-dashed border-green-300 rounded-lg bg-green-50 p-4 space-y-3">
+                      <p className="text-xs font-semibold text-green-800">
+                        📩 Comprovante de Pagamento
+                        {selectedSolicitacao.metadata?.nome_cliente && (
+                          <span> — {selectedSolicitacao.metadata.nome_cliente}</span>
+                        )}
+                      </p>
+                      <div className="text-center py-2">
+                        <p className="text-lg font-bold text-green-900">
+                          🔑 NSU: {selectedSolicitacao.metadata?.nsu || "N/A"}
+                        </p>
+                        <p className="text-[10px] text-green-700">Use este número para baixa no sistema</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-green-900">
+                        <span className="text-green-700">💰 Valor</span>
+                        <span className="font-medium">
+                          {selectedSolicitacao.metadata?.valor
+                            ? `R$ ${Number(selectedSolicitacao.metadata.valor).toFixed(2)}`
+                            : "N/A"}
+                        </span>
+                        <span className="text-green-700">🆔 TID</span>
+                        <span className="font-medium">{selectedSolicitacao.metadata?.tid || "N/A"}</span>
+                        <span className="text-green-700">🔐 Autorização</span>
+                        <span className="font-medium">{selectedSolicitacao.metadata?.authorization || "N/A"}</span>
+                        <span className="text-green-700">📅 Data</span>
+                        <span className="font-medium">
+                          {selectedSolicitacao.metadata?.payment_confirmed_at
+                            ? format(new Date(selectedSolicitacao.metadata.payment_confirmed_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
+                            : "N/A"}
+                        </span>
+                        <span className="text-green-700">💳 Cartão</span>
+                        <span className="font-medium">**** {selectedSolicitacao.metadata?.last4 || "****"}</span>
+                        <span className="text-green-700">📦 Parcelas</span>
+                        <span className="font-medium">{selectedSolicitacao.metadata?.installments || 1}x</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

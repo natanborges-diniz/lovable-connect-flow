@@ -28,9 +28,12 @@ serve(async (req) => {
 
   try {
     const payload = await req.json();
-    const { payment_link_id, status, tid, authorization, valor, origem_ref } = payload;
+    const {
+      payment_link_id, status, tid, authorization, valor, origem_ref,
+      nsu, last4, installments, descricao, nome_cliente,
+    } = payload;
 
-    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, origem_ref });
+    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref });
 
     if (!payment_link_id) {
       throw new Error("payment_link_id é obrigatório");
@@ -66,7 +69,6 @@ serve(async (req) => {
 
     let colunaId: string | null = null;
     if (targetColunaNome) {
-      // Find the Financeiro sector and target column
       const { data: financeiroSetor } = await supabase
         .from("setores")
         .select("id")
@@ -86,14 +88,20 @@ serve(async (req) => {
       }
     }
 
-    // Update solicitação metadata with TID and move to target column
+    // Update solicitação metadata with all payment details
+    const now = new Date();
     const existingMeta = (solicitacao.metadata || {}) as Record<string, unknown>;
     const updatedMeta = {
       ...existingMeta,
       tid: tid || null,
       authorization: authorization || null,
+      nsu: nsu || null,
+      last4: last4 || null,
+      installments: installments || null,
+      descricao: descricao || null,
+      nome_cliente: nome_cliente || null,
       payment_status: status,
-      payment_confirmed_at: new Date().toISOString(),
+      payment_confirmed_at: now.toISOString(),
     };
 
     const updateData: Record<string, unknown> = { metadata: updatedMeta };
@@ -110,16 +118,81 @@ serve(async (req) => {
       .eq("id", solicitacao.id);
 
     // Log CRM event
+    const nsuLabel = nsu ? ` | NSU: ${nsu}` : "";
     await supabase.from("eventos_crm").insert({
       contato_id: solicitacao.contato_id,
       tipo: status === "PAGO" ? "pagamento_confirmado" : "pagamento_status_atualizado",
       descricao: status === "PAGO"
-        ? `Pagamento confirmado via link. TID: ${tid || "N/A"} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`
+        ? `Pagamento confirmado via link. TID: ${tid || "N/A"}${nsuLabel} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`
         : `Status do link atualizado para ${status}`,
       referencia_tipo: "solicitacao",
       referencia_id: solicitacao.id,
-      metadata: { payment_link_id, tid, status, authorization, valor },
+      metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments },
     });
+
+    // Send receipt ("picote") to the store via WhatsApp
+    if (status === "PAGO") {
+      try {
+        // Get store contact info
+        const { data: contato } = await supabase
+          .from("contatos")
+          .select("id, nome, telefone")
+          .eq("id", solicitacao.contato_id)
+          .single();
+
+        if (contato?.telefone) {
+          // Find active WhatsApp atendimento for this store
+          const { data: atendimento } = await supabase
+            .from("atendimentos")
+            .select("id, canal_provedor")
+            .eq("contato_id", contato.id)
+            .eq("canal", "whatsapp")
+            .eq("status", "em_atendimento")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+          const dateStr = now.toLocaleDateString("pt-BR");
+          const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+          const clienteName = nome_cliente || "N/A";
+          const valorFmt = valor ? `R$ ${Number(valor).toFixed(2)}` : "N/A";
+          const descFmt = descricao || "";
+          const nsuFmt = nsu || "N/A";
+          const tidFmt = tid || "N/A";
+          const authFmt = authorization || "N/A";
+          const last4Fmt = last4 || "****";
+          const installmentsFmt = installments || 1;
+
+          let receiptMsg = `📩 *Segue comprovante de pagamento da cliente ${clienteName}*\n\n`;
+          receiptMsg += `✅ *Pagamento Confirmado!*\n\n`;
+          receiptMsg += `💰 Valor: ${valorFmt}\n`;
+          if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
+          receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
+          receiptMsg += `🔑 *NSU: ${nsuFmt}*\n`;
+          receiptMsg += `   ↳ Use este número para baixa no sistema\n`;
+          receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
+          receiptMsg += `🆔 TID: ${tidFmt}\n`;
+          receiptMsg += `🔐 Autorização: ${authFmt}\n`;
+          receiptMsg += `📅 Data: ${dateStr} às ${timeStr}\n`;
+          receiptMsg += `💳 Cartão: **** ${last4Fmt}\n`;
+          receiptMsg += `📦 Parcelas: ${installmentsFmt}x`;
+
+          await supabase.functions.invoke("send-whatsapp", {
+            body: {
+              telefone: contato.telefone,
+              mensagem: receiptMsg,
+              atendimento_id: atendimento?.id || null,
+              provedor: atendimento?.canal_provedor || "evolution",
+            },
+          });
+
+          console.log("[payment-webhook] Receipt sent to store:", contato.telefone);
+        }
+      } catch (whatsappErr) {
+        console.error("[payment-webhook] Failed to send WhatsApp receipt:", whatsappErr);
+        // Don't fail the webhook response
+      }
+    }
 
     console.log("[payment-webhook] Solicitação updated:", solicitacao.id, "→", targetColunaNome);
 
