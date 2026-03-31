@@ -62,6 +62,26 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+  // Load dynamic menu options from database
+  async function loadMenuOpcoes(): Promise<Array<{ chave: string; titulo: string; emoji: string; fluxo: string; ordem: number }>> {
+    try {
+      const { data } = await supabase
+        .from("bot_menu_opcoes")
+        .select("chave, titulo, emoji, fluxo, ordem")
+        .eq("ativo", true)
+        .order("ordem");
+      return data || [];
+    } catch {
+      // Fallback to hardcoded defaults
+      return [
+        { chave: "link_pagamento", titulo: "Gerar Link de Pagamento", emoji: "1️⃣", fluxo: "link_pagamento", ordem: 1 },
+        { chave: "gerar_boleto", titulo: "Gerar Boleto", emoji: "2️⃣", fluxo: "gerar_boleto", ordem: 2 },
+        { chave: "consulta_cpf", titulo: "Consultar CPF", emoji: "3️⃣", fluxo: "consulta_cpf", ordem: 3 },
+        { chave: "confirmar_comparecimento", titulo: "Confirmar Comparecimento de Cliente", emoji: "4️⃣", fluxo: "confirmar_comparecimento", ordem: 4 },
+      ];
+    }
+  }
+
   try {
     const { atendimento_id, contato_id, mensagem_texto, loja_info } = await req.json();
     if (!atendimento_id) throw new Error("atendimento_id is required");
