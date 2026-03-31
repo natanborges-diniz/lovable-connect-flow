@@ -1,129 +1,130 @@
 
 
-# Plano: Sistema de Fluxos Configuráveis e Multi-Bot
+# Análise do Plano: Auto-Compilação do Prompt com IA
 
-## Contexto Atual
-
-O `bot-lojas` tem 4 fluxos hardcoded (`link_pagamento`, `gerar_boleto`, `consulta_cpf`, `confirmar_comparecimento`), cada um com etapas sequenciais (valor → descrição → confirmar → executar). O menu já é dinâmico via `bot_menu_opcoes`, mas os fluxos em si não são editáveis. Além disso, o sistema suporta apenas o tipo "loja" — o usuário quer expandir para "colaborador", "cliente Lab" e outros.
-
-## Arquitetura Proposta
-
-```text
-┌─────────────────────────────────────┐
-│         bot_fluxos (tabela)         │
-│  id, chave, nome, tipo_bot,        │
-│  descricao, etapas (jsonb[]),       │
-│  acao_final (jsonb), ativo          │
-├─────────────────────────────────────┤
-│  Cada etapa:                        │
-│  { campo, mensagem, tipo_input,     │
-│    validacao, obrigatorio }         │
-│                                     │
-│  Ação final:                        │
-│  { tipo, coluna_destino,            │
-│    tipo_solicitacao, endpoint,      │
-│    template_confirmacao }           │
-└─────────────────────────────────────┘
-         ↑ referenciado por
-┌─────────────────────────────────────┐
-│  bot_menu_opcoes (existente)        │
-│  + campo: fluxo_id (uuid, FK)      │
-│  + campo: tipo_bot (text)           │
-│    "loja" | "colaborador" |         │
-│    "cliente_lab" | custom           │
-└─────────────────────────────────────┘
-```
-
-## Alterações
-
-### 1. Migração — Tabela `bot_fluxos`
-
-Nova tabela para armazenar fluxos configuráveis:
-
-| Campo | Tipo | Descrição |
-|-------|------|-----------|
-| `id` | uuid PK | — |
-| `chave` | text unique | Identificador (ex: `link_pagamento`) |
-| `nome` | text | Nome de exibição |
-| `tipo_bot` | text default 'loja' | Qual bot usa: loja, colaborador, cliente_lab |
-| `descricao` | text | Explicação do fluxo |
-| `etapas` | jsonb | Array de etapas sequenciais |
-| `acao_final` | jsonb | O que fazer ao concluir (criar solicitação, chamar API, etc.) |
-| `ativo` | boolean default true | — |
-
-Cada **etapa** no jsonb:
-```json
-{
-  "campo": "valor",
-  "mensagem": "💳 Qual o *valor*? (ex: 150.00)",
-  "tipo_input": "decimal",         // decimal | texto | cpf | documento | opcao | inteiro
-  "validacao": { "min": 0.01 },
-  "obrigatorio": true
-}
-```
-
-**Ação final**:
-```json
-{
-  "tipo": "criar_solicitacao",       // criar_solicitacao | chamar_endpoint | apenas_mensagem
-  "tipo_solicitacao": "link_pagamento",
-  "coluna_destino": "Link Enviado",
-  "endpoint": "payment-links",       // para fluxos que chamam API externa (OB)
-  "template_confirmacao": "✅ *Link gerado!*\n🔗 {{url}}\n💰 R$ {{valor}}"
-}
-```
-
-### 2. Migração — Seed dos 4 fluxos existentes
-
-Inserir os 4 fluxos atuais (link_pagamento, gerar_boleto, consulta_cpf, confirmar_comparecimento) como registros na tabela, com suas etapas em jsonb.
-
-### 3. Migração — Adicionar `tipo_bot` à `bot_menu_opcoes`
-
-- `ALTER TABLE bot_menu_opcoes ADD COLUMN tipo_bot text NOT NULL DEFAULT 'loja'`
-- Permite filtrar o menu por tipo de bot
-
-### 4. Edge Function `bot-lojas/index.ts`
-
-Refatorar para usar um **motor genérico de fluxos**:
-
-- `loadFluxo(chave)` → busca as etapas e ação final do banco
-- `processarEtapa(fluxo, etapa_atual, texto, dados)` → valida input conforme `tipo_input`, avança para próxima etapa
-- `executarAcaoFinal(acao, dados, contexto)` → switch no `tipo`: criar_solicitacao, chamar_endpoint, apenas_mensagem
-- Os 4 fluxos originais continuam funcionando, mas agora lidos do banco
-- Fluxos com `endpoint` (link_pagamento) mantêm a lógica de chamada ao OB
-
-### 5. Frontend — Gestão de Fluxos
-
-Novo componente `BotFluxosCard.tsx` na tab "Lojas" de Configurações:
-
-**Listagem:** Tabela com nome, tipo_bot, qtd etapas, ativo/inativo
-**Criação/Edição (Dialog):**
-- Nome e chave do fluxo
-- Tipo de bot (select: loja, colaborador, cliente_lab, outro)
-- Builder de etapas: lista ordenável onde cada etapa tem campo, mensagem, tipo de input e validação
-- Ação final: tipo (criar solicitação / chamar endpoint / apenas mensagem), coluna destino, tipo solicitação
-- Preview do fluxo (visualização sequencial das mensagens)
-
-### 6. Frontend — Atualizar `BotMenuCard.tsx`
-
-- Adicionar filtro por `tipo_bot` (tabs ou select no topo)
-- No select de "Fluxo", carregar da tabela `bot_fluxos` filtrado por `tipo_bot` em vez de lista hardcoded
-- Exibir badge com o tipo de bot em cada opção
-
-### 7. RLS
-
-- `bot_fluxos`: SELECT para anon e service_role, ALL para authenticated
+## Veredicto: Bom conceito, mas precisa de ajustes para ser realmente eficiente e seguro
 
 ---
 
-## Resumo de arquivos
+## O que está BOM no plano
 
-| Item | Tipo | Ação |
-|------|------|------|
-| `bot_fluxos` | Migração | Criar tabela + seed 4 fluxos |
-| `bot_menu_opcoes.tipo_bot` | Migração | Adicionar coluna |
-| `bot-lojas/index.ts` | Edge Function | Motor genérico de fluxos |
-| `BotFluxosCard.tsx` | Componente | Criar — gestão de fluxos |
-| `BotMenuCard.tsx` | Componente | Atualizar — filtro tipo_bot + fluxos do banco |
-| `Configuracoes.tsx` | Página | Adicionar BotFluxosCard |
+1. **O prompt original nunca é sobrescrito** — correto, mantém rollback
+2. **Compilação manual (não automática)** — evita custo desnecessário
+3. **Usar gemini-2.5-flash** — bom balanço custo/qualidade para síntese de texto
+
+---
+
+## Problemas e Melhorias Sugeridas
+
+### 1. Risco de Segurança: IA reescrevendo suas próprias regras de segurança
+
+O compilador usa IA para "integrar naturalmente" as proibições no texto. Isso é perigoso:
+- A IA pode **diluir** uma proibição ao reformulá-la ("não fazemos exames" → "orientamos sobre exames")
+- Proibições devem ser **literais e mecânicas**, não "naturais"
+
+**Melhoria**: As `ia_regras_proibidas` devem continuar sendo injetadas **literalmente** no bloco `⛔ PROIBIÇÕES ABSOLUTAS`, separadas do prompt compilado. O compilador só deve sintetizar exemplos e feedbacks no corpo do prompt. As proibições ficam intocadas.
+
+### 2. Dados dinâmicos que o compilador não pode tocar
+
+O plano menciona que data/hora, lojas e agendamentos continuam dinâmicos. Mas falta explicitar que o `prompt_compilado` substitui **apenas**:
+- `businessRules` (prompt_atendimento)
+- `examples` (ia_exemplos)
+- `antiExamples` (ia_feedbacks)
+
+E **NÃO** substitui:
+- Proibições absolutas (segurança)
+- Base de conhecimento (muda em tempo real)
+- Lojas/agendamentos (muda em tempo real)
+- Tópicos já cobertos (sessão específica)
+- Modo híbrido (sessão específica)
+
+**Melhoria**: Criar slots no prompt compilado com marcadores (ex: `{{PROIBICOES}}`, `{{CONHECIMENTO}}`, `{{LOJAS}}`) que o `ai-triage` substitui em runtime.
+
+### 3. Falta validação pós-compilação
+
+A IA pode gerar um prompt que remove acidentalmente instruções críticas. Não há checagem.
+
+**Melhoria**: Após compilar, validar automaticamente que o prompt contém palavras-chave obrigatórias: "NUNCA invente preços", "Consultor especializado", "3 frases", "receita". Se faltar alguma, rejeitar e alertar.
+
+### 4. Versionamento fraco
+
+O plano salva apenas `prompt_compilado_anterior` (uma versão). Se compilar 3 vezes e a v1 era a melhor, perdeu.
+
+**Melhoria**: Usar uma tabela separada `prompt_versoes` com timestamp, fontes usadas e conteúdo. Ou no mínimo um array jsonb com as últimas 5 versões.
+
+### 5. A hierarquia de processamento deve ser preservada
+
+Hoje o `ai-triage` segue: Proibições > Prompt > Exemplos > Feedbacks > Conhecimento. Se o compilador funde prompt+exemplos+feedbacks em um bloco só, a IA perde a distinção hierárquica.
+
+**Melhoria**: O compilador deve gerar o prompt com seções Markdown internas marcadas (# REGRAS, # EXEMPLOS INTEGRADOS, # CORREÇÕES APRENDIDAS), mantendo a hierarquia visual.
+
+---
+
+## Plano Revisado Recomendado
+
+### Arquitetura
+
+```text
+┌─────────────────────────────────────────────┐
+│            compile-prompt                    │
+│  Entrada:                                   │
+│  - prompt_atendimento (espinha dorsal)       │
+│  - ia_exemplos (few-shot)                   │
+│  - ia_feedbacks corrigidos                  │
+│                                             │
+│  NÃO TOCA:                                 │
+│  - ia_regras_proibidas (literal)            │
+│  - conhecimento_ia (runtime)                │
+│  - lojas/agendamentos (runtime)             │
+│                                             │
+│  Saída:                                     │
+│  - prompt_compilado com slots:              │
+│    {{PROIBICOES}} {{CONHECIMENTO}}          │
+│    {{LOJAS}} {{AGENDAMENTOS}}               │
+│                                             │
+│  Validação: checklist de palavras-chave     │
+└─────────────────────────────────────────────┘
+```
+
+### Mudanças no ai-triage
+
+```text
+SE prompt_compilado existe:
+  1. Carrega prompt_compilado
+  2. Substitui slots ({{PROIBICOES}}, {{CONHECIMENTO}}, etc.)
+  3. Injeta proibições LITERAIS (não compiladas)
+  4. Pula injeção separada de exemplos/feedbacks (já no compilado)
+SENÃO:
+  Fluxo atual (retrocompatível)
+```
+
+### Arquivos
+
+| Arquivo | Ação |
+|---------|------|
+| `compile-prompt/index.ts` | Criar — compilador com validação |
+| `ai-triage/index.ts` | Atualizar — carregar prompt_compilado + substituir slots |
+| `PromptCompilerTab.tsx` | Criar — UI de compilação, preview, histórico |
+| `LearningCard.tsx` | Atualizar — adicionar aba "Prompt IA" |
+| Migração | Adicionar chaves `prompt_compilado`, `prompt_compilado_at`, `prompt_versoes` na `configuracoes_ia` |
+
+### Checklist de validação pós-compilação
+
+O compilador rejeita o resultado se faltar qualquer um:
+- "NUNCA invente" (anti-alucinação)
+- "Consultor especializado" (terminologia)
+- "3 frases" ou "máximo" (concisão)
+- "receita" (fluxo core)
+- "pergunta" ou "ação" (proatividade)
+
+---
+
+## Resumo
+
+O conceito é sólido, mas precisa de **3 proteções críticas**:
+1. Proibições nunca passam pelo compilador (segurança)
+2. Validação automática pós-compilação (qualidade)
+3. Slots para dados dinâmicos em vez de substituição total (flexibilidade)
+
+Com essas mudanças, o sistema fica robusto e seguro para produção.
 
