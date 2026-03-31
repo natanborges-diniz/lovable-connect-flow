@@ -116,6 +116,9 @@ serve(async (req) => {
     let resposta = "";
     let updateSessao: Record<string, unknown> = {};
 
+    // Load menu options
+    const menuOpcoes = await loadMenuOpcoes();
+
     const { fluxo, etapa, dados } = sessao;
 
     // ─── Global navigation ───
