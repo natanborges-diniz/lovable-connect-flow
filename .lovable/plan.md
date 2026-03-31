@@ -1,63 +1,129 @@
 
 
-# Implementação: Comprovante de Pagamento ("Picote")
+# Plano: Sistema de Fluxos Configuráveis e Multi-Bot
 
-## Arquivo 1: `supabase/functions/payment-webhook/index.ts`
+## Contexto Atual
 
-### Mudanças no payload (linha 31)
-Extrair novos campos: `nsu`, `last4`, `installments`, `descricao`, `nome_cliente`
+O `bot-lojas` tem 4 fluxos hardcoded (`link_pagamento`, `gerar_boleto`, `consulta_cpf`, `confirmar_comparecimento`), cada um com etapas sequenciais (valor → descrição → confirmar → executar). O menu já é dinâmico via `bot_menu_opcoes`, mas os fluxos em si não são editáveis. Além disso, o sistema suporta apenas o tipo "loja" — o usuário quer expandir para "colaborador", "cliente Lab" e outros.
 
-### Mudanças no metadata (linhas 91-97)
-Adicionar ao `updatedMeta`: `nsu`, `last4`, `installments`, `descricao`, `nome_cliente`
+## Arquitetura Proposta
 
-### Mudança no evento CRM (linhas 116-117)
-Incluir NSU na descrição e nos metadata do evento
-
-### Novo bloco: Envio do picote via WhatsApp (após linha 124)
-Quando `status === "PAGO"`:
-1. Buscar contato (loja) pelo `contato_id` da solicitação
-2. Buscar atendimento ativo WhatsApp para esse contato
-3. Montar mensagem formatada com cabeçalho "Segue comprovante de pagamento da cliente {nome_cliente}" e o picote completo (NSU destacado entre separadores, TID, autorização, data/hora, cartão, parcelas)
-4. Enviar via `supabase.functions.invoke("send-whatsapp")`
-5. Falha no envio WhatsApp NÃO impede o retorno do webhook (try/catch isolado)
-
----
-
-## Arquivo 2: `src/pages/PipelineFinanceiro.tsx`
-
-### No card (após linha 427, antes do timestamp)
-Quando `metadata.payment_status === "PAGO"` e `metadata.nsu` existe, exibir badge verde:
-```tsx
-<Badge className="bg-green-100 text-green-800 text-[10px]">
-  🔑 NSU: {sol.metadata.nsu}
-</Badge>
+```text
+┌─────────────────────────────────────┐
+│         bot_fluxos (tabela)         │
+│  id, chave, nome, tipo_bot,        │
+│  descricao, etapas (jsonb[]),       │
+│  acao_final (jsonb), ativo          │
+├─────────────────────────────────────┤
+│  Cada etapa:                        │
+│  { campo, mensagem, tipo_input,     │
+│    validacao, obrigatorio }         │
+│                                     │
+│  Ação final:                        │
+│  { tipo, coluna_destino,            │
+│    tipo_solicitacao, endpoint,      │
+│    template_confirmacao }           │
+└─────────────────────────────────────┘
+         ↑ referenciado por
+┌─────────────────────────────────────┐
+│  bot_menu_opcoes (existente)        │
+│  + campo: fluxo_id (uuid, FK)      │
+│  + campo: tipo_bot (text)           │
+│    "loja" | "colaborador" |         │
+│    "cliente_lab" | custom           │
+└─────────────────────────────────────┘
 ```
 
-### No dialog de detalhes (após linha 533, dentro do bloco non-CPF)
-Quando `metadata.payment_status === "PAGO"`, renderizar bloco "Comprovante de Pagamento" com:
-- Borda tracejada, fundo verde claro (`bg-green-50 border-dashed border-green-300`)
-- NSU em destaque (bold, maior) com separadores visuais
-- TID, Autorização, Data, Cartão, Parcelas em linhas menores
-- Nome do cliente no cabeçalho
+## Alterações
 
----
+### 1. Migração — Tabela `bot_fluxos`
 
-## Contrato esperado do OB
+Nova tabela para armazenar fluxos configuráveis:
 
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | uuid PK | — |
+| `chave` | text unique | Identificador (ex: `link_pagamento`) |
+| `nome` | text | Nome de exibição |
+| `tipo_bot` | text default 'loja' | Qual bot usa: loja, colaborador, cliente_lab |
+| `descricao` | text | Explicação do fluxo |
+| `etapas` | jsonb | Array de etapas sequenciais |
+| `acao_final` | jsonb | O que fazer ao concluir (criar solicitação, chamar API, etc.) |
+| `ativo` | boolean default true | — |
+
+Cada **etapa** no jsonb:
 ```json
 {
-  "payment_link_id": "...",
-  "status": "PAGO",
-  "tid": "...",
-  "authorization": "...",
-  "valor": 150.00,
-  "nsu": "123456",
-  "last4": "1234",
-  "installments": 3,
-  "descricao": "Óculos Ray-Ban",
-  "nome_cliente": "Maria Silva"
+  "campo": "valor",
+  "mensagem": "💳 Qual o *valor*? (ex: 150.00)",
+  "tipo_input": "decimal",         // decimal | texto | cpf | documento | opcao | inteiro
+  "validacao": { "min": 0.01 },
+  "obrigatorio": true
 }
 ```
 
-Nenhuma migração de banco necessária — tudo armazenado no campo `metadata` (jsonb) existente.
+**Ação final**:
+```json
+{
+  "tipo": "criar_solicitacao",       // criar_solicitacao | chamar_endpoint | apenas_mensagem
+  "tipo_solicitacao": "link_pagamento",
+  "coluna_destino": "Link Enviado",
+  "endpoint": "payment-links",       // para fluxos que chamam API externa (OB)
+  "template_confirmacao": "✅ *Link gerado!*\n🔗 {{url}}\n💰 R$ {{valor}}"
+}
+```
+
+### 2. Migração — Seed dos 4 fluxos existentes
+
+Inserir os 4 fluxos atuais (link_pagamento, gerar_boleto, consulta_cpf, confirmar_comparecimento) como registros na tabela, com suas etapas em jsonb.
+
+### 3. Migração — Adicionar `tipo_bot` à `bot_menu_opcoes`
+
+- `ALTER TABLE bot_menu_opcoes ADD COLUMN tipo_bot text NOT NULL DEFAULT 'loja'`
+- Permite filtrar o menu por tipo de bot
+
+### 4. Edge Function `bot-lojas/index.ts`
+
+Refatorar para usar um **motor genérico de fluxos**:
+
+- `loadFluxo(chave)` → busca as etapas e ação final do banco
+- `processarEtapa(fluxo, etapa_atual, texto, dados)` → valida input conforme `tipo_input`, avança para próxima etapa
+- `executarAcaoFinal(acao, dados, contexto)` → switch no `tipo`: criar_solicitacao, chamar_endpoint, apenas_mensagem
+- Os 4 fluxos originais continuam funcionando, mas agora lidos do banco
+- Fluxos com `endpoint` (link_pagamento) mantêm a lógica de chamada ao OB
+
+### 5. Frontend — Gestão de Fluxos
+
+Novo componente `BotFluxosCard.tsx` na tab "Lojas" de Configurações:
+
+**Listagem:** Tabela com nome, tipo_bot, qtd etapas, ativo/inativo
+**Criação/Edição (Dialog):**
+- Nome e chave do fluxo
+- Tipo de bot (select: loja, colaborador, cliente_lab, outro)
+- Builder de etapas: lista ordenável onde cada etapa tem campo, mensagem, tipo de input e validação
+- Ação final: tipo (criar solicitação / chamar endpoint / apenas mensagem), coluna destino, tipo solicitação
+- Preview do fluxo (visualização sequencial das mensagens)
+
+### 6. Frontend — Atualizar `BotMenuCard.tsx`
+
+- Adicionar filtro por `tipo_bot` (tabs ou select no topo)
+- No select de "Fluxo", carregar da tabela `bot_fluxos` filtrado por `tipo_bot` em vez de lista hardcoded
+- Exibir badge com o tipo de bot em cada opção
+
+### 7. RLS
+
+- `bot_fluxos`: SELECT para anon e service_role, ALL para authenticated
+
+---
+
+## Resumo de arquivos
+
+| Item | Tipo | Ação |
+|------|------|------|
+| `bot_fluxos` | Migração | Criar tabela + seed 4 fluxos |
+| `bot_menu_opcoes.tipo_bot` | Migração | Adicionar coluna |
+| `bot-lojas/index.ts` | Edge Function | Motor genérico de fluxos |
+| `BotFluxosCard.tsx` | Componente | Criar — gestão de fluxos |
+| `BotMenuCard.tsx` | Componente | Atualizar — filtro tipo_bot + fluxos do banco |
+| `Configuracoes.tsx` | Página | Adicionar BotFluxosCard |
 
