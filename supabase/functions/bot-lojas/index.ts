@@ -390,10 +390,15 @@ serve(async (req) => {
   }
 });
 
-// ─── Menu ───
+// ─── Menu (dynamic from DB) ───
 
-function buildMenu(nomeLoja: string): string {
-  return `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n1️⃣ Gerar Link de Pagamento\n2️⃣ Gerar Boleto\n3️⃣ Consultar CPF\n4️⃣ Confirmar Comparecimento de Cliente\n\n_Digite o número da opção desejada._\n_A qualquer momento, digite *0* para voltar ao menu._`;
+function buildMenuDynamic(nomeLoja: string, opcoes: Array<{ emoji: string; titulo: string }>): string {
+  let menu = `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n`;
+  opcoes.forEach((op, i) => {
+    menu += `${op.emoji || `${i + 1}️⃣`} ${op.titulo}\n`;
+  });
+  menu += `\n_Digite o número da opção desejada._\n_A qualquer momento, digite *0* para voltar ao menu._`;
+  return menu;
 }
 
 // ─── Link de Pagamento Flow ───
