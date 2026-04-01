@@ -211,12 +211,14 @@ serve(async (req) => {
 
     // 4. Handle media: download and store in bucket
     let storedMediaUrl: string | null = null;
+    let inlineMediaBase64: string | null = null;
+    let storedMediaMimeType: string | null = mediaMimeType || null;
     let tipoConteudo = "text";
 
     if (mediaType && mediaType !== "text") {
       tipoConteudo = mediaType; // image, document, audio, video, sticker
       try {
-        storedMediaUrl = await downloadAndStoreMedia(supabase, SUPABASE_URL, {
+        const storedMedia = await downloadAndStoreMedia(supabase, SUPABASE_URL, {
           source,
           mediaId,
           mediaUrl,
@@ -225,6 +227,9 @@ serve(async (req) => {
           messageId,
           evolutionMessageKey: message.evolutionMessageKey,
         });
+        storedMediaUrl = storedMedia?.publicUrl || null;
+        inlineMediaBase64 = storedMedia?.inlineBase64 || null;
+        storedMediaMimeType = storedMedia?.mimeType || storedMediaMimeType;
         console.log(`Media stored: ${storedMediaUrl}`);
       } catch (e) {
         console.error("Failed to download/store media:", e);
@@ -246,7 +251,7 @@ serve(async (req) => {
         whatsapp_message_id: messageId,
         source,
         ...(storedMediaUrl && { media_url: storedMediaUrl }),
-        ...(mediaMimeType && { mime_type: mediaMimeType }),
+        ...(storedMediaMimeType && { mime_type: storedMediaMimeType }),
       },
       provedor: source,
     });
@@ -343,6 +348,8 @@ serve(async (req) => {
         triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, {
           tipo_conteudo: tipoConteudo,
           media_url: storedMediaUrl,
+          mime_type: storedMediaMimeType,
+          inline_base64: inlineMediaBase64,
         }).catch(
           (e) => console.error("AI triage trigger failed:", e)
         )
@@ -374,7 +381,7 @@ async function downloadAndStoreMedia(
     messageId: string;
     evolutionMessageKey?: any;
   }
-): Promise<string | null> {
+): Promise<{ publicUrl: string | null; inlineBase64: string | null; mimeType: string } | null> {
   let mediaBytes: ArrayBuffer | null = null;
   let mimeType = opts.mediaMimeType || "application/octet-stream";
 
@@ -470,6 +477,16 @@ async function downloadAndStoreMedia(
 
   if (!mediaBytes) return null;
 
+  const bytesToBase64 = (buffer: ArrayBuffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  };
+
   // Determine file extension from mime type
   const extMap: Record<string, string> = {
     "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
@@ -490,7 +507,11 @@ async function downloadAndStoreMedia(
     .from("whatsapp-media")
     .getPublicUrl(filePath);
 
-  return publicUrl?.publicUrl || null;
+  return {
+    publicUrl: publicUrl?.publicUrl || null,
+    inlineBase64: mimeType.startsWith("image/") ? bytesToBase64(mediaBytes) : null,
+    mimeType,
+  };
 }
 
 // ─── Trigger Bot Lojas ───
@@ -547,7 +568,7 @@ async function triggerAiTriage(
   contatoId: string,
   phone: string,
   text: string,
-  mediaInfo?: { tipo_conteudo: string; media_url: string | null }
+  mediaInfo?: { tipo_conteudo: string; media_url: string | null; mime_type?: string | null; inline_base64?: string | null }
 ) {
   await fetch(`${supabaseUrl}/functions/v1/ai-triage`, {
     method: "POST",
