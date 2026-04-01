@@ -395,7 +395,7 @@ async function downloadAndStoreMedia(
     messageId: string;
     evolutionMessageKey?: any;
   }
-): Promise<{ publicUrl: string | null; inlineBase64: string | null; mimeType: string } | null> {
+): Promise<{ publicUrl: string | null; inlineBase64: string | null; mimeType: string; mediaBytes: ArrayBuffer | null } | null> {
   let mediaBytes: ArrayBuffer | null = null;
   let mimeType = opts.mediaMimeType || "application/octet-stream";
 
