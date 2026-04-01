@@ -1419,7 +1419,7 @@ serve(async (req) => {
               resposta = fb;
               validatorFlags.push("deterministic_fallback");
             } else {
-              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido);
+              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
               resposta = contextualFallback.resposta;
               intencao = contextualFallback.intencao;
               pipeline_coluna = contextualFallback.pipeline_coluna;
