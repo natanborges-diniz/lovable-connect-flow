@@ -1,130 +1,110 @@
 
 
-# Análise do Plano: Auto-Compilação do Prompt com IA
+# Plano: Tabela de Preços de Lentes + Aprimoramento da Tool interpretar_receita + Quote Engine
 
-## Veredicto: Bom conceito, mas precisa de ajustes para ser realmente eficiente e seguro
+## Objetivo
 
----
+Criar a tabela `pricing_table_lentes` no banco, carregar os dados iniciais, aprimorar a tool `interpretar_receita` para seguir o contrato padronizado, e implementar o quote engine que busca lentes compatíveis automaticamente após a interpretação da receita.
 
-## O que está BOM no plano
-
-1. **O prompt original nunca é sobrescrito** — correto, mantém rollback
-2. **Compilação manual (não automática)** — evita custo desnecessário
-3. **Usar gemini-2.5-flash** — bom balanço custo/qualidade para síntese de texto
-
----
-
-## Problemas e Melhorias Sugeridas
-
-### 1. Risco de Segurança: IA reescrevendo suas próprias regras de segurança
-
-O compilador usa IA para "integrar naturalmente" as proibições no texto. Isso é perigoso:
-- A IA pode **diluir** uma proibição ao reformulá-la ("não fazemos exames" → "orientamos sobre exames")
-- Proibições devem ser **literais e mecânicas**, não "naturais"
-
-**Melhoria**: As `ia_regras_proibidas` devem continuar sendo injetadas **literalmente** no bloco `⛔ PROIBIÇÕES ABSOLUTAS`, separadas do prompt compilado. O compilador só deve sintetizar exemplos e feedbacks no corpo do prompt. As proibições ficam intocadas.
-
-### 2. Dados dinâmicos que o compilador não pode tocar
-
-O plano menciona que data/hora, lojas e agendamentos continuam dinâmicos. Mas falta explicitar que o `prompt_compilado` substitui **apenas**:
-- `businessRules` (prompt_atendimento)
-- `examples` (ia_exemplos)
-- `antiExamples` (ia_feedbacks)
-
-E **NÃO** substitui:
-- Proibições absolutas (segurança)
-- Base de conhecimento (muda em tempo real)
-- Lojas/agendamentos (muda em tempo real)
-- Tópicos já cobertos (sessão específica)
-- Modo híbrido (sessão específica)
-
-**Melhoria**: Criar slots no prompt compilado com marcadores (ex: `{{PROIBICOES}}`, `{{CONHECIMENTO}}`, `{{LOJAS}}`) que o `ai-triage` substitui em runtime.
-
-### 3. Falta validação pós-compilação
-
-A IA pode gerar um prompt que remove acidentalmente instruções críticas. Não há checagem.
-
-**Melhoria**: Após compilar, validar automaticamente que o prompt contém palavras-chave obrigatórias: "NUNCA invente preços", "Consultor especializado", "3 frases", "receita". Se faltar alguma, rejeitar e alertar.
-
-### 4. Versionamento fraco
-
-O plano salva apenas `prompt_compilado_anterior` (uma versão). Se compilar 3 vezes e a v1 era a melhor, perdeu.
-
-**Melhoria**: Usar uma tabela separada `prompt_versoes` com timestamp, fontes usadas e conteúdo. Ou no mínimo um array jsonb com as últimas 5 versões.
-
-### 5. A hierarquia de processamento deve ser preservada
-
-Hoje o `ai-triage` segue: Proibições > Prompt > Exemplos > Feedbacks > Conhecimento. Se o compilador funde prompt+exemplos+feedbacks em um bloco só, a IA perde a distinção hierárquica.
-
-**Melhoria**: O compilador deve gerar o prompt com seções Markdown internas marcadas (# REGRAS, # EXEMPLOS INTEGRADOS, # CORREÇÕES APRENDIDAS), mantendo a hierarquia visual.
-
----
-
-## Plano Revisado Recomendado
-
-### Arquitetura
+## Arquitetura do Fluxo
 
 ```text
-┌─────────────────────────────────────────────┐
-│            compile-prompt                    │
-│  Entrada:                                   │
-│  - prompt_atendimento (espinha dorsal)       │
-│  - ia_exemplos (few-shot)                   │
-│  - ia_feedbacks corrigidos                  │
-│                                             │
-│  NÃO TOCA:                                 │
-│  - ia_regras_proibidas (literal)            │
-│  - conhecimento_ia (runtime)                │
-│  - lojas/agendamentos (runtime)             │
-│                                             │
-│  Saída:                                     │
-│  - prompt_compilado com slots:              │
-│    {{PROIBICOES}} {{CONHECIMENTO}}          │
-│    {{LOJAS}} {{AGENDAMENTOS}}               │
-│                                             │
-│  Validação: checklist de palavras-chave     │
-└─────────────────────────────────────────────┘
+Cliente envia foto receita
+        │
+        ▼
+  ai-triage (GPT-5 Vision)
+  tool: interpretar_receita
+  saída: JSON rx padronizado
+        │
+        ▼
+  quote_engine (lógica no ai-triage)
+  SELECT * FROM pricing_table_lentes
+  WHERE category = rx_type
+    AND sphere_min <= esf <= sphere_max
+    AND cylinder_min <= cil <= cylinder_max
+    AND (add_min <= add <= add_max)
+  ORDER BY priority, price_brl
+        │
+        ▼
+  Monta resposta com top 3 opções
+  (econômica, intermediária, premium)
+  e envia ao cliente
 ```
 
-### Mudanças no ai-triage
+## Etapas
 
-```text
-SE prompt_compilado existe:
-  1. Carrega prompt_compilado
-  2. Substitui slots ({{PROIBICOES}}, {{CONHECIMENTO}}, etc.)
-  3. Injeta proibições LITERAIS (não compiladas)
-  4. Pula injeção separada de exemplos/feedbacks (já no compilado)
-SENÃO:
-  Fluxo atual (retrocompatível)
-```
+### 1. Migração: Criar tabela `pricing_table_lentes`
 
-### Arquivos
+Criar a tabela conforme a estrutura fornecida. RLS: leitura para `anon` e `authenticated`, gestão completa para `authenticated`.
+
+### 2. Carga inicial de dados
+
+Inserir os 30 registros de lentes HOYA, DNZ e ZEISS via insert tool.
+
+### 3. Atualizar tool `interpretar_receita` no ai-triage
+
+Substituir a definição atual da tool por uma versão que segue o contrato padronizado:
+- Saída estruturada com `eyes.od`, `eyes.oe`, `pd`, `rx_type`, `summary`, `confidence`, `needs_human_review`
+- Após o GPT retornar a extração, o código do ai-triage faz a pós-classificação determinística (has_addition → progressive, etc.)
+- Se `confidence < 0.80` → `needs_human_review = true` → resposta cautelosa + escalar
+
+### 4. Implementar quote engine no handler do ai-triage
+
+Após `interpretar_receita` retornar dados válidos:
+1. Query `pricing_table_lentes` filtrando por `category`, ranges de sphere/cylinder/add, `active = true`
+2. Ordenar por `priority ASC, price_brl ASC`
+3. Selecionar top 3 opções (econômica, intermediária, premium)
+4. Montar resposta formatada para WhatsApp com marca, família, tratamento e preço
+5. Se nenhuma lente compatível: escalar para consultor
+
+### 5. Atualizar armazenamento de dados da receita
+
+Salvar no `contatos.metadata.ultima_receita` o formato padronizado (eyes.od/oe com sphere/cylinder/axis/add, rx_type, confidence).
+
+## Arquivos a modificar
 
 | Arquivo | Ação |
 |---------|------|
-| `compile-prompt/index.ts` | Criar — compilador com validação |
-| `ai-triage/index.ts` | Atualizar — carregar prompt_compilado + substituir slots |
-| `PromptCompilerTab.tsx` | Criar — UI de compilação, preview, histórico |
-| `LearningCard.tsx` | Atualizar — adicionar aba "Prompt IA" |
-| Migração | Adicionar chaves `prompt_compilado`, `prompt_compilado_at`, `prompt_versoes` na `configuracoes_ia` |
+| Migração SQL | Criar tabela `pricing_table_lentes` + RLS |
+| Insert SQL | Carga dos 30 registros iniciais |
+| `supabase/functions/ai-triage/index.ts` | Atualizar tool interpretar_receita + adicionar quote engine |
 
-### Checklist de validação pós-compilação
+## Detalhes Técnicos
 
-O compilador rejeita o resultado se faltar qualquer um:
-- "NUNCA invente" (anti-alucinação)
-- "Consultor especializado" (terminologia)
-- "3 frases" ou "máximo" (concisão)
-- "receita" (fluxo core)
-- "pergunta" ou "ação" (proatividade)
+### Tool interpretar_receita (novo contrato)
 
----
+A tool definition no GPT passará a pedir o formato padronizado com `eyes.od.sphere`, `eyes.od.cylinder`, etc. como números (não strings). O handler pós-tool-call fará:
 
-## Resumo
+```text
+1. Parse dos valores numéricos
+2. Classificação determinística do rx_type
+3. Cálculo de confidence baseado em campos preenchidos
+4. Se confidence >= 0.80: query pricing_table_lentes
+5. Se confidence < 0.80: resposta cautelosa + needs_human_review
+```
 
-O conceito é sólido, mas precisa de **3 proteções críticas**:
-1. Proibições nunca passam pelo compilador (segurança)
-2. Validação automática pós-compilação (qualidade)
-3. Slots para dados dinâmicos em vez de substituição total (flexibilidade)
+### Query do Quote Engine
 
-Com essas mudanças, o sistema fica robusto e seguro para produção.
+```sql
+SELECT * FROM pricing_table_lentes
+WHERE active = true
+  AND category = $rx_type
+  AND sphere_min <= $worst_sphere AND sphere_max >= $worst_sphere
+  AND cylinder_min <= $worst_cylinder AND cylinder_max >= $worst_cylinder
+  AND (
+    ($rx_type != 'progressive') OR
+    (add_min <= $max_add AND add_max >= $max_add)
+  )
+ORDER BY priority ASC, price_brl ASC
+```
+
+A resposta ao cliente segue o formato:
+- Opção econômica (menor priority + menor preço)
+- Opção intermediária
+- Opção premium (maior preço)
+- Cada opção: marca, família, tratamento, índice, preço
+
+### Registros com price_brl = 0
+
+Os registros DNZ HD, DNZ HDI e DNZ Free Form têm preço 0. Serão inseridos mas filtrados na query (`price_brl > 0`) até que os preços sejam atualizados.
 
