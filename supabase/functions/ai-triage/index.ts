@@ -744,6 +744,7 @@ serve(async (req) => {
 
   try {
     const { atendimento_id, mensagem_texto, contato_id, media } = await req.json();
+    const isTranscribedAudio = media?.is_transcribed_audio === true;
     atendimentoIdForCleanup = atendimento_id;
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
