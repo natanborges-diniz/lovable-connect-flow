@@ -744,6 +744,7 @@ serve(async (req) => {
 
   try {
     const { atendimento_id, mensagem_texto, contato_id, media } = await req.json();
+    const isTranscribedAudio = media?.is_transcribed_audio === true;
     atendimentoIdForCleanup = atendimento_id;
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
@@ -1445,7 +1446,33 @@ serve(async (req) => {
     // ── 10. SEND RESPONSE ──
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
-    // ── 11. UPDATE MODO + PIPELINE ──
+    // ── 10.1. AUDIO NUDGE — gently encourage text over audio ──
+    if (isTranscribedAudio) {
+      // Count how many audio messages this contact has sent in this atendimento
+      const { count: audioCount } = await supabase
+        .from("mensagens")
+        .select("id", { count: "exact", head: true })
+        .eq("atendimento_id", atendimento_id)
+        .eq("direcao", "inbound")
+        .not("metadata->transcribed_from", "is", null);
+
+      const totalAudios = audioCount || 1;
+      console.log(`[AUDIO-NUDGE] Contact has sent ${totalAudios} audio(s) in this atendimento`);
+
+      // Nudge on 1st audio, then every 3rd audio
+      if (totalAudios === 1 || totalAudios % 3 === 0) {
+        const nudges = [
+          "💡 Dica: consigo te responder mais rápido quando você digita a mensagem. Mas fique à vontade, vou continuar ouvindo seus áudios também 😊",
+          "📝 Só uma dica rápida: por texto eu consigo te ajudar de forma mais ágil. Mas pode mandar áudio se preferir, sem problemas!",
+          "✏️ Se puder digitar, consigo te atender ainda mais rápido! Mas não se preocupe, estou ouvindo seus áudios normalmente 😉",
+        ];
+        const nudge = nudges[Math.floor(Math.random() * nudges.length)];
+        // Small delay so it doesn't feel robotic
+        await new Promise(r => setTimeout(r, 2000));
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, nudge);
+      }
+    }
+
     let newModo: string | null = null;
     if (precisa_humano && !isHibrido) {
       newModo = "hibrido";
