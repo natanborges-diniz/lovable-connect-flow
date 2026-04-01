@@ -1096,7 +1096,7 @@ serve(async (req) => {
         resposta = plainContent;
         validatorFlags.push("no_tool_plain_text");
       } else {
-        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido);
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
         resposta = fallback.resposta;
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
