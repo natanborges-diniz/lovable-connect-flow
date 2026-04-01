@@ -532,6 +532,7 @@ interface NormalizedMessage {
   mediaId?: string;      // Meta media ID
   mediaUrl?: string;     // Direct URL (Evolution/Z-API)
   mediaMimeType?: string;
+  evolutionMessageKey?: any; // Full key object for Evolution API media download
 }
 
 function normalizeWebhookPayload(body: any): NormalizedMessage | null {
