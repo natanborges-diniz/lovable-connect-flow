@@ -637,6 +637,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "document",
         mediaUrl: msgData.documentMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.documentMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Audio message
@@ -650,6 +651,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "audio",
         mediaUrl: msgData.audioMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.audioMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Video message
@@ -663,6 +665,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "video",
         mediaUrl: msgData.videoMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.videoMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Text message (fallback)
