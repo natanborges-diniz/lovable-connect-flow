@@ -824,6 +824,84 @@ export type Database = {
           },
         ]
       }
+      pricing_table_lentes: {
+        Row: {
+          active: boolean | null
+          add_max: number | null
+          add_min: number | null
+          blue: boolean | null
+          brand: string
+          category: string
+          created_at: string | null
+          cylinder_max: number | null
+          cylinder_min: number | null
+          diameter: number | null
+          family: string
+          id: number
+          index_name: string
+          min_fitting_height: number | null
+          photo: boolean | null
+          price_brl: number
+          priority: number | null
+          source_catalog: string | null
+          source_page: string | null
+          sphere_max: number | null
+          sphere_min: number | null
+          treatment: string
+          updated_at: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          add_max?: number | null
+          add_min?: number | null
+          blue?: boolean | null
+          brand: string
+          category: string
+          created_at?: string | null
+          cylinder_max?: number | null
+          cylinder_min?: number | null
+          diameter?: number | null
+          family: string
+          id?: number
+          index_name: string
+          min_fitting_height?: number | null
+          photo?: boolean | null
+          price_brl: number
+          priority?: number | null
+          source_catalog?: string | null
+          source_page?: string | null
+          sphere_max?: number | null
+          sphere_min?: number | null
+          treatment: string
+          updated_at?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          add_max?: number | null
+          add_min?: number | null
+          blue?: boolean | null
+          brand?: string
+          category?: string
+          created_at?: string | null
+          cylinder_max?: number | null
+          cylinder_min?: number | null
+          diameter?: number | null
+          family?: string
+          id?: number
+          index_name?: string
+          min_fitting_height?: number | null
+          photo?: boolean | null
+          price_brl?: number
+          priority?: number | null
+          source_catalog?: string | null
+          source_page?: string | null
+          sphere_max?: number | null
+          sphere_min?: number | null
+          treatment?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           ativo: boolean
