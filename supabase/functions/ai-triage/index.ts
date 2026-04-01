@@ -1434,7 +1434,7 @@ serve(async (req) => {
     }
 
     if (!resposta) {
-      const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido);
+      const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
       resposta = fallback.resposta;
       intencao = fallback.intencao;
       pipeline_coluna = fallback.pipeline_coluna;
