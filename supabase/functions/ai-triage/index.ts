@@ -80,7 +80,7 @@ function matchesSubjectChange(msg: string): boolean {
   return SUBJECT_CHANGE_KEYWORDS.some((kw) => n.includes(norm(kw)));
 }
 
-function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean): {
+function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[]): {
   resposta: string;
   intencao: string;
   pipeline_coluna: string;
@@ -97,7 +97,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
-  if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor/.test(n)) {
+  if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor|barato|caro|mais em conta|econom/.test(n)) {
     return {
       resposta:
         "Boa! Me manda uma foto da sua receita que eu já te passo os valores certinhos. Se ainda não tem receita, posso te orientar também 😉",
@@ -134,20 +134,35 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
-  if (isHibrido) {
-    return {
-      resposta: "Opa, me conta o que precisa que eu te ajudo agora mesmo!",
-      intencao: "outro",
-      pipeline_coluna: "Novo Contato",
-      precisa_humano: false,
-    };
+  // For híbrido or generic cases, use rotating pool to avoid repetition
+  const genericPool = [
+    "Sobre o que a gente estava falando — quer que eu retome o orçamento ou te ajudo com outra coisa?",
+    "Pode me explicar melhor o que precisa? Quero te dar um retorno certeiro!",
+    "Me diz com mais detalhes o que tá buscando que eu resolvo pra você 😊",
+    "Pra eu te ajudar certinho, preciso entender melhor — pode elaborar?",
+    "Me conta: é sobre lentes, agendamento, ou outro assunto?",
+  ];
+
+  const recentNorm = (recentOutbound || []).slice(-10).map(norm);
+  for (const msg of genericPool) {
+    const msgNorm = norm(msg);
+    const alreadySent = recentNorm.some((prev) => computeSimilarity(msgNorm, prev) > 0.5);
+    if (!alreadySent) {
+      return {
+        resposta: msg,
+        intencao: "outro",
+        pipeline_coluna: "Novo Contato",
+        precisa_humano: false,
+      };
+    }
   }
 
+  // All pool exhausted — escalate to human
   return {
-    resposta: "Me conta o que tá precisando que eu resolvo pra você!",
+    resposta: "Vou chamar um Consultor especializado pra te ajudar melhor, tá? Ele já entra em contato!",
     intencao: "outro",
-    pipeline_coluna: "Novo Contato",
-    precisa_humano: false,
+    pipeline_coluna: "Atendimento Humano",
+    precisa_humano: true,
   };
 }
 
