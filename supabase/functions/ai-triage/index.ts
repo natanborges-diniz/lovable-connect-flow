@@ -41,6 +41,35 @@ function hasSupportedImageSignature(bytes: Uint8Array): boolean {
   return false;
 }
 
+function cleanBase64(base64String: string): string {
+  let cleaned = base64String.trim();
+  if (cleaned.includes(",") && cleaned.startsWith("data:")) {
+    cleaned = cleaned.split(",")[1] ?? "";
+  }
+  return cleaned.replace(/\s/g, "");
+}
+
+function imageContentFromBase64(base64String: string, mimeType: string): any | null {
+  const rawMime = String(mimeType || "image/jpeg").split(";")[0].trim().toLowerCase();
+  const normalizedMime = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+  const supportedMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+  if (!supportedMimes.has(normalizedMime)) return null;
+
+  const cleaned = cleanBase64(base64String);
+  if (!cleaned) return null;
+
+  const binary = atob(cleaned);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  if (!hasSupportedImageSignature(bytes)) return null;
+
+  return {
+    type: "image_url",
+    image_url: { url: `data:${normalizedMime};base64,${cleaned}`, detail: "high" },
+  };
+}
+
 function matchesEscalation(msg: string): boolean {
   const n = norm(msg);
   return ESCALATION_KEYWORDS.some((kw) => n.includes(norm(kw)));
@@ -792,6 +821,10 @@ serve(async (req) => {
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
+    const latestInboundImageIndex = [...allMsgs]
+      .map((m: any, index: number) => ({ m, index }))
+      .filter(({ m }) => m.direcao === "inbound" && (m.tipo_conteudo || "text") === "image")
+      .slice(-1)[0]?.index ?? -1;
 
     // ── 5. BUILD CONTEXT ──
     const sentTopics = extractSentTopics(recentOutbound);
@@ -913,39 +946,44 @@ serve(async (req) => {
       const mediaUrl = (m.metadata as any)?.media_url;
       const tipo = (m as any).tipo_conteudo || "text";
 
-      if (tipo === "image" && mediaUrl && role === "user") {
+      if (tipo === "image" && role === "user") {
         const imageCaption = m.conteudo && m.conteudo !== "[image]"
           ? m.conteudo
           : "[Cliente enviou uma imagem/receita]";
 
         let imageContent: any | null = null;
         try {
-          const imgResp = await fetch(mediaUrl);
-          if (imgResp.ok) {
-            const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
-            const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
-              .split(";")[0]
-              .trim()
-              .toLowerCase();
-            const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
-            const supportedMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+          const inlineBase64 = latestInboundImageIndex === i ? media?.inline_base64 : null;
+          const inlineMime = latestInboundImageIndex === i ? media?.mime_type : null;
 
-            if (supportedMimes.has(mimeType) && hasSupportedImageSignature(imgBuffer)) {
-              let binary = "";
-              const chunkSize = 8192;
-              for (let i = 0; i < imgBuffer.length; i += chunkSize) {
-                binary += String.fromCharCode(...imgBuffer.subarray(i, i + chunkSize));
+          if (inlineBase64 && inlineMime) {
+            imageContent = imageContentFromBase64(inlineBase64, inlineMime);
+          }
+
+          if (!imageContent && mediaUrl) {
+            const imgResp = await fetch(mediaUrl);
+            if (imgResp.ok) {
+              const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
+              const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
+                .split(";")[0]
+                .trim()
+                .toLowerCase();
+              const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+
+              if (hasSupportedImageSignature(imgBuffer)) {
+                let binary = "";
+                const chunkSize = 8192;
+                for (let j = 0; j < imgBuffer.length; j += chunkSize) {
+                  binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                }
+                imageContent = imageContentFromBase64(btoa(binary), mimeType);
               }
-              const base64 = btoa(binary);
-              if (base64) {
-                imageContent = {
-                  type: "image_url",
-                  image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" },
-                };
-              }
-            } else {
-              console.warn(`[MEDIA] Invalid or unsupported image payload for AI: mime=${mimeType}. Skipping image content.`);
             }
+          }
+
+          if (!imageContent) {
+            const warnMime = String((m.metadata as any)?.mime_type || media?.mime_type || "unknown");
+            console.warn(`[MEDIA] Invalid or unsupported image payload for AI: mime=${warnMime}. Skipping image content.`);
           }
         } catch (e) {
           console.warn(`[MEDIA] Failed to prepare image for AI. Skipping image content.`, e);
