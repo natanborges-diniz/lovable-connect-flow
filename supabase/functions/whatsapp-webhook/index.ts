@@ -525,6 +525,7 @@ async function downloadAndStoreMedia(
     publicUrl: publicUrl?.publicUrl || null,
     inlineBase64: mimeType.startsWith("image/") ? bytesToBase64(mediaBytes) : null,
     mimeType,
+    mediaBytes,
   };
 }
 
