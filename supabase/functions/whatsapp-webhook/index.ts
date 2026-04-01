@@ -529,6 +529,45 @@ async function downloadAndStoreMedia(
   };
 }
 
+// ─── Transcribe Audio via OpenAI Whisper ───
+async function transcribeAudio(mediaBytes: ArrayBuffer, mimeType: string): Promise<string | null> {
+  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+  if (!OPENAI_API_KEY) {
+    console.warn("[AUDIO] OPENAI_API_KEY not set — skipping transcription");
+    return null;
+  }
+
+  const extMap: Record<string, string> = {
+    "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/opus": "opus",
+    "audio/aac": "aac", "audio/mp4": "m4a", "audio/wav": "wav",
+    "audio/ogg; codecs=opus": "ogg",
+  };
+  const cleanMime = mimeType.split(";")[0].trim();
+  const ext = extMap[cleanMime] || extMap[mimeType] || "ogg";
+
+  const formData = new FormData();
+  const blob = new Blob([mediaBytes], { type: cleanMime });
+  formData.append("file", blob, `audio.${ext}`);
+  formData.append("model", "whisper-1");
+  formData.append("language", "pt");
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[AUDIO] Whisper error ${res.status}: ${errText}`);
+    return null;
+  }
+
+  const data = await res.json();
+  const transcription = data.text?.trim();
+  return transcription || null;
+}
+
 // ─── Trigger Bot Lojas ───
 async function triggerBotLojas(
   supabaseUrl: string,
