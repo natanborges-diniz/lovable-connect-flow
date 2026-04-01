@@ -676,8 +676,11 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+  let atendimentoIdForCleanup: string | null = null;
+
   try {
     const { atendimento_id, mensagem_texto, contato_id, media } = await req.json();
+    atendimentoIdForCleanup = atendimento_id;
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
     // ── 1. LOAD ATENDIMENTO ──
