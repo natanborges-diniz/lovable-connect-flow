@@ -900,7 +900,22 @@ serve(async (req) => {
       const tipo = (m as any).tipo_conteudo || "text";
 
       if (tipo === "image" && mediaUrl && role === "user") {
-        const content: any[] = [{ type: "image_url", image_url: { url: mediaUrl, detail: "high" } }];
+        // Fetch image and convert to base64 to avoid content-type issues with storage URLs
+        let imageContent: any = { type: "image_url", image_url: { url: mediaUrl, detail: "high" } };
+        try {
+          const imgResp = await fetch(mediaUrl);
+          if (imgResp.ok) {
+            const imgBuffer = await imgResp.arrayBuffer();
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+            const contentType = imgResp.headers.get("content-type") || "image/jpeg";
+            // Ensure we use a supported mime type
+            const mimeType = /\/(png|jpeg|jpg|gif|webp)/.test(contentType) ? contentType : "image/jpeg";
+            imageContent = { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } };
+          }
+        } catch (e) {
+          console.warn(`[MEDIA] Failed to fetch image for base64, using URL fallback:`, e);
+        }
+        const content: any[] = [imageContent];
         if (m.conteudo && m.conteudo !== "[image]") content.push({ type: "text", text: m.conteudo });
         messages.push({ role, content });
       } else {
