@@ -30,6 +30,17 @@ function norm(t: string): string {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
+function hasSupportedImageSignature(bytes: Uint8Array): boolean {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true; // jpeg
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return true; // png
+  if (bytes.length >= 6) {
+    const ascii = Array.from(bytes.slice(0, 12)).map((b) => String.fromCharCode(b)).join("");
+    if (ascii.startsWith("GIF87a") || ascii.startsWith("GIF89a")) return true;
+    if (ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WEBP") return true;
+  }
+  return false;
+}
+
 function matchesEscalation(msg: string): boolean {
   const n = norm(msg);
   return ESCALATION_KEYWORDS.some((kw) => n.includes(norm(kw)));
@@ -912,12 +923,6 @@ serve(async (req) => {
           const imgResp = await fetch(mediaUrl);
           if (imgResp.ok) {
             const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
-            let binary = "";
-            const chunkSize = 8192;
-            for (let i = 0; i < imgBuffer.length; i += chunkSize) {
-              binary += String.fromCharCode(...imgBuffer.subarray(i, i + chunkSize));
-            }
-            const base64 = btoa(binary);
             const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
               .split(";")[0]
               .trim()
@@ -925,13 +930,21 @@ serve(async (req) => {
             const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
             const supportedMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-            if (supportedMimes.has(mimeType) && base64) {
-              imageContent = {
-                type: "image_url",
-                image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" },
-              };
+            if (supportedMimes.has(mimeType) && hasSupportedImageSignature(imgBuffer)) {
+              let binary = "";
+              const chunkSize = 8192;
+              for (let i = 0; i < imgBuffer.length; i += chunkSize) {
+                binary += String.fromCharCode(...imgBuffer.subarray(i, i + chunkSize));
+              }
+              const base64 = btoa(binary);
+              if (base64) {
+                imageContent = {
+                  type: "image_url",
+                  image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" },
+                };
+              }
             } else {
-              console.warn(`[MEDIA] Unsupported image mime for AI: ${mimeType}. Skipping image content.`);
+              console.warn(`[MEDIA] Invalid or unsupported image payload for AI: mime=${mimeType}. Skipping image content.`);
             }
           }
         } catch (e) {
