@@ -223,6 +223,7 @@ serve(async (req) => {
           mediaMimeType,
           atendimentoId,
           messageId,
+          evolutionMessageKey: message.evolutionMessageKey,
         });
         console.log(`Media stored: ${storedMediaUrl}`);
       } catch (e) {
@@ -371,6 +372,7 @@ async function downloadAndStoreMedia(
     mediaMimeType?: string;
     atendimentoId: string;
     messageId: string;
+    evolutionMessageKey?: any;
   }
 ): Promise<string | null> {
   let mediaBytes: ArrayBuffer | null = null;
@@ -395,8 +397,72 @@ async function downloadAndStoreMedia(
     if (!downloadRes.ok) throw new Error(`Meta media download failed: ${downloadRes.status}`);
     mediaBytes = await downloadRes.arrayBuffer();
 
+  } else if (opts.source === "evolution_api" && opts.evolutionMessageKey) {
+    // Evolution API: use getBase64FromMediaMessage endpoint
+    const evolutionApiUrl = Deno.env.get("EVOLUTION_API_URL");
+    const evolutionApiKey = Deno.env.get("EVOLUTION_API_KEY");
+    const evolutionInstance = Deno.env.get("EVOLUTION_INSTANCE_NAME");
+
+    if (evolutionApiUrl && evolutionApiKey && evolutionInstance) {
+      try {
+        const b64Res = await fetch(
+          `${evolutionApiUrl}/chat/getBase64FromMediaMessage/${evolutionInstance}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: evolutionApiKey,
+            },
+            body: JSON.stringify({
+              message: { key: opts.evolutionMessageKey },
+              convertToMp4: false,
+            }),
+          }
+        );
+
+        if (b64Res.ok) {
+          const b64Data = await b64Res.json();
+          const base64String = b64Data.base64 || b64Data.data;
+          if (base64String) {
+            // base64 may include data URI prefix
+            const raw = base64String.includes(",")
+              ? base64String.split(",")[1]
+              : base64String;
+            // Decode base64 to bytes
+            const binaryStr = atob(raw);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
+            mediaBytes = bytes.buffer;
+            // Try to extract mime from data URI if present
+            if (base64String.includes(",") && base64String.startsWith("data:")) {
+              const extractedMime = base64String.split(";")[0].replace("data:", "");
+              if (extractedMime) mimeType = extractedMime;
+            }
+            console.log(`[MEDIA] Evolution base64 decoded: ${bytes.length} bytes, mime=${mimeType}`);
+          }
+        } else {
+          console.warn(`[MEDIA] Evolution getBase64 failed: ${b64Res.status} — falling back to direct URL`);
+        }
+      } catch (e) {
+        console.warn("[MEDIA] Evolution getBase64 error — falling back to direct URL:", e);
+      }
+    }
+
+    // Fallback: try direct URL with API key header
+    if (!mediaBytes && opts.mediaUrl) {
+      const evolutionKey = Deno.env.get("EVOLUTION_API_KEY");
+      const headers: Record<string, string> = {};
+      if (evolutionKey) headers["apikey"] = evolutionKey;
+      const downloadRes = await fetch(opts.mediaUrl, { headers });
+      if (downloadRes.ok) {
+        mediaBytes = await downloadRes.arrayBuffer();
+      }
+    }
+
   } else if (opts.mediaUrl) {
-    // Evolution API / Z-API: direct URL download
+    // Z-API / Generic: direct URL download
     const downloadRes = await fetch(opts.mediaUrl);
     if (!downloadRes.ok) throw new Error(`Media download failed: ${downloadRes.status}`);
     mediaBytes = await downloadRes.arrayBuffer();
@@ -532,6 +598,7 @@ interface NormalizedMessage {
   mediaId?: string;      // Meta media ID
   mediaUrl?: string;     // Direct URL (Evolution/Z-API)
   mediaMimeType?: string;
+  evolutionMessageKey?: any; // Full key object for Evolution API media download
 }
 
 function normalizeWebhookPayload(body: any): NormalizedMessage | null {
@@ -622,6 +689,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "image",
         mediaUrl: msgData.imageMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.imageMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Document message
@@ -635,6 +703,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "document",
         mediaUrl: msgData.documentMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.documentMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Audio message
@@ -648,6 +717,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "audio",
         mediaUrl: msgData.audioMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.audioMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Video message
@@ -661,6 +731,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "video",
         mediaUrl: msgData.videoMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.videoMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Text message (fallback)
