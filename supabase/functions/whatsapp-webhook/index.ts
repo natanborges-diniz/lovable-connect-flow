@@ -366,6 +366,7 @@ serve(async (req) => {
           media_url: storedMediaUrl,
           mime_type: storedMediaMimeType,
           inline_base64: inlineMediaBase64,
+          is_transcribed_audio: isTranscribedAudio,
         }).catch(
           (e) => console.error("AI triage trigger failed:", e)
         )
