@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, ShieldAlert } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ArrowRight, ShieldAlert, Plus, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -43,6 +46,36 @@ export function FeedbacksTab() {
   const { data: stats } = useFeedbackStats();
   const { data: negativos } = useRecentNegativeFeedbacks();
   const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const [correcao, setCorrecao] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const addManualFeedback = async () => {
+    if (!motivo.trim()) {
+      toast.error("Informe o motivo/erro");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("ia_feedbacks" as any).insert({
+        avaliacao: "corrigido",
+        motivo: motivo.trim(),
+        resposta_corrigida: correcao.trim() || null,
+      } as any);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["ia_feedbacks_stats"] });
+      queryClient.invalidateQueries({ queryKey: ["ia_feedbacks_negativos"] });
+      setMotivo("");
+      setCorrecao("");
+      setShowForm(false);
+      toast.success("Feedback adicionado!");
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const promoteToExample = async (feedback: any) => {
     if (!feedback.resposta_corrigida) {
@@ -101,6 +134,37 @@ export function FeedbacksTab() {
             <p className="text-2xl font-bold">{stats.taxa}%</p>
             <p className="text-[10px] text-muted-foreground">Acerto</p>
           </div>
+        </div>
+      )}
+
+      {/* Add button / Form */}
+      {!showForm ? (
+        <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={() => setShowForm(true)}>
+          <Plus className="h-3.5 w-3.5" /> Adicionar Feedback Manual
+        </Button>
+      ) : (
+        <div className="border rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">Novo Feedback / Correção</span>
+            <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setShowForm(false)}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <Input
+            placeholder="Motivo / Erro que a IA cometeu"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            className="text-xs"
+          />
+          <Textarea
+            placeholder="Resposta corrigida (opcional)"
+            value={correcao}
+            onChange={(e) => setCorrecao(e.target.value)}
+            className="text-xs min-h-[60px]"
+          />
+          <Button size="sm" className="w-full text-xs" onClick={addManualFeedback} disabled={saving}>
+            {saving ? "Salvando..." : "Salvar Feedback"}
+          </Button>
         </div>
       )}
 
