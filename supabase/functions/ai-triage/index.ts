@@ -214,31 +214,45 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "interpretar_receita",
-      description: "Extrai dados de foto de receita oftalmológica enviada pelo cliente.",
+      description: "Extrai dados de foto/PDF de receita oftalmológica. Retorne NÚMEROS (não strings). Se ilegível, use null. NÃO invente valores.",
       parameters: {
         type: "object",
         properties: {
-          olho_direito: {
+          eyes: {
             type: "object",
             properties: {
-              esferico: { type: "string" }, cilindrico: { type: "string" },
-              eixo: { type: "string" }, adicao: { type: "string" },
+              od: {
+                type: "object",
+                properties: {
+                  sphere: { type: "number", description: "ESF/SPH olho direito" },
+                  cylinder: { type: "number", description: "CIL/CYL olho direito" },
+                  axis: { type: "number", description: "EIXO/AXIS olho direito" },
+                  add: { type: "number", description: "ADIÇÃO/ADD olho direito" },
+                },
+                additionalProperties: false,
+              },
+              oe: {
+                type: "object",
+                properties: {
+                  sphere: { type: "number", description: "ESF/SPH olho esquerdo" },
+                  cylinder: { type: "number", description: "CIL/CYL olho esquerdo" },
+                  axis: { type: "number", description: "EIXO/AXIS olho esquerdo" },
+                  add: { type: "number", description: "ADIÇÃO/ADD olho esquerdo" },
+                },
+                additionalProperties: false,
+              },
             },
-            required: ["esferico"], additionalProperties: false,
+            required: ["od", "oe"],
+            additionalProperties: false,
           },
-          olho_esquerdo: {
-            type: "object",
-            properties: {
-              esferico: { type: "string" }, cilindrico: { type: "string" },
-              eixo: { type: "string" }, adicao: { type: "string" },
-            },
-            required: ["esferico"], additionalProperties: false,
-          },
-          tipo_lente: { type: "string", enum: ["visao_simples", "bifocal", "multifocal", "progressiva"] },
-          observacoes: { type: "string" },
+          pd: { type: "number", description: "DP/PD (distância pupilar) se disponível" },
+          issued_at: { type: "string", description: "Data da receita se visível (formato YYYY-MM-DD)" },
+          confidence: { type: "number", description: "Confiança na leitura de 0.0 a 1.0" },
+          missing_fields: { type: "array", items: { type: "string" }, description: "Campos ilegíveis ou ausentes" },
+          raw_notes: { type: "array", items: { type: "string" }, description: "Observações do médico" },
           resposta: { type: "string", description: "Mensagem confirmando dados extraídos e próximos passos." },
         },
-        required: ["olho_direito", "olho_esquerdo", "tipo_lente", "resposta"],
+        required: ["eyes", "confidence", "resposta"],
         additionalProperties: false,
       },
     },
