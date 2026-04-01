@@ -637,32 +637,32 @@ export type Database = {
       }
       ia_feedbacks: {
         Row: {
-          atendimento_id: string
+          atendimento_id: string | null
           avaliacao: string
           avaliador_id: string | null
           created_at: string | null
           id: string
-          mensagem_id: string
+          mensagem_id: string | null
           motivo: string | null
           resposta_corrigida: string | null
         }
         Insert: {
-          atendimento_id: string
+          atendimento_id?: string | null
           avaliacao: string
           avaliador_id?: string | null
           created_at?: string | null
           id?: string
-          mensagem_id: string
+          mensagem_id?: string | null
           motivo?: string | null
           resposta_corrigida?: string | null
         }
         Update: {
-          atendimento_id?: string
+          atendimento_id?: string | null
           avaliacao?: string
           avaliador_id?: string | null
           created_at?: string | null
           id?: string
-          mensagem_id?: string
+          mensagem_id?: string | null
           motivo?: string | null
           resposta_corrigida?: string | null
         }
