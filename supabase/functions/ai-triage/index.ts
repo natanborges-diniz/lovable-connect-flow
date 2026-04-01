@@ -939,7 +939,7 @@ serve(async (req) => {
     const contextWindow = allMsgs.slice(-20);
     const messages: any[] = [{ role: "system", content: systemPrompt }];
 
-    for (const m of contextWindow) {
+    for (const [i, m] of contextWindow.entries()) {
       const role = m.direcao === "inbound" ? "user" : "assistant";
       if (m.direcao === "internal") continue;
 
