@@ -251,8 +251,9 @@ serve(async (req) => {
     }
 
     // 5. Save message
+    const isTranscribedAudio = mediaType === "audio" && text && text !== `[audio]`;
     const messageContent = mediaType && mediaType !== "text"
-      ? (text || `[${mediaType}]`)
+      ? (isTranscribedAudio ? `🎤 ${text}` : (text || `[${mediaType}]`))
       : text;
 
     await supabase.from("mensagens").insert({
@@ -260,12 +261,13 @@ serve(async (req) => {
       direcao: "inbound",
       conteudo: messageContent,
       remetente_nome: senderName || contato.nome,
-      tipo_conteudo: tipoConteudo,
+      tipo_conteudo: isTranscribedAudio ? "text" : tipoConteudo,
       metadata: {
         whatsapp_message_id: messageId,
         source,
         ...(storedMediaUrl && { media_url: storedMediaUrl }),
         ...(storedMediaMimeType && { mime_type: storedMediaMimeType }),
+        ...(isTranscribedAudio && { transcribed_from: "audio", original_type: "audio" }),
       },
       provedor: source,
     });
