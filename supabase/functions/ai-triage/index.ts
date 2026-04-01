@@ -1344,11 +1344,19 @@ serve(async (req) => {
         validatorFlags.push(`rejected:${validation.reason}`);
 
         // If the rejection is only "no question" but the response has real content (>40 chars),
-        // append a question instead of discarding the entire contextual response
+        // append a contextual question instead of discarding the entire response
         if (validation.reason.includes("no question or action") && resposta.length > 40) {
-          resposta = resposta.trimEnd().replace(/[.!]$/, "") + ". Como posso te ajudar com isso?";
+          const appendPool = [
+            "Quer que eu siga por aqui?",
+            "Posso te ajudar com mais alguma coisa?",
+            "O que acha?",
+            "Quer que eu detalhe?",
+            "Posso seguir nessa linha?",
+          ];
+          const appendQ = appendPool[Math.floor(Math.random() * appendPool.length)];
+          resposta = resposta.trimEnd().replace(/[.!]$/, "") + ". " + appendQ;
           validatorFlags.push("appended_question");
-          console.log("[VALIDATOR] Appended question to contextual response");
+          console.log("[VALIDATOR] Appended contextual question to response");
         } else {
           // One retry with explicit correction
           const retryResult = await callAI(
