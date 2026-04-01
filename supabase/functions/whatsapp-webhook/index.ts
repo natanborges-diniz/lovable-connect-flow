@@ -625,7 +625,7 @@ async function triggerAiTriage(
   contatoId: string,
   phone: string,
   text: string,
-  mediaInfo?: { tipo_conteudo: string; media_url: string | null; mime_type?: string | null; inline_base64?: string | null }
+  mediaInfo?: { tipo_conteudo: string; media_url: string | null; mime_type?: string | null; inline_base64?: string | null; is_transcribed_audio?: boolean }
 ) {
   await fetch(`${supabaseUrl}/functions/v1/ai-triage`, {
     method: "POST",
