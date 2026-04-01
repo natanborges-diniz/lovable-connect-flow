@@ -223,6 +223,7 @@ serve(async (req) => {
           mediaMimeType,
           atendimentoId,
           messageId,
+          evolutionMessageKey: message.evolutionMessageKey,
         });
         console.log(`Media stored: ${storedMediaUrl}`);
       } catch (e) {
