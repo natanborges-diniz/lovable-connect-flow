@@ -676,8 +676,11 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+  let atendimentoIdForCleanup: string | null = null;
+
   try {
     const { atendimento_id, mensagem_texto, contato_id, media } = await req.json();
+    atendimentoIdForCleanup = atendimento_id;
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
     // ── 1. LOAD ATENDIMENTO ──
@@ -1397,9 +1400,11 @@ serve(async (req) => {
     console.error("[ERROR] ai-triage:", e);
     // Clear lock on error too
     try {
-      const errMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
-      delete errMeta.ia_lock;
-      await supabase.from("atendimentos").update({ metadata: errMeta }).eq("id", atendimento_id);
+      if (atendimentoIdForCleanup) {
+        const errMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimentoIdForCleanup).single()).data?.metadata as Record<string, any>) || {};
+        delete errMeta.ia_lock;
+        await supabase.from("atendimentos").update({ metadata: errMeta }).eq("id", atendimentoIdForCleanup);
+      }
     } catch (_) { /* ignore lock cleanup errors */ }
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
