@@ -88,6 +88,15 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 } {
   const n = norm(msg);
 
+  if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|\[image\]|\[document\]|enviei minha receita|recebeu minha receita/.test(n)) {
+    return {
+      resposta: "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
+      intencao: "receita_oftalmologica",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
+
   if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor/.test(n)) {
     return {
       resposta:
@@ -1361,28 +1370,38 @@ serve(async (req) => {
                 console.log("[VALIDATOR] Retry response kept with appended question");
               } else {
                 // Only now use fallback pool as last resort
-                const fb = pickFallback(recentOutbound);
+                const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
+                  ? null
+                  : pickFallback(recentOutbound);
                 if (fb) {
                   resposta = fb;
                   validatorFlags.push("deterministic_fallback");
                   console.log("[VALIDATOR] Using rotating fallback");
                 } else {
-                  resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
-                  precisa_humano = true;
-                  validatorFlags.push("fallback_exhausted_escalate");
-                  console.log("[VALIDATOR] All fallbacks exhausted — escalating to human");
+                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido);
+                  resposta = contextualFallback.resposta;
+                  intencao = contextualFallback.intencao;
+                  pipeline_coluna = contextualFallback.pipeline_coluna;
+                  precisa_humano = contextualFallback.precisa_humano;
+                  validatorFlags.push("contextual_deterministic_fallback");
+                  console.log("[VALIDATOR] Contextual deterministic fallback applied");
                 }
               }
             }
           } else {
-            const fb = pickFallback(recentOutbound);
+            const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
+              ? null
+              : pickFallback(recentOutbound);
             if (fb) {
               resposta = fb;
               validatorFlags.push("deterministic_fallback");
             } else {
-              resposta = "Vou chamar um consultor pra te ajudar melhor com isso, tá? Já já alguém te atende!";
-              precisa_humano = true;
-              validatorFlags.push("fallback_exhausted_escalate");
+              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido);
+              resposta = contextualFallback.resposta;
+              intencao = contextualFallback.intencao;
+              pipeline_coluna = contextualFallback.pipeline_coluna;
+              precisa_humano = contextualFallback.precisa_humano;
+              validatorFlags.push("contextual_deterministic_fallback");
             }
           }
         }
