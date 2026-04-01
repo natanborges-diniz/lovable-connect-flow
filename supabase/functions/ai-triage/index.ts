@@ -293,6 +293,24 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "consultar_lentes",
+      description: "Busca lentes compatíveis com a receita do cliente. Use SOMENTE quando o cliente demonstrar interesse em orçamento/preço/opções de lentes APÓS a receita já ter sido interpretada. NÃO use logo após interpretar_receita — espere o cliente pedir.",
+      parameters: {
+        type: "object",
+        properties: {
+          filtro_blue: { type: "boolean", description: "Se o cliente mencionou filtro de luz azul" },
+          filtro_photo: { type: "boolean", description: "Se o cliente mencionou lente fotossensível/transitions" },
+          preferencia_marca: { type: "string", description: "Marca preferida se mencionada (HOYA, ZEISS, DNZ)" },
+          resposta_fallback: { type: "string", description: "Resposta caso nenhuma lente seja encontrada" },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════
