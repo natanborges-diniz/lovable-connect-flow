@@ -623,6 +623,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
         mediaType: "image",
         mediaUrl: msgData.imageMessage.url || body.data.mediaUrl,
         mediaMimeType: msgData.imageMessage.mimetype,
+        evolutionMessageKey: body.data.key,
       };
     }
     // Document message
