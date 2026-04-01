@@ -905,8 +905,14 @@ serve(async (req) => {
         try {
           const imgResp = await fetch(mediaUrl);
           if (imgResp.ok) {
-            const imgBuffer = await imgResp.arrayBuffer();
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+          const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
+            // Use chunked encoding to avoid stack overflow on large images
+            let binary = "";
+            const chunkSize = 8192;
+            for (let i = 0; i < imgBuffer.length; i += chunkSize) {
+              binary += String.fromCharCode(...imgBuffer.subarray(i, i + chunkSize));
+            }
+            const base64 = btoa(binary);
             const contentType = imgResp.headers.get("content-type") || "image/jpeg";
             // Ensure we use a supported mime type
             const mimeType = /\/(png|jpeg|jpg|gif|webp)/.test(contentType) ? contentType : "image/jpeg";
