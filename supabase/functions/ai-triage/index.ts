@@ -1006,25 +1006,112 @@ serve(async (req) => {
         });
 
       } else if (fn === "interpretar_receita") {
-        resposta = args.resposta;
         intencao = "receita_oftalmologica";
         pipeline_coluna = "Orçamento";
 
+        // ── QUOTE ENGINE: deterministic post-processing ──
+        const od = args.eyes?.od || {};
+        const oe = args.eyes?.oe || {};
+        const confidence = typeof args.confidence === "number" ? args.confidence : 0.75;
+
+        const addValues = [od.add, oe.add].filter((v: any) => typeof v === "number") as number[];
+        const sphereValues = [od.sphere, oe.sphere].filter((v: any) => typeof v === "number") as number[];
+        const cylValues = [od.cylinder, oe.cylinder].filter((v: any) => typeof v === "number") as number[];
+
+        const hasAddition = addValues.length > 0;
+        const hasMyopia = sphereValues.some((v: number) => v < 0);
+        const hasHyperopia = sphereValues.some((v: number) => v > 0);
+        const hasAstigmatism = cylValues.some((v: number) => v !== 0);
+
+        let rxType = "unknown";
+        if (hasAddition) rxType = "progressive";
+        else if (sphereValues.length > 0 || cylValues.length > 0) rxType = "single_vision";
+
+        const needsHumanReview = confidence < 0.80;
+
+        // Build standardized RX data
+        const rxData = {
+          rx_type: rxType,
+          eyes: { od, oe },
+          pd: args.pd ?? null,
+          issued_at: args.issued_at ?? null,
+          summary: { has_myopia: hasMyopia, has_hyperopia: hasHyperopia, has_astigmatism: hasAstigmatism, has_addition: hasAddition, needs_progressive: hasAddition, suggested_category: rxType },
+          confidence,
+          needs_human_review: needsHumanReview,
+          missing_fields: args.missing_fields || [],
+          raw_notes: args.raw_notes || [],
+          data_leitura: new Date().toISOString(),
+        };
+
+        // Save to contact metadata
+        const { data: contatoData } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+        const existingMeta = (contatoData?.metadata as Record<string, any>) || {};
         await supabase.from("contatos").update({
-          metadata: {
-            ultima_receita: {
-              olho_direito: args.olho_direito, olho_esquerdo: args.olho_esquerdo,
-              tipo_lente: args.tipo_lente, observacoes: args.observacoes,
-              data_leitura: new Date().toISOString(),
-            },
-          },
+          metadata: { ...existingMeta, ultima_receita: rxData },
         }).eq("id", contatoId);
 
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId, tipo: "receita_interpretada",
-          descricao: `Receita: OD ${args.olho_direito.esferico} OE ${args.olho_esquerdo.esferico} — ${args.tipo_lente}`,
-          metadata: args, referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          descricao: `Receita: OD esf=${od.sphere ?? "?"} cil=${od.cylinder ?? "?"} OE esf=${oe.sphere ?? "?"} cil=${oe.cylinder ?? "?"} — ${rxType} (conf: ${(confidence * 100).toFixed(0)}%)`,
+          metadata: rxData, referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
+
+        // ── QUOTE ENGINE: search compatible lenses ──
+        if (!needsHumanReview && rxType !== "unknown" && sphereValues.length > 0) {
+          const worstSphere = sphereValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0);
+          const worstCylinder = cylValues.length > 0 ? cylValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0) : 0;
+          const maxAdd = addValues.length > 0 ? Math.max(...addValues) : null;
+
+          let query = supabase
+            .from("pricing_table_lentes")
+            .select("*")
+            .eq("active", true)
+            .eq("category", rxType)
+            .gt("price_brl", 0)
+            .lte("sphere_min", worstSphere)
+            .gte("sphere_max", worstSphere)
+            .lte("cylinder_min", worstCylinder)
+            .gte("cylinder_max", worstCylinder);
+
+          if (rxType === "progressive" && maxAdd !== null) {
+            query = query.lte("add_min", maxAdd).gte("add_max", maxAdd);
+          }
+
+          const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(20);
+
+          if (lenses && lenses.length > 0) {
+            // Pick 3 tiers: economy (first), mid, premium (last)
+            const economy = lenses[0];
+            const premium = lenses[lenses.length - 1];
+            const midIndex = Math.floor(lenses.length / 2);
+            const mid = lenses.length >= 3 ? lenses[midIndex] : null;
+
+            const formatLens = (l: any, label: string) =>
+              `${label}: *${l.brand} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
+
+            let quoteMsg = `📋 *Receita interpretada!*\nSeu grau: OD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\nTipo: ${rxType === "progressive" ? "Progressiva" : rxType === "single_vision" ? "Visão Simples" : "Ocupacional"}\n\n🔍 *Opções de lentes para você:*\n\n`;
+            quoteMsg += formatLens(economy, "💚 Econômica");
+            if (mid && mid.id !== economy.id && mid.id !== premium.id) {
+              quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
+            }
+            if (premium.id !== economy.id) {
+              quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+            }
+            quoteMsg += "\n\nQuer que eu detalhe alguma opção ou prefere agendar uma visita para experimentar?";
+
+            resposta = quoteMsg;
+            console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
+          } else {
+            // No lenses found — use AI response + note
+            resposta = args.resposta + "\n\nPara esse grau específico, vou encaminhar para um Consultor que pode detalhar as melhores opções. Posso fazer isso agora?";
+            console.log(`[QUOTE] No matching lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
+          }
+        } else if (needsHumanReview) {
+          resposta = "Consegui ler boa parte da sua receita, mas quero te passar a opção certinha. Posso te mostrar uma base e confirmar na loja? 😊";
+          console.log(`[QUOTE] Low confidence (${(confidence * 100).toFixed(0)}%) — cautious response`);
+        } else {
+          resposta = args.resposta;
+        }
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
         resposta = args.resposta;
         intencao = "agendamento";
