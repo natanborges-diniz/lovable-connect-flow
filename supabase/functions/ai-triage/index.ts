@@ -903,30 +903,48 @@ serve(async (req) => {
       const tipo = (m as any).tipo_conteudo || "text";
 
       if (tipo === "image" && mediaUrl && role === "user") {
-        // Fetch image and convert to base64 to avoid content-type issues with storage URLs
-        let imageContent: any = { type: "image_url", image_url: { url: mediaUrl, detail: "high" } };
+        const imageCaption = m.conteudo && m.conteudo !== "[image]"
+          ? m.conteudo
+          : "[Cliente enviou uma imagem/receita]";
+
+        let imageContent: any | null = null;
         try {
           const imgResp = await fetch(mediaUrl);
           if (imgResp.ok) {
-          const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
-            // Use chunked encoding to avoid stack overflow on large images
+            const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
             let binary = "";
             const chunkSize = 8192;
             for (let i = 0; i < imgBuffer.length; i += chunkSize) {
               binary += String.fromCharCode(...imgBuffer.subarray(i, i + chunkSize));
             }
             const base64 = btoa(binary);
-            const contentType = imgResp.headers.get("content-type") || "image/jpeg";
-            // Ensure we use a supported mime type
-            const mimeType = /\/(png|jpeg|jpg|gif|webp)/.test(contentType) ? contentType : "image/jpeg";
-            imageContent = { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } };
+            const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
+              .split(";")[0]
+              .trim()
+              .toLowerCase();
+            const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+            const supportedMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+            if (supportedMimes.has(mimeType) && base64) {
+              imageContent = {
+                type: "image_url",
+                image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" },
+              };
+            } else {
+              console.warn(`[MEDIA] Unsupported image mime for AI: ${mimeType}. Skipping image content.`);
+            }
           }
         } catch (e) {
-          console.warn(`[MEDIA] Failed to fetch image for base64, using URL fallback:`, e);
+          console.warn(`[MEDIA] Failed to prepare image for AI. Skipping image content.`, e);
         }
-        const content: any[] = [imageContent];
-        if (m.conteudo && m.conteudo !== "[image]") content.push({ type: "text", text: m.conteudo });
-        messages.push({ role, content });
+
+        if (imageContent) {
+          const content: any[] = [imageContent];
+          if (m.conteudo && m.conteudo !== "[image]") content.push({ type: "text", text: m.conteudo });
+          messages.push({ role, content });
+        } else {
+          messages.push({ role, content: imageCaption });
+        }
       } else {
         const prefix = role === "assistant" && m.remetente_nome === "Operador" ? "[Operador] " : "";
         messages.push({ role, content: prefix + m.conteudo });
