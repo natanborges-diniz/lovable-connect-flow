@@ -41,7 +41,7 @@ serve(async (req) => {
       });
     }
 
-    const { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
+    let { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
     console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
     // 1. Find or create contato
@@ -231,14 +231,29 @@ serve(async (req) => {
         inlineMediaBase64 = storedMedia?.inlineBase64 || null;
         storedMediaMimeType = storedMedia?.mimeType || storedMediaMimeType;
         console.log(`Media stored: ${storedMediaUrl}`);
+
+        // Transcribe audio if applicable
+        if (mediaType === "audio" && storedMedia?.mediaBytes) {
+          try {
+            const transcribed = await transcribeAudio(storedMedia.mediaBytes, storedMediaMimeType || "audio/ogg");
+            if (transcribed) {
+              console.log(`[AUDIO] Transcribed: "${transcribed.substring(0, 80)}..."`);
+              // Replace [audio] with transcribed text for AI processing
+              text = transcribed;
+            }
+          } catch (e) {
+            console.error("[AUDIO] Transcription failed:", e);
+          }
+        }
       } catch (e) {
         console.error("Failed to download/store media:", e);
       }
     }
 
     // 5. Save message
+    const isTranscribedAudio = mediaType === "audio" && text && text !== `[audio]`;
     const messageContent = mediaType && mediaType !== "text"
-      ? (text || `[${mediaType}]`)
+      ? (isTranscribedAudio ? `🎤 ${text}` : (text || `[${mediaType}]`))
       : text;
 
     await supabase.from("mensagens").insert({
@@ -246,12 +261,13 @@ serve(async (req) => {
       direcao: "inbound",
       conteudo: messageContent,
       remetente_nome: senderName || contato.nome,
-      tipo_conteudo: tipoConteudo,
+      tipo_conteudo: isTranscribedAudio ? "text" : tipoConteudo,
       metadata: {
         whatsapp_message_id: messageId,
         source,
         ...(storedMediaUrl && { media_url: storedMediaUrl }),
         ...(storedMediaMimeType && { mime_type: storedMediaMimeType }),
+        ...(isTranscribedAudio && { transcribed_from: "audio", original_type: "audio" }),
       },
       provedor: source,
     });
@@ -381,7 +397,7 @@ async function downloadAndStoreMedia(
     messageId: string;
     evolutionMessageKey?: any;
   }
-): Promise<{ publicUrl: string | null; inlineBase64: string | null; mimeType: string } | null> {
+): Promise<{ publicUrl: string | null; inlineBase64: string | null; mimeType: string; mediaBytes: ArrayBuffer | null } | null> {
   let mediaBytes: ArrayBuffer | null = null;
   let mimeType = opts.mediaMimeType || "application/octet-stream";
 
@@ -511,7 +527,47 @@ async function downloadAndStoreMedia(
     publicUrl: publicUrl?.publicUrl || null,
     inlineBase64: mimeType.startsWith("image/") ? bytesToBase64(mediaBytes) : null,
     mimeType,
+    mediaBytes,
   };
+}
+
+// ─── Transcribe Audio via OpenAI Whisper ───
+async function transcribeAudio(mediaBytes: ArrayBuffer, mimeType: string): Promise<string | null> {
+  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+  if (!OPENAI_API_KEY) {
+    console.warn("[AUDIO] OPENAI_API_KEY not set — skipping transcription");
+    return null;
+  }
+
+  const extMap: Record<string, string> = {
+    "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/opus": "opus",
+    "audio/aac": "aac", "audio/mp4": "m4a", "audio/wav": "wav",
+    "audio/ogg; codecs=opus": "ogg",
+  };
+  const cleanMime = mimeType.split(";")[0].trim();
+  const ext = extMap[cleanMime] || extMap[mimeType] || "ogg";
+
+  const formData = new FormData();
+  const blob = new Blob([mediaBytes], { type: cleanMime });
+  formData.append("file", blob, `audio.${ext}`);
+  formData.append("model", "whisper-1");
+  formData.append("language", "pt");
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[AUDIO] Whisper error ${res.status}: ${errText}`);
+    return null;
+  }
+
+  const data = await res.json();
+  const transcription = data.text?.trim();
+  return transcription || null;
 }
 
 // ─── Trigger Bot Lojas ───
