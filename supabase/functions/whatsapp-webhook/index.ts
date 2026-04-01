@@ -231,6 +231,20 @@ serve(async (req) => {
         inlineMediaBase64 = storedMedia?.inlineBase64 || null;
         storedMediaMimeType = storedMedia?.mimeType || storedMediaMimeType;
         console.log(`Media stored: ${storedMediaUrl}`);
+
+        // Transcribe audio if applicable
+        if (mediaType === "audio" && storedMedia?.mediaBytes) {
+          try {
+            const transcribed = await transcribeAudio(storedMedia.mediaBytes, storedMediaMimeType || "audio/ogg");
+            if (transcribed) {
+              console.log(`[AUDIO] Transcribed: "${transcribed.substring(0, 80)}..."`);
+              // Replace [audio] with transcribed text for AI processing
+              text = transcribed;
+            }
+          } catch (e) {
+            console.error("[AUDIO] Transcription failed:", e);
+          }
+        }
       } catch (e) {
         console.error("Failed to download/store media:", e);
       }
