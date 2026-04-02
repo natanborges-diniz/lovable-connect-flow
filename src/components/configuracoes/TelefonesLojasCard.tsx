@@ -345,6 +345,16 @@ function LojaForm({
           />
         </div>
       </div>
+      <div className="space-y-2">
+        <Label>Link Perfil Google</Label>
+        <Input
+          value={form.google_profile_url}
+          onChange={(e) => setForm({ ...form, google_profile_url: e.target.value })}
+          placeholder="https://maps.app.goo.gl/..."
+          type="url"
+        />
+        <p className="text-xs text-muted-foreground">URL do perfil no Google Maps/Business da loja</p>
+      </div>
       <Button type="submit" className="w-full" disabled={loading || !form.telefone || !form.nome_loja}>
         {loading ? "Salvando..." : submitLabel}
       </Button>

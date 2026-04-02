@@ -874,6 +874,7 @@ serve(async (req) => {
         if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
         if (l.telefone) parts.push(`Tel: ${l.telefone}`);
         if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
+        if (l.google_profile_url) parts.push(`Google: ${l.google_profile_url}`);
         knowledgeStr += `- ${parts.join(" | ")}\n`;
       }
     }
