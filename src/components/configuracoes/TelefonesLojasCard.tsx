@@ -166,6 +166,13 @@ export function TelefonesLojasCard() {
                   <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">{t.endereco || "—"}</TableCell>
                   <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{t.horario_abertura || "—"} – {t.horario_fechamento || "—"}</TableCell>
                   <TableCell>
+                    {t.google_profile_url ? (
+                      <a href={t.google_profile_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    ) : <span className="text-muted-foreground text-xs">—</span>}
+                  </TableCell>
+                  <TableCell>
                     <Switch
                       checked={t.ativo ?? true}
                       onCheckedChange={(v) => toggleAtivo.mutate({ id: t.id, ativo: v })}
