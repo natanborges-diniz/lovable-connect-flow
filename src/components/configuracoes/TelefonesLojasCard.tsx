@@ -277,6 +277,7 @@ function LojaForm({
           endereco: form.endereco || undefined,
           horario_abertura: form.horario_abertura || "09:00",
           horario_fechamento: form.horario_fechamento || "18:00",
+          google_profile_url: form.google_profile_url || undefined,
         });
       }}
       className="space-y-4"
