@@ -55,13 +55,27 @@ serve(async (req) => {
     let contato = contatoResult?.[0] || null;
 
     if (!contato) {
+      // Use upsert to handle race conditions with unique telefone index
       const { data: newContato, error: createErr } = await supabase
         .from("contatos")
-        .insert({ nome: senderName || phone, tipo: "cliente", telefone: phone })
+        .upsert(
+          { nome: senderName || phone, tipo: "cliente", telefone: phone },
+          { onConflict: "telefone", ignoreDuplicates: true }
+        )
         .select()
         .single();
-      if (createErr) throw createErr;
-      contato = newContato;
+      if (createErr) {
+        // If upsert still fails, try fetching again
+        const { data: retry } = await supabase
+          .from("contatos")
+          .select("*")
+          .eq("telefone", phone)
+          .limit(1);
+        contato = retry?.[0] || null;
+        if (!contato) throw createErr;
+      } else {
+        contato = newContato;
+      }
     }
 
     // 2. Find or create canal (with provedor)
