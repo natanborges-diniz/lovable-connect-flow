@@ -19,6 +19,7 @@ interface LojaFormData {
   endereco?: string;
   horario_abertura?: string;
   horario_fechamento?: string;
+  google_profile_url?: string;
 }
 
 export function TelefonesLojasCard() {
