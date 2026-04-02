@@ -45,11 +45,14 @@ serve(async (req) => {
     console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
     // 1. Find or create contato
-    let { data: contato } = await supabase
+    let { data: contatoResult } = await supabase
       .from("contatos")
       .select("*")
       .eq("telefone", phone)
-      .single();
+      .order("created_at", { ascending: true })
+      .limit(1);
+
+    let contato = contatoResult?.[0] || null;
 
     if (!contato) {
       const { data: newContato, error: createErr } = await supabase
