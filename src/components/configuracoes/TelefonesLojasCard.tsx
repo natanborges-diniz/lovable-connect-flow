@@ -219,6 +219,7 @@ export function TelefonesLojasCard() {
                 endereco: editingLoja.endereco || "",
                 horario_abertura: editingLoja.horario_abertura || "09:00",
                 horario_fechamento: editingLoja.horario_fechamento || "18:00",
+                google_profile_url: editingLoja.google_profile_url || "",
               }}
               onSubmit={(data) => updateTelefone.mutate({ id: editingLoja.id, data })}
               loading={updateTelefone.isPending}
