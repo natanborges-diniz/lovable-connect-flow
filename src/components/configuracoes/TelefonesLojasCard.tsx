@@ -261,6 +261,7 @@ function LojaForm({
       endereco: "",
       horario_abertura: "09:00",
       horario_fechamento: "18:00",
+      google_profile_url: "",
     }
   );
 
