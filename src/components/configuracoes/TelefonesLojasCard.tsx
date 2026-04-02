@@ -153,6 +153,7 @@ export function TelefonesLojasCard() {
                 <TableHead>Loja</TableHead>
                 <TableHead>Endereço</TableHead>
                 <TableHead>Horário</TableHead>
+                <TableHead>Google</TableHead>
                 <TableHead>Ativo</TableHead>
                 <TableHead className="w-20"></TableHead>
               </TableRow>
