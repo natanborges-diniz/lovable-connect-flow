@@ -102,6 +102,7 @@ export function TelefonesLojasCard() {
           endereco: data.endereco,
           horario_abertura: data.horario_abertura,
           horario_fechamento: data.horario_fechamento,
+          google_profile_url: data.google_profile_url,
         })
         .eq("id", id);
       if (error) throw error;
