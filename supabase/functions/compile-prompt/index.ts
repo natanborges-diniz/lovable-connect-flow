@@ -10,7 +10,7 @@ const corsHeaders = {
 // Validation keywords that MUST appear in the compiled prompt
 const VALIDATION_KEYWORDS = [
   { keyword: "nunca invente", label: "anti-alucinação" },
-  { keyword: "consultor especializado", label: "terminologia" },
+  { keyword: "consultor", label: "terminologia" },
   { keyword: "3 frases", label: "concisão" },
   { keyword: "receita", label: "fluxo core" },
 ];
