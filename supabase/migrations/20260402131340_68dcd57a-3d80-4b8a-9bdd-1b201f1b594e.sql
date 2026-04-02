@@ -1,0 +1,1 @@
+ALTER TABLE public.telefones_lojas ADD COLUMN google_profile_url TEXT;

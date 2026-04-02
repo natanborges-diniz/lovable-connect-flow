@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Store, Trash2, Pencil } from "lucide-react";
+import { Plus, Store, Trash2, Pencil, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,6 +19,7 @@ interface LojaFormData {
   endereco?: string;
   horario_abertura?: string;
   horario_fechamento?: string;
+  google_profile_url?: string;
 }
 
 export function TelefonesLojasCard() {
@@ -77,6 +78,7 @@ export function TelefonesLojasCard() {
           endereco: data.endereco,
           horario_abertura: data.horario_abertura,
           horario_fechamento: data.horario_fechamento,
+          google_profile_url: data.google_profile_url,
         });
       if (error) throw error;
     },
@@ -100,6 +102,7 @@ export function TelefonesLojasCard() {
           endereco: data.endereco,
           horario_abertura: data.horario_abertura,
           horario_fechamento: data.horario_fechamento,
+          google_profile_url: data.google_profile_url,
         })
         .eq("id", id);
       if (error) throw error;
@@ -150,6 +153,7 @@ export function TelefonesLojasCard() {
                 <TableHead>Loja</TableHead>
                 <TableHead>Endereço</TableHead>
                 <TableHead>Horário</TableHead>
+                <TableHead>Google</TableHead>
                 <TableHead>Ativo</TableHead>
                 <TableHead className="w-20"></TableHead>
               </TableRow>
@@ -161,6 +165,13 @@ export function TelefonesLojasCard() {
                   <TableCell className="font-medium">{t.nome_loja}</TableCell>
                   <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">{t.endereco || "—"}</TableCell>
                   <TableCell className="text-muted-foreground text-xs whitespace-nowrap">{t.horario_abertura || "—"} – {t.horario_fechamento || "—"}</TableCell>
+                  <TableCell>
+                    {t.google_profile_url ? (
+                      <a href={t.google_profile_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    ) : <span className="text-muted-foreground text-xs">—</span>}
+                  </TableCell>
                   <TableCell>
                     <Switch
                       checked={t.ativo ?? true}
@@ -208,6 +219,7 @@ export function TelefonesLojasCard() {
                 endereco: editingLoja.endereco || "",
                 horario_abertura: editingLoja.horario_abertura || "09:00",
                 horario_fechamento: editingLoja.horario_fechamento || "18:00",
+                google_profile_url: editingLoja.google_profile_url || "",
               }}
               onSubmit={(data) => updateTelefone.mutate({ id: editingLoja.id, data })}
               loading={updateTelefone.isPending}
@@ -237,6 +249,7 @@ function LojaForm({
     endereco: string;
     horario_abertura: string;
     horario_fechamento: string;
+    google_profile_url: string;
   };
 }) {
   const [form, setForm] = useState(
@@ -248,6 +261,7 @@ function LojaForm({
       endereco: "",
       horario_abertura: "09:00",
       horario_fechamento: "18:00",
+      google_profile_url: "",
     }
   );
 
@@ -263,6 +277,7 @@ function LojaForm({
           endereco: form.endereco || undefined,
           horario_abertura: form.horario_abertura || "09:00",
           horario_fechamento: form.horario_fechamento || "18:00",
+          google_profile_url: form.google_profile_url || undefined,
         });
       }}
       className="space-y-4"
@@ -329,6 +344,16 @@ function LojaForm({
             placeholder="geral"
           />
         </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Link Perfil Google</Label>
+        <Input
+          value={form.google_profile_url}
+          onChange={(e) => setForm({ ...form, google_profile_url: e.target.value })}
+          placeholder="https://maps.app.goo.gl/..."
+          type="url"
+        />
+        <p className="text-xs text-muted-foreground">URL do perfil no Google Maps/Business da loja</p>
       </div>
       <Button type="submit" className="w-full" disabled={loading || !form.telefone || !form.nome_loja}>
         {loading ? "Salvando..." : submitLabel}

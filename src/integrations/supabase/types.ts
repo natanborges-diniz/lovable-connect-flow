@@ -1109,6 +1109,7 @@ export type Database = {
           created_at: string | null
           departamento: string | null
           endereco: string | null
+          google_profile_url: string | null
           horario_abertura: string | null
           horario_fechamento: string | null
           id: string
@@ -1121,6 +1122,7 @@ export type Database = {
           created_at?: string | null
           departamento?: string | null
           endereco?: string | null
+          google_profile_url?: string | null
           horario_abertura?: string | null
           horario_fechamento?: string | null
           id?: string
@@ -1133,6 +1135,7 @@ export type Database = {
           created_at?: string | null
           departamento?: string | null
           endereco?: string | null
+          google_profile_url?: string | null
           horario_abertura?: string | null
           horario_fechamento?: string | null
           id?: string

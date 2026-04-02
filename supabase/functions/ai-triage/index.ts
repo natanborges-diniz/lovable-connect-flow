@@ -826,7 +826,7 @@ serve(async (req) => {
         .limit(60),
       supabase.from("pipeline_colunas").select("id, nome").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
-      supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento").eq("ativo", true),
+      supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
       supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
     ]);
 
@@ -874,6 +874,7 @@ serve(async (req) => {
         if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
         if (l.telefone) parts.push(`Tel: ${l.telefone}`);
         if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
+        if (l.google_profile_url) parts.push(`Google: ${l.google_profile_url}`);
         knowledgeStr += `- ${parts.join(" | ")}\n`;
       }
     }
