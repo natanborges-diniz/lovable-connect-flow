@@ -249,6 +249,7 @@ function LojaForm({
     endereco: string;
     horario_abertura: string;
     horario_fechamento: string;
+    google_profile_url: string;
   };
 }) {
   const [form, setForm] = useState(
