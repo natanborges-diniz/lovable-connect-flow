@@ -1525,12 +1525,20 @@ serve(async (req) => {
     }
 
     if (!resposta) {
-      const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
-      resposta = fallback.resposta;
-      intencao = fallback.intencao;
-      pipeline_coluna = fallback.pipeline_coluna;
-      precisa_humano = fallback.precisa_humano;
-      validatorFlags.push("empty_response_deterministic");
+      // If image context with no response, use dedicated image fallback
+      if (isImageContext) {
+        resposta = imageContextFallback(recentOutbound);
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = "Orçamento";
+        validatorFlags.push("empty_response_image_fallback");
+      } else {
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+        resposta = fallback.resposta;
+        intencao = fallback.intencao;
+        pipeline_coluna = fallback.pipeline_coluna;
+        precisa_humano = fallback.precisa_humano;
+        validatorFlags.push("empty_response_deterministic");
+      }
     }
 
     // ── 10. SEND RESPONSE ──
