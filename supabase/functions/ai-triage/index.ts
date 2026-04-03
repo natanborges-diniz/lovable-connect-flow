@@ -495,6 +495,7 @@ function buildSystemPromptFromCompiled(opts: {
   regrasProibidas: { regra: string; categoria: string }[];
   knowledge: string;
   agendamentoCtx: string;
+  receitaCtx: string;
   lojasStr: string;
   sentTopics: string[];
   colunasNomes: string;
