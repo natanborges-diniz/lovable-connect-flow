@@ -325,7 +325,7 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "interpretar_receita",
-      description: "Extrai dados de foto/PDF de receita oftalmológica. Retorne NÚMEROS (não strings). Se ilegível, use null. NÃO invente valores.",
+      description: "Extrai dados de foto/PDF de receita oftalmológica. Retorne NÚMEROS (não strings). Se ilegível, use null. NÃO invente valores. Infira o 'label' da pessoa a quem pertence a receita pelo contexto da conversa (ex: 'cliente', 'filho', 'mãe').",
       parameters: {
         type: "object",
         properties: {
