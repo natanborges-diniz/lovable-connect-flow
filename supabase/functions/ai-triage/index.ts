@@ -325,7 +325,7 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "interpretar_receita",
-      description: "Extrai dados de foto/PDF de receita oftalmológica. Retorne NÚMEROS (não strings). Se ilegível, use null. NÃO invente valores.",
+      description: "Extrai dados de foto/PDF de receita oftalmológica. Retorne NÚMEROS (não strings). Se ilegível, use null. NÃO invente valores. Infira o 'label' da pessoa a quem pertence a receita pelo contexto da conversa (ex: 'cliente', 'filho', 'mãe').",
       parameters: {
         type: "object",
         properties: {
@@ -361,6 +361,7 @@ const TOOLS = [
           confidence: { type: "number", description: "Confiança na leitura de 0.0 a 1.0" },
           missing_fields: { type: "array", items: { type: "string" }, description: "Campos ilegíveis ou ausentes" },
           raw_notes: { type: "array", items: { type: "string" }, description: "Observações do médico" },
+          label: { type: "string", description: "Identificador da pessoa dona da receita (ex: 'cliente', 'filho', 'mãe', 'pai'). Infira pelo contexto da conversa." },
           resposta: { type: "string", description: "Mensagem confirmando dados extraídos e próximos passos." },
         },
         required: ["eyes", "confidence", "resposta"],
@@ -408,10 +409,11 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "consultar_lentes",
-      description: "Busca lentes compatíveis com a receita do cliente. Use SOMENTE quando o cliente demonstrar interesse em orçamento/preço/opções de lentes APÓS a receita já ter sido interpretada. NÃO use logo após interpretar_receita — espere o cliente pedir.",
+      description: "Busca lentes compatíveis com a receita do cliente. Use SOMENTE quando o cliente demonstrar interesse em orçamento/preço/opções de lentes APÓS a receita já ter sido interpretada. NÃO use logo após interpretar_receita — espere o cliente pedir. Se o contexto indicar que a receita JÁ FOI INTERPRETADA (seção RECEITAS JÁ INTERPRETADAS), use esta tool diretamente — NÃO peça a receita novamente.",
       parameters: {
         type: "object",
         properties: {
+          receita_label: { type: "string", description: "Label da receita a usar (ex: 'cliente', 'filho', 'mãe'). Se não especificado, usa a mais recente. Se houver mais de uma receita, pergunte ao cliente qual usar ANTES de chamar esta tool." },
           filtro_blue: { type: "boolean", description: "Se o cliente mencionou filtro de luz azul" },
           filtro_photo: { type: "boolean", description: "Se o cliente mencionou lente fotossensível/transitions" },
           preferencia_marca: { type: "string", description: "Marca preferida se mencionada (HOYA, ZEISS, DNZ)" },
@@ -494,6 +496,7 @@ function buildSystemPromptFromCompiled(opts: {
   regrasProibidas: { regra: string; categoria: string }[];
   knowledge: string;
   agendamentoCtx: string;
+  receitaCtx: string;
   lojasStr: string;
   sentTopics: string[];
   colunasNomes: string;
@@ -518,6 +521,11 @@ function buildSystemPromptFromCompiled(opts: {
   // Inject prohibition block even if slot was missing (safety)
   if (!opts.compiledPrompt.includes("{{PROIBICOES}}") && opts.regrasProibidas.length > 0) {
     s.push(buildProhibitionsBlock(opts.regrasProibidas));
+  }
+
+  // Inject prescription context
+  if (opts.receitaCtx) {
+    s.push(opts.receitaCtx);
   }
 
   if (opts.sentTopics.length > 0) {
@@ -860,7 +868,7 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
+    const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes, contatoMetaRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_compilado").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
@@ -875,6 +883,7 @@ serve(async (req) => {
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
       supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
+      supabase.from("contatos").select("metadata").eq("id", contatoId).single(),
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
@@ -889,6 +898,16 @@ serve(async (req) => {
     const setores = setRes.data || [];
     const lojas = lojasRes.data || [];
     const agendamentosAtivos = agendRes.data || [];
+    const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
+
+    // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
+    let receitas: any[] = [];
+    if (Array.isArray(contatoMeta.receitas) && contatoMeta.receitas.length > 0) {
+      receitas = contatoMeta.receitas;
+    } else if (contatoMeta.ultima_receita && contatoMeta.ultima_receita.eyes) {
+      // Legacy migration: convert single object to array
+      receitas = [{ ...contatoMeta.ultima_receita, label: "cliente" }];
+    }
 
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
@@ -954,6 +973,35 @@ serve(async (req) => {
       }
     }
 
+    // ── 5.05 INJECT PRESCRIPTION CONTEXT ──
+    let receitaCtx = "";
+    if (receitas.length > 0) {
+      receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
+      for (let i = 0; i < receitas.length; i++) {
+        const rx = receitas[i];
+        const label = rx.label || `receita ${i + 1}`;
+        const dataLeitura = rx.data_leitura ? new Date(rx.data_leitura).toLocaleDateString("pt-BR") : "—";
+        const rxTypeLabel = rx.rx_type === "progressive" ? "Progressiva" : rx.rx_type === "single_vision" ? "Visão simples" : rx.rx_type || "—";
+        const conf = typeof rx.confidence === "number" ? `${(rx.confidence * 100).toFixed(0)}%` : "—";
+        const od = rx.eyes?.od || {};
+        const oe = rx.eyes?.oe || {};
+        const formatEye = (eye: any, name: string) => {
+          const parts = [`${name}: esf ${eye.sphere ?? "?"} cil ${eye.cylinder ?? "?"} eixo ${eye.axis ?? "?"}`];
+          if (typeof eye.add === "number") parts.push(`add +${eye.add}`);
+          return parts.join(" ");
+        };
+        receitaCtx += `\n## Receita ${i + 1} (${label}) — lida em ${dataLeitura}\n`;
+        receitaCtx += `Tipo: ${rxTypeLabel} | Confiança: ${conf}\n`;
+        receitaCtx += `${formatEye(od, "OD")}\n`;
+        receitaCtx += `${formatEye(oe, "OE")}\n`;
+      }
+      receitaCtx += `\n⚠️ NÃO peça receita novamente. O cliente JÁ enviou. Use consultar_lentes referenciando a receita correta.`;
+      if (receitas.length > 1) {
+        receitaCtx += `\nQuando o cliente pedir orçamento, pergunte "Para qual receita?" antes de chamar consultar_lentes.`;
+      }
+      console.log(`[RX-CTX] Injecting ${receitas.length} prescription(s) into context`);
+    }
+
     // ── 5.1 DECIDE: compiled prompt vs legacy ──
     let systemPrompt: string;
 
@@ -977,6 +1025,7 @@ serve(async (req) => {
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
         knowledge: knowledgeStr,
         agendamentoCtx,
+        receitaCtx,
         lojasStr,
         sentTopics,
         colunasNomes: colunas.map((c: any) => c.nome).join(", "),
@@ -1007,7 +1056,7 @@ serve(async (req) => {
 
       systemPrompt = buildSystemPrompt({
         businessRules,
-        knowledge: knowledgeStr + agendamentoCtx,
+        knowledge: knowledgeStr + agendamentoCtx + receitaCtx,
         examples: examplesStr,
         antiExamples: antiStr,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
@@ -1256,11 +1305,28 @@ serve(async (req) => {
           data_leitura: new Date().toISOString(),
         };
 
-        // Save to contact metadata
+        // Save to contact metadata — append to receitas[] array (max 5, FIFO)
         const { data: contatoData } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
         const existingMeta = (contatoData?.metadata as Record<string, any>) || {};
+        
+        // Normalize existing receitas
+        let existingReceitas: any[] = [];
+        if (Array.isArray(existingMeta.receitas)) {
+          existingReceitas = existingMeta.receitas;
+        } else if (existingMeta.ultima_receita && existingMeta.ultima_receita.eyes) {
+          existingReceitas = [{ ...existingMeta.ultima_receita, label: "cliente" }];
+        }
+        
+        // Add label from model args or infer
+        const rxLabel = args.label || (existingReceitas.length === 0 ? "cliente" : `pessoa_${existingReceitas.length + 1}`);
+        const rxWithLabel = { ...rxData, label: rxLabel };
+        
+        // Append and cap at 5 (FIFO)
+        existingReceitas.push(rxWithLabel);
+        if (existingReceitas.length > 5) existingReceitas = existingReceitas.slice(-5);
+        
         await supabase.from("contatos").update({
-          metadata: { ...existingMeta, ultima_receita: rxData },
+          metadata: { ...existingMeta, receitas: existingReceitas, ultima_receita: rxData },
         }).eq("id", contatoId);
 
         await supabase.from("eventos_crm").insert({
@@ -1284,9 +1350,28 @@ serve(async (req) => {
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
 
-        // Load saved prescription from contact metadata
+        // Load saved prescriptions from contact metadata
         const { data: contatoRx } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
-        const rxMeta = (contatoRx?.metadata as Record<string, any>)?.ultima_receita;
+        const contatoRxMeta = (contatoRx?.metadata as Record<string, any>) || {};
+        
+        // Resolve which prescription to use
+        let allRx: any[] = [];
+        if (Array.isArray(contatoRxMeta.receitas) && contatoRxMeta.receitas.length > 0) {
+          allRx = contatoRxMeta.receitas;
+        } else if (contatoRxMeta.ultima_receita && contatoRxMeta.ultima_receita.eyes) {
+          allRx = [{ ...contatoRxMeta.ultima_receita, label: "cliente" }];
+        }
+        
+        // Select by label or use most recent
+        let rxMeta: any = null;
+        if (allRx.length > 0) {
+          if (args.receita_label) {
+            rxMeta = allRx.find((r: any) => norm(r.label || "") === norm(args.receita_label)) || allRx[allRx.length - 1];
+          } else {
+            rxMeta = allRx[allRx.length - 1]; // Most recent
+          }
+          console.log(`[QUOTE] Using prescription label="${rxMeta?.label}" from ${allRx.length} available`);
+        }
 
         if (!rxMeta || !rxMeta.eyes) {
           resposta = args.resposta_fallback || "Ainda não tenho sua receita. Me envia uma foto da receita que eu já busco as melhores opções pra você! 📸";
