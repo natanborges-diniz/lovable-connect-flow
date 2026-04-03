@@ -1349,9 +1349,28 @@ serve(async (req) => {
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
 
-        // Load saved prescription from contact metadata
+        // Load saved prescriptions from contact metadata
         const { data: contatoRx } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
-        const rxMeta = (contatoRx?.metadata as Record<string, any>)?.ultima_receita;
+        const contatoRxMeta = (contatoRx?.metadata as Record<string, any>) || {};
+        
+        // Resolve which prescription to use
+        let allRx: any[] = [];
+        if (Array.isArray(contatoRxMeta.receitas) && contatoRxMeta.receitas.length > 0) {
+          allRx = contatoRxMeta.receitas;
+        } else if (contatoRxMeta.ultima_receita && contatoRxMeta.ultima_receita.eyes) {
+          allRx = [{ ...contatoRxMeta.ultima_receita, label: "cliente" }];
+        }
+        
+        // Select by label or use most recent
+        let rxMeta: any = null;
+        if (allRx.length > 0) {
+          if (args.receita_label) {
+            rxMeta = allRx.find((r: any) => norm(r.label || "") === norm(args.receita_label)) || allRx[allRx.length - 1];
+          } else {
+            rxMeta = allRx[allRx.length - 1]; // Most recent
+          }
+          console.log(`[QUOTE] Using prescription label="${rxMeta?.label}" from ${allRx.length} available`);
+        }
 
         if (!rxMeta || !rxMeta.eyes) {
           resposta = args.resposta_fallback || "Ainda não tenho sua receita. Me envia uma foto da receita que eu já busco as melhores opções pra você! 📸";
