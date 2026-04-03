@@ -891,6 +891,16 @@ serve(async (req) => {
     const setores = setRes.data || [];
     const lojas = lojasRes.data || [];
     const agendamentosAtivos = agendRes.data || [];
+    const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
+
+    // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
+    let receitas: any[] = [];
+    if (Array.isArray(contatoMeta.receitas) && contatoMeta.receitas.length > 0) {
+      receitas = contatoMeta.receitas;
+    } else if (contatoMeta.ultima_receita && contatoMeta.ultima_receita.eyes) {
+      // Legacy migration: convert single object to array
+      receitas = [{ ...contatoMeta.ultima_receita, label: "cliente" }];
+    }
 
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
