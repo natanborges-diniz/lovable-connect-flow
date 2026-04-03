@@ -121,7 +121,7 @@ ${feedbacks.length > 0
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         temperature: 0.3,
-        max_completion_tokens: 4000,
+        max_completion_tokens: 8000,
         messages: [
           { role: "system", content: "Você é um compilador de prompts. Retorne APENAS o prompt compilado, sem explicações." },
           { role: "user", content: metaPrompt },
@@ -142,19 +142,26 @@ ${feedbacks.length > 0
       throw new Error("AI returned empty response");
     }
 
-    // 4. Validate compiled prompt
-    const validation = validateCompiledPrompt(compiledPrompt);
+    // 4. Validate compiled prompt — auto-append missing critical rules instead of failing
+    let finalPrompt = compiledPrompt;
+    const validation = validateCompiledPrompt(finalPrompt);
     if (!validation.valid) {
-      console.warn(`[COMPILE] Validation failed — missing: ${validation.missing.join(", ")}`);
-      return new Response(
-        JSON.stringify({ 
-          error: "Validação falhou", 
-          missing: validation.missing,
-          prompt_gerado: compiledPrompt,
-          message: `O prompt compilado não contém termos obrigatórios: ${validation.missing.join(", ")}. Revise os fontes e tente novamente.`
-        }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      console.warn(`[COMPILE] Auto-appending missing rules: ${validation.missing.join(", ")}`);
+      const CRITICAL_RULES_BLOCK = `\n\n# ⚠️ REGRAS CRÍTICAS DE SEGURANÇA\n\n- NUNCA invente informações, preços, prazos ou dados que não estejam na base de conhecimento\n- Você é um consultor especializado — nunca aja como robô genérico\n- Respostas com no máximo 3 frases — concisão é obrigatória\n- Sempre seguir o fluxo de receita antes de gerar orçamento`;
+      finalPrompt = finalPrompt + CRITICAL_RULES_BLOCK;
+      
+      // Re-validate after append
+      const revalidation = validateCompiledPrompt(finalPrompt);
+      if (!revalidation.valid) {
+        console.error(`[COMPILE] Still missing after auto-append: ${revalidation.missing.join(", ")}`);
+        return new Response(
+          JSON.stringify({ 
+            error: "Validação falhou mesmo após auto-correção", 
+            missing: revalidation.missing,
+          }),
+          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // 5. Save current compiled as previous (for rollback)
@@ -190,7 +197,7 @@ ${feedbacks.length > 0
 
     // 6. Save compiled prompt and metadata
     await Promise.all([
-      upsertConfig(supabase, "prompt_compilado", compiledPrompt),
+      upsertConfig(supabase, "prompt_compilado", finalPrompt),
       upsertConfig(supabase, "prompt_compilado_at", new Date().toISOString()),
       upsertConfig(supabase, "prompt_compilado_fontes", JSON.stringify({
         exemplos: exemplos.length,
@@ -199,14 +206,14 @@ ${feedbacks.length > 0
       })),
     ]);
 
-    console.log(`[COMPILE] Success: ${compiledPrompt.length}ch compiled from ${promptBase.length}ch base + ${exemplos.length} exemplos + ${feedbacks.length} feedbacks`);
+    console.log(`[COMPILE] Success: ${finalPrompt.length}ch compiled from ${promptBase.length}ch base + ${exemplos.length} exemplos + ${feedbacks.length} feedbacks`);
 
     return new Response(
       JSON.stringify({
         status: "ok",
-        compiled_length: compiledPrompt.length,
+        compiled_length: finalPrompt.length,
         fontes: { exemplos: exemplos.length, feedbacks: feedbacks.length },
-        prompt_compilado: compiledPrompt,
+        prompt_compilado: finalPrompt,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
