@@ -197,7 +197,7 @@ ${feedbacks.length > 0
 
     // 6. Save compiled prompt and metadata
     await Promise.all([
-      upsertConfig(supabase, "prompt_compilado", compiledPrompt),
+      upsertConfig(supabase, "prompt_compilado", finalPrompt),
       upsertConfig(supabase, "prompt_compilado_at", new Date().toISOString()),
       upsertConfig(supabase, "prompt_compilado_fontes", JSON.stringify({
         exemplos: exemplos.length,
@@ -206,14 +206,14 @@ ${feedbacks.length > 0
       })),
     ]);
 
-    console.log(`[COMPILE] Success: ${compiledPrompt.length}ch compiled from ${promptBase.length}ch base + ${exemplos.length} exemplos + ${feedbacks.length} feedbacks`);
+    console.log(`[COMPILE] Success: ${finalPrompt.length}ch compiled from ${promptBase.length}ch base + ${exemplos.length} exemplos + ${feedbacks.length} feedbacks`);
 
     return new Response(
       JSON.stringify({
         status: "ok",
-        compiled_length: compiledPrompt.length,
+        compiled_length: finalPrompt.length,
         fontes: { exemplos: exemplos.length, feedbacks: feedbacks.length },
-        prompt_compilado: compiledPrompt,
+        prompt_compilado: finalPrompt,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
