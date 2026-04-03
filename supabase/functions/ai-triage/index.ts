@@ -1417,13 +1417,28 @@ serve(async (req) => {
     if (resposta && !precisa_humano) {
       const validation = validateResponse(resposta, recentOutbound);
 
-    if (!validation.valid) {
-        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — attempting retry`);
+      if (!validation.valid) {
+        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext}`);
         validatorFlags.push(`rejected:${validation.reason}`);
 
-        // If the rejection is only "no question" but the response has real content (>40 chars),
-        // append a contextual question instead of discarding the entire response
-        if (validation.reason.includes("no question or action") && resposta.length > 40) {
+        // IMAGE CONTEXT: NEVER use generic fallback — always use image-specific response
+        if (isImageContext) {
+          // If AI produced a response about the image but it was rejected for similarity/blacklist,
+          // keep it if it mentions receita/imagem, otherwise use image fallback
+          const mentionsImage = /receita|imagem|foto|envio|document|lente|grau/i.test(resposta);
+          if (mentionsImage && resposta.length > 30) {
+            // Append a contextual question
+            resposta = resposta.trimEnd().replace(/[.!]$/, "") + ". Quer que eu analise pra você?";
+            validatorFlags.push("image_context_appended");
+            console.log("[VALIDATOR] Image context — kept AI response with appended question");
+          } else {
+            resposta = imageContextFallback(recentOutbound);
+            intencao = "receita_oftalmologica";
+            pipeline_coluna = "Orçamento";
+            validatorFlags.push("image_context_fallback");
+            console.log("[VALIDATOR] Image context — using dedicated image fallback");
+          }
+        } else if (validation.reason.includes("no question or action") && resposta.length > 40) {
           const appendPool = [
             "Quer que eu siga por aqui?",
             "Posso te ajudar com mais alguma coisa?",
@@ -1464,13 +1479,11 @@ serve(async (req) => {
               validatorFlags.push("retry_accepted");
               console.log("[VALIDATOR] Retry accepted");
             } else {
-              // Keep the original AI response + append question rather than using a generic fallback
               if (retryResposta && retryResposta.length > 30) {
                 resposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". O que precisa?";
                 validatorFlags.push("retry_appended_question");
                 console.log("[VALIDATOR] Retry response kept with appended question");
               } else {
-                // Only now use fallback pool as last resort
                 const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
                   ? null
                   : pickFallback(recentOutbound);
@@ -1479,7 +1492,7 @@ serve(async (req) => {
                   validatorFlags.push("deterministic_fallback");
                   console.log("[VALIDATOR] Using rotating fallback");
                 } else {
-                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
+                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
                   resposta = contextualFallback.resposta;
                   intencao = contextualFallback.intencao;
                   pipeline_coluna = contextualFallback.pipeline_coluna;
@@ -1497,7 +1510,7 @@ serve(async (req) => {
               resposta = fb;
               validatorFlags.push("deterministic_fallback");
             } else {
-              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
+              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
               resposta = contextualFallback.resposta;
               intencao = contextualFallback.intencao;
               pipeline_coluna = contextualFallback.pipeline_coluna;
