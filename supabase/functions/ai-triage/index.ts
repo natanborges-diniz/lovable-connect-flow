@@ -1392,11 +1392,18 @@ serve(async (req) => {
             const maxAdd = addValues.length > 0 ? Math.max(...addValues) : null;
             const hasAddition = addValues.length > 0;
 
+            // Map rxType to compatible DB categories
+            const categoryMap: Record<string, string[]> = {
+              single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids"],
+              progressive: ["progressive", "occupational"],
+            };
+            const categories = categoryMap[rxType] || [rxType];
+
             let query = supabase
               .from("pricing_table_lentes")
               .select("*")
               .eq("active", true)
-              .eq("category", rxType)
+              .in("category", categories)
               .gt("price_brl", 0)
               .lte("sphere_min", worstSphere)
               .gte("sphere_max", worstSphere)
