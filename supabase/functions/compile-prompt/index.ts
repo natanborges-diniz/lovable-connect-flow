@@ -121,7 +121,7 @@ ${feedbacks.length > 0
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         temperature: 0.3,
-        max_completion_tokens: 4000,
+        max_completion_tokens: 8000,
         messages: [
           { role: "system", content: "Você é um compilador de prompts. Retorne APENAS o prompt compilado, sem explicações." },
           { role: "user", content: metaPrompt },
