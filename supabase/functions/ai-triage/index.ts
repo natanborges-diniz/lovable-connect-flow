@@ -1024,6 +1024,7 @@ serve(async (req) => {
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
         knowledge: knowledgeStr,
         agendamentoCtx,
+        receitaCtx,
         lojasStr,
         sentTopics,
         colunasNomes: colunas.map((c: any) => c.nome).join(", "),
