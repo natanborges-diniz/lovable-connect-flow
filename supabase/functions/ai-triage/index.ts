@@ -1610,6 +1610,7 @@ serve(async (req) => {
         history_range: historyRange,
         validator_flags: validatorFlags,
         topics_blocked: sentTopics,
+        is_image_context: isImageContext,
       },
       referencia_tipo: "atendimento",
       referencia_id: atendimento_id,
