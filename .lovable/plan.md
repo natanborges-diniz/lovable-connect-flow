@@ -1,71 +1,46 @@
 
 
-# Correção: Integrar categorias ESSILOR no Quote Engine
+# Integrar ESSILOR nas Recomendações do Assistente
 
 ## Problema
 
-O Quote Engine usa `.eq("category", rxType)` onde `rxType` é sempre `"progressive"` ou `"single_vision"`. As lentes ESSILOR usam categorias mais granulares (`single_vision_digital`, `single_vision_stock`, `occupational`, etc.) que nunca são matcheadas.
+A estratégia comercial atual prioriza apenas DNZ → DMAX → HOYA → ZEISS. ESSILOR não aparece na ordem de prioridade, não tem regra de posicionamento, e não existe nenhum exemplo de conversa para quando o cliente pede Varilux ou Essilor.
 
-**Resultado**: 15 das 34 lentes ESSILOR nunca aparecem em orçamentos.
+## O que muda
 
-## Solução
+### 1. Atualizar Estratégia Comercial
 
-Substituir o filtro exato `.eq("category", rxType)` por um filtro que agrupe categorias equivalentes usando `.in("category", [...])`.
+Atualizar o registro `Estrategia Comercial de Lentes` em `conhecimento_ia` para incluir ESSILOR:
 
-### Mapeamento de categorias
+- **Regra ESSILOR**: "usar como referência premium ao lado de HOYA — destacar Varilux como líder mundial em progressivas e Eyezen para visão simples digital"
+- **Ordem de prioridade**: DNZ → DMAX → HOYA / ESSILOR → ZEISS
+- **Regra de progressivas**: quando cliente precisa de multifocal, mencionar Varilux como opção premium naturalmente (são as progressivas mais usadas no mundo)
+- **Regra de visão simples digital**: posicionar Eyezen como alternativa premium à visão simples convencional
 
-```text
-rxType do interpretador  →  categorias aceitas no banco
-─────────────────────────────────────────────────────────
-"single_vision"          →  single_vision, single_vision_digital,
-                             single_vision_stock,
-                             single_vision_digital_kids
-"progressive"            →  progressive, occupational
-```
+### 2. Adicionar exemplos de conversa (ia_exemplos)
 
-Categorias especiais (`myopia_control`, `special_drive`, `special_sport`) podem ser incluídas condicionalmente — por exemplo, `myopia_control` só quando o label da receita indica criança, e `special_drive` / `special_sport` quando o cliente mencionar interesse específico.
+| Categoria | Pergunta | Resposta ideal |
+|-----------|----------|----------------|
+| `cliente_marca` | "quero Essilor" | "Excelente escolha! A Essilor é referência mundial em lentes 😊 Temos toda a linha Varilux para multifocal e Eyezen para visão simples. Quer que eu mostre as opções compatíveis com sua receita?" |
+| `cliente_marca` | "quero Varilux" | "Varilux é a multifocal mais usada no mundo, ótima escolha 😊 Temos desde a Liberty até a XR Pro. Quer que eu compare as opções pro seu grau?" |
+| `cliente_marca` | "qual a melhor lente multifocal?" | "As Varilux da Essilor são as progressivas mais utilizadas no mundo. Temos também a linha Hoya que é excelente. Quer que eu monte um comparativo com seu grau?" |
+| `orcamento` | "quero a melhor lente possível" | "Para o melhor em tecnologia, temos Varilux XR Pro (Essilor) e Hoyalux iD MySelf (Hoya) — ambas são top de linha mundial. Quer que eu compare as duas pro seu grau?" |
 
-### Mudança no código
+### 3. Recompilar prompt
 
-**Arquivo**: `supabase/functions/ai-triage/index.ts` (~linhas 1395-1404)
+Após inserir os dados, disparar recompilação para que o `prompt_compilado` absorva as novas regras e exemplos.
 
-De:
-```typescript
-.eq("category", rxType)
-```
+## Arquivos/tabelas modificados
 
-Para:
-```typescript
-// Map rxType to compatible categories
-const categoryMap: Record<string, string[]> = {
-  single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids"],
-  progressive: ["progressive", "occupational"],
-};
-const categories = categoryMap[rxType] || [rxType];
-
-// Use .in() instead of .eq()
-query = supabase
-  .from("pricing_table_lentes")
-  .select("*")
-  .eq("active", true)
-  .in("category", categories)
-  ...
-```
-
-### Categorias especiais (fase 2, opcional)
-
-Para `myopia_control`, `special_drive` e `special_sport`, adicionar um parâmetro opcional na tool `consultar_lentes`:
-- `categoria_especial`: permite a IA incluir essas categorias quando o contexto justificar (ex: "meu filho de 8 anos" → incluir `myopia_control`; "óculos pra dirigir" → incluir `special_drive`)
-
-## Arquivo modificado
-
-| Arquivo | Mudança |
-|---------|---------|
-| `supabase/functions/ai-triage/index.ts` | Substituir `.eq("category")` por `.in("category")` com mapeamento |
+| Local | Mudança |
+|-------|---------|
+| `conhecimento_ia` (update) | Estratégia comercial com ESSILOR |
+| `ia_exemplos` (insert) | 4 novos exemplos de conversa |
+| Edge function `compile-prompt` | Disparar recompilação (invoke) |
 
 ## Resultado
 
-- 34/34 lentes ESSILOR passam a ser elegíveis para orçamento
-- Lentes DNZ, DMAX, HOYA, ZEISS continuam funcionando normalmente
-- Orçamentos ficam mais competitivos com mais opções de faixa de preço
+- Gael passa a recomendar ESSILOR/Varilux naturalmente em contexto de progressivas premium
+- Cliente que pede "Essilor", "Varilux" ou "melhor lente" recebe resposta adequada
+- Posicionamento HOYA e ESSILOR lado a lado como premium, sem favorecer uma sobre a outra
 
