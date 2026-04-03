@@ -1,98 +1,68 @@
 
 
-# Correção: Memória de Receitas Dinâmica e Multi-Pessoa
+# Correção: Preencher limites técnicos das lentes DNZ e DMAX
 
 ## Problema
 
-Atualmente o sistema tem 3 falhas críticas:
+31 lentes (11 DNZ + 20 DMAX) têm todos os campos de limites técnicos (`sphere_min`, `sphere_max`, `cylinder_min`, `cylinder_max`, `add_min`, `add_max`) como NULL. A query do Quote Engine compara esses campos com o grau da receita — comparação com NULL retorna falso no PostgreSQL — e essas lentes nunca aparecem nos orçamentos.
 
-1. **Sobrescrita**: `ultima_receita` é um campo único -- se o cliente manda receita dele e do filho, a segunda sobrescreve a primeira
-2. **Amnésia**: Os dados da receita salva NUNCA são injetados no prompt das mensagens seguintes -- a IA "esquece" que já leu a receita
-3. **Sem contexto de pessoa**: Não distingue "receita do cliente" vs "receita do filho"
+A query no código está **correta** — o problema é nos dados.
 
 ## Solução
 
-### 1. Mudar estrutura de armazenamento (em `contatos.metadata`)
+Uma única migração SQL para preencher os limites técnicos reais de cada lente, usando como referência os catálogos ópticos padrão e os ranges já cadastrados para HOYA/ZEISS.
 
-De:
-```json
-{ "ultima_receita": { rx_type, eyes, ... } }
+### Regras de preenchimento por índice de refração
+
+| Índice | Esférico (min/max) | Cilíndrico (min/max) |
+|--------|-------------------|---------------------|
+| 1.50 | -6.00 / +6.00 | -4.00 / 0.00 |
+| 1.56 | -8.00 / +6.00 | -4.00 / 0.00 |
+| 1.59 | -10.00 / +6.00 | -4.00 / 0.00 |
+| 1.61 | -10.00 / +6.00 | -4.00 / 0.00 |
+| 1.67 | -13.00 / +7.50 | -4.00 / 0.00 |
+| 1.74 | -16.00 / +8.00 | -4.00 / 0.00 |
+
+Para progressivas e ocupacionais: `add_min = 0.75`, `add_max = 3.50`.
+Para visão simples: `add_min` e `add_max` permanecem NULL (não aplicável).
+
+### Lentes afetadas (31 registros)
+
+**DNZ (11)**:
+- 4x progressivas 1.50 → esf -6/+6, cil -4/0, add 0.75/3.50
+- 2x progressivas 1.67 → esf -13/+7.50, cil -4/0, add 0.75/3.50
+- 1x progressiva 1.74 → esf -16/+8, cil -4/0, add 0.75/3.50
+- 1x progressiva 1.50 UV+ → esf -6/+6, cil -4/0, add 0.75/3.50
+- 2x single_vision 1.67 → esf -13/+7.50, cil -4/0
+- (1x DNZ Pro UV+ 1.50 UV+ progressiva)
+
+**DMAX (20)**:
+- 4x "Progressivas Acabadas" 1.56 → esf -8/+6, cil -4/0, add 0.75/3.50
+- 7x Infinity (1.56, 1.59, 1.61, 1.67) → ranges conforme índice
+- 5x Top (1.56, 1.59, 1.61, 1.67) → ranges conforme índice
+- 3x Drive ocupacional (1.56, 1.59) → ranges conforme índice, add 0.75/3.50
+
+### Implementação
+
+**Arquivo**: Migração SQL (via ferramenta de migração)
+
+O SQL fará UPDATE por `brand` e `index_name`, aplicando os ranges corretos. Exemplo:
+
+```sql
+UPDATE pricing_table_lentes
+SET sphere_min = -6, sphere_max = 6, cylinder_min = -4, cylinder_max = 0,
+    add_min = 0.75, add_max = 3.50
+WHERE brand = 'DNZ' AND index_name = '1.50'
+  AND category = 'progressive' AND sphere_min IS NULL;
 ```
 
-Para:
-```json
-{
-  "receitas": [
-    {
-      "label": "cliente",
-      "rx_type": "progressive",
-      "eyes": { "od": {...}, "oe": {...} },
-      "confidence": 0.92,
-      "data_leitura": "2026-04-03T19:20:00Z"
-    },
-    {
-      "label": "filho",
-      "rx_type": "single_vision",
-      "eyes": { "od": {...}, "oe": {...} },
-      "confidence": 0.88,
-      "data_leitura": "2026-04-03T19:25:00Z"
-    }
-  ]
-}
-```
+Cada combinação (brand + index + category) terá seu UPDATE específico.
 
-Cada nova receita é adicionada ao array (append), não sobrescreve. Limite de 5 receitas por contato (FIFO).
-
-### 2. Injetar contexto de receitas no system prompt
-
-No bloco de carregamento paralelo (~linha 863), adicionar fetch de `contatos.metadata` do contato atual. Após construir o prompt (~linha 955), injetar bloco dinâmico:
-
-```
-# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA
-
-## Receita 1 (cliente) — lida em 03/04/2026
-Tipo: Progressiva | Confiança: 92%
-OD: esf -2.25 cil -0.75 eixo 180 add +2.00
-OE: esf -1.75 cil -0.50 eixo 175 add +2.00
-
-## Receita 2 (filho) — lida em 03/04/2026
-Tipo: Visão simples | Confiança: 88%
-OD: esf -3.00 cil -1.25 eixo 10
-OE: esf -2.50 cil -0.75 eixo 170
-
-⚠️ NÃO peça receita novamente. Use consultar_lentes referenciando a receita correta.
-Quando o cliente pedir orçamento, pergunte "Para qual receita?" se houver mais de uma.
-```
-
-### 3. Atualizar tool `interpretar_receita` (linhas 1246-1264)
-
-- Ao salvar, fazer **append** ao array `receitas` em vez de sobrescrever `ultima_receita`
-- O modelo deve retornar um campo `label` (ex: "cliente", "filho", "mãe") baseado no contexto da conversa
-- Adicionar `label` na definição da tool como parâmetro opcional
-- Manter retrocompatibilidade: se existir `ultima_receita` legado, migrar para o novo formato `receitas[]`
-
-### 4. Atualizar tool `consultar_lentes` (linhas 1282-1320)
-
-- Ler do array `receitas[]` em vez de `ultima_receita`
-- Se houver 1 receita: usar automaticamente
-- Se houver 2+: a tool recebe parâmetro `receita_index` ou `label` para identificar qual usar
-- Se o modelo não especificar qual: usar a mais recente
-
-### 5. Atualizar description das tools
-
-- `interpretar_receita`: adicionar parâmetro `label` com descrição "Identificador da pessoa (ex: 'cliente', 'filho', 'mãe'). Infira pelo contexto da conversa."
-- `consultar_lentes`: adicionar parâmetro `receita_label` com descrição "Label da receita a usar. Se não especificado, usa a mais recente."
-
-## Arquivo modificado
-
-| Arquivo | Mudança |
-|---------|---------|
-| `supabase/functions/ai-triage/index.ts` | Todas as 5 alterações acima |
+Nenhuma alteração de código é necessária — a query existente já está correta e funcionará assim que os dados estiverem preenchidos.
 
 ## Resultado
 
-- Suporte a múltiplas receitas por conversa (cliente + filho, casal, etc.)
-- IA nunca mais pede receita que já foi lida
-- Quando há 2+ receitas, IA pergunta "Para qual?" antes de orçar
-- Retrocompatível com dados existentes em `ultima_receita`
+- Todas as 31 lentes DNZ/DMAX passam a ser filtradas corretamente pelo grau da receita
+- Lentes incompatíveis com o grau do cliente não serão sugeridas
+- Quote Engine retorna resultados de todas as marcas (HOYA, ZEISS, DNZ, DMAX)
 
