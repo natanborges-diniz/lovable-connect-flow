@@ -1,68 +1,71 @@
 
 
-# Correção: Preencher limites técnicos das lentes DNZ e DMAX
+# Correção: Integrar categorias ESSILOR no Quote Engine
 
 ## Problema
 
-31 lentes (11 DNZ + 20 DMAX) têm todos os campos de limites técnicos (`sphere_min`, `sphere_max`, `cylinder_min`, `cylinder_max`, `add_min`, `add_max`) como NULL. A query do Quote Engine compara esses campos com o grau da receita — comparação com NULL retorna falso no PostgreSQL — e essas lentes nunca aparecem nos orçamentos.
+O Quote Engine usa `.eq("category", rxType)` onde `rxType` é sempre `"progressive"` ou `"single_vision"`. As lentes ESSILOR usam categorias mais granulares (`single_vision_digital`, `single_vision_stock`, `occupational`, etc.) que nunca são matcheadas.
 
-A query no código está **correta** — o problema é nos dados.
+**Resultado**: 15 das 34 lentes ESSILOR nunca aparecem em orçamentos.
 
 ## Solução
 
-Uma única migração SQL para preencher os limites técnicos reais de cada lente, usando como referência os catálogos ópticos padrão e os ranges já cadastrados para HOYA/ZEISS.
+Substituir o filtro exato `.eq("category", rxType)` por um filtro que agrupe categorias equivalentes usando `.in("category", [...])`.
 
-### Regras de preenchimento por índice de refração
+### Mapeamento de categorias
 
-| Índice | Esférico (min/max) | Cilíndrico (min/max) |
-|--------|-------------------|---------------------|
-| 1.50 | -6.00 / +6.00 | -4.00 / 0.00 |
-| 1.56 | -8.00 / +6.00 | -4.00 / 0.00 |
-| 1.59 | -10.00 / +6.00 | -4.00 / 0.00 |
-| 1.61 | -10.00 / +6.00 | -4.00 / 0.00 |
-| 1.67 | -13.00 / +7.50 | -4.00 / 0.00 |
-| 1.74 | -16.00 / +8.00 | -4.00 / 0.00 |
-
-Para progressivas e ocupacionais: `add_min = 0.75`, `add_max = 3.50`.
-Para visão simples: `add_min` e `add_max` permanecem NULL (não aplicável).
-
-### Lentes afetadas (31 registros)
-
-**DNZ (11)**:
-- 4x progressivas 1.50 → esf -6/+6, cil -4/0, add 0.75/3.50
-- 2x progressivas 1.67 → esf -13/+7.50, cil -4/0, add 0.75/3.50
-- 1x progressiva 1.74 → esf -16/+8, cil -4/0, add 0.75/3.50
-- 1x progressiva 1.50 UV+ → esf -6/+6, cil -4/0, add 0.75/3.50
-- 2x single_vision 1.67 → esf -13/+7.50, cil -4/0
-- (1x DNZ Pro UV+ 1.50 UV+ progressiva)
-
-**DMAX (20)**:
-- 4x "Progressivas Acabadas" 1.56 → esf -8/+6, cil -4/0, add 0.75/3.50
-- 7x Infinity (1.56, 1.59, 1.61, 1.67) → ranges conforme índice
-- 5x Top (1.56, 1.59, 1.61, 1.67) → ranges conforme índice
-- 3x Drive ocupacional (1.56, 1.59) → ranges conforme índice, add 0.75/3.50
-
-### Implementação
-
-**Arquivo**: Migração SQL (via ferramenta de migração)
-
-O SQL fará UPDATE por `brand` e `index_name`, aplicando os ranges corretos. Exemplo:
-
-```sql
-UPDATE pricing_table_lentes
-SET sphere_min = -6, sphere_max = 6, cylinder_min = -4, cylinder_max = 0,
-    add_min = 0.75, add_max = 3.50
-WHERE brand = 'DNZ' AND index_name = '1.50'
-  AND category = 'progressive' AND sphere_min IS NULL;
+```text
+rxType do interpretador  →  categorias aceitas no banco
+─────────────────────────────────────────────────────────
+"single_vision"          →  single_vision, single_vision_digital,
+                             single_vision_stock,
+                             single_vision_digital_kids
+"progressive"            →  progressive, occupational
 ```
 
-Cada combinação (brand + index + category) terá seu UPDATE específico.
+Categorias especiais (`myopia_control`, `special_drive`, `special_sport`) podem ser incluídas condicionalmente — por exemplo, `myopia_control` só quando o label da receita indica criança, e `special_drive` / `special_sport` quando o cliente mencionar interesse específico.
 
-Nenhuma alteração de código é necessária — a query existente já está correta e funcionará assim que os dados estiverem preenchidos.
+### Mudança no código
+
+**Arquivo**: `supabase/functions/ai-triage/index.ts` (~linhas 1395-1404)
+
+De:
+```typescript
+.eq("category", rxType)
+```
+
+Para:
+```typescript
+// Map rxType to compatible categories
+const categoryMap: Record<string, string[]> = {
+  single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids"],
+  progressive: ["progressive", "occupational"],
+};
+const categories = categoryMap[rxType] || [rxType];
+
+// Use .in() instead of .eq()
+query = supabase
+  .from("pricing_table_lentes")
+  .select("*")
+  .eq("active", true)
+  .in("category", categories)
+  ...
+```
+
+### Categorias especiais (fase 2, opcional)
+
+Para `myopia_control`, `special_drive` e `special_sport`, adicionar um parâmetro opcional na tool `consultar_lentes`:
+- `categoria_especial`: permite a IA incluir essas categorias quando o contexto justificar (ex: "meu filho de 8 anos" → incluir `myopia_control`; "óculos pra dirigir" → incluir `special_drive`)
+
+## Arquivo modificado
+
+| Arquivo | Mudança |
+|---------|---------|
+| `supabase/functions/ai-triage/index.ts` | Substituir `.eq("category")` por `.in("category")` com mapeamento |
 
 ## Resultado
 
-- Todas as 31 lentes DNZ/DMAX passam a ser filtradas corretamente pelo grau da receita
-- Lentes incompatíveis com o grau do cliente não serão sugeridas
-- Quote Engine retorna resultados de todas as marcas (HOYA, ZEISS, DNZ, DMAX)
+- 34/34 lentes ESSILOR passam a ser elegíveis para orçamento
+- Lentes DNZ, DMAX, HOYA, ZEISS continuam funcionando normalmente
+- Orçamentos ficam mais competitivos com mais opções de faixa de preço
 
