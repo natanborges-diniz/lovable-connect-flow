@@ -893,10 +893,22 @@ serve(async (req) => {
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
+    // Compute latestInboundImageIndex RELATIVE to the context window (last 20), not allMsgs
+    const contextWindowOffset = Math.max(0, allMsgs.length - 20);
     const latestInboundImageIndex = [...allMsgs]
       .map((m: any, index: number) => ({ m, index }))
       .filter(({ m }) => m.direcao === "inbound" && (m.tipo_conteudo || "text") === "image")
       .slice(-1)[0]?.index ?? -1;
+    // Convert to contextWindow-relative index
+    const latestImageCtxIndex = latestInboundImageIndex >= contextWindowOffset
+      ? latestInboundImageIndex - contextWindowOffset
+      : -1;
+
+    // Detect if the CURRENT message (last inbound) is an image
+    const lastInbound = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
+    const isImageContext = (lastInbound?.tipo_conteudo || "text") === "image"
+      || /\[image\]|\[document\]/.test(currentMsg)
+      || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
 
     // ── 5. BUILD CONTEXT ──
     const sentTopics = extractSentTopics(recentOutbound);
