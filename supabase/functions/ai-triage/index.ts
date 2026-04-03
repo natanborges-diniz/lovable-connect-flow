@@ -80,7 +80,26 @@ function matchesSubjectChange(msg: string): boolean {
   return SUBJECT_CHANGE_KEYWORDS.some((kw) => n.includes(norm(kw)));
 }
 
-function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[]): {
+// Pool of image-context fallback responses
+const IMAGE_CONTEXT_FALLBACK_POOL = [
+  "Recebi sua imagem aqui! É uma receita oftalmológica? Se sim, me confirma que eu analiso pra você 😊",
+  "Vi que me enviou uma imagem. Se for uma receita, me manda com boa iluminação que eu leio pra você!",
+  "Recebi seu envio! Se for receita, eu consigo ler e já te mostrar opções de lentes compatíveis. É receita?",
+  "Obrigado por enviar! Se isso for uma receita oftalmológica, posso analisar e te passar opções. Me confirma? 😊",
+  "Recebi a imagem! Parece ser uma receita? Se sim, já analiso e te passo as melhores opções de lente.",
+];
+
+function imageContextFallback(recentOutbound: string[]): string {
+  const recentNorm = (recentOutbound || []).slice(-10).map(norm);
+  for (const fb of IMAGE_CONTEXT_FALLBACK_POOL) {
+    const fbNorm = norm(fb);
+    const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.5);
+    if (!alreadySent) return fb;
+  }
+  return IMAGE_CONTEXT_FALLBACK_POOL[0]; // Always return something for images
+}
+
+function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
   resposta: string;
   intencao: string;
   pipeline_coluna: string;
@@ -88,7 +107,35 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 } {
   const n = norm(msg);
 
-  if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|\[image\]|\[document\]|enviei minha receita|recebeu minha receita/.test(n)) {
+  // If image context, use dedicated image fallback pool
+  if (isImageContext || /\[image\]|\[document\]/.test(n)) {
+    const recentNorm = (recentOutbound || []).slice(-10).map(norm);
+    const receitaPool = [
+      "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
+      "Recebi sua imagem! Parece ser uma receita. Quer que eu leia e te passe opções de lentes? 😊",
+      "Vi que enviou uma imagem. Se for receita, eu consigo analisar e já te mostrar as melhores opções de lente!",
+    ];
+    for (const fb of receitaPool) {
+      const fbNorm = norm(fb);
+      const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.5);
+      if (!alreadySent) {
+        return {
+          resposta: fb,
+          intencao: "receita_oftalmologica",
+          pipeline_coluna: "Orçamento",
+          precisa_humano: false,
+        };
+      }
+    }
+    return {
+      resposta: receitaPool[0],
+      intencao: "receita_oftalmologica",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
+
+  if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|enviei minha receita|recebeu minha receita/.test(n)) {
     return {
       resposta: "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
       intencao: "receita_oftalmologica",
