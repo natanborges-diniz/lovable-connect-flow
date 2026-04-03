@@ -522,6 +522,11 @@ function buildSystemPromptFromCompiled(opts: {
     s.push(buildProhibitionsBlock(opts.regrasProibidas));
   }
 
+  // Inject prescription context
+  if (opts.receitaCtx) {
+    s.push(opts.receitaCtx);
+  }
+
   if (opts.sentTopics.length > 0) {
     s.push(`# TÓPICOS JÁ COBERTOS (NÃO REPITA)
 ${opts.sentTopics.map((t) => `- ❌ ${t}`).join("\n")}
