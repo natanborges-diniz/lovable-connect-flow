@@ -861,7 +861,7 @@ serve(async (req) => {
     }
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
-    const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes] = await Promise.all([
+    const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes, contatoMetaRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_compilado").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
@@ -876,6 +876,7 @@ serve(async (req) => {
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
       supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
+      supabase.from("contatos").select("metadata").eq("id", contatoId).single(),
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
