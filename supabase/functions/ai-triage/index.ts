@@ -361,6 +361,7 @@ const TOOLS = [
           confidence: { type: "number", description: "Confiança na leitura de 0.0 a 1.0" },
           missing_fields: { type: "array", items: { type: "string" }, description: "Campos ilegíveis ou ausentes" },
           raw_notes: { type: "array", items: { type: "string" }, description: "Observações do médico" },
+          label: { type: "string", description: "Identificador da pessoa dona da receita (ex: 'cliente', 'filho', 'mãe', 'pai'). Infira pelo contexto da conversa." },
           resposta: { type: "string", description: "Mensagem confirmando dados extraídos e próximos passos." },
         },
         required: ["eyes", "confidence", "resposta"],
