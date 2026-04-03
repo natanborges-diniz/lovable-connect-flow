@@ -966,6 +966,35 @@ serve(async (req) => {
       }
     }
 
+    // ── 5.05 INJECT PRESCRIPTION CONTEXT ──
+    let receitaCtx = "";
+    if (receitas.length > 0) {
+      receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
+      for (let i = 0; i < receitas.length; i++) {
+        const rx = receitas[i];
+        const label = rx.label || `receita ${i + 1}`;
+        const dataLeitura = rx.data_leitura ? new Date(rx.data_leitura).toLocaleDateString("pt-BR") : "—";
+        const rxTypeLabel = rx.rx_type === "progressive" ? "Progressiva" : rx.rx_type === "single_vision" ? "Visão simples" : rx.rx_type || "—";
+        const conf = typeof rx.confidence === "number" ? `${(rx.confidence * 100).toFixed(0)}%` : "—";
+        const od = rx.eyes?.od || {};
+        const oe = rx.eyes?.oe || {};
+        const formatEye = (eye: any, name: string) => {
+          const parts = [`${name}: esf ${eye.sphere ?? "?"} cil ${eye.cylinder ?? "?"} eixo ${eye.axis ?? "?"}`];
+          if (typeof eye.add === "number") parts.push(`add +${eye.add}`);
+          return parts.join(" ");
+        };
+        receitaCtx += `\n## Receita ${i + 1} (${label}) — lida em ${dataLeitura}\n`;
+        receitaCtx += `Tipo: ${rxTypeLabel} | Confiança: ${conf}\n`;
+        receitaCtx += `${formatEye(od, "OD")}\n`;
+        receitaCtx += `${formatEye(oe, "OE")}\n`;
+      }
+      receitaCtx += `\n⚠️ NÃO peça receita novamente. O cliente JÁ enviou. Use consultar_lentes referenciando a receita correta.`;
+      if (receitas.length > 1) {
+        receitaCtx += `\nQuando o cliente pedir orçamento, pergunte "Para qual receita?" antes de chamar consultar_lentes.`;
+      }
+      console.log(`[RX-CTX] Injecting ${receitas.length} prescription(s) into context`);
+    }
+
     // ── 5.1 DECIDE: compiled prompt vs legacy ──
     let systemPrompt: string;
 
