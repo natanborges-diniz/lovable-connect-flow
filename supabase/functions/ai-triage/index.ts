@@ -1304,11 +1304,28 @@ serve(async (req) => {
           data_leitura: new Date().toISOString(),
         };
 
-        // Save to contact metadata
+        // Save to contact metadata — append to receitas[] array (max 5, FIFO)
         const { data: contatoData } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
         const existingMeta = (contatoData?.metadata as Record<string, any>) || {};
+        
+        // Normalize existing receitas
+        let existingReceitas: any[] = [];
+        if (Array.isArray(existingMeta.receitas)) {
+          existingReceitas = existingMeta.receitas;
+        } else if (existingMeta.ultima_receita && existingMeta.ultima_receita.eyes) {
+          existingReceitas = [{ ...existingMeta.ultima_receita, label: "cliente" }];
+        }
+        
+        // Add label from model args or infer
+        const rxLabel = args.label || (existingReceitas.length === 0 ? "cliente" : `pessoa_${existingReceitas.length + 1}`);
+        const rxWithLabel = { ...rxData, label: rxLabel };
+        
+        // Append and cap at 5 (FIFO)
+        existingReceitas.push(rxWithLabel);
+        if (existingReceitas.length > 5) existingReceitas = existingReceitas.slice(-5);
+        
         await supabase.from("contatos").update({
-          metadata: { ...existingMeta, ultima_receita: rxData },
+          metadata: { ...existingMeta, receitas: existingReceitas, ultima_receita: rxData },
         }).eq("id", contatoId);
 
         await supabase.from("eventos_crm").insert({
