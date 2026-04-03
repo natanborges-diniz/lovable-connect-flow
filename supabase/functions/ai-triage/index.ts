@@ -1055,7 +1055,7 @@ serve(async (req) => {
 
       systemPrompt = buildSystemPrompt({
         businessRules,
-        knowledge: knowledgeStr + agendamentoCtx,
+        knowledge: knowledgeStr + agendamentoCtx + receitaCtx,
         examples: examplesStr,
         antiExamples: antiStr,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
