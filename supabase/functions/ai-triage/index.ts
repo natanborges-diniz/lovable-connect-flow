@@ -80,7 +80,26 @@ function matchesSubjectChange(msg: string): boolean {
   return SUBJECT_CHANGE_KEYWORDS.some((kw) => n.includes(norm(kw)));
 }
 
-function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[]): {
+// Pool of image-context fallback responses
+const IMAGE_CONTEXT_FALLBACK_POOL = [
+  "Recebi sua imagem aqui! É uma receita oftalmológica? Se sim, me confirma que eu analiso pra você 😊",
+  "Vi que me enviou uma imagem. Se for uma receita, me manda com boa iluminação que eu leio pra você!",
+  "Recebi seu envio! Se for receita, eu consigo ler e já te mostrar opções de lentes compatíveis. É receita?",
+  "Obrigado por enviar! Se isso for uma receita oftalmológica, posso analisar e te passar opções. Me confirma? 😊",
+  "Recebi a imagem! Parece ser uma receita? Se sim, já analiso e te passo as melhores opções de lente.",
+];
+
+function imageContextFallback(recentOutbound: string[]): string {
+  const recentNorm = (recentOutbound || []).slice(-10).map(norm);
+  for (const fb of IMAGE_CONTEXT_FALLBACK_POOL) {
+    const fbNorm = norm(fb);
+    const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.5);
+    if (!alreadySent) return fb;
+  }
+  return IMAGE_CONTEXT_FALLBACK_POOL[0]; // Always return something for images
+}
+
+function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
   resposta: string;
   intencao: string;
   pipeline_coluna: string;
@@ -88,7 +107,35 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 } {
   const n = norm(msg);
 
-  if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|\[image\]|\[document\]|enviei minha receita|recebeu minha receita/.test(n)) {
+  // If image context, use dedicated image fallback pool
+  if (isImageContext || /\[image\]|\[document\]/.test(n)) {
+    const recentNorm = (recentOutbound || []).slice(-10).map(norm);
+    const receitaPool = [
+      "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
+      "Recebi sua imagem! Parece ser uma receita. Quer que eu leia e te passe opções de lentes? 😊",
+      "Vi que enviou uma imagem. Se for receita, eu consigo analisar e já te mostrar as melhores opções de lente!",
+    ];
+    for (const fb of receitaPool) {
+      const fbNorm = norm(fb);
+      const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.5);
+      if (!alreadySent) {
+        return {
+          resposta: fb,
+          intencao: "receita_oftalmologica",
+          pipeline_coluna: "Orçamento",
+          precisa_humano: false,
+        };
+      }
+    }
+    return {
+      resposta: receitaPool[0],
+      intencao: "receita_oftalmologica",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
+
+  if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|enviei minha receita|recebeu minha receita/.test(n)) {
     return {
       resposta: "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
       intencao: "receita_oftalmologica",
@@ -846,10 +893,22 @@ serve(async (req) => {
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
+    // Compute latestInboundImageIndex RELATIVE to the context window (last 20), not allMsgs
+    const contextWindowOffset = Math.max(0, allMsgs.length - 20);
     const latestInboundImageIndex = [...allMsgs]
       .map((m: any, index: number) => ({ m, index }))
       .filter(({ m }) => m.direcao === "inbound" && (m.tipo_conteudo || "text") === "image")
       .slice(-1)[0]?.index ?? -1;
+    // Convert to contextWindow-relative index
+    const latestImageCtxIndex = latestInboundImageIndex >= contextWindowOffset
+      ? latestInboundImageIndex - contextWindowOffset
+      : -1;
+
+    // Detect if the CURRENT message (last inbound) is an image
+    const lastInbound = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
+    const isImageContext = (lastInbound?.tipo_conteudo || "text") === "image"
+      || /\[image\]|\[document\]/.test(currentMsg)
+      || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
 
     // ── 5. BUILD CONTEXT ──
     const sentTopics = extractSentTopics(recentOutbound);
@@ -979,40 +1038,51 @@ serve(async (req) => {
 
         let imageContent: any | null = null;
         try {
-          const inlineBase64 = latestInboundImageIndex === i ? media?.inline_base64 : null;
-          const inlineMime = latestInboundImageIndex === i ? media?.mime_type : null;
+          // Use context-window-relative index for inline_base64 matching
+          const isCurrentImage = latestImageCtxIndex === i;
+          const inlineBase64 = isCurrentImage ? media?.inline_base64 : null;
+          const inlineMime = isCurrentImage ? media?.mime_type : null;
 
           if (inlineBase64 && inlineMime) {
             imageContent = imageContentFromBase64(inlineBase64, inlineMime);
+            if (imageContent) console.log(`[MEDIA] Image delivered via inline_base64 (ctx index ${i})`);
           }
 
           if (!imageContent && mediaUrl) {
-            const imgResp = await fetch(mediaUrl);
-            if (imgResp.ok) {
-              const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
-              const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
-                .split(";")[0]
-                .trim()
-                .toLowerCase();
-              const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 5000);
+              const imgResp = await fetch(mediaUrl, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              if (imgResp.ok) {
+                const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
+                const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
+                  .split(";")[0]
+                  .trim()
+                  .toLowerCase();
+                const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
 
-              if (hasSupportedImageSignature(imgBuffer)) {
-                let binary = "";
-                const chunkSize = 8192;
-                for (let j = 0; j < imgBuffer.length; j += chunkSize) {
-                  binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                if (hasSupportedImageSignature(imgBuffer)) {
+                  let binary = "";
+                  const chunkSize = 8192;
+                  for (let j = 0; j < imgBuffer.length; j += chunkSize) {
+                    binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                  }
+                  imageContent = imageContentFromBase64(btoa(binary), mimeType);
+                  if (imageContent) console.log(`[MEDIA] Image delivered via media_url download (ctx index ${i})`);
                 }
-                imageContent = imageContentFromBase64(btoa(binary), mimeType);
               }
+            } catch (dlErr) {
+              console.warn(`[MEDIA] Download failed for media_url (timeout/error):`, dlErr);
             }
           }
 
           if (!imageContent) {
             const warnMime = String((m.metadata as any)?.mime_type || media?.mime_type || "unknown");
-            console.warn(`[MEDIA] Invalid or unsupported image payload for AI: mime=${warnMime}. Skipping image content.`);
+            console.warn(`[MEDIA] Failed to deliver image to AI: mime=${warnMime}, isCurrentImage=${isCurrentImage}, hasMediaUrl=${!!mediaUrl}`);
           }
         } catch (e) {
-          console.warn(`[MEDIA] Failed to prepare image for AI. Skipping image content.`, e);
+          console.warn(`[MEDIA] Failed to prepare image for AI:`, e);
         }
 
         if (imageContent) {
@@ -1020,7 +1090,13 @@ serve(async (req) => {
           if (m.conteudo && m.conteudo !== "[image]") content.push({ type: "text", text: m.conteudo });
           messages.push({ role, content });
         } else {
-          messages.push({ role, content: imageCaption });
+          // If this is the CURRENT message and image failed, inject system hint
+          if (latestImageCtxIndex === i) {
+            messages.push({ role, content: imageCaption });
+            messages.push({ role: "system", content: "[SISTEMA: O cliente enviou uma imagem mas não foi possível processá-la visualmente. Reconheça o recebimento, pergunte se é uma receita e peça reenvio com boa iluminação se necessário.]" });
+          } else {
+            messages.push({ role, content: imageCaption });
+          }
         }
       } else {
         const prefix = role === "assistant" && m.remetente_nome === "Operador" ? "[Operador] " : "";
@@ -1098,7 +1174,7 @@ serve(async (req) => {
         resposta = plainContent;
         validatorFlags.push("no_tool_plain_text");
       } else {
-        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
         resposta = fallback.resposta;
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
@@ -1341,13 +1417,28 @@ serve(async (req) => {
     if (resposta && !precisa_humano) {
       const validation = validateResponse(resposta, recentOutbound);
 
-    if (!validation.valid) {
-        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — attempting retry`);
+      if (!validation.valid) {
+        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext}`);
         validatorFlags.push(`rejected:${validation.reason}`);
 
-        // If the rejection is only "no question" but the response has real content (>40 chars),
-        // append a contextual question instead of discarding the entire response
-        if (validation.reason.includes("no question or action") && resposta.length > 40) {
+        // IMAGE CONTEXT: NEVER use generic fallback — always use image-specific response
+        if (isImageContext) {
+          // If AI produced a response about the image but it was rejected for similarity/blacklist,
+          // keep it if it mentions receita/imagem, otherwise use image fallback
+          const mentionsImage = /receita|imagem|foto|envio|document|lente|grau/i.test(resposta);
+          if (mentionsImage && resposta.length > 30) {
+            // Append a contextual question
+            resposta = resposta.trimEnd().replace(/[.!]$/, "") + ". Quer que eu analise pra você?";
+            validatorFlags.push("image_context_appended");
+            console.log("[VALIDATOR] Image context — kept AI response with appended question");
+          } else {
+            resposta = imageContextFallback(recentOutbound);
+            intencao = "receita_oftalmologica";
+            pipeline_coluna = "Orçamento";
+            validatorFlags.push("image_context_fallback");
+            console.log("[VALIDATOR] Image context — using dedicated image fallback");
+          }
+        } else if (validation.reason.includes("no question or action") && resposta.length > 40) {
           const appendPool = [
             "Quer que eu siga por aqui?",
             "Posso te ajudar com mais alguma coisa?",
@@ -1388,13 +1479,11 @@ serve(async (req) => {
               validatorFlags.push("retry_accepted");
               console.log("[VALIDATOR] Retry accepted");
             } else {
-              // Keep the original AI response + append question rather than using a generic fallback
               if (retryResposta && retryResposta.length > 30) {
                 resposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". O que precisa?";
                 validatorFlags.push("retry_appended_question");
                 console.log("[VALIDATOR] Retry response kept with appended question");
               } else {
-                // Only now use fallback pool as last resort
                 const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
                   ? null
                   : pickFallback(recentOutbound);
@@ -1403,7 +1492,7 @@ serve(async (req) => {
                   validatorFlags.push("deterministic_fallback");
                   console.log("[VALIDATOR] Using rotating fallback");
                 } else {
-                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
+                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
                   resposta = contextualFallback.resposta;
                   intencao = contextualFallback.intencao;
                   pipeline_coluna = contextualFallback.pipeline_coluna;
@@ -1421,7 +1510,7 @@ serve(async (req) => {
               resposta = fb;
               validatorFlags.push("deterministic_fallback");
             } else {
-              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
+              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
               resposta = contextualFallback.resposta;
               intencao = contextualFallback.intencao;
               pipeline_coluna = contextualFallback.pipeline_coluna;
@@ -1436,12 +1525,20 @@ serve(async (req) => {
     }
 
     if (!resposta) {
-      const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound);
-      resposta = fallback.resposta;
-      intencao = fallback.intencao;
-      pipeline_coluna = fallback.pipeline_coluna;
-      precisa_humano = fallback.precisa_humano;
-      validatorFlags.push("empty_response_deterministic");
+      // If image context with no response, use dedicated image fallback
+      if (isImageContext) {
+        resposta = imageContextFallback(recentOutbound);
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = "Orçamento";
+        validatorFlags.push("empty_response_image_fallback");
+      } else {
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+        resposta = fallback.resposta;
+        intencao = fallback.intencao;
+        pipeline_coluna = fallback.pipeline_coluna;
+        precisa_humano = fallback.precisa_humano;
+        validatorFlags.push("empty_response_deterministic");
+      }
     }
 
     // ── 10. SEND RESPONSE ──
@@ -1513,6 +1610,7 @@ serve(async (req) => {
         history_range: historyRange,
         validator_flags: validatorFlags,
         topics_blocked: sentTopics,
+        is_image_context: isImageContext,
       },
       referencia_tipo: "atendimento",
       referencia_id: atendimento_id,
