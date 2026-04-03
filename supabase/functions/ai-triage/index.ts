@@ -1038,40 +1038,51 @@ serve(async (req) => {
 
         let imageContent: any | null = null;
         try {
-          const inlineBase64 = latestInboundImageIndex === i ? media?.inline_base64 : null;
-          const inlineMime = latestInboundImageIndex === i ? media?.mime_type : null;
+          // Use context-window-relative index for inline_base64 matching
+          const isCurrentImage = latestImageCtxIndex === i;
+          const inlineBase64 = isCurrentImage ? media?.inline_base64 : null;
+          const inlineMime = isCurrentImage ? media?.mime_type : null;
 
           if (inlineBase64 && inlineMime) {
             imageContent = imageContentFromBase64(inlineBase64, inlineMime);
+            if (imageContent) console.log(`[MEDIA] Image delivered via inline_base64 (ctx index ${i})`);
           }
 
           if (!imageContent && mediaUrl) {
-            const imgResp = await fetch(mediaUrl);
-            if (imgResp.ok) {
-              const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
-              const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
-                .split(";")[0]
-                .trim()
-                .toLowerCase();
-              const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 5000);
+              const imgResp = await fetch(mediaUrl, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              if (imgResp.ok) {
+                const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
+                const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
+                  .split(";")[0]
+                  .trim()
+                  .toLowerCase();
+                const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
 
-              if (hasSupportedImageSignature(imgBuffer)) {
-                let binary = "";
-                const chunkSize = 8192;
-                for (let j = 0; j < imgBuffer.length; j += chunkSize) {
-                  binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                if (hasSupportedImageSignature(imgBuffer)) {
+                  let binary = "";
+                  const chunkSize = 8192;
+                  for (let j = 0; j < imgBuffer.length; j += chunkSize) {
+                    binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                  }
+                  imageContent = imageContentFromBase64(btoa(binary), mimeType);
+                  if (imageContent) console.log(`[MEDIA] Image delivered via media_url download (ctx index ${i})`);
                 }
-                imageContent = imageContentFromBase64(btoa(binary), mimeType);
               }
+            } catch (dlErr) {
+              console.warn(`[MEDIA] Download failed for media_url (timeout/error):`, dlErr);
             }
           }
 
           if (!imageContent) {
             const warnMime = String((m.metadata as any)?.mime_type || media?.mime_type || "unknown");
-            console.warn(`[MEDIA] Invalid or unsupported image payload for AI: mime=${warnMime}. Skipping image content.`);
+            console.warn(`[MEDIA] Failed to deliver image to AI: mime=${warnMime}, isCurrentImage=${isCurrentImage}, hasMediaUrl=${!!mediaUrl}`);
           }
         } catch (e) {
-          console.warn(`[MEDIA] Failed to prepare image for AI. Skipping image content.`, e);
+          console.warn(`[MEDIA] Failed to prepare image for AI:`, e);
         }
 
         if (imageContent) {
@@ -1079,7 +1090,13 @@ serve(async (req) => {
           if (m.conteudo && m.conteudo !== "[image]") content.push({ type: "text", text: m.conteudo });
           messages.push({ role, content });
         } else {
-          messages.push({ role, content: imageCaption });
+          // If this is the CURRENT message and image failed, inject system hint
+          if (latestImageCtxIndex === i) {
+            messages.push({ role, content: imageCaption });
+            messages.push({ role: "system", content: "[SISTEMA: O cliente enviou uma imagem mas não foi possível processá-la visualmente. Reconheça o recebimento, pergunte se é uma receita e peça reenvio com boa iluminação se necessário.]" });
+          } else {
+            messages.push({ role, content: imageCaption });
+          }
         }
       } else {
         const prefix = role === "assistant" && m.remetente_nome === "Operador" ? "[Operador] " : "";
