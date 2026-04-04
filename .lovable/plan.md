@@ -1,46 +1,58 @@
 
 
-# Integrar ESSILOR nas Recomendações do Assistente
+# Corrigir Roteamento de Contatos Loja no Pipeline
 
 ## Problema
 
-A estratégia comercial atual prioriza apenas DNZ → DMAX → HOYA → ZEISS. ESSILOR não aparece na ordem de prioridade, não tem regra de posicionamento, e não existe nenhum exemplo de conversa para quando o cliente pede Varilux ou Essilor.
+Natan Borges (tipo `loja`) está na coluna "Link Enviado" do **Financeiro**, mas deveria estar visível no pipeline de atendimento. Isso acontece porque:
 
-## O que muda
+1. O setor **"Atendimento Gael"** (destinado a lojas) não tem nenhuma coluna de pipeline
+2. O webhook de WhatsApp roteia lojas para `internalColunas`, que mistura Financeiro + Agendamentos — o primeiro "Novo" encontrado é do Financeiro
+3. O ai-triage carrega TODAS as colunas sem filtro de setor — quando sugere uma coluna como "Orçamento", pode pegar a de qualquer setor
 
-### 1. Atualizar Estratégia Comercial
+## Solução
 
-Atualizar o registro `Estrategia Comercial de Lentes` em `conhecimento_ia` para incluir ESSILOR:
+### 1. Criar colunas de pipeline para o setor "Atendimento Gael"
 
-- **Regra ESSILOR**: "usar como referência premium ao lado de HOYA — destacar Varilux como líder mundial em progressivas e Eyezen para visão simples digital"
-- **Ordem de prioridade**: DNZ → DMAX → HOYA / ESSILOR → ZEISS
-- **Regra de progressivas**: quando cliente precisa de multifocal, mencionar Varilux como opção premium naturalmente (são as progressivas mais usadas no mundo)
-- **Regra de visão simples digital**: posicionar Eyezen como alternativa premium à visão simples convencional
+Migration SQL para criar colunas dedicadas ao atendimento de lojas:
 
-### 2. Adicionar exemplos de conversa (ia_exemplos)
+| Coluna | Ordem |
+|--------|-------|
+| Novo | 0 |
+| Em Atendimento | 1 |
+| Aguardando Resposta | 2 |
+| Resolvido | 3 |
 
-| Categoria | Pergunta | Resposta ideal |
-|-----------|----------|----------------|
-| `cliente_marca` | "quero Essilor" | "Excelente escolha! A Essilor é referência mundial em lentes 😊 Temos toda a linha Varilux para multifocal e Eyezen para visão simples. Quer que eu mostre as opções compatíveis com sua receita?" |
-| `cliente_marca` | "quero Varilux" | "Varilux é a multifocal mais usada no mundo, ótima escolha 😊 Temos desde a Liberty até a XR Pro. Quer que eu compare as opções pro seu grau?" |
-| `cliente_marca` | "qual a melhor lente multifocal?" | "As Varilux da Essilor são as progressivas mais utilizadas no mundo. Temos também a linha Hoya que é excelente. Quer que eu monte um comparativo com seu grau?" |
-| `orcamento` | "quero a melhor lente possível" | "Para o melhor em tecnologia, temos Varilux XR Pro (Essilor) e Hoyalux iD MySelf (Hoya) — ambas são top de linha mundial. Quer que eu compare as duas pro seu grau?" |
+### 2. Corrigir roteamento no webhook (whatsapp-webhook)
 
-### 3. Recompilar prompt
+No bloco de CRM ROUTING (linhas 193-209), filtrar `internalColunas` pelo setor correto:
+- Buscar o setor "Atendimento Gael" pelo nome
+- Filtrar colunas internas apenas desse setor para contatos loja/colaborador
+- Fallback: se não encontrar, usar o primeiro setor interno disponível
 
-Após inserir os dados, disparar recompilação para que o `prompt_compilado` absorva as novas regras e exemplos.
+### 3. Corrigir ai-triage para respeitar o setor do contato
 
-## Arquivos/tabelas modificados
+Na query de `pipeline_colunas` (linha 882), continuar carregando todas, mas na hora de aplicar a coluna sugerida (linhas 1678-1684), filtrar pelo setor correto:
+- Se contato é loja → usar colunas do setor "Atendimento Gael"
+- Se contato é cliente → usar colunas de vendas (setor_id IS NULL)
+- Isso evita que a IA mova um contato loja para uma coluna do Financeiro
+
+### 4. Corrigir Natan Borges agora
+
+Migration para mover Natan Borges para a coluna "Novo" do setor "Atendimento Gael" recém-criada.
+
+## Arquivos modificados
 
 | Local | Mudança |
 |-------|---------|
-| `conhecimento_ia` (update) | Estratégia comercial com ESSILOR |
-| `ia_exemplos` (insert) | 4 novos exemplos de conversa |
-| Edge function `compile-prompt` | Disparar recompilação (invoke) |
+| Migration SQL | Criar 4 colunas para setor "Atendimento Gael" |
+| Migration SQL | Mover Natan Borges para coluna correta |
+| `supabase/functions/whatsapp-webhook/index.ts` | Filtrar colunas internas pelo setor "Atendimento Gael" |
+| `supabase/functions/ai-triage/index.ts` | Filtrar coluna sugerida pelo setor do contato |
 
 ## Resultado
 
-- Gael passa a recomendar ESSILOR/Varilux naturalmente em contexto de progressivas premium
-- Cliente que pede "Essilor", "Varilux" ou "melhor lente" recebe resposta adequada
-- Posicionamento HOYA e ESSILOR lado a lado como premium, sem favorecer uma sobre a outra
+- Contatos tipo `loja` aparecem no pipeline interno correto, não mais no Financeiro
+- AI-triage não mistura colunas entre setores
+- Natan Borges fica visível no pipeline de atendimento
 
