@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useContatos, useUpdateContato } from "@/hooks/useContatos";
+import { useUpdateContato } from "@/hooks/useContatos";
 import {
   usePipelineColunas,
   useCreatePipelineColuna,
