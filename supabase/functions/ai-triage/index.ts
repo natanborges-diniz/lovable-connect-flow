@@ -1677,10 +1677,24 @@ serve(async (req) => {
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
 
     if (precisa_humano) {
-      const col = colunas.find((c: any) => c.nome === "Atendimento Humano");
+      // For human escalation, find column matching the contact's sector context
+      const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
+      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const sectorFilteredCols = isCorporate
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        : colunas.filter((c: any) => c.setor_id === null);
+      const col = sectorFilteredCols.find((c: any) => c.nome === "Atendimento Humano")
+        || colunas.find((c: any) => c.nome === "Atendimento Humano" && c.setor_id === null);
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
     } else if (pipeline_coluna !== "Novo Contato") {
-      const col = colunas.find((c: any) => c.nome === pipeline_coluna);
+      // Filter columns by contact type to avoid cross-sector assignment
+      const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
+      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const sectorFilteredCols = isCorporate
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        : colunas.filter((c: any) => c.setor_id === null);
+      const col = sectorFilteredCols.find((c: any) => c.nome === pipeline_coluna)
+        || colunas.find((c: any) => c.nome === pipeline_coluna && c.setor_id === null);
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
     }
 
