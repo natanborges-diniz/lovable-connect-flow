@@ -899,6 +899,7 @@ serve(async (req) => {
     const lojas = lojasRes.data || [];
     const agendamentosAtivos = agendRes.data || [];
     const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
+    const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
 
     // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
     let receitas: any[] = [];
