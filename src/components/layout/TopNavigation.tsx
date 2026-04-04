@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays } from "lucide-react";
+import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -14,6 +14,7 @@ const modules: { key: ModuleKey; label: string; icon: React.ElementType; default
   { key: "crm", label: "CRM", icon: Users, defaultPath: "/crm" },
   { key: "financeiro", label: "Financeiro", icon: DollarSign, defaultPath: "/financeiro" },
   { key: "agendamentos", label: "Agendamentos", icon: CalendarDays, defaultPath: "/agendamentos" },
+  { key: "atendimento_gael", label: "Lojas", icon: Store, defaultPath: "/atendimento-gael" },
   { key: "solicitacoes", label: "Solicitações", icon: FileText, defaultPath: "/solicitacoes" },
   { key: "atendimentos", label: "Atendimentos", icon: MessageSquare, defaultPath: "/atendimentos" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
