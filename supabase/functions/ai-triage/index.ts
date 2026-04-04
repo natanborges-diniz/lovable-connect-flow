@@ -879,11 +879,11 @@ serve(async (req) => {
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
         .limit(60),
-      supabase.from("pipeline_colunas").select("id, nome").eq("ativo", true).order("ordem"),
+      supabase.from("pipeline_colunas").select("id, nome, setor_id").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
       supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
-      supabase.from("contatos").select("metadata").eq("id", contatoId).single(),
+      supabase.from("contatos").select("metadata, tipo").eq("id", contatoId).single(),
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
@@ -899,6 +899,7 @@ serve(async (req) => {
     const lojas = lojasRes.data || [];
     const agendamentosAtivos = agendRes.data || [];
     const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
+    const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
 
     // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
     let receitas: any[] = [];
@@ -1676,10 +1677,24 @@ serve(async (req) => {
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
 
     if (precisa_humano) {
-      const col = colunas.find((c: any) => c.nome === "Atendimento Humano");
+      // For human escalation, find column matching the contact's sector context
+      const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
+      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const sectorFilteredCols = isCorporate
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        : colunas.filter((c: any) => c.setor_id === null);
+      const col = sectorFilteredCols.find((c: any) => c.nome === "Atendimento Humano")
+        || colunas.find((c: any) => c.nome === "Atendimento Humano" && c.setor_id === null);
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
     } else if (pipeline_coluna !== "Novo Contato") {
-      const col = colunas.find((c: any) => c.nome === pipeline_coluna);
+      // Filter columns by contact type to avoid cross-sector assignment
+      const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
+      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const sectorFilteredCols = isCorporate
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        : colunas.filter((c: any) => c.setor_id === null);
+      const col = sectorFilteredCols.find((c: any) => c.nome === pipeline_coluna)
+        || colunas.find((c: any) => c.nome === pipeline_coluna && c.setor_id === null);
       if (col) contatoUpdates.pipeline_coluna_id = col.id;
     }
 
