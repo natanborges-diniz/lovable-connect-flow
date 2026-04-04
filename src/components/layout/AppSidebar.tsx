@@ -68,6 +68,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       ],
     },
   ],
+  atendimento_gael: [
+    {
+      label: "Atendimento Interno",
+      items: [
+        { title: "Pipeline Lojas", url: "/atendimento-gael", icon: Store },
+      ],
+    },
+  ],
   solicitacoes: [
     {
       label: "Solicitações",

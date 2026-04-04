@@ -14,6 +14,7 @@ const modules: { key: ModuleKey; label: string; icon: React.ElementType; default
   { key: "crm", label: "CRM", icon: Users, defaultPath: "/crm" },
   { key: "financeiro", label: "Financeiro", icon: DollarSign, defaultPath: "/financeiro" },
   { key: "agendamentos", label: "Agendamentos", icon: CalendarDays, defaultPath: "/agendamentos" },
+  { key: "atendimento_gael", label: "Lojas", icon: Store, defaultPath: "/atendimento-gael" },
   { key: "solicitacoes", label: "Solicitações", icon: FileText, defaultPath: "/solicitacoes" },
   { key: "atendimentos", label: "Atendimentos", icon: MessageSquare, defaultPath: "/atendimentos" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
