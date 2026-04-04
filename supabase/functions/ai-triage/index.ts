@@ -879,7 +879,7 @@ serve(async (req) => {
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
         .limit(60),
-      supabase.from("pipeline_colunas").select("id, nome").eq("ativo", true).order("ordem"),
+      supabase.from("pipeline_colunas").select("id, nome, setor_id").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
       supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
