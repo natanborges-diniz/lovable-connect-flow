@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
-  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle,
+  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
