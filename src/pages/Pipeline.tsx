@@ -103,6 +103,10 @@ export default function Pipeline() {
   const isLoading = loadingContatos || loadingColunasVendas || loadingColunasInternas;
 
   const filteredContatos = (contatos ?? []).filter((c) => {
+    // Cycle filter
+    if (cicloFilter === "novos" && c.ciclo_funil !== 1) return false;
+    if (cicloFilter === "retornos" && c.ciclo_funil < 2) return false;
+    
     if (!search) return true;
     const s = search.toLowerCase();
     return (
