@@ -240,7 +240,7 @@ serve(async (req) => {
         } else if (currentColuna?.setor_id) {
           // Corrige contatos não-corporativos presos em pipeline interno
           targetColunaId = retornoCol?.id ?? novoContatoCol?.id ?? null;
-        } else if (currentColuna && ["Abandonado", "Cancelado"].includes(currentColuna.nome)) {
+        } else if (currentColuna && ["Abandonado", "Cancelado", "Perdidos"].includes(currentColuna.nome)) {
           targetColunaId = retornoCol?.id ?? null;
         }
 
