@@ -820,7 +820,7 @@ serve(async (req) => {
     const iaLock = meta.ia_lock ? new Date(meta.ia_lock).getTime() : 0;
     const now = Date.now();
     const LOCK_TTL_MS = 15_000; // 15 second lock
-    const DEBOUNCE_WAIT_MS = 3_000; // wait 3 seconds for more messages
+    const DEBOUNCE_WAIT_MS = 5_000; // wait 5 seconds for more messages
 
     if (iaLock && (now - iaLock) < LOCK_TTL_MS) {
       // Another instance is processing — wait then check if it handled our message
