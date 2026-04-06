@@ -1,37 +1,64 @@
 
 
-# Visibilidade do Ciclo de Funil
+# Correções: Classificação, Lembrete Prometido e Terminologia de Lentes
 
-## Situação Atual
+## Problemas Identificados
 
-- O `ciclo_funil` existe no banco mas só é usado como filtro no Dashboard (gráfico de funil)
-- Nos cards do pipeline CRM não há nenhuma indicação visual do ciclo
-- Não há detalhes do ciclo na ficha/detalhe do contato
+### 1. Coluna "Aguardando Resposta" — classificação errada
+A coluna "Aguardando Resposta" pertence ao setor interno (Atendimento Gael). No entanto, a IA está classificando um contato de cliente nessa coluna. Isso ocorre porque o prompt lista TODAS as colunas disponíveis (incluindo as internas) no bloco `# CLASSIFICAÇÃO`, e o LLM pode escolher qualquer uma delas. A filtragem por setor acontece depois (linhas 1758-1767), mas se a coluna interna não tem correspondente no pipeline de vendas, o contato fica preso.
 
-## O que falta
+**Correção**: Filtrar as colunas enviadas no prompt para que o LLM só veja colunas do setor correto do contato. Clientes nunca devem ver colunas do setor Atendimento Gael no prompt.
 
-### 1. Badge de ciclo nos cards do Pipeline CRM
-Adicionar um badge discreto nos cards de contato que estejam em ciclo 2+. Exemplo: badge "Retorno" ou "Ciclo 3" para distinguir visualmente leads reativados de leads novos.
+### 2. Lembrete prometido pela IA para sexta-feira — não existe mecanismo
+A IA prometeu "te aviso na sexta" mas não existe nenhuma tool para agendar lembretes avulsos (sem agendamento de visita). O sistema só dispara lembretes via `agendamentos-cron` quando há um agendamento registrado. Sem agendamento, nenhum lembrete será enviado. A IA fez uma promessa que não pode cumprir.
 
-Cards de ciclo 1 (novo) não mostram nada extra — é o comportamento padrão.
+**Correção**: 
+- Criar uma tool `agendar_lembrete` que registra um lembrete na tabela `tarefas` (ou nova tabela `lembretes`) com data de disparo
+- O `vendas-recuperacao-cron` (ou novo cron) verifica lembretes pendentes e envia a mensagem
+- Adicionar regra proibida: "NUNCA prometa ações futuras (lembretes, retornos, envios) sem usar a tool correspondente"
 
-### 2. Filtro de ciclo no Pipeline CRM
-Assim como o Dashboard tem filtro "Todos / Novos / Retornos", o pipeline CRM também pode ter esse filtro para que o operador veja apenas novos leads ou apenas retornos.
+### 3. "Experimentar lentes" — terminologia incorreta
+Na linha 1487 do ai-triage, após o orçamento, a IA pergunta "prefere agendar uma visita para experimentar?" — lentes de óculos são sob encomenda, não se experimentam. O que se experimenta são armações. Lentes de contato são outro departamento (encaminhar para atendimento humano).
 
-### 3. Ciclos 3, 4, 5...
-A lógica já suporta ciclos infinitos (cada retorno incrementa +1). No Dashboard, o filtro "Retornos (Ciclo 2+)" agrupa todos. Opcionalmente podemos mostrar no gráfico a distribuição por ciclo individual (2, 3, 4...) para entender quantas vezes leads precisam ser reativados.
+**Correção**:
+- Alterar a mensagem pós-orçamento (linha 1487) para não usar "experimentar"
+- Adicionar regra proibida sobre "experimentar lentes"
+- Adicionar instrução: lentes de contato → escalar para consultor
 
-## Arquivos afetados
+---
+
+## Plano de Implementação
+
+### Migration SQL
+- Inserir regra proibida: "NUNCA diga 'experimentar lentes'. Lentes de óculos são sob encomenda. O que pode ser experimentado são armações."
+- Inserir regra proibida: "Se o cliente perguntar sobre lentes de contato, encaminhe para um Consultor especializado."
+- Inserir regra proibida: "NUNCA prometa ações futuras (lembretes, retornos, follow-ups) sem registrar via tool. Se não existe tool para isso, não prometa."
+- Criar tabela `lembretes` (id, contato_id, atendimento_id, mensagem, data_disparo, status, created_at)
+
+### `supabase/functions/ai-triage/index.ts`
+1. **Filtrar colunas no prompt por setor** (bloco CLASSIFICAÇÃO ~linha 563): só enviar colunas do setor null para clientes, e colunas do setor Atendimento Gael para lojas/colaboradores
+2. **Linha 1487**: Trocar "experimentar" por "conhecer as opções presencialmente" ou "provar armações"
+3. **Nova tool `agendar_lembrete`**: permite à IA registrar um lembrete futuro com data e mensagem
+4. **Instrução sobre lentes de contato**: no system prompt, adicionar que lentes de contato devem ser encaminhadas para consultor
+
+### `supabase/functions/vendas-recuperacao-cron/index.ts` (ou novo cron)
+- Adicionar bloco que verifica `lembretes` com `data_disparo <= now()` e `status = 'pendente'`
+- Envia a mensagem via send-whatsapp e marca como `enviado`
+
+---
+
+## Arquivos Afetados
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/pages/Pipeline.tsx` (ou componente de card) | Badge "Retorno" / "Ciclo N" nos cards com ciclo >= 2 |
-| `src/pages/Pipeline.tsx` | Filtro de ciclo (Todos / Novos / Retornos) no topo do pipeline |
-| `src/pages/Dashboard.tsx` | Opcional: breakdown por ciclo individual no tooltip do funil |
+| Migration SQL | Tabela `lembretes`, regras proibidas (experimentar lentes, lentes de contato, promessas sem tool) |
+| `supabase/functions/ai-triage/index.ts` | Filtrar colunas por setor no prompt, tool `agendar_lembrete`, fix linha 1487, instrução lentes de contato |
+| `supabase/functions/vendas-recuperacao-cron/index.ts` | Processar lembretes pendentes |
 
 ## Resultado
 
-- Operador vê imediatamente quais cards são retornos no Kanban
-- Pode filtrar o pipeline para focar em novos leads ou em reativações
-- Ciclos 3+ continuam funcionando automaticamente — o badge mostra "Ciclo 3", "Ciclo 4", etc.
+- Clientes nunca são classificados em colunas internas (Aguardando Resposta)
+- IA só promete lembretes se registrar via tool — e o cron garante o envio
+- Terminologia correta: lentes são encomenda, armações são experimentáveis
+- Lentes de contato encaminhadas para consultor humano
 
