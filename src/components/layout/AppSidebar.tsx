@@ -2,7 +2,7 @@ import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
   Search as SearchIcon, Plus, List, Clock, Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap, MessageSquare
+  Brain, Building2, Store, Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
