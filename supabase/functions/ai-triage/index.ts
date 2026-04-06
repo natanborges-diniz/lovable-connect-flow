@@ -424,6 +424,23 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "agendar_lembrete",
+      description: "Registra um lembrete futuro para enviar ao cliente. Use quando o cliente pedir para ser lembrado ou quando combinar um retorno em data específica. OBRIGATÓRIO usar esta tool antes de prometer qualquer ação futura.",
+      parameters: {
+        type: "object",
+        properties: {
+          data_disparo: { type: "string", description: "Data e hora para enviar o lembrete no formato ISO 8601 (ex: 2026-04-11T10:00:00-03:00)." },
+          mensagem: { type: "string", description: "Mensagem a ser enviada ao cliente no momento do lembrete." },
+          resposta: { type: "string", description: "Mensagem confirmando ao cliente que o lembrete foi agendado." },
+        },
+        required: ["data_disparo", "mensagem", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════
