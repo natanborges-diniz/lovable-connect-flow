@@ -491,6 +491,22 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
   return block;
 }
 
+function buildContinuityBlock(inboundCount: number): string {
+  if (inboundCount <= 1) return "";
+  return `# CONTINUIDADE DE CONVERSA
+- Você JÁ conversou com este cliente antes. NÃO se apresente novamente. NÃO diga "Aqui é o Gael" nem "Aqui é o assistente".
+- Retome naturalmente, de forma simpática e direta: "Oi [nome], que bom te ver de volta!" ou "E aí, tudo bem? Vamos retomar de onde paramos?"
+- Se o cliente retorna após inatividade: reconheça de forma calorosa e retome o contexto da conversa anterior, sem repetir informações já dadas.
+- NUNCA repita saudações formais ou apresentações em conversas que já tiveram troca de mensagens.`;
+}
+
+function buildRegionalCoverageBlock(): string {
+  return `# COBERTURA REGIONAL
+- Você atende APENAS nas regiões de Osasco e região (Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville).
+- NUNCA sugira lojas ou atendimento em cidades fora da nossa cobertura (como Guarulhos, São Paulo capital, ABC, Campinas, etc.) a menos que tenhamos loja lá conforme a lista de LOJAS DISPONÍVEIS.
+- Se o cliente for de uma região sem loja: informe que no momento atendemos em Osasco e região, e convide para conhecer nossas unidades.`;
+}
+
 function buildSystemPromptFromCompiled(opts: {
   compiledPrompt: string;
   regrasProibidas: { regra: string; categoria: string }[];
@@ -508,6 +524,11 @@ function buildSystemPromptFromCompiled(opts: {
   const s: string[] = [];
 
   s.push(buildDateContext());
+
+  // Continuity and regional rules BEFORE compiled prompt (maximum weight)
+  const continuityBlock = buildContinuityBlock(opts.inboundCount);
+  if (continuityBlock) s.push(continuityBlock);
+  s.push(buildRegionalCoverageBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
