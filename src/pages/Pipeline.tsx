@@ -101,7 +101,7 @@ export default function Pipeline() {
   const [newColunaNome, setNewColunaNome] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const isLoading = loadingContatos || loadingColunas;
+  const isLoading = loadingContatos || loadingColunasVendas || loadingColunasInternas;
 
   const filteredContatos = (contatos ?? []).filter((c) => {
     if (!search) return true;
