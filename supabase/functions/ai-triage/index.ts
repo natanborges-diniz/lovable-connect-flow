@@ -870,6 +870,20 @@ serve(async (req) => {
       console.log("[DEBOUNCE] No response found, proceeding as fallback");
     }
 
+    // Anti-duplicate: check if an outbound was sent in the last 10s (even without lock)
+    const { data: veryRecentOut } = await supabase
+      .from("mensagens")
+      .select("id")
+      .eq("atendimento_id", atendimento_id)
+      .eq("direcao", "outbound")
+      .gte("created_at", new Date(now - 10_000).toISOString())
+      .limit(1);
+
+    if (veryRecentOut?.length) {
+      console.log("[DEBOUNCE] Outbound sent <10s ago, skipping to prevent duplicate");
+      return jsonResponse({ status: "skipped", reason: "debounce — recent outbound <10s" });
+    }
+
     // Set lock
     await supabase.from("atendimentos").update({
       metadata: { ...meta, ia_lock: new Date().toISOString() },
