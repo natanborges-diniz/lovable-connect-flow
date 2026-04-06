@@ -243,16 +243,21 @@ export default function Pipeline() {
                   {...colDragProvided.draggableProps}
                   className={cn("flex-shrink-0 w-72", colDragSnapshot.isDragging && "opacity-80")}
                 >
-                  <Card
-                    className={cn(
-                      "border-t-4",
-                      isHumano
-                        ? "border-t-destructive bg-destructive/5 ring-2 ring-destructive/20"
-                        : `border-t-${coluna.cor}`
-                    )}
-                  >
-                    <CardHeader className="pb-2 pt-3 px-3 cursor-grab active:cursor-grabbing" {...colDragProvided.dragHandleProps}>
-                      <div className="flex items-center justify-between gap-1">
+                    <Card
+                      className={cn(
+                        "border-t-4",
+                        isHumano
+                          ? "border-t-destructive bg-destructive/5 ring-2 ring-destructive/20"
+                          : coluna.isInternal
+                            ? "border-t-accent-foreground bg-accent/10"
+                            : `border-t-${coluna.cor}`
+                      )}
+                    >
+                      <CardHeader className="pb-2 pt-3 px-3 cursor-grab active:cursor-grabbing" {...colDragProvided.dragHandleProps}>
+                        <div className="flex items-center justify-between gap-1">
+                          {coluna.isInternal && !isHumano && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 mr-1 border-accent-foreground/30 text-accent-foreground">Interno</Badge>
+                          )}
                         {editingColuna === coluna.id ? (
                           <div className="flex items-center gap-1 flex-1">
                             <Input
