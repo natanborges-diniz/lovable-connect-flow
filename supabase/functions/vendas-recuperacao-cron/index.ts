@@ -303,6 +303,7 @@ serve(async (req) => {
       status: "ok",
       processed,
       moved_to_perdidos: movedToPerdidos,
+      lembretes_enviados: lembretesEnviados,
       total_checked: contatos.length,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
