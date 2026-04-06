@@ -491,6 +491,22 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
   return block;
 }
 
+function buildContinuityBlock(inboundCount: number): string {
+  if (inboundCount <= 1) return "";
+  return `# CONTINUIDADE DE CONVERSA
+- Você JÁ conversou com este cliente antes. NÃO se apresente novamente. NÃO diga "Aqui é o Gael" nem "Aqui é o assistente".
+- Retome naturalmente, de forma simpática e direta: "Oi [nome], que bom te ver de volta!" ou "E aí, tudo bem? Vamos retomar de onde paramos?"
+- Se o cliente retorna após inatividade: reconheça de forma calorosa e retome o contexto da conversa anterior, sem repetir informações já dadas.
+- NUNCA repita saudações formais ou apresentações em conversas que já tiveram troca de mensagens.`;
+}
+
+function buildRegionalCoverageBlock(): string {
+  return `# COBERTURA REGIONAL
+- Você atende APENAS nas regiões de Osasco e região (Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville).
+- NUNCA sugira lojas ou atendimento em cidades fora da nossa cobertura (como Guarulhos, São Paulo capital, ABC, Campinas, etc.) a menos que tenhamos loja lá conforme a lista de LOJAS DISPONÍVEIS.
+- Se o cliente for de uma região sem loja: informe que no momento atendemos em Osasco e região, e convide para conhecer nossas unidades.`;
+}
+
 function buildSystemPromptFromCompiled(opts: {
   compiledPrompt: string;
   regrasProibidas: { regra: string; categoria: string }[];
@@ -508,6 +524,11 @@ function buildSystemPromptFromCompiled(opts: {
   const s: string[] = [];
 
   s.push(buildDateContext());
+
+  // Continuity and regional rules BEFORE compiled prompt (maximum weight)
+  const continuityBlock = buildContinuityBlock(opts.inboundCount);
+  if (continuityBlock) s.push(continuityBlock);
+  s.push(buildRegionalCoverageBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
@@ -567,6 +588,11 @@ function buildSystemPrompt(opts: {
 
   // Date/time context FIRST — so the model always knows the current date
   s.push(buildDateContext());
+
+  // Continuity and regional rules BEFORE identity (maximum weight)
+  const continuityBlock = buildContinuityBlock(opts.inboundCount);
+  if (continuityBlock) s.push(continuityBlock);
+  s.push(buildRegionalCoverageBlock());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
@@ -820,7 +846,7 @@ serve(async (req) => {
     const iaLock = meta.ia_lock ? new Date(meta.ia_lock).getTime() : 0;
     const now = Date.now();
     const LOCK_TTL_MS = 15_000; // 15 second lock
-    const DEBOUNCE_WAIT_MS = 3_000; // wait 3 seconds for more messages
+    const DEBOUNCE_WAIT_MS = 5_000; // wait 5 seconds for more messages
 
     if (iaLock && (now - iaLock) < LOCK_TTL_MS) {
       // Another instance is processing — wait then check if it handled our message
@@ -842,6 +868,20 @@ serve(async (req) => {
       }
       // If no outbound yet, proceed (the other instance may have failed)
       console.log("[DEBOUNCE] No response found, proceeding as fallback");
+    }
+
+    // Anti-duplicate: check if an outbound was sent in the last 10s (even without lock)
+    const { data: veryRecentOut } = await supabase
+      .from("mensagens")
+      .select("id")
+      .eq("atendimento_id", atendimento_id)
+      .eq("direcao", "outbound")
+      .gte("created_at", new Date(now - 10_000).toISOString())
+      .limit(1);
+
+    if (veryRecentOut?.length) {
+      console.log("[DEBOUNCE] Outbound sent <10s ago, skipping to prevent duplicate");
+      return jsonResponse({ status: "skipped", reason: "debounce — recent outbound <10s" });
     }
 
     // Set lock
