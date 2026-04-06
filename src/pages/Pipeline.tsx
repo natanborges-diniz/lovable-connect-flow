@@ -685,6 +685,17 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
         </div>
       )}
 
+      {/* AI Summary card */}
+      {atendimento && (atendimento as any).metadata?.resumo_ia && (
+        <div className="rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 flex gap-2 items-start">
+          <FileText className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+          <div className="text-sm text-yellow-800 dark:text-yellow-200">
+            <p className="font-medium text-xs mb-1">Resumo IA</p>
+            <p className="whitespace-pre-wrap text-xs">{(atendimento as any).metadata.resumo_ia}</p>
+          </div>
+        </div>
+      )}
+
       <div ref={scrollRef} className="flex-1 overflow-auto min-h-[200px] max-h-[400px] space-y-2 p-3 bg-app-bg rounded-lg border">
         {!mensagens?.length ? (
           <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
