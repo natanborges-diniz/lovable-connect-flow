@@ -594,7 +594,7 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
     queryFn: async () => {
       const { data, error } = await supabase
         .from("atendimentos")
-        .select("id, modo, status, canal, canal_provedor")
+        .select("id, modo, status, canal, canal_provedor, metadata")
         .eq("id", atendimentoId)
         .single();
       if (error) throw error;
