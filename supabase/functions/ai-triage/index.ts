@@ -1580,6 +1580,31 @@ serve(async (req) => {
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
+      } else if (fn === "agendar_lembrete") {
+        resposta = args.resposta;
+        intencao = "lembrete";
+
+        try {
+          await supabase.from("lembretes").insert({
+            contato_id: contatoId,
+            atendimento_id,
+            mensagem: args.mensagem,
+            data_disparo: args.data_disparo,
+          });
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "lembrete_agendado",
+            descricao: `Lembrete agendado para ${new Date(args.data_disparo).toLocaleDateString("pt-BR")}`,
+            metadata: { mensagem: args.mensagem, data_disparo: args.data_disparo },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+
+          console.log(`[TOOL] agendar_lembrete: ${args.data_disparo} — "${args.mensagem.substring(0, 50)}..."`);
+        } catch (e) {
+          console.error("[TOOL] agendar_lembrete failed:", e);
+        }
       }
     }
 
