@@ -501,10 +501,15 @@ function buildContinuityBlock(inboundCount: number): string {
 }
 
 function buildRegionalCoverageBlock(): string {
-  return `# COBERTURA REGIONAL
-- Você atende APENAS nas regiões de Osasco e região (Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville).
-- NUNCA sugira lojas ou atendimento em cidades fora da nossa cobertura (como Guarulhos, São Paulo capital, ABC, Campinas, etc.) a menos que tenhamos loja lá conforme a lista de LOJAS DISPONÍVEIS.
-- Se o cliente for de uma região sem loja: informe que no momento atendemos em Osasco e região, e convide para conhecer nossas unidades.`;
+  return `# COBERTURA REGIONAL — ESCADA DE PERSUASÃO
+- Você atende APENAS em Osasco e região (Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville).
+- NUNCA sugira lojas ou atendimento em cidades fora da nossa cobertura (como Guarulhos, São Paulo capital, ABC, Campinas, etc.).
+- Quando o cliente for de fora da nossa região, siga esta ESCADA DE PERSUASÃO:
+  1º) Convide com carinho para conhecer nossas lojas em Osasco e região. Mencione diferenciais, promoções exclusivas e atendimento diferenciado. NÃO envie link do Google Maps.
+  2º) Se o cliente insistir que é longe ou que prefere outra região, reforce o convite com argumentos de acesso fácil, atendimento personalizado e condições especiais. NÃO envie link do Google Maps.
+  3º) SOMENTE se o cliente se mostrar irredutível pela TERCEIRA VEZ: envie o link do Google Maps da loja mais próxima dele (da lista de LOJAS DISPONÍVEIS) e classifique como coluna_pipeline "Redirecionado".
+- NUNCA envie o link do Google Maps logo na 1ª ou 2ª interação sobre localização.
+- Ao enviar o link (3ª tentativa), use coluna_pipeline "Redirecionado" para que o card saia do radar comercial.`;
 }
 
 function buildSystemPromptFromCompiled(opts: {

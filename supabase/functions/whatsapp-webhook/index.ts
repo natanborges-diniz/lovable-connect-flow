@@ -240,8 +240,18 @@ serve(async (req) => {
         } else if (currentColuna?.setor_id) {
           // Corrige contatos não-corporativos presos em pipeline interno
           targetColunaId = retornoCol?.id ?? novoContatoCol?.id ?? null;
-        } else if (currentColuna && ["Abandonado", "Cancelado", "Perdidos"].includes(currentColuna.nome)) {
+        } else if (currentColuna && ["Abandonado", "Cancelado", "Perdidos", "Redirecionado"].includes(currentColuna.nome)) {
           targetColunaId = retornoCol?.id ?? null;
+          // Increment ciclo_funil when returning from terminal column
+          const currentCiclo = (contato as any).ciclo_funil || 1;
+          await supabase.from("contatos").update({ ciclo_funil: currentCiclo + 1 }).eq("id", contato.id);
+          contato = { ...contato, ciclo_funil: currentCiclo + 1 };
+          console.log(`[CRM ROUTING] Contact ${contato.id} returning from terminal "${currentColuna.nome}", ciclo_funil incremented to ${currentCiclo + 1}`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contato.id,
+            tipo: "ciclo_funil_incrementado",
+            descricao: `Lead retornou de "${currentColuna.nome}". Ciclo do funil: ${currentCiclo + 1}`,
+          });
         }
 
         if (targetColunaId && targetColunaId !== contato.pipeline_coluna_id) {
