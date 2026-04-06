@@ -1108,6 +1108,13 @@ serve(async (req) => {
         antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
       }
 
+      // Filter columns by contact type for legacy path too
+      const ATENDIMENTO_GAEL_SETOR_ID_LEGACY = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const isCorporateLegacy = ["loja", "colaborador"].includes(contatoTipo);
+      const promptColunasLegacy = isCorporateLegacy
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID_LEGACY)
+        : colunas.filter((c: any) => c.setor_id === null);
+
       systemPrompt = buildSystemPrompt({
         businessRules,
         knowledge: knowledgeStr + agendamentoCtx + receitaCtx,
@@ -1115,7 +1122,7 @@ serve(async (req) => {
         antiExamples: antiStr,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
         sentTopics,
-        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        colunasNomes: promptColunasLegacy.map((c: any) => c.nome).join(", "),
         setoresNomes: setores.map((s: any) => s.nome).join(", "),
         inboundCount,
         isHibrido,
