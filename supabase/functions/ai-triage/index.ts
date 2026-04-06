@@ -1672,6 +1672,30 @@ serve(async (req) => {
 
     if (newModo) {
       await supabase.from("atendimentos").update({ modo: newModo }).eq("id", atendimento_id);
+
+      // Auto-generate summary for human agent
+      try {
+        const sumResp = await fetch(`${SUPABASE_URL}/functions/v1/summarize-atendimento`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ atendimento_id }),
+        });
+        if (sumResp.ok) {
+          const sumData = await sumResp.json();
+          if (sumData?.resumo) {
+            const currentMeta2 = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+            await supabase.from("atendimentos").update({ metadata: { ...currentMeta2, resumo_ia: sumData.resumo } }).eq("id", atendimento_id);
+            console.log("[SUMMARY] Auto-summary saved for human agent");
+          }
+        } else {
+          console.error("[SUMMARY] Failed:", await sumResp.text());
+        }
+      } catch (sumErr) {
+        console.error("[SUMMARY] Error:", sumErr);
+      }
     }
 
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };

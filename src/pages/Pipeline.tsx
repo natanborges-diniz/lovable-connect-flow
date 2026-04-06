@@ -15,8 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
   MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle,
@@ -44,14 +42,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
-import type { StatusAtendimento } from "@/types/database";
+
 import { useRef } from "react";
 
 export default function Pipeline() {
   const [search, setSearch] = useState("");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
   const { data: contatos, isLoading: loadingContatos } = useContatos();
-  const { data: colunas, isLoading: loadingColunas } = usePipelineColunas();
+  const { data: colunasVendas, isLoading: loadingColunasVendas } = usePipelineColunas();
+  const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+  const { data: colunasInternas, isLoading: loadingColunasInternas } = usePipelineColunas(ATENDIMENTO_GAEL_SETOR_ID);
+  const colunas = [...(colunasVendas ?? []), ...(colunasInternas ?? [])];
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -98,7 +99,7 @@ export default function Pipeline() {
   const [newColunaNome, setNewColunaNome] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const isLoading = loadingContatos || loadingColunas;
+  const isLoading = loadingContatos || loadingColunasVendas || loadingColunasInternas;
 
   const filteredContatos = (contatos ?? []).filter((c) => {
     if (!search) return true;
@@ -112,8 +113,12 @@ export default function Pipeline() {
     );
   });
 
+  
+  const colunasInternasIds = new Set((colunasInternas ?? []).map(c => c.id));
+
   const contatosByColuna = (colunas ?? []).map((col) => ({
     ...col,
+    isInternal: colunasInternasIds.has(col.id),
     contatos: filteredContatos.filter((c) => c.pipeline_coluna_id === col.id),
   }));
 
@@ -236,16 +241,21 @@ export default function Pipeline() {
                   {...colDragProvided.draggableProps}
                   className={cn("flex-shrink-0 w-72", colDragSnapshot.isDragging && "opacity-80")}
                 >
-                  <Card
-                    className={cn(
-                      "border-t-4",
-                      isHumano
-                        ? "border-t-destructive bg-destructive/5 ring-2 ring-destructive/20"
-                        : `border-t-${coluna.cor}`
-                    )}
-                  >
-                    <CardHeader className="pb-2 pt-3 px-3 cursor-grab active:cursor-grabbing" {...colDragProvided.dragHandleProps}>
-                      <div className="flex items-center justify-between gap-1">
+                    <Card
+                      className={cn(
+                        "border-t-4",
+                        isHumano
+                          ? "border-t-destructive bg-destructive/5 ring-2 ring-destructive/20"
+                          : coluna.isInternal
+                            ? "border-t-accent-foreground bg-accent/10"
+                            : `border-t-${coluna.cor}`
+                      )}
+                    >
+                      <CardHeader className="pb-2 pt-3 px-3 cursor-grab active:cursor-grabbing" {...colDragProvided.dragHandleProps}>
+                        <div className="flex items-center justify-between gap-1">
+                          {coluna.isInternal && !isHumano && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 mr-1 border-accent-foreground/30 text-accent-foreground">Interno</Badge>
+                          )}
                         {editingColuna === coluna.id ? (
                           <div className="flex items-center gap-1 flex-1">
                             <Input
@@ -582,7 +592,7 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
     queryFn: async () => {
       const { data, error } = await supabase
         .from("atendimentos")
-        .select("id, modo, status, canal, canal_provedor")
+        .select("id, modo, status, canal, canal_provedor, metadata")
         .eq("id", atendimentoId)
         .single();
       if (error) throw error;
@@ -670,6 +680,17 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
           >
             {atendimento.modo === "ia" ? "🤖 IA" : "👤 Humano"} (clique p/ alternar)
           </Badge>
+        </div>
+      )}
+
+      {/* AI Summary card */}
+      {atendimento && (atendimento as any).metadata?.resumo_ia && (
+        <div className="rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 flex gap-2 items-start">
+          <FileText className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+          <div className="text-sm text-yellow-800 dark:text-yellow-200">
+            <p className="font-medium text-xs mb-1">Resumo IA</p>
+            <p className="whitespace-pre-wrap text-xs">{(atendimento as any).metadata.resumo_ia}</p>
+          </div>
         </div>
       )}
 
