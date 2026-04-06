@@ -179,6 +179,28 @@ serve(async (req) => {
       });
     }
 
+    // ── CANCEL RECOVERY if contact is in recovery cadence ──
+    try {
+      const contatoMeta = (contato.metadata as any) || {};
+      const recuperacao = contatoMeta.recuperacao_vendas;
+      if (recuperacao && recuperacao.tentativas > 0) {
+        console.log(`[RECOVERY CANCEL] Inbound from ${contato.id}, resetting recuperacao_vendas (was at attempt ${recuperacao.tentativas})`);
+        const { recuperacao_vendas, ...restMeta } = contatoMeta;
+        await supabase.from("contatos").update({
+          metadata: { ...restMeta, recuperacao_vendas: { tentativas: 0 } },
+        }).eq("id", contato.id);
+        contato = { ...contato, metadata: { ...restMeta, recuperacao_vendas: { tentativas: 0 } } };
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contato.id,
+          tipo: "recuperacao_cancelada",
+          descricao: `Cliente respondeu durante cadência de recuperação (tentativa ${recuperacao.tentativas}/3). Recuperação cancelada.`,
+        });
+      }
+    } catch (recErr) {
+      console.error("[RECOVERY CANCEL] Error:", recErr);
+    }
+
     // ── CRM ROUTING: Assign pipeline_coluna_id immediately ──
     try {
       const { data: allColunas } = await supabase
