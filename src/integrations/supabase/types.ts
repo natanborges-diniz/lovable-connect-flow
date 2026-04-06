@@ -430,6 +430,7 @@ export type Database = {
       contatos: {
         Row: {
           ativo: boolean
+          ciclo_funil: number
           created_at: string
           documento: string | null
           email: string | null
@@ -447,6 +448,7 @@ export type Database = {
         }
         Insert: {
           ativo?: boolean
+          ciclo_funil?: number
           created_at?: string
           documento?: string | null
           email?: string | null
@@ -464,6 +466,7 @@ export type Database = {
         }
         Update: {
           ativo?: boolean
+          ciclo_funil?: number
           created_at?: string
           documento?: string | null
           email?: string | null
@@ -788,6 +791,7 @@ export type Database = {
           ativo: boolean
           cor: string
           created_at: string
+          grupo_funil: string | null
           id: string
           nome: string
           ordem: number
@@ -798,6 +802,7 @@ export type Database = {
           ativo?: boolean
           cor?: string
           created_at?: string
+          grupo_funil?: string | null
           id?: string
           nome: string
           ordem?: number
@@ -808,6 +813,7 @@ export type Database = {
           ativo?: boolean
           cor?: string
           created_at?: string
+          grupo_funil?: string | null
           id?: string
           nome?: string
           ordem?: number
@@ -1146,7 +1152,16 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      funil_metricas_vendas: {
+        Row: {
+          ciclo_funil: number | null
+          coluna_nome: string | null
+          grupo_funil: string | null
+          grupo_ordem: number | null
+          total_contatos: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
