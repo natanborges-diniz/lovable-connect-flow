@@ -47,6 +47,7 @@ import { useRef } from "react";
 
 export default function Pipeline() {
   const [search, setSearch] = useState("");
+  const [cicloFilter, setCicloFilter] = useState<"todos" | "novos" | "retornos">("todos");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunasVendas, isLoading: loadingColunasVendas } = usePipelineColunas();
