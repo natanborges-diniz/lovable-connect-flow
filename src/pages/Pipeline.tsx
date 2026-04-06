@@ -208,6 +208,24 @@ export default function Pipeline() {
         description="Clique em um card para abrir a conversa • Arraste para mover entre colunas"
         actions={
           <div className="flex items-center gap-2">
+            <div className="flex items-center bg-muted rounded-md p-0.5">
+              {([
+                { key: "todos", label: "Todos" },
+                { key: "novos", label: "Novos" },
+                { key: "retornos", label: "Retornos" },
+              ] as const).map(({ key, label }) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant={cicloFilter === key ? "default" : "ghost"}
+                  className={cn("h-7 text-xs px-3", cicloFilter === key && "shadow-sm")}
+                  onClick={() => setCicloFilter(key)}
+                >
+                  {key === "retornos" && <RefreshCw className="h-3 w-3 mr-1" />}
+                  {label}
+                </Button>
+              ))}
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
