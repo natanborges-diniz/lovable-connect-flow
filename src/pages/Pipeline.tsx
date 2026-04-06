@@ -51,7 +51,10 @@ export default function Pipeline() {
   const [search, setSearch] = useState("");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
   const { data: contatos, isLoading: loadingContatos } = useContatos();
-  const { data: colunas, isLoading: loadingColunas } = usePipelineColunas();
+  const { data: colunasVendas, isLoading: loadingColunasVendas } = usePipelineColunas();
+  const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+  const { data: colunasInternas, isLoading: loadingColunasInternas } = usePipelineColunas(ATENDIMENTO_GAEL_SETOR_ID);
+  const colunas = [...(colunasVendas ?? []), ...(colunasInternas ?? [])];
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
