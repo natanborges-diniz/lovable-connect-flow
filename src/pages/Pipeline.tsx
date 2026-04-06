@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
-  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle,
+  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -47,6 +47,7 @@ import { useRef } from "react";
 
 export default function Pipeline() {
   const [search, setSearch] = useState("");
+  const [cicloFilter, setCicloFilter] = useState<"todos" | "novos" | "retornos">("todos");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunasVendas, isLoading: loadingColunasVendas } = usePipelineColunas();
@@ -102,6 +103,10 @@ export default function Pipeline() {
   const isLoading = loadingContatos || loadingColunasVendas || loadingColunasInternas;
 
   const filteredContatos = (contatos ?? []).filter((c) => {
+    // Cycle filter
+    if (cicloFilter === "novos" && c.ciclo_funil !== 1) return false;
+    if (cicloFilter === "retornos" && c.ciclo_funil < 2) return false;
+    
     if (!search) return true;
     const s = search.toLowerCase();
     return (
@@ -203,6 +208,24 @@ export default function Pipeline() {
         description="Clique em um card para abrir a conversa • Arraste para mover entre colunas"
         actions={
           <div className="flex items-center gap-2">
+            <div className="flex items-center bg-muted rounded-md p-0.5">
+              {([
+                { key: "todos", label: "Todos" },
+                { key: "novos", label: "Novos" },
+                { key: "retornos", label: "Retornos" },
+              ] as const).map(({ key, label }) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant={cicloFilter === key ? "default" : "ghost"}
+                  className={cn("h-7 text-xs px-3", cicloFilter === key && "shadow-sm")}
+                  onClick={() => setCicloFilter(key)}
+                >
+                  {key === "retornos" && <RefreshCw className="h-3 w-3 mr-1" />}
+                  {label}
+                </Button>
+              ))}
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -359,6 +382,12 @@ export default function Pipeline() {
                                                   <User className="h-2.5 w-2.5" /> Humano
                                                 </Badge>
                                               )
+                                            )}
+                                            {contato.ciclo_funil >= 2 && (
+                                              <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-accent-foreground/50 text-accent-foreground bg-accent/20">
+                                                <RefreshCw className="h-2.5 w-2.5" />
+                                                {contato.ciclo_funil === 2 ? "Retorno" : `Ciclo ${contato.ciclo_funil}`}
+                                              </Badge>
                                             )}
                                           </div>
                                           <TipoContatoBadge tipo={contato.tipo} />
