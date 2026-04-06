@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.compile-prompt]
 verify_jwt = false
+
+[functions.vendas-recuperacao-cron]
+verify_jwt = false
