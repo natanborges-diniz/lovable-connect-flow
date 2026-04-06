@@ -115,8 +115,12 @@ export default function Pipeline() {
     );
   });
 
+  const colunasVendasIds = new Set((colunasVendas ?? []).map(c => c.id));
+  const colunasInternasIds = new Set((colunasInternas ?? []).map(c => c.id));
+
   const contatosByColuna = (colunas ?? []).map((col) => ({
     ...col,
+    isInternal: colunasInternasIds.has(col.id),
     contatos: filteredContatos.filter((c) => c.pipeline_coluna_id === col.id),
   }));
 
