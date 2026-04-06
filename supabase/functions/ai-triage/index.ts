@@ -1067,6 +1067,13 @@ serve(async (req) => {
         }
       }
 
+      // Filter columns by contact type — clients only see sales columns (setor_id = null)
+      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const isCorporateContact = ["loja", "colaborador"].includes(contatoTipo);
+      const promptColunas = isCorporateContact
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        : colunas.filter((c: any) => c.setor_id === null);
+
       systemPrompt = buildSystemPromptFromCompiled({
         compiledPrompt,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
@@ -1075,7 +1082,7 @@ serve(async (req) => {
         receitaCtx,
         lojasStr,
         sentTopics,
-        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        colunasNomes: promptColunas.map((c: any) => c.nome).join(", "),
         setoresNomes: setores.map((s: any) => s.nome).join(", "),
         inboundCount,
         isHibrido,
