@@ -1485,7 +1485,7 @@ serve(async (req) => {
               if (premium.id !== economy.id) {
                 quoteMsg += "\n" + formatLens(premium, "💎 Premium");
               }
-              quoteMsg += "\n\nQuer que eu detalhe alguma opção ou prefere agendar uma visita para experimentar?";
+              quoteMsg += "\n\nQuer que eu detalhe alguma opção ou prefere agendar uma visita para conhecer nossas armações e fechar presencialmente?";
 
               resposta = quoteMsg;
               console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
