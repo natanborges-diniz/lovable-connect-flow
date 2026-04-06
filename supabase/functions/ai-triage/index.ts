@@ -424,6 +424,23 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "agendar_lembrete",
+      description: "Registra um lembrete futuro para enviar ao cliente. Use quando o cliente pedir para ser lembrado ou quando combinar um retorno em data específica. OBRIGATÓRIO usar esta tool antes de prometer qualquer ação futura.",
+      parameters: {
+        type: "object",
+        properties: {
+          data_disparo: { type: "string", description: "Data e hora para enviar o lembrete no formato ISO 8601 (ex: 2026-04-11T10:00:00-03:00)." },
+          mensagem: { type: "string", description: "Mensagem a ser enviada ao cliente no momento do lembrete." },
+          resposta: { type: "string", description: "Mensagem confirmando ao cliente que o lembrete foi agendado." },
+        },
+        required: ["data_disparo", "mensagem", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════
@@ -561,10 +578,11 @@ Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assun
   }
 
   s.push(`# CLASSIFICAÇÃO
-Colunas: ${opts.colunasNomes}
+Colunas disponíveis: ${opts.colunasNomes}
 Setores: ${opts.setoresNomes || "nenhum"}
 Mensagem nº ${opts.inboundCount}.
-Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.`);
+Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.
+IMPORTANTE: Use SOMENTE as colunas listadas acima. Nunca classifique em colunas que não aparecem nesta lista.`);
 
   if (opts.isHibrido) {
     s.push(`# MODO HÍBRIDO
@@ -1066,6 +1084,13 @@ serve(async (req) => {
         }
       }
 
+      // Filter columns by contact type — clients only see sales columns (setor_id = null)
+      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const isCorporateContact = ["loja", "colaborador"].includes(contatoTipo);
+      const promptColunas = isCorporateContact
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        : colunas.filter((c: any) => c.setor_id === null);
+
       systemPrompt = buildSystemPromptFromCompiled({
         compiledPrompt,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
@@ -1074,7 +1099,7 @@ serve(async (req) => {
         receitaCtx,
         lojasStr,
         sentTopics,
-        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        colunasNomes: promptColunas.map((c: any) => c.nome).join(", "),
         setoresNomes: setores.map((s: any) => s.nome).join(", "),
         inboundCount,
         isHibrido,
@@ -1100,6 +1125,13 @@ serve(async (req) => {
         antiStr = prioritizedFeedbacks.filter((f: any) => f.motivo).map((f: any) => `- ${f.motivo}${f.resposta_corrigida ? ` → Correto: ${f.resposta_corrigida}` : ""}`).join("\n");
       }
 
+      // Filter columns by contact type for legacy path too
+      const ATENDIMENTO_GAEL_SETOR_ID_LEGACY = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const isCorporateLegacy = ["loja", "colaborador"].includes(contatoTipo);
+      const promptColunasLegacy = isCorporateLegacy
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID_LEGACY)
+        : colunas.filter((c: any) => c.setor_id === null);
+
       systemPrompt = buildSystemPrompt({
         businessRules,
         knowledge: knowledgeStr + agendamentoCtx + receitaCtx,
@@ -1107,7 +1139,7 @@ serve(async (req) => {
         antiExamples: antiStr,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
         sentTopics,
-        colunasNomes: colunas.map((c: any) => c.nome).join(", "),
+        colunasNomes: promptColunasLegacy.map((c: any) => c.nome).join(", "),
         setoresNomes: setores.map((s: any) => s.nome).join(", "),
         inboundCount,
         isHibrido,
@@ -1484,7 +1516,7 @@ serve(async (req) => {
               if (premium.id !== economy.id) {
                 quoteMsg += "\n" + formatLens(premium, "💎 Premium");
               }
-              quoteMsg += "\n\nQuer que eu detalhe alguma opção ou prefere agendar uma visita para experimentar?";
+              quoteMsg += "\n\nQuer que eu detalhe alguma opção ou prefere agendar uma visita para conhecer nossas armações e fechar presencialmente?";
 
               resposta = quoteMsg;
               console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
@@ -1548,6 +1580,31 @@ serve(async (req) => {
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
+      } else if (fn === "agendar_lembrete") {
+        resposta = args.resposta;
+        intencao = "lembrete";
+
+        try {
+          await supabase.from("lembretes").insert({
+            contato_id: contatoId,
+            atendimento_id,
+            mensagem: args.mensagem,
+            data_disparo: args.data_disparo,
+          });
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "lembrete_agendado",
+            descricao: `Lembrete agendado para ${new Date(args.data_disparo).toLocaleDateString("pt-BR")}`,
+            metadata: { mensagem: args.mensagem, data_disparo: args.data_disparo },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+
+          console.log(`[TOOL] agendar_lembrete: ${args.data_disparo} — "${args.mensagem.substring(0, 50)}..."`);
+        } catch (e) {
+          console.error("[TOOL] agendar_lembrete failed:", e);
+        }
       }
     }
 

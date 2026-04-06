@@ -695,6 +695,54 @@ export type Database = {
         }
         Relationships: []
       }
+      lembretes: {
+        Row: {
+          atendimento_id: string | null
+          contato_id: string
+          created_at: string
+          data_disparo: string
+          id: string
+          mensagem: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          atendimento_id?: string | null
+          contato_id: string
+          created_at?: string
+          data_disparo: string
+          id?: string
+          mensagem: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          atendimento_id?: string | null
+          contato_id?: string
+          created_at?: string
+          data_disparo?: string
+          id?: string
+          mensagem?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lembretes_atendimento_id_fkey"
+            columns: ["atendimento_id"]
+            isOneToOne: false
+            referencedRelation: "atendimentos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lembretes_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mensagens: {
         Row: {
           atendimento_id: string

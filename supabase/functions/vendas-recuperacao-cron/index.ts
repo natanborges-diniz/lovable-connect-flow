@@ -31,6 +31,69 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
+    // ── 0. PROCESS PENDING LEMBRETES (reminders) ──
+    let lembretesEnviados = 0;
+    try {
+      const { data: lembretesPendentes } = await supabase
+        .from("lembretes")
+        .select("id, contato_id, atendimento_id, mensagem")
+        .eq("status", "pendente")
+        .lte("data_disparo", new Date().toISOString())
+        .limit(50);
+
+      if (lembretesPendentes?.length) {
+        for (const lembrete of lembretesPendentes) {
+          try {
+            // Find active atendimento for this contact
+            let atendimentoId = lembrete.atendimento_id;
+            if (!atendimentoId) {
+              const { data: at } = await supabase
+                .from("atendimentos")
+                .select("id")
+                .eq("contato_id", lembrete.contato_id)
+                .eq("canal", "whatsapp")
+                .neq("status", "encerrado")
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .single();
+              atendimentoId = at?.id;
+            }
+
+            if (atendimentoId) {
+              const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  atendimento_id: atendimentoId,
+                  mensagem: lembrete.mensagem,
+                  remetente_nome: "Gael",
+                }),
+              });
+
+              if (sendResp.ok) {
+                await supabase.from("lembretes").update({ status: "enviado", updated_at: new Date().toISOString() }).eq("id", lembrete.id);
+                lembretesEnviados++;
+                console.log(`[LEMBRETE] Sent reminder ${lembrete.id} to contact ${lembrete.contato_id}`);
+              } else {
+                console.error(`[LEMBRETE] Send failed for ${lembrete.id}: ${await sendResp.text()}`);
+              }
+            } else {
+              // No active atendimento — mark as failed
+              await supabase.from("lembretes").update({ status: "falhou", updated_at: new Date().toISOString() }).eq("id", lembrete.id);
+              console.warn(`[LEMBRETE] No active atendimento for contact ${lembrete.contato_id} — skipped`);
+            }
+          } catch (lemErr) {
+            console.error(`[LEMBRETE] Error processing ${lembrete.id}:`, lemErr);
+          }
+        }
+      }
+    } catch (lemGlobalErr) {
+      console.error("[LEMBRETE] Global error:", lemGlobalErr);
+    }
+
     // 1. Get eligible sales columns IDs
     const { data: colunas } = await supabase
       .from("pipeline_colunas")
@@ -240,6 +303,7 @@ serve(async (req) => {
       status: "ok",
       processed,
       moved_to_perdidos: movedToPerdidos,
+      lembretes_enviados: lembretesEnviados,
       total_checked: contatos.length,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
