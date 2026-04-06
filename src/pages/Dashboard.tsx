@@ -2,22 +2,47 @@ import { useContatos } from "@/hooks/useContatos";
 import { useSolicitacoes } from "@/hooks/useSolicitacoes";
 import { useAtendimentos } from "@/hooks/useAtendimentos";
 import { useTarefas } from "@/hooks/useTarefas";
+import { usePipelineColunas } from "@/hooks/usePipelineColunas";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, FileText, AlertCircle, CheckCircle2, MessageSquare, ListTodo, Clock, TrendingUp } from "lucide-react";
+import { Users, FileText, AlertCircle, CheckCircle2, MessageSquare, ListTodo, TrendingUp, Filter } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+
+const GRUPO_LABELS: Record<string, string> = {
+  triagem: "Triagem",
+  comercial: "Comercial",
+  pos_venda: "Pós-Venda",
+  sac: "SAC",
+  outros: "Outros",
+  terminal: "Terminal",
+};
+
+const GRUPO_ORDER = ["triagem", "comercial", "pos_venda", "sac", "outros", "terminal"];
+
+const FUNNEL_COLORS: Record<string, string> = {
+  triagem: "hsl(220, 70%, 50%)",
+  comercial: "hsl(160, 60%, 45%)",
+  pos_venda: "hsl(35, 90%, 55%)",
+  sac: "hsl(0, 70%, 55%)",
+  outros: "hsl(280, 60%, 55%)",
+  terminal: "hsl(0, 0%, 50%)",
+};
 
 export default function Dashboard() {
   const { data: contatos } = useContatos();
   const { data: solicitacoes } = useSolicitacoes();
   const { data: atendimentos } = useAtendimentos();
   const { data: tarefas } = useTarefas();
+  const { data: colunas } = usePipelineColunas();
+
+  const [cicloFilter, setCicloFilter] = useState<"all" | 1 | 2>("all");
 
   const totalContatos = contatos?.length ?? 0;
   const totalSolicitacoes = solicitacoes?.length ?? 0;
   const abertas = solicitacoes?.filter((s: any) => ["aberta", "classificada", "em_atendimento", "reaberta"].includes(s.status)).length ?? 0;
   const concluidas = solicitacoes?.filter((s: any) => s.status === "concluida").length ?? 0;
-
   const atendimentosAtivos = atendimentos?.filter((a: any) => a.status !== "encerrado").length ?? 0;
   const tarefasPendentes = tarefas?.filter((t: any) => ["pendente", "em_andamento"].includes(t.status)).length ?? 0;
 
@@ -30,6 +55,34 @@ export default function Dashboard() {
     { label: "Tarefas Pendentes", value: tarefasPendentes, icon: ListTodo, color: "text-warning" },
   ];
 
+  // Build funnel data from contatos + colunas
+  const colunasMap = new Map<string, { grupo_funil: string | null; ordem: number; nome: string }>();
+  colunas?.forEach((c: any) => colunasMap.set(c.id, { grupo_funil: c.grupo_funil, ordem: c.ordem, nome: c.nome }));
+
+  const filteredContatos = contatos?.filter((c: any) => {
+    if (cicloFilter === "all") return true;
+    if (cicloFilter === 1) return (c.ciclo_funil || 1) === 1;
+    return (c.ciclo_funil || 1) >= 2;
+  }) ?? [];
+
+  const funnelData = GRUPO_ORDER.map((grupo) => {
+    const count = filteredContatos.filter((c: any) => {
+      const col = colunasMap.get(c.pipeline_coluna_id);
+      return col?.grupo_funil === grupo;
+    }).length;
+    return { grupo, label: GRUPO_LABELS[grupo] || grupo, value: count, fill: FUNNEL_COLORS[grupo] };
+  }).filter(d => d.grupo !== "terminal" || d.value > 0);
+
+  // Calculate conversion rates
+  const conversionPairs = funnelData
+    .filter(d => d.grupo !== "terminal")
+    .map((d, i, arr) => {
+      if (i === 0) return { ...d, conversion: null };
+      const prev = arr[i - 1];
+      const rate = prev.value > 0 ? ((d.value / prev.value) * 100).toFixed(1) : "0";
+      return { ...d, conversion: `${rate}%` };
+    });
+
   // Chart data: Solicitações por status
   const statusCounts = [
     { name: "Aberta", value: solicitacoes?.filter((s: any) => s.status === "aberta").length ?? 0 },
@@ -40,7 +93,6 @@ export default function Dashboard() {
     { name: "Cancelada", value: solicitacoes?.filter((s: any) => s.status === "cancelada").length ?? 0 },
   ].filter(d => d.value > 0);
 
-  // Chart data: Solicitações por canal
   const canalCounts = [
     { name: "Sistema", value: solicitacoes?.filter((s: any) => s.canal_origem === "sistema").length ?? 0 },
     { name: "WhatsApp", value: solicitacoes?.filter((s: any) => s.canal_origem === "whatsapp").length ?? 0 },
@@ -48,7 +100,6 @@ export default function Dashboard() {
     { name: "Telefone", value: solicitacoes?.filter((s: any) => s.canal_origem === "telefone").length ?? 0 },
   ].filter(d => d.value > 0);
 
-  // Chart data: Tarefas por status
   const tarefaStatusCounts = [
     { name: "Pendente", value: tarefas?.filter((t: any) => t.status === "pendente").length ?? 0 },
     { name: "Em Andamento", value: tarefas?.filter((t: any) => t.status === "em_andamento").length ?? 0 },
@@ -79,8 +130,75 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* Funnel Chart */}
+      <Card className="shadow-card mb-6">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" /> Funil de Vendas
+            </CardTitle>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant={cicloFilter === "all" ? "default" : "outline"}
+                onClick={() => setCicloFilter("all")}
+                className="text-xs h-7"
+              >
+                Todos
+              </Button>
+              <Button
+                size="sm"
+                variant={cicloFilter === 1 ? "default" : "outline"}
+                onClick={() => setCicloFilter(1)}
+                className="text-xs h-7"
+              >
+                <Filter className="h-3 w-3 mr-1" /> Novos (Ciclo 1)
+              </Button>
+              <Button
+                size="sm"
+                variant={cicloFilter === 2 ? "default" : "outline"}
+                onClick={() => setCicloFilter(2)}
+                className="text-xs h-7"
+              >
+                <Filter className="h-3 w-3 mr-1" /> Retornos (Ciclo 2+)
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {conversionPairs.map((d, i) => {
+              const maxValue = Math.max(...conversionPairs.map(x => x.value), 1);
+              const widthPct = Math.max((d.value / maxValue) * 100, 8);
+              return (
+                <div key={d.grupo} className="flex items-center gap-3">
+                  <div className="w-24 text-xs font-medium text-muted-foreground text-right shrink-0">
+                    {d.label}
+                  </div>
+                  <div className="flex-1 relative">
+                    <div
+                      className="h-8 rounded-md flex items-center px-3 text-xs font-bold text-white transition-all"
+                      style={{ width: `${widthPct}%`, backgroundColor: d.fill, minWidth: "40px" }}
+                    >
+                      {d.value}
+                    </div>
+                  </div>
+                  {d.conversion && (
+                    <div className="w-14 text-xs text-muted-foreground shrink-0">
+                      → {d.conversion}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {filteredContatos.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-8">Nenhum contato neste filtro</p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Solicitações por Status */}
         {statusCounts.length > 0 && (
           <Card className="shadow-card">
             <CardHeader>
@@ -102,7 +220,6 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {/* Volume por Canal */}
         {canalCounts.length > 0 && (
           <Card className="shadow-card">
             <CardHeader>
@@ -126,7 +243,6 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {/* Tarefas por Status */}
         {tarefaStatusCounts.length > 0 && (
           <Card className="shadow-card">
             <CardHeader>
