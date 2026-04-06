@@ -561,10 +561,11 @@ Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assun
   }
 
   s.push(`# CLASSIFICAÇÃO
-Colunas: ${opts.colunasNomes}
+Colunas disponíveis: ${opts.colunasNomes}
 Setores: ${opts.setoresNomes || "nenhum"}
 Mensagem nº ${opts.inboundCount}.
-Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.`);
+Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.
+IMPORTANTE: Use SOMENTE as colunas listadas acima. Nunca classifique em colunas que não aparecem nesta lista.`);
 
   if (opts.isHibrido) {
     s.push(`# MODO HÍBRIDO
