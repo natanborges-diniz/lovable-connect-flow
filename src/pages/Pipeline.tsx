@@ -115,7 +115,7 @@ export default function Pipeline() {
     );
   });
 
-  const colunasVendasIds = new Set((colunasVendas ?? []).map(c => c.id));
+  
   const colunasInternasIds = new Set((colunasInternas ?? []).map(c => c.id));
 
   const contatosByColuna = (colunas ?? []).map((col) => ({
