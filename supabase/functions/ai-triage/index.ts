@@ -589,6 +589,11 @@ function buildSystemPrompt(opts: {
   // Date/time context FIRST — so the model always knows the current date
   s.push(buildDateContext());
 
+  // Continuity and regional rules BEFORE identity (maximum weight)
+  const continuityBlock = buildContinuityBlock(opts.inboundCount);
+  if (continuityBlock) s.push(continuityBlock);
+  s.push(buildRegionalCoverageBlock());
+
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
 
