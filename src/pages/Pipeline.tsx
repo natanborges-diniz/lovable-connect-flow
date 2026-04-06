@@ -383,6 +383,12 @@ export default function Pipeline() {
                                                 </Badge>
                                               )
                                             )}
+                                            {contato.ciclo_funil >= 2 && (
+                                              <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-accent-foreground/50 text-accent-foreground bg-accent/20">
+                                                <RefreshCw className="h-2.5 w-2.5" />
+                                                {contato.ciclo_funil === 2 ? "Retorno" : `Ciclo ${contato.ciclo_funil}`}
+                                              </Badge>
+                                            )}
                                           </div>
                                           <TipoContatoBadge tipo={contato.tipo} />
                                         </div>
