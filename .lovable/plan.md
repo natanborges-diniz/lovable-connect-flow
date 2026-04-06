@@ -1,58 +1,66 @@
 
 
-# Corrigir Roteamento de Contatos Loja no Pipeline
+# Unificar CRM e Eliminar Duplicidade
 
-## Problema
+## Contexto
 
-Natan Borges (tipo `loja`) está na coluna "Link Enviado" do **Financeiro**, mas deveria estar visível no pipeline de atendimento. Isso acontece porque:
+Atualmente existem duas telas de pipeline separadas: **CRM** (`/crm`) mostra contatos de vendas (setor_id IS NULL) e **Lojas** (`/atendimento-gael`) mostra contatos do setor "Atendimento Gael". Ambas são operadas pelo mesmo back-office, gerando confusão. A tela Lojas também não abre conversas ao clicar nos cards.
 
-1. O setor **"Atendimento Gael"** (destinado a lojas) não tem nenhuma coluna de pipeline
-2. O webhook de WhatsApp roteia lojas para `internalColunas`, que mistura Financeiro + Agendamentos — o primeiro "Novo" encontrado é do Financeiro
-3. O ai-triage carrega TODAS as colunas sem filtro de setor — quando sugere uma coluna como "Orçamento", pode pegar a de qualquer setor
+## O que muda
 
-## Solução
+### 1. Remover a página "Lojas" separada
 
-### 1. Criar colunas de pipeline para o setor "Atendimento Gael"
+- Deletar `src/pages/PipelineAtendimentoGael.tsx`
+- Remover a rota `/atendimento-gael` do `App.tsx`
+- Remover o módulo `atendimento_gael` da navegação (`TopNavigation.tsx`, `AppSidebar.tsx`, `AppLayout.tsx`)
 
-Migration SQL para criar colunas dedicadas ao atendimento de lojas:
+### 2. Unificar todos os contatos no CRM (`/crm`)
 
-| Coluna | Ordem |
-|--------|-------|
-| Novo | 0 |
-| Em Atendimento | 1 |
-| Aguardando Resposta | 2 |
-| Resolvido | 3 |
+O Pipeline CRM (`Pipeline.tsx`) hoje filtra apenas colunas com `setor_id IS NULL`. A mudança:
 
-### 2. Corrigir roteamento no webhook (whatsapp-webhook)
+- `usePipelineColunas()` sem argumento continuará trazendo vendas
+- Adicionar query separada para carregar colunas do setor "Atendimento Gael"
+- Combinar ambas as listas de colunas no Kanban, com separação visual (ex: um divisor ou cor diferente na borda superior para colunas internas)
+- Todos os cards terão o `onClick` que abre o `ConversationPanel` (já funciona no CRM atual)
 
-No bloco de CRM ROUTING (linhas 193-209), filtrar `internalColunas` pelo setor correto:
-- Buscar o setor "Atendimento Gael" pelo nome
-- Filtrar colunas internas apenas desse setor para contatos loja/colaborador
-- Fallback: se não encontrar, usar o primeiro setor interno disponível
+### 3. Resumo automático no escalonamento humano
 
-### 3. Corrigir ai-triage para respeitar o setor do contato
+Quando `precisa_humano = true` no ai-triage, após escalar:
 
-Na query de `pipeline_colunas` (linha 882), continuar carregando todas, mas na hora de aplicar a coluna sugerida (linhas 1678-1684), filtrar pelo setor correto:
-- Se contato é loja → usar colunas do setor "Atendimento Gael"
-- Se contato é cliente → usar colunas de vendas (setor_id IS NULL)
-- Isso evita que a IA mova um contato loja para uma coluna do Financeiro
+- Invocar `summarize-atendimento` automaticamente (já existe a edge function)
+- O resumo será salvo em `atendimentos.metadata.resumo_ia`
+- No `ConversationPanel`, exibir o resumo como um bloco destacado no topo da conversa (antes das mensagens), quando existir `resumo_ia` no metadata
+- Formato: card com ícone de documento, fundo amarelo claro, com os pontos principais em poucas linhas
 
-### 4. Corrigir Natan Borges agora
+### 4. Ajustar ai-triage para resumo automático
 
-Migration para mover Natan Borges para a coluna "Novo" do setor "Atendimento Gael" recém-criada.
+No `ai-triage/index.ts`, após a linha que faz `update({ modo: "hibrido" })` quando `precisa_humano`:
+
+```typescript
+// Auto-generate summary for human agent
+await fetch(`${SUPABASE_URL}/functions/v1/summarize-atendimento`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ atendimento_id }),
+});
+```
 
 ## Arquivos modificados
 
-| Local | Mudança |
-|-------|---------|
-| Migration SQL | Criar 4 colunas para setor "Atendimento Gael" |
-| Migration SQL | Mover Natan Borges para coluna correta |
-| `supabase/functions/whatsapp-webhook/index.ts` | Filtrar colunas internas pelo setor "Atendimento Gael" |
-| `supabase/functions/ai-triage/index.ts` | Filtrar coluna sugerida pelo setor do contato |
+| Arquivo | Ação |
+|---------|------|
+| `src/pages/PipelineAtendimentoGael.tsx` | Deletar |
+| `src/App.tsx` | Remover rota `/atendimento-gael` |
+| `src/components/layout/TopNavigation.tsx` | Remover aba "Lojas" |
+| `src/components/layout/AppSidebar.tsx` | Remover item "Lojas" |
+| `src/components/layout/AppLayout.tsx` | Remover módulo `atendimento_gael` |
+| `src/pages/Pipeline.tsx` | Carregar e exibir colunas de todos os setores; exibir resumo IA no ConversationPanel |
+| `supabase/functions/ai-triage/index.ts` | Chamar summarize-atendimento ao escalar para humano |
 
 ## Resultado
 
-- Contatos tipo `loja` aparecem no pipeline interno correto, não mais no Financeiro
-- AI-triage não mistura colunas entre setores
-- Natan Borges fica visível no pipeline de atendimento
+- Uma única tela CRM com todas as colunas (vendas + atendimento interno)
+- Cards de loja e cliente, todos clicáveis com histórico de conversa
+- Quando o humano abre um card escalado, vê imediatamente o resumo com motivo e pontos-chave, sem precisar ler toda a conversa
+- Sem duplicidade de telas, sem confusão de navegação
 
