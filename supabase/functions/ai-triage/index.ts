@@ -955,6 +955,14 @@ serve(async (req) => {
       return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword");
     }
 
+    // ── 2.5. PRE-LLM ROUTER: contact lens detection → deterministic escalation ──
+    const CONTACT_LENS_RE = /lentes?\s*de\s*contato/i;
+    if (CONTACT_LENS_RE.test(currentMsg) && !isHibrido) {
+      console.log("[ROUTER] Contact lens detected — deterministic escalation");
+      const contactLensMsg = "Lentes de contato é com nosso Consultor especializado! Para adiantar seu atendimento, me conta: você já usa lentes de contato? Se sim, qual marca/tipo (diária, mensal, anual) e tem receita atualizada? Vou passar tudo pro Consultor te atender já preparado 🤝";
+      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, contactLensMsg, "lentes_de_contato");
+    }
+
     // ── 3. PRE-LLM ROUTER: subject change → deterministic ──
     if (matchesSubjectChange(currentMsg)) {
       console.log("[ROUTER] Subject change detected — deterministic response");
