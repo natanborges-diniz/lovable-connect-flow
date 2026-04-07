@@ -614,6 +614,7 @@ function buildSystemPrompt(opts: {
   inboundCount: number;
   isHibrido: boolean;
   hasKnowledge: boolean;
+  escalatedSubject?: string | null;
 }): string {
   const s: string[] = [];
 
@@ -690,10 +691,17 @@ Mensagem nº ${opts.inboundCount}.
 Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.`);
 
   if (opts.isHibrido) {
-    s.push(`# MODO HÍBRIDO
-Consultor solicitado mas não respondeu. Continue atendendo.
+    let hibridoBlock = `# MODO HÍBRIDO
+Consultor solicitado mas não respondeu. Continue atendendo OUTROS assuntos.
 Para mensagens vagas: faça pergunta objetiva ("Sobre qual tema: orçamento, lentes, pedidos, financeiro?").
-NUNCA responda com CTA genérico de visita.`);
+NUNCA responda com CTA genérico de visita.`;
+    if (opts.escalatedSubject) {
+      hibridoBlock += `\n\n# ASSUNTO ESCALADO: ${opts.escalatedSubject}
+Este assunto foi encaminhado para Consultor especializado. NÃO faça perguntas sobre este tema.
+Se o cliente perguntar sobre "${opts.escalatedSubject}", responda APENAS: "Seu Consultor já foi acionado e vai te chamar em breve! 🤝"
+Se o cliente iniciar um assunto DIFERENTE, responda normalmente.`;
+    }
+    s.push(hibridoBlock);
   }
 
   return s.join("\n\n");
