@@ -1985,7 +1985,10 @@ async function handleEscalation(
   supabase: any, supabaseUrl: string, serviceKey: string,
   atendimentoId: string, contatoId: string, mensagem: string, trigger: string
 ) {
-  const resposta = "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Posso te ajudar com algo rápido enquanto isso? 😊";
+  // Use custom message for contact lens, default for others
+  const resposta = trigger === "lentes_de_contato"
+    ? mensagem
+    : "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Posso te ajudar com algo rápido enquanto isso? 😊";
 
   await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, resposta);
 
@@ -2002,7 +2005,7 @@ async function handleEscalation(
   await supabase.from("eventos_crm").insert({
     contato_id: contatoId, tipo: "escalonamento_humano",
     descricao: `Escalonamento (${trigger}): cliente pediu Consultor`,
-    metadata: { trigger, mensagem },
+    metadata: { trigger, motivo: trigger, mensagem },
     referencia_tipo: "atendimento", referencia_id: atendimentoId,
   });
 
