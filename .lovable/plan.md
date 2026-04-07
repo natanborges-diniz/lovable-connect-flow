@@ -1,64 +1,63 @@
 
 
-# Correções: Classificação, Lembrete Prometido e Terminologia de Lentes
+# Corrigir Comportamento Pós-Escalonamento + Build Errors
 
-## Problemas Identificados
+## Problemas
 
-### 1. Coluna "Aguardando Resposta" — classificação errada
-A coluna "Aguardando Resposta" pertence ao setor interno (Atendimento Gael). No entanto, a IA está classificando um contato de cliente nessa coluna. Isso ocorre porque o prompt lista TODAS as colunas disponíveis (incluindo as internas) no bloco `# CLASSIFICAÇÃO`, e o LLM pode escolher qualquer uma delas. A filtragem por setor acontece depois (linhas 1758-1767), mas se a coluna interna não tem correspondente no pipeline de vendas, o contato fica preso.
+1. **IA continua fazendo perguntas picadas após escalar**: Após chamar `escalar_consultor`, a IA deveria parar de coletar dados sobre o assunto escalado, mas continua perguntando marca, tipo, receita — uma por vez.
+2. **Gate pós-escalonamento precisa ser inteligente**: A IA deve parar de puxar conversa sobre o assunto escalado, mas permanecer disponível se o CLIENTE iniciar uma pergunta nova (outro assunto, dúvida sobre horário, endereço, etc.).
+3. **Build errors**: `useAtendimentos.ts` e `useTarefas.ts` usam `Record<string, unknown>` incompatível com tipos Supabase.
 
-**Correção**: Filtrar as colunas enviadas no prompt para que o LLM só veja colunas do setor correto do contato. Clientes nunca devem ver colunas do setor Atendimento Gael no prompt.
+## Correções
 
-### 2. Lembrete prometido pela IA para sexta-feira — não existe mecanismo
-A IA prometeu "te aviso na sexta" mas não existe nenhuma tool para agendar lembretes avulsos (sem agendamento de visita). O sistema só dispara lembretes via `agendamentos-cron` quando há um agendamento registrado. Sem agendamento, nenhum lembrete será enviado. A IA fez uma promessa que não pode cumprir.
+### 1. Migration SQL — Regras de comportamento pós-escalonamento
 
-**Correção**: 
-- Criar uma tool `agendar_lembrete` que registra um lembrete na tabela `tarefas` (ou nova tabela `lembretes`) com data de disparo
-- O `vendas-recuperacao-cron` (ou novo cron) verifica lembretes pendentes e envia a mensagem
-- Adicionar regra proibida: "NUNCA prometa ações futuras (lembretes, retornos, envios) sem usar a tool correspondente"
+**Atualizar regra de lentes de contato** para incluir mini-questionário consolidado na mensagem de escalonamento (uma única mensagem com todas as perguntas relevantes).
 
-### 3. "Experimentar lentes" — terminologia incorreta
-Na linha 1487 do ai-triage, após o orçamento, a IA pergunta "prefere agendar uma visita para experimentar?" — lentes de óculos são sob encomenda, não se experimentam. O que se experimenta são armações. Lentes de contato são outro departamento (encaminhar para atendimento humano).
+**Inserir regra global**: "Após usar a tool escalar_consultor, NÃO faça mais perguntas sobre o assunto escalado. Se o cliente enviar uma nova pergunta sobre OUTRO assunto, responda normalmente. Se perguntar sobre o assunto escalado, diga apenas que o Consultor está a caminho."
 
-**Correção**:
-- Alterar a mensagem pós-orçamento (linha 1487) para não usar "experimentar"
-- Adicionar regra proibida sobre "experimentar lentes"
-- Adicionar instrução: lentes de contato → escalar para consultor
+**Inserir regra global sobre perguntas picadas**: "NUNCA faça perguntas de forma picada (uma por vez em mensagens separadas). Se precisar coletar informações, consolide todas as perguntas relevantes em uma única mensagem com objetivo claro."
 
----
+### 2. `supabase/functions/ai-triage/index.ts` — Contexto pós-escalonamento
 
-## Plano de Implementação
+No system prompt, quando o atendimento estiver em modo `hibrido`, injetar instrução contextual:
 
-### Migration SQL
-- Inserir regra proibida: "NUNCA diga 'experimentar lentes'. Lentes de óculos são sob encomenda. O que pode ser experimentado são armações."
-- Inserir regra proibida: "Se o cliente perguntar sobre lentes de contato, encaminhe para um Consultor especializado."
-- Inserir regra proibida: "NUNCA prometa ações futuras (lembretes, retornos, follow-ups) sem registrar via tool. Se não existe tool para isso, não prometa."
-- Criar tabela `lembretes` (id, contato_id, atendimento_id, mensagem, data_disparo, status, created_at)
+- "Este atendimento foi escalado para Consultor especializado. O assunto escalado é: [motivo]. NÃO faça perguntas sobre este assunto. Se o cliente perguntar sobre ele, informe que o Consultor está a caminho. Se o cliente iniciar um assunto DIFERENTE, responda normalmente."
 
-### `supabase/functions/ai-triage/index.ts`
-1. **Filtrar colunas no prompt por setor** (bloco CLASSIFICAÇÃO ~linha 563): só enviar colunas do setor null para clientes, e colunas do setor Atendimento Gael para lojas/colaboradores
-2. **Linha 1487**: Trocar "experimentar" por "conhecer as opções presencialmente" ou "provar armações"
-3. **Nova tool `agendar_lembrete`**: permite à IA registrar um lembrete futuro com data e mensagem
-4. **Instrução sobre lentes de contato**: no system prompt, adicionar que lentes de contato devem ser encaminhadas para consultor
+Isso dá ao LLM a informação necessária para distinguir entre "cliente perguntando sobre o assunto escalado" vs "cliente com dúvida nova".
 
-### `supabase/functions/vendas-recuperacao-cron/index.ts` (ou novo cron)
-- Adicionar bloco que verifica `lembretes` com `data_disparo <= now()` e `status = 'pendente'`
-- Envia a mensagem via send-whatsapp e marca como `enviado`
+Na mensagem de escalonamento por lentes de contato, consolidar o mini-questionário:
 
----
+> "Lentes de contato é com nosso Consultor especializado! Para adiantar seu atendimento, me conta: você já usa lentes de contato? Se sim, qual marca/tipo e tem receita atualizada? Vou passar tudo pro Consultor te atender já preparado 🤝"
 
-## Arquivos Afetados
+### 3. `src/hooks/useAtendimentos.ts` — Fix build error
+
+Trocar `Record<string, unknown>` por tipo explícito:
+```typescript
+const updates: { status: StatusAtendimento; inicio_at?: string; fim_at?: string } = { status };
+```
+
+### 4. `src/hooks/useTarefas.ts` — Fix build error
+
+Mesmo padrão:
+```typescript
+const updates: { status: StatusTarefa; concluida_at?: string } = { status };
+```
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---------|---------|
-| Migration SQL | Tabela `lembretes`, regras proibidas (experimentar lentes, lentes de contato, promessas sem tool) |
-| `supabase/functions/ai-triage/index.ts` | Filtrar colunas por setor no prompt, tool `agendar_lembrete`, fix linha 1487, instrução lentes de contato |
-| `supabase/functions/vendas-recuperacao-cron/index.ts` | Processar lembretes pendentes |
+| Migration SQL | Regra pós-escalonamento inteligente, regra anti-perguntas picadas, atualizar regra lentes de contato |
+| `supabase/functions/ai-triage/index.ts` | Injetar contexto de assunto escalado no prompt quando modo híbrido; mini-questionário consolidado |
+| `src/hooks/useAtendimentos.ts` | Fix tipo do `updates` |
+| `src/hooks/useTarefas.ts` | Fix tipo do `updates` |
 
 ## Resultado
 
-- Clientes nunca são classificados em colunas internas (Aguardando Resposta)
-- IA só promete lembretes se registrar via tool — e o cron garante o envio
-- Terminologia correta: lentes são encomenda, armações são experimentáveis
-- Lentes de contato encaminhadas para consultor humano
+- Após escalar, IA para de perguntar sobre o assunto escalado
+- Se o cliente iniciar conversa sobre outro assunto, IA responde normalmente (modo híbrido funciona)
+- Quando humano envia primeira mensagem, IA desativa (comportamento existente preservado)
+- Coleta de info consolidada em uma única mensagem
+- Build errors corrigidos
 
