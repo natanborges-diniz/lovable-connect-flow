@@ -932,6 +932,23 @@ serve(async (req) => {
     const contatoId = contato_id || atendimento.contato_id;
     const currentMsg = mensagem_texto || "";
 
+    // ── 1.6. DETECT ESCALATED SUBJECT for hybrid mode ──
+    let escalatedSubject: string | null = null;
+    if (isHibrido) {
+      const { data: escEvent } = await supabase
+        .from("eventos_crm")
+        .select("metadata")
+        .eq("contato_id", contatoId)
+        .eq("tipo", "escalonamento_humano")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (escEvent?.[0]?.metadata) {
+        const escMeta = escEvent[0].metadata as Record<string, any>;
+        escalatedSubject = escMeta.motivo || null;
+      }
+      console.log(`[HYBRID] Escalated subject: ${escalatedSubject || "unknown"}`);
+    }
+
     // ── 2. PRE-LLM ROUTER: keyword escalation ──
     if (matchesEscalation(currentMsg)) {
       console.log("[ROUTER] Escalation keyword detected");
