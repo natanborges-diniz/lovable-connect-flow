@@ -73,7 +73,7 @@ export function useUpdateAtendimentoStatus() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: StatusAtendimento }) => {
-      const updates: Record<string, unknown> = { status };
+      const updates: { status: StatusAtendimento; inicio_at?: string; fim_at?: string } = { status };
       if (status === "em_atendimento") updates.inicio_at = new Date().toISOString();
       if (status === "encerrado") updates.fim_at = new Date().toISOString();
       const { data, error } = await supabase.from("atendimentos").update(updates).eq("id", id).select().single();
