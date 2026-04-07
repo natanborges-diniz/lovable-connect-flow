@@ -542,6 +542,7 @@ function buildSystemPromptFromCompiled(opts: {
   inboundCount: number;
   isHibrido: boolean;
   hasKnowledge: boolean;
+  escalatedSubject?: string | null;
 }): string {
   const s: string[] = [];
 
@@ -585,10 +586,17 @@ Classifique na coluna adequada assim que identificar a intenção. Use "Novo Con
 IMPORTANTE: Use SOMENTE as colunas listadas acima. Nunca classifique em colunas que não aparecem nesta lista.`);
 
   if (opts.isHibrido) {
-    s.push(`# MODO HÍBRIDO
-Consultor solicitado mas não respondeu. Continue atendendo.
+    let hibridoBlock = `# MODO HÍBRIDO
+Consultor solicitado mas não respondeu. Continue atendendo OUTROS assuntos.
 Para mensagens vagas: faça pergunta objetiva ("Sobre qual tema: orçamento, lentes, pedidos, financeiro?").
-NUNCA responda com CTA genérico de visita.`);
+NUNCA responda com CTA genérico de visita.`;
+    if (opts.escalatedSubject) {
+      hibridoBlock += `\n\n# ASSUNTO ESCALADO: ${opts.escalatedSubject}
+Este assunto foi encaminhado para Consultor especializado. NÃO faça perguntas sobre este tema.
+Se o cliente perguntar sobre "${opts.escalatedSubject}", responda APENAS: "Seu Consultor já foi acionado e vai te chamar em breve! 🤝"
+Se o cliente iniciar um assunto DIFERENTE, responda normalmente.`;
+    }
+    s.push(hibridoBlock);
   }
 
   return s.join("\n\n");
@@ -606,6 +614,7 @@ function buildSystemPrompt(opts: {
   inboundCount: number;
   isHibrido: boolean;
   hasKnowledge: boolean;
+  escalatedSubject?: string | null;
 }): string {
   const s: string[] = [];
 
@@ -682,10 +691,17 @@ Mensagem nº ${opts.inboundCount}.
 Classifique na coluna adequada assim que identificar a intenção. Use "Novo Contato" apenas se a intenção ainda não estiver clara.`);
 
   if (opts.isHibrido) {
-    s.push(`# MODO HÍBRIDO
-Consultor solicitado mas não respondeu. Continue atendendo.
+    let hibridoBlock = `# MODO HÍBRIDO
+Consultor solicitado mas não respondeu. Continue atendendo OUTROS assuntos.
 Para mensagens vagas: faça pergunta objetiva ("Sobre qual tema: orçamento, lentes, pedidos, financeiro?").
-NUNCA responda com CTA genérico de visita.`);
+NUNCA responda com CTA genérico de visita.`;
+    if (opts.escalatedSubject) {
+      hibridoBlock += `\n\n# ASSUNTO ESCALADO: ${opts.escalatedSubject}
+Este assunto foi encaminhado para Consultor especializado. NÃO faça perguntas sobre este tema.
+Se o cliente perguntar sobre "${opts.escalatedSubject}", responda APENAS: "Seu Consultor já foi acionado e vai te chamar em breve! 🤝"
+Se o cliente iniciar um assunto DIFERENTE, responda normalmente.`;
+    }
+    s.push(hibridoBlock);
   }
 
   return s.join("\n\n");
@@ -916,10 +932,35 @@ serve(async (req) => {
     const contatoId = contato_id || atendimento.contato_id;
     const currentMsg = mensagem_texto || "";
 
+    // ── 1.6. DETECT ESCALATED SUBJECT for hybrid mode ──
+    let escalatedSubject: string | null = null;
+    if (isHibrido) {
+      const { data: escEvent } = await supabase
+        .from("eventos_crm")
+        .select("metadata")
+        .eq("contato_id", contatoId)
+        .eq("tipo", "escalonamento_humano")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (escEvent?.[0]?.metadata) {
+        const escMeta = escEvent[0].metadata as Record<string, any>;
+        escalatedSubject = escMeta.motivo || null;
+      }
+      console.log(`[HYBRID] Escalated subject: ${escalatedSubject || "unknown"}`);
+    }
+
     // ── 2. PRE-LLM ROUTER: keyword escalation ──
     if (matchesEscalation(currentMsg)) {
       console.log("[ROUTER] Escalation keyword detected");
       return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword");
+    }
+
+    // ── 2.5. PRE-LLM ROUTER: contact lens detection → deterministic escalation ──
+    const CONTACT_LENS_RE = /lentes?\s*de\s*contato/i;
+    if (CONTACT_LENS_RE.test(currentMsg) && !isHibrido) {
+      console.log("[ROUTER] Contact lens detected — deterministic escalation");
+      const contactLensMsg = "Lentes de contato é com nosso Consultor especializado! Para adiantar seu atendimento, me conta: você já usa lentes de contato? Se sim, qual marca/tipo (diária, mensal, anual) e tem receita atualizada? Vou passar tudo pro Consultor te atender já preparado 🤝";
+      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, contactLensMsg, "lentes_de_contato");
     }
 
     // ── 3. PRE-LLM ROUTER: subject change → deterministic ──
@@ -1104,6 +1145,7 @@ serve(async (req) => {
         inboundCount,
         isHibrido,
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+        escalatedSubject,
       });
 
       console.log(`[CONTEXT] Using COMPILED prompt (${compiledPrompt.length}ch) with slot replacement`);
@@ -1144,6 +1186,7 @@ serve(async (req) => {
         inboundCount,
         isHibrido,
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+        escalatedSubject,
       });
     }
 
@@ -1942,7 +1985,10 @@ async function handleEscalation(
   supabase: any, supabaseUrl: string, serviceKey: string,
   atendimentoId: string, contatoId: string, mensagem: string, trigger: string
 ) {
-  const resposta = "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Posso te ajudar com algo rápido enquanto isso? 😊";
+  // Use custom message for contact lens, default for others
+  const resposta = trigger === "lentes_de_contato"
+    ? mensagem
+    : "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Posso te ajudar com algo rápido enquanto isso? 😊";
 
   await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, resposta);
 
@@ -1959,7 +2005,7 @@ async function handleEscalation(
   await supabase.from("eventos_crm").insert({
     contato_id: contatoId, tipo: "escalonamento_humano",
     descricao: `Escalonamento (${trigger}): cliente pediu Consultor`,
-    metadata: { trigger, mensagem },
+    metadata: { trigger, motivo: trigger, mensagem },
     referencia_tipo: "atendimento", referencia_id: atendimentoId,
   });
 

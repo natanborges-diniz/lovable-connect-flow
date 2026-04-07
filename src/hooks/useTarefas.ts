@@ -78,7 +78,7 @@ export function useUpdateTarefaStatus() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: StatusTarefa }) => {
-      const updates: Record<string, unknown> = { status };
+      const updates: { status: StatusTarefa; concluida_at?: string } = { status };
       if (status === "concluida") updates.concluida_at = new Date().toISOString();
       const { data, error } = await supabase.from("tarefas").update(updates).eq("id", id).select().single();
       if (error) throw error;
