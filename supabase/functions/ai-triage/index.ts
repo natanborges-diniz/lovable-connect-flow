@@ -1137,6 +1137,7 @@ serve(async (req) => {
         inboundCount,
         isHibrido,
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+        escalatedSubject,
       });
 
       console.log(`[CONTEXT] Using COMPILED prompt (${compiledPrompt.length}ch) with slot replacement`);
@@ -1177,6 +1178,7 @@ serve(async (req) => {
         inboundCount,
         isHibrido,
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
+        escalatedSubject,
       });
     }
 
