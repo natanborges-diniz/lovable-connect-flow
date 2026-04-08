@@ -611,6 +611,39 @@ export type Database = {
           },
         ]
       }
+      fluxo_responsaveis: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          fluxo_chave: string
+          id: string
+          nome: string
+          telefone: string
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          fluxo_chave: string
+          id?: string
+          nome: string
+          telefone: string
+          tipo?: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          fluxo_chave?: string
+          id?: string
+          nome?: string
+          telefone?: string
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ia_exemplos: {
         Row: {
           ativo: boolean | null

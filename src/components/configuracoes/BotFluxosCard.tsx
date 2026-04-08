@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, GitBranch, Trash2, Loader2, ChevronDown, ChevronUp, GripVertical, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { FluxoResponsaveisSection } from "./FluxoResponsaveisSection";
 
 interface Etapa {
   campo: string;
@@ -376,6 +377,9 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
           />
         </div>
       </div>
+
+      {/* Responsáveis (only for existing flows) */}
+      {initial && <FluxoResponsaveisSection fluxoChave={initial.chave} />}
 
       <Button onClick={handleSubmit} disabled={loading || !nome.trim()} className="w-full">
         {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}

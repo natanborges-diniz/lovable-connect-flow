@@ -213,6 +213,9 @@ serve(async (req) => {
         });
       }
 
+      // Notify responsáveis
+      await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, nomeLoja, dados, fluxo.nome);
+
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
       for (const [k, v] of Object.entries(dados)) {
@@ -516,21 +519,31 @@ interface SolicitacaoParams {
   evento_tipo: string;
 }
 
+// Map tipo_solicitacao to setor name
+function resolveSetorForTipo(tipo: string): string {
+  const tiMap: Record<string, string> = {
+    impressao: "TI",
+    suporte_tecnico: "TI",
+  };
+  return tiMap[tipo] || "Financeiro";
+}
+
 async function createFinanceiroSolicitacao(supabase: any, contatoId: string, params: SolicitacaoParams) {
   try {
-    const { data: financeiroSetor } = await supabase
+    const setorNome = resolveSetorForTipo(params.tipo);
+    const { data: setor } = await supabase
       .from("setores")
       .select("id")
-      .eq("nome", "Financeiro")
+      .eq("nome", setorNome)
       .single();
 
     let colunaId: string | null = null;
 
-    if (financeiroSetor) {
+    if (setor) {
       const { data: colunasAtivas } = await supabase
         .from("pipeline_colunas")
         .select("id, nome, ordem")
-        .eq("setor_id", financeiroSetor.id)
+        .eq("setor_id", setor.id)
         .eq("ativo", true)
         .order("ordem", { ascending: true });
 
@@ -570,7 +583,95 @@ async function createFinanceiroSolicitacao(supabase: any, contatoId: string, par
         metadata: params.metadata,
       });
     }
+
+    return solicitacao;
   } catch (e) {
-    console.error("Error creating financeiro solicitacao:", e);
+    console.error("Error creating solicitacao:", e);
+    return null;
+  }
+}
+
+// ─── Notify flow responsáveis via WhatsApp ───
+async function notificarResponsaveis(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  fluxoChave: string,
+  nomeLoja: string,
+  dados: Record<string, any>,
+  fluxoNome: string
+) {
+  try {
+    const { data: responsaveis } = await supabase
+      .from("fluxo_responsaveis")
+      .select("*")
+      .eq("fluxo_chave", fluxoChave)
+      .eq("ativo", true)
+      .eq("tipo", "primario");
+
+    if (!responsaveis?.length) {
+      console.log(`[bot-lojas] No responsáveis for flow: ${fluxoChave}`);
+      return;
+    }
+
+    // Build summary
+    const resumo = Object.entries(dados)
+      .map(([k, v]) => `• ${k}: ${typeof v === "number" ? `R$ ${Number(v).toFixed(2)}` : v}`)
+      .join("\n");
+
+    const mensagem = `🔔 *Nova solicitação: ${fluxoNome}*\n\n🏪 Loja: *${nomeLoja}*\n\n${resumo}\n\n_Acompanhe no pipeline do sistema._`;
+
+    for (const resp of responsaveis) {
+      try {
+        // Find or create contato for responsável
+        const tel = resp.telefone.replace(/\D/g, "");
+        let { data: contatoResp } = await supabase
+          .from("canais")
+          .select("contato_id")
+          .eq("identificador", tel)
+          .eq("tipo", "whatsapp")
+          .limit(1)
+          .single();
+
+        if (contatoResp) {
+          // Find active atendimento or send direct
+          const { data: atendResp } = await supabase
+            .from("atendimentos")
+            .select("id")
+            .eq("contato_id", contatoResp.contato_id)
+            .in("status", ["aguardando", "em_atendimento"])
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+          if (atendResp) {
+            await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ atendimento_id: atendResp.id, texto: mensagem, remetente_nome: "Sistema" }),
+            });
+          } else {
+            // Send via template or direct message to phone
+            await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ telefone: tel, texto: mensagem, remetente_nome: "Sistema" }),
+            });
+          }
+        } else {
+          // No canal found, send direct to phone number
+          await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ telefone: tel, texto: mensagem, remetente_nome: "Sistema" }),
+          });
+        }
+        console.log(`[bot-lojas] Notified ${resp.nome} (${resp.telefone}) for ${fluxoChave}`);
+      } catch (notifErr) {
+        console.error(`[bot-lojas] Failed to notify ${resp.nome}:`, notifErr);
+      }
+    }
+  } catch (e) {
+    console.error("[bot-lojas] notificarResponsaveis error:", e);
   }
 }
