@@ -109,12 +109,18 @@ serve(async (req) => {
       .single();
 
     const isLoja = !!lojaMatch;
-    const isCorporateContact = isLoja || contato.tipo === "colaborador";
+    const isCorporate = isLoja;
+    const corporateTipo = lojaMatch?.tipo || "loja"; // loja, colaborador, departamento
 
-    if (isLoja && contato.tipo !== "loja") {
-      await supabase.from("contatos").update({ tipo: "loja" }).eq("id", contato.id);
-      contato = { ...contato, tipo: "loja" };
+    // Update contato.tipo based on corporate phone type
+    if (isCorporate) {
+      const tipoContato = corporateTipo === "colaborador" ? "colaborador" : "loja";
+      if (contato.tipo !== tipoContato) {
+        await supabase.from("contatos").update({ tipo: tipoContato }).eq("id", contato.id);
+        contato = { ...contato, tipo: tipoContato };
+      }
     }
+    const isCorporateContact = isCorporate || contato.tipo === "colaborador";
 
     // 3. Find open atendimento (any provider) or create solicitação + atendimento
     let { data: atendimentoAberto } = await supabase
@@ -408,9 +414,11 @@ serve(async (req) => {
     // 8. Trigger appropriate bot (fire-and-forget)
     if (shouldSkipBot) {
       console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
-    } else if (isLoja) {
+    } else if (isCorporate) {
+      // Pass tipo_bot from the registered phone type (loja, colaborador, departamento)
+      const lojaInfoWithTipo = { ...lojaMatch, tipo_bot: corporateTipo };
       runInBackground(
-        triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaMatch).catch(
+        triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaInfoWithTipo).catch(
           (e) => console.error("Bot lojas trigger failed:", e)
         )
       );
