@@ -1,63 +1,102 @@
 
 
-# Corrigir Comportamento Pós-Escalonamento + Build Errors
+# Incrementar Chatbot Corporativo — Fluxos Internos com Responsável e Notificação
 
-## Problemas
+## Contexto
 
-1. **IA continua fazendo perguntas picadas após escalar**: Após chamar `escalar_consultor`, a IA deveria parar de coletar dados sobre o assunto escalado, mas continua perguntando marca, tipo, receita — uma por vez.
-2. **Gate pós-escalonamento precisa ser inteligente**: A IA deve parar de puxar conversa sobre o assunto escalado, mas permanecer disponível se o CLIENTE iniciar uma pergunta nova (outro assunto, dúvida sobre horário, endereço, etc.).
-3. **Build errors**: `useAtendimentos.ts` e `useTarefas.ts` usam `Record<string, unknown>` incompatível com tipos Supabase.
+O diagrama define ~10 novos fluxos internos (Estorno PIX, Cancelamento Cartão, Reembolso, etc.). O motor genérico (`bot-lojas`) já suporta novos fluxos via dados no banco. O ponto principal desta revisão: **cada fluxo precisa de um responsável configurável que será notificado via WhatsApp quando a tarefa for criada**, e esse responsável acompanha a tarefa no pipeline do setor correspondente.
 
-## Correções
+## Arquitetura: Responsável por Fluxo
 
-### 1. Migration SQL — Regras de comportamento pós-escalonamento
+### Nova tabela: `fluxo_responsaveis`
 
-**Atualizar regra de lentes de contato** para incluir mini-questionário consolidado na mensagem de escalonamento (uma única mensagem com todas as perguntas relevantes).
+Cadastro de responsáveis por fluxo, com telefone para acionamento:
 
-**Inserir regra global**: "Após usar a tool escalar_consultor, NÃO faça mais perguntas sobre o assunto escalado. Se o cliente enviar uma nova pergunta sobre OUTRO assunto, responda normalmente. Se perguntar sobre o assunto escalado, diga apenas que o Consultor está a caminho."
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| id | uuid | PK |
+| fluxo_chave | text | Chave do fluxo (ex: `estorno_pix`) |
+| nome | text | Nome do responsável |
+| telefone | text | WhatsApp do responsável |
+| tipo | text | `primario` ou `contingencia` |
+| ativo | boolean | Se está ativo |
 
-**Inserir regra global sobre perguntas picadas**: "NUNCA faça perguntas de forma picada (uma por vez em mensagens separadas). Se precisar coletar informações, consolide todas as perguntas relevantes em uma única mensagem com objetivo claro."
+Isso permite:
+- **Primário**: recebe a notificação sempre que o fluxo gera uma solicitação
+- **Contingência**: acionado se o primário não responder em X minutos (fase futura), ou em fluxos que exigem aprovação (ex: Reembolso → Natan autoriza)
 
-### 2. `supabase/functions/ai-triage/index.ts` — Contexto pós-escalonamento
+### UI de Cadastro (Configurações)
 
-No system prompt, quando o atendimento estiver em modo `hibrido`, injetar instrução contextual:
+Dentro da tela de Configurações, na seção de Fluxos do Bot, ao editar um fluxo, haverá uma aba/seção **"Responsáveis"** onde o operador configura:
+- Nome do responsável
+- Telefone (WhatsApp)
+- Tipo: Primário / Contingência
+- Ativo/Inativo
 
-- "Este atendimento foi escalado para Consultor especializado. O assunto escalado é: [motivo]. NÃO faça perguntas sobre este assunto. Se o cliente perguntar sobre ele, informe que o Consultor está a caminho. Se o cliente iniciar um assunto DIFERENTE, responda normalmente."
+### Notificação automática ao responsável
 
-Isso dá ao LLM a informação necessária para distinguir entre "cliente perguntando sobre o assunto escalado" vs "cliente com dúvida nova".
+No `executarAcaoFinal` do `bot-lojas`, após criar a solicitação, o sistema:
+1. Consulta `fluxo_responsaveis` para o fluxo executado
+2. Envia WhatsApp ao responsável primário com resumo da solicitação (loja solicitante, dados coletados, link/referência)
+3. Se houver contingência configurada, registra para follow-up
 
-Na mensagem de escalonamento por lentes de contato, consolidar o mini-questionário:
+### Pipeline e acompanhamento
 
-> "Lentes de contato é com nosso Consultor especializado! Para adiantar seu atendimento, me conta: você já usa lentes de contato? Se sim, qual marca/tipo e tem receita atualizada? Vou passar tudo pro Consultor te atender já preparado 🤝"
+As solicitações criadas pelos fluxos já vão para o pipeline do setor (Financeiro, TI, etc.) com a coluna correta. O responsável:
+- Recebe notificação no WhatsApp
+- Acompanha o card no pipeline correspondente
+- Move o card conforme executa a tarefa
 
-### 3. `src/hooks/useAtendimentos.ts` — Fix build error
+## Os 10 Novos Fluxos (com responsável e contingência)
 
-Trocar `Record<string, unknown>` por tipo explícito:
-```typescript
-const updates: { status: StatusAtendimento; inicio_at?: string; fim_at?: string } = { status };
-```
+| # | Fluxo | Responsável Padrão | Contingência |
+|---|-------|--------------------|--------------|
+| 1 | Confirmação de PIX | Financeiro | -- |
+| 2 | Estorno PIX/Débito/Dinheiro | Financeiro | Natan (aprovação) |
+| 3 | Estorno Cartão de Crédito | Financeiro | Adquirente (manual) |
+| 4 | Devolução de OS com Saldo | Financeiro | -- |
+| 5 | Solicitação de Reembolso | Natan (aprovação) | -- |
+| 6 | Solicitação de Pagamentos | Natan (aprovação) | -- |
+| 7 | Solicitação de Impressões | TI | Envio por malote |
+| 8 | Autorizações Dataweb | Responsável Dataweb | -- |
+| 9 | Suporte Técnico Geral | TI | Terceiros (manual) |
+| 10 | Compra de Funcionário | Natan (aprovação) → RH | -- |
 
-### 4. `src/hooks/useTarefas.ts` — Fix build error
+Os nomes e telefones dos responsáveis são configurados na interface, não hardcoded.
 
-Mesmo padrão:
-```typescript
-const updates: { status: StatusTarefa; concluida_at?: string } = { status };
-```
+## Implementação Técnica
+
+### Migration SQL
+1. Criar tabela `fluxo_responsaveis` com RLS
+2. Criar novas colunas no pipeline Financeiro e TI: "Estorno Solicitado", "Devolução OS", "Reembolso", "Pagamentos", "Impressões", "Autorização Dataweb", "Suporte Técnico", "Compra Funcionário"
+3. Inserir 10 registros em `bot_fluxos` com etapas, acao_final e referência de responsável
+4. Inserir registros em `bot_menu_opcoes` para os novos fluxos
+
+### `supabase/functions/bot-lojas/index.ts`
+- No `executarAcaoFinal`, após `createFinanceiroSolicitacao`, buscar responsáveis em `fluxo_responsaveis` e enviar notificação WhatsApp via `send-whatsapp` ou template
+- Mensagem ao responsável: "Nova solicitação: [Tipo] | Loja: [Nome] | [Resumo dos dados]. Acompanhe no pipeline."
+
+### `src/components/configuracoes/BotFluxosCard.tsx`
+- Adicionar seção "Responsáveis" no dialog de edição de fluxo
+- CRUD de responsáveis (nome, telefone, tipo primário/contingência)
+
+### `src/components/configuracoes/FluxoResponsaveisSection.tsx` (novo)
+- Componente para listar/adicionar/remover responsáveis de um fluxo
 
 ## Arquivos afetados
 
 | Arquivo | Mudança |
 |---------|---------|
-| Migration SQL | Regra pós-escalonamento inteligente, regra anti-perguntas picadas, atualizar regra lentes de contato |
-| `supabase/functions/ai-triage/index.ts` | Injetar contexto de assunto escalado no prompt quando modo híbrido; mini-questionário consolidado |
-| `src/hooks/useAtendimentos.ts` | Fix tipo do `updates` |
-| `src/hooks/useTarefas.ts` | Fix tipo do `updates` |
+| Migration SQL | Tabela `fluxo_responsaveis`, colunas pipeline, 10 fluxos + menus |
+| `supabase/functions/bot-lojas/index.ts` | Notificar responsável após ação final |
+| `src/components/configuracoes/BotFluxosCard.tsx` | Seção de responsáveis no editor de fluxo |
+| `src/components/configuracoes/FluxoResponsaveisSection.tsx` | Novo componente CRUD responsáveis |
 
 ## Resultado
 
-- Após escalar, IA para de perguntar sobre o assunto escalado
-- Se o cliente iniciar conversa sobre outro assunto, IA responde normalmente (modo híbrido funciona)
-- Quando humano envia primeira mensagem, IA desativa (comportamento existente preservado)
-- Coleta de info consolidada em uma única mensagem
-- Build errors corrigidos
+- Todo fluxo tem um responsável configurável com telefone cadastrado
+- Ao criar solicitação, responsável é acionado automaticamente via WhatsApp
+- Fluxos com aprovação (Reembolso, Pagamentos, Compra Funcionário) têm contingência para autorização
+- Responsáveis acompanham tarefas no pipeline do setor correspondente
+- Interface administrativa permite trocar responsáveis sem deploy
 
