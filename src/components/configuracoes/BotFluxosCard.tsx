@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, GitBranch, Trash2, Loader2, ChevronDown, ChevronUp, GripVertical, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { FluxoResponsaveisSection } from "./FluxoResponsaveisSection";
 
 interface Etapa {
   campo: string;
