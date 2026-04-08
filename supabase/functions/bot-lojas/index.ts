@@ -213,6 +213,9 @@ serve(async (req) => {
         });
       }
 
+      // Notify responsáveis
+      await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, nomeLoja, dados, fluxo.nome);
+
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
       for (const [k, v] of Object.entries(dados)) {
