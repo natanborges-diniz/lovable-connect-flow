@@ -1192,6 +1192,7 @@ export type Database = {
       telefones_lojas: {
         Row: {
           ativo: boolean | null
+          cargo: string | null
           cod_empresa: string | null
           created_at: string | null
           departamento: string | null
@@ -1200,11 +1201,14 @@ export type Database = {
           horario_abertura: string | null
           horario_fechamento: string | null
           id: string
+          nome_colaborador: string | null
           nome_loja: string
           telefone: string
+          tipo: string
         }
         Insert: {
           ativo?: boolean | null
+          cargo?: string | null
           cod_empresa?: string | null
           created_at?: string | null
           departamento?: string | null
@@ -1213,11 +1217,14 @@ export type Database = {
           horario_abertura?: string | null
           horario_fechamento?: string | null
           id?: string
+          nome_colaborador?: string | null
           nome_loja: string
           telefone: string
+          tipo?: string
         }
         Update: {
           ativo?: boolean | null
+          cargo?: string | null
           cod_empresa?: string | null
           created_at?: string | null
           departamento?: string | null
@@ -1226,8 +1233,10 @@ export type Database = {
           horario_abertura?: string | null
           horario_fechamento?: string | null
           id?: string
+          nome_colaborador?: string | null
           nome_loja?: string
           telefone?: string
+          tipo?: string
         }
         Relationships: []
       }
