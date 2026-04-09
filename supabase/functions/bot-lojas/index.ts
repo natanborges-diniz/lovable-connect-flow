@@ -175,7 +175,7 @@ serve(async (req) => {
         }
         const resolvedCod = effectiveCodEmpresa || await resolveCodEmpresa(effectiveNomeLoja);
         if (!resolvedCod) {
-          return `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
+          return `⚠️ Não foi possível identificar a loja "${effectiveNomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
         }
 
         try {
@@ -205,7 +205,7 @@ serve(async (req) => {
             descricao: `${dados.descricao}${dados.cliente ? ` | Cliente: ${dados.cliente}` : ""} | Parcelas: ${dados.parcelas}x`,
             tipo: acao.tipo_solicitacao,
             coluna_nome: acao.coluna_destino,
-            metadata: { payment_link_id: payResult.id, url, alias_loja: nomeLoja, cod_empresa: resolvedCod },
+            metadata: { payment_link_id: payResult.id, url, alias_loja: effectiveNomeLoja, cod_empresa: resolvedCod },
             evento_descricao: `Link de pagamento R$ ${Number(dados.valor).toFixed(2)} gerado via bot. ${dados.descricao}`,
             evento_tipo: "link_pagamento_gerado",
           });
@@ -226,14 +226,14 @@ serve(async (req) => {
           descricao: descParts,
           tipo: acao.tipo_solicitacao,
           coluna_nome: acao.coluna_destino,
-          metadata: { ...dados, alias_loja: nomeLoja, cod_empresa: codEmpresa },
+          metadata: { ...dados, alias_loja: effectiveNomeLoja, cod_empresa: effectiveCodEmpresa },
           evento_descricao: `${fluxo.nome} solicitado via bot`,
           evento_tipo: `${acao.tipo_solicitacao}_solicitado`,
         });
       }
 
       // Notify responsáveis
-      await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, nomeLoja, dados, fluxo.nome);
+      await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, effectiveNomeLoja, dados, fluxo.nome);
 
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
