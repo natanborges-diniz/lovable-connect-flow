@@ -163,13 +163,17 @@ serve(async (req) => {
     const acao = fluxo.acao_final;
     const tipo = acao.tipo;
 
+    // Override nomeLoja/codEmpresa if a store was selected (departamento/colaborador flows)
+    const effectiveNomeLoja = dados.loja_selecionada_nome || nomeLoja;
+    const effectiveCodEmpresa = dados.loja_selecionada_cod || codEmpresa;
+
     if (tipo === "criar_solicitacao") {
       // For link_pagamento, call OB API first
       if (acao.endpoint === "payment-links") {
         if (!OPTICAL_BUSINESS_URL || !INTERNAL_SERVICE_SECRET) {
           return "⚠️ Integração de pagamento não configurada. Contate o administrador.";
         }
-        const resolvedCod = codEmpresa || await resolveCodEmpresa(nomeLoja);
+        const resolvedCod = effectiveCodEmpresa || await resolveCodEmpresa(effectiveNomeLoja);
         if (!resolvedCod) {
           return `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
         }
