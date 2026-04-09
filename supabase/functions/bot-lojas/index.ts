@@ -129,6 +129,10 @@ serve(async (req) => {
   function buildConfirmacao(fluxo: any, dados: Record<string, any>): string {
     const etapas = fluxo.etapas as any[];
     let msg = "📋 *Confirme os dados:*\n\n";
+    // Show selected store if present (for departamento/colaborador flows)
+    if (dados.loja_selecionada_nome) {
+      msg += `• Unidade: ${dados.loja_selecionada_nome}\n`;
+    }
     for (const et of etapas) {
       const val = dados[et.campo];
       if (val === null || val === undefined) continue;
@@ -137,6 +141,17 @@ serve(async (req) => {
     }
     msg += "\nResponda *SIM* para confirmar ou *NÃO* para cancelar.";
     return msg;
+  }
+
+  // ─── Load active stores for selection ───
+  async function loadLojasAtivas(): Promise<Array<{ nome_loja: string; cod_empresa: string }>> {
+    const { data } = await supabase
+      .from("telefones_lojas")
+      .select("nome_loja, cod_empresa")
+      .eq("tipo", "loja")
+      .eq("ativo", true)
+      .order("nome_loja");
+    return (data || []).filter((l: any) => l.cod_empresa);
   }
 
   // ─── Execute final action ───
