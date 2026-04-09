@@ -129,6 +129,10 @@ serve(async (req) => {
   function buildConfirmacao(fluxo: any, dados: Record<string, any>): string {
     const etapas = fluxo.etapas as any[];
     let msg = "📋 *Confirme os dados:*\n\n";
+    // Show selected store if present (for departamento/colaborador flows)
+    if (dados.loja_selecionada_nome) {
+      msg += `• Unidade: ${dados.loja_selecionada_nome}\n`;
+    }
     for (const et of etapas) {
       const val = dados[et.campo];
       if (val === null || val === undefined) continue;
@@ -137,6 +141,17 @@ serve(async (req) => {
     }
     msg += "\nResponda *SIM* para confirmar ou *NÃO* para cancelar.";
     return msg;
+  }
+
+  // ─── Load active stores for selection ───
+  async function loadLojasAtivas(): Promise<Array<{ nome_loja: string; cod_empresa: string }>> {
+    const { data } = await supabase
+      .from("telefones_lojas")
+      .select("nome_loja, cod_empresa")
+      .eq("tipo", "loja")
+      .eq("ativo", true)
+      .order("nome_loja");
+    return (data || []).filter((l: any) => l.cod_empresa);
   }
 
   // ─── Execute final action ───
@@ -148,15 +163,19 @@ serve(async (req) => {
     const acao = fluxo.acao_final;
     const tipo = acao.tipo;
 
+    // Override nomeLoja/codEmpresa if a store was selected (departamento/colaborador flows)
+    const effectiveNomeLoja = dados.loja_selecionada_nome || nomeLoja;
+    const effectiveCodEmpresa = dados.loja_selecionada_cod || codEmpresa;
+
     if (tipo === "criar_solicitacao") {
       // For link_pagamento, call OB API first
       if (acao.endpoint === "payment-links") {
         if (!OPTICAL_BUSINESS_URL || !INTERNAL_SERVICE_SECRET) {
           return "⚠️ Integração de pagamento não configurada. Contate o administrador.";
         }
-        const resolvedCod = codEmpresa || await resolveCodEmpresa(nomeLoja);
+        const resolvedCod = effectiveCodEmpresa || await resolveCodEmpresa(effectiveNomeLoja);
         if (!resolvedCod) {
-          return `⚠️ Não foi possível identificar a loja "${nomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
+          return `⚠️ Não foi possível identificar a loja "${effectiveNomeLoja}" no sistema financeiro. Verifique o cadastro.\n\nDigite *menu* para voltar.`;
         }
 
         try {
@@ -186,7 +205,7 @@ serve(async (req) => {
             descricao: `${dados.descricao}${dados.cliente ? ` | Cliente: ${dados.cliente}` : ""} | Parcelas: ${dados.parcelas}x`,
             tipo: acao.tipo_solicitacao,
             coluna_nome: acao.coluna_destino,
-            metadata: { payment_link_id: payResult.id, url, alias_loja: nomeLoja, cod_empresa: resolvedCod },
+            metadata: { payment_link_id: payResult.id, url, alias_loja: effectiveNomeLoja, cod_empresa: resolvedCod },
             evento_descricao: `Link de pagamento R$ ${Number(dados.valor).toFixed(2)} gerado via bot. ${dados.descricao}`,
             evento_tipo: "link_pagamento_gerado",
           });
@@ -207,14 +226,14 @@ serve(async (req) => {
           descricao: descParts,
           tipo: acao.tipo_solicitacao,
           coluna_nome: acao.coluna_destino,
-          metadata: { ...dados, alias_loja: nomeLoja, cod_empresa: codEmpresa },
+          metadata: { ...dados, alias_loja: effectiveNomeLoja, cod_empresa: effectiveCodEmpresa },
           evento_descricao: `${fluxo.nome} solicitado via bot`,
           evento_tipo: `${acao.tipo_solicitacao}_solicitado`,
         });
       }
 
       // Notify responsáveis
-      await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, nomeLoja, dados, fluxo.nome);
+      await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, effectiveNomeLoja, dados, fluxo.nome);
 
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
@@ -299,9 +318,28 @@ serve(async (req) => {
           // Generic flow: start at first step
           const etapas = fluxoDef.etapas as any[];
           if (etapas.length > 0) {
-            const primeiraEtapa = etapas[0];
-            resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
-            updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
+            // Check if non-loja needs to select a store first (e.g. payment-links)
+            if (tipoBot !== "loja" && fluxoDef.acao_final?.endpoint === "payment-links") {
+              const lojasDisponiveis = await loadLojasAtivas();
+              if (lojasDisponiveis.length === 0) {
+                resposta = "⚠️ Nenhuma loja cadastrada para seleção. Contate o administrador.\n\nDigite *menu* para voltar.";
+                updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+              } else {
+                let msg = "🏪 *Selecione a unidade para gerar o link:*\n\n";
+                const lojaMap: Record<string, { nome: string; cod: string }> = {};
+                lojasDisponiveis.forEach((loja, i) => {
+                  msg += `${i + 1}️⃣ ${loja.nome_loja} (${loja.cod_empresa})\n`;
+                  lojaMap[String(i + 1)] = { nome: loja.nome_loja, cod: loja.cod_empresa };
+                });
+                msg += "\n_Digite o número da unidade desejada ou *0* para voltar._";
+                resposta = msg;
+                updateSessao = { fluxo: selectedFluxo, etapa: "selecionar_loja", dados: { lojas_map: lojaMap } };
+              }
+            } else {
+              const primeiraEtapa = etapas[0];
+              resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
+              updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
+            }
           } else {
             resposta = "⚠️ Fluxo sem etapas configuradas.";
             updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
@@ -346,6 +384,27 @@ serve(async (req) => {
       } else {
         resposta = "⚠️ Etapa não reconhecida. Digite *menu* para recomeçar.";
         updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+      }
+    }
+    // ─── Store selection for non-loja bots ───
+    else if (etapa === "selecionar_loja") {
+      const lojaMap = (dados as any).lojas_map || {};
+      const selected = lojaMap[texto];
+      if (!selected) {
+        resposta = "⚠️ Número inválido. Digite o número da unidade desejada ou *0* para voltar.";
+      } else {
+        const fluxoDef = await loadFluxo(fluxo);
+        if (!fluxoDef || !(fluxoDef.etapas as any[]).length) {
+          resposta = "⚠️ Fluxo não encontrado. Digite *menu* para recomeçar.";
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        } else {
+          const primeiraEtapa = (fluxoDef.etapas as any[])[0];
+          resposta = `✅ Unidade selecionada: *${selected.nome}*\n\n${primeiraEtapa.mensagem}\n\n_Digite *0* para voltar ao menu._`;
+          updateSessao = {
+            etapa: "step_0",
+            dados: { loja_selecionada_nome: selected.nome, loja_selecionada_cod: selected.cod },
+          };
+        }
       }
     }
     // ─── Generic flow engine (step_N) ───
