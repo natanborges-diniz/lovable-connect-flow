@@ -314,9 +314,28 @@ serve(async (req) => {
           // Generic flow: start at first step
           const etapas = fluxoDef.etapas as any[];
           if (etapas.length > 0) {
-            const primeiraEtapa = etapas[0];
-            resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
-            updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
+            // Check if non-loja needs to select a store first (e.g. payment-links)
+            if (tipoBot !== "loja" && fluxoDef.acao_final?.endpoint === "payment-links") {
+              const lojasDisponiveis = await loadLojasAtivas();
+              if (lojasDisponiveis.length === 0) {
+                resposta = "⚠️ Nenhuma loja cadastrada para seleção. Contate o administrador.\n\nDigite *menu* para voltar.";
+                updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+              } else {
+                let msg = "🏪 *Selecione a unidade para gerar o link:*\n\n";
+                const lojaMap: Record<string, { nome: string; cod: string }> = {};
+                lojasDisponiveis.forEach((loja, i) => {
+                  msg += `${i + 1}️⃣ ${loja.nome_loja} (${loja.cod_empresa})\n`;
+                  lojaMap[String(i + 1)] = { nome: loja.nome_loja, cod: loja.cod_empresa };
+                });
+                msg += "\n_Digite o número da unidade desejada ou *0* para voltar._";
+                resposta = msg;
+                updateSessao = { fluxo: selectedFluxo, etapa: "selecionar_loja", dados: { lojas_map: lojaMap } };
+              }
+            } else {
+              const primeiraEtapa = etapas[0];
+              resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
+              updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
+            }
           } else {
             resposta = "⚠️ Fluxo sem etapas configuradas.";
             updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
