@@ -1,60 +1,54 @@
 
 
-# Unificar Cadastro de Telefones: Lojas, Colaboradores e Departamentos
+# Seleção de Loja para Link de Pagamento — Departamentos e Colaboradores
 
-## Situação Atual
+## Problema
 
-- A tabela `telefones_lojas` só suporta tipo "loja"
-- O webhook identifica telefones nessa tabela e direciona ao bot com `tipo_bot = "loja"`
-- Fluxos de colaborador (ex: Compra de Funcionário) foram criados no banco mas não há como um colaborador acessá-los porque seu telefone não é reconhecido
+Quando um **departamento** ou **colaborador** solicita um link de pagamento, o bot não sabe qual `cod_empresa` usar na API, pois o número não pertence a uma loja. O sistema precisa apresentar a lista de lojas cadastradas para o solicitante escolher antes de prosseguir com o fluxo.
 
-## O que muda
+## Solução
 
-### 1. Expandir a tabela `telefones_lojas` (migration)
+Inserir uma etapa intermediária automática no motor do bot (`bot-lojas/index.ts`). Quando o fluxo selecionado for `link_pagamento` (ou qualquer fluxo com `acao_final.endpoint === "payment-links"`) e o `tipoBot` for `departamento` ou `colaborador`, o bot:
 
-Adicionar colunas:
-- `tipo` (text, default `'loja'`) — valores: `loja`, `colaborador`, `departamento`
-- `cargo` (text, nullable) — cargo do colaborador (ex: "Gerente", "Vendedor"). Usado para controle de permissão futura
-- `nome_colaborador` (text, nullable) — nome da pessoa (para colaboradores)
+1. Consulta `telefones_lojas` filtrando `tipo = 'loja'` e `ativo = true`
+2. Apresenta lista numerada das lojas disponíveis
+3. Aguarda seleção do usuário (etapa `selecionar_loja`)
+4. Armazena `cod_empresa` e `nome_loja` da loja escolhida nos `dados` da sessão
+5. Prossegue normalmente com `step_0` do fluxo de link de pagamento
 
-A tabela mantém o nome `telefones_lojas` para não quebrar queries existentes, mas passa a ser o cadastro unificado de todos os telefones corporativos.
+## Alteração Técnica
 
-### 2. Atualizar UI — `TelefonesLojasCard.tsx`
+**Arquivo único**: `supabase/functions/bot-lojas/index.ts`
 
-- Renomear visualmente para "Telefones Corporativos"
-- Adicionar campo **Tipo** (select: Loja / Colaborador / Departamento) no formulário
-- Quando tipo = `colaborador`: mostrar campos **Nome do Colaborador** e **Cargo**
-- Quando tipo = `departamento`: mostrar campo **Nome do Departamento** (usa `nome_loja`)
-- Quando tipo = `loja`: formulário atual (endereço, horário, Google Maps, cod_empresa)
-- Adicionar filtro por tipo na listagem (tabs ou select)
-- Coluna "Tipo" na tabela com badge colorido
+### Mudanças no fluxo:
 
-### 3. Atualizar webhook — `whatsapp-webhook/index.ts`
+1. **Após selecionar opção de menu** (bloco `fluxo === "menu_principal"`): quando o fluxo carregado tem `acao_final.endpoint === "payment-links"` e `tipoBot !== "loja"`, em vez de ir para `step_0`, vai para etapa `selecionar_loja` com a lista de lojas.
 
-- Na consulta à `telefones_lojas`, já traz o campo `tipo`
-- Passa `tipo_bot` para o `bot-lojas` baseado no `tipo` do registro:
-  - `loja` → `tipo_bot: "loja"`
-  - `colaborador` → `tipo_bot: "colaborador"`
-  - `departamento` → `tipo_bot: "departamento"` (ou mapeia para o tipo adequado)
-- Atualiza `contato.tipo` conforme o tipo do telefone (loja, colaborador, etc.)
+2. **Nova etapa `selecionar_loja`**: handler que valida a escolha numérica, resolve a loja e sobrescreve `nomeLoja`/`codEmpresa` nos dados da sessão, depois avança para `step_0`.
 
-### 4. Atualizar `bot-lojas/index.ts`
+3. **Em `executarAcaoFinal`**: usar `dados.loja_selecionada_cod` e `dados.loja_selecionada_nome` (se presentes) como override do `nomeLoja`/`codEmpresa` passados pela sessão original.
 
-- Já recebe `tipo_bot` via `loja_info` — nenhuma mudança no motor
-- O menu já filtra por `tipo_bot` — basta que os registros em `bot_menu_opcoes` usem o tipo correto
+```text
+Departamento/Colaborador seleciona "Link de Pagamento"
+    │
+    ├── tipoBot == "loja" → step_0 (fluxo normal, cod_empresa já existe)
+    │
+    └── tipoBot != "loja" → etapa "selecionar_loja"
+         │
+         │  "Selecione a unidade para gerar o link:"
+         │   1️⃣ Ótica Centro (001)
+         │   2️⃣ Ótica Shopping (002)
+         │
+         └── Usuário digita número → armazena cod_empresa → step_0
+```
 
-## Arquivos afetados
+### Confirmação
 
-| Arquivo | Mudança |
-|---------|---------|
-| Migration SQL | Adicionar colunas `tipo`, `cargo`, `nome_colaborador` em `telefones_lojas` |
-| `src/components/configuracoes/TelefonesLojasCard.tsx` | Formulário condicional por tipo, filtro na listagem |
-| `supabase/functions/whatsapp-webhook/index.ts` | Passar `tipo_bot` baseado no `tipo` do registro |
+Na tela de confirmação (`buildConfirmacao`), o campo `loja` aparecerá mostrando qual unidade foi selecionada.
 
 ## Resultado
 
-- Cadastro único para lojas, colaboradores e departamentos
-- Um gerente cadastrado como "colaborador" com cargo "Gerente" pode solicitar Compra de Funcionário
-- Uma loja pode solicitar os mesmos fluxos do menu de loja
-- O menu do bot se adapta automaticamente ao tipo do telefone
+- Departamentos e colaboradores podem gerar links de pagamento vinculados a qualquer loja
+- Lojas continuam com fluxo inalterado (sem etapa extra)
+- O `cod_empresa` correto é enviado à API de pagamento
 
