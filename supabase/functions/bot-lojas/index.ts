@@ -382,6 +382,27 @@ serve(async (req) => {
         updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
       }
     }
+    // ─── Store selection for non-loja bots ───
+    else if (etapa === "selecionar_loja") {
+      const lojaMap = (dados as any).lojas_map || {};
+      const selected = lojaMap[texto];
+      if (!selected) {
+        resposta = "⚠️ Número inválido. Digite o número da unidade desejada ou *0* para voltar.";
+      } else {
+        const fluxoDef = await loadFluxo(fluxo);
+        if (!fluxoDef || !(fluxoDef.etapas as any[]).length) {
+          resposta = "⚠️ Fluxo não encontrado. Digite *menu* para recomeçar.";
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        } else {
+          const primeiraEtapa = (fluxoDef.etapas as any[])[0];
+          resposta = `✅ Unidade selecionada: *${selected.nome}*\n\n${primeiraEtapa.mensagem}\n\n_Digite *0* para voltar ao menu._`;
+          updateSessao = {
+            etapa: "step_0",
+            dados: { loja_selecionada_nome: selected.nome, loja_selecionada_cod: selected.cod },
+          };
+        }
+      }
+    }
     // ─── Generic flow engine (step_N) ───
     else if (etapa.startsWith("step_")) {
       const fluxoDef = await loadFluxo(fluxo);
