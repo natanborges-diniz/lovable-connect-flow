@@ -539,8 +539,53 @@ serve(async (req) => {
           resposta = "⚠️ Etapa inválida. Digite *menu* para recomeçar.";
           updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
         } else {
+          // Handle selecionar_loja_ou_setor type
+          if (currentEtapa.tipo_input === "selecionar_loja_ou_setor") {
+            const opcoes = (dados as any)._loja_setor_opcoes;
+            if (!opcoes) {
+              // First time: load and present options
+              const items = await loadLojasESetores();
+              if (items.length === 0) {
+                resposta = "⚠️ Nenhuma loja ou setor cadastrado.\n\n_Digite *0* para voltar ao menu._";
+              } else {
+                let msg = currentEtapa.mensagem + "\n\n";
+                const opMap: Record<string, { nome: string; tipo: string; cod_empresa?: string }> = {};
+                items.forEach((item, i) => {
+                  const label = item.tipo === "loja" ? `🏪 ${item.nome} (${item.cod_empresa})` : `🏢 ${item.nome} (setor)`;
+                  msg += `${i + 1}️⃣ ${label}\n`;
+                  opMap[String(i + 1)] = item;
+                });
+                msg += "\n_Digite o número ou *0* para voltar ao menu._";
+                resposta = msg;
+                updateSessao = { etapa: etapa, dados: { ...dados as Record<string, any>, _loja_setor_opcoes: opMap } };
+              }
+            } else {
+              // User selected
+              const selected = opcoes[texto];
+              if (!selected) {
+                resposta = "⚠️ Número inválido. Escolha uma opção da lista ou *0* para voltar.";
+              } else {
+                const displayValue = selected.tipo === "loja" ? `${selected.nome} (${selected.cod_empresa})` : selected.nome;
+                const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: displayValue };
+                delete newDados._loja_setor_opcoes;
+                if (selected.cod_empresa) {
+                  newDados.loja_ou_setor_cod = selected.cod_empresa;
+                  newDados.loja_ou_setor_nome = selected.nome;
+                }
+                const nextIndex = stepIndex + 1;
+                const etapas_ = fluxoDef.etapas as any[];
+                if (nextIndex >= etapas_.length) {
+                  resposta = buildConfirmacao(fluxoDef, newDados);
+                  updateSessao = { etapa: "confirmar", dados: newDados };
+                } else {
+                  resposta = etapas_[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+                  updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+                }
+              }
+            }
+          }
           // Handle skip for optional fields
-          if (!currentEtapa.obrigatorio && textoLower === "pular") {
+          else if (!currentEtapa.obrigatorio && textoLower === "pular") {
             const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: null };
             const nextIndex = stepIndex + 1;
 
@@ -554,36 +599,79 @@ serve(async (req) => {
             }
           } else {
             // Validate input
-            const validation = validateInput(texto, currentEtapa);
+            const validation = validateInput(texto, currentEtapa, mediaContext);
             if (!validation.valid) {
               resposta = validation.error!;
             } else {
-              const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: validation.value };
+              let newDados = { ...dados as Record<string, any> };
 
-              // Special: compute valor_financiado after valor_entrada
-              if (currentEtapa.campo === "valor_entrada" && newDados.valor_compra !== undefined) {
-                const entrada = Number(newDados.valor_entrada);
-                const compra = Number(newDados.valor_compra);
-                if (entrada > compra) {
-                  resposta = `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${compra.toFixed(2)}). Digite novamente:\n\n_Digite *0* para voltar ao menu._`;
-                } else {
-                  newDados.valor_financiado = compra - entrada;
+              // For imagem type, store in comprovantes array
+              if (currentEtapa.tipo_input === "imagem") {
+                const comprovantes = newDados.comprovantes || [];
+                comprovantes.push({ url: validation.value, mime_type: mediaContext.media_mime_type || null });
+                newDados.comprovantes = comprovantes;
+                newDados[currentEtapa.campo] = `${comprovantes.length} arquivo(s)`;
+                // Ask if more receipts
+                resposta = `✅ Comprovante ${comprovantes.length} recebido!\n\nDeseja enviar *mais um comprovante*?\nResponda *SIM* ou *NÃO*.`;
+                updateSessao = { etapa: "aguardando_mais_comprovantes", dados: { ...newDados, _current_step: stepIndex } };
+              } else {
+                newDados[currentEtapa.campo] = validation.value;
+
+                // Special: compute valor_financiado after valor_entrada
+                if (currentEtapa.campo === "valor_entrada" && newDados.valor_compra !== undefined) {
+                  const entrada = Number(newDados.valor_entrada);
+                  const compra = Number(newDados.valor_compra);
+                  if (entrada > compra) {
+                    resposta = `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${compra.toFixed(2)}). Digite novamente:\n\n_Digite *0* para voltar ao menu._`;
+                  } else {
+                    newDados.valor_financiado = compra - entrada;
+                  }
                 }
-              }
 
-              if (!resposta) {
-                const nextIndex = stepIndex + 1;
-                if (nextIndex >= etapas.length) {
-                  resposta = buildConfirmacao(fluxoDef, newDados);
-                  updateSessao = { etapa: "confirmar", dados: newDados };
-                } else {
-                  resposta = etapas[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
-                  updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+                if (!resposta) {
+                  const nextIndex = stepIndex + 1;
+                  if (nextIndex >= etapas.length) {
+                    resposta = buildConfirmacao(fluxoDef, newDados);
+                    updateSessao = { etapa: "confirmar", dados: newDados };
+                  } else {
+                    resposta = etapas[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+                    updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+                  }
                 }
               }
             }
           }
         }
+      }
+    }
+    // ─── Multiple receipt loop ───
+    else if (etapa === "aguardando_mais_comprovantes") {
+      if (["sim", "s"].includes(textoLower)) {
+        // Go back to the image step
+        const fluxoDef = await loadFluxo(fluxo);
+        const stepIndex = (dados as any)._current_step;
+        const etapas_ = (fluxoDef?.etapas as any[]) || [];
+        const imgEtapa = etapas_[stepIndex];
+        resposta = (imgEtapa?.mensagem || "📎 Envie o comprovante:") + "\n\n_Digite *0* para voltar ao menu._";
+        const newDados = { ...dados as Record<string, any> };
+        updateSessao = { etapa: `step_${stepIndex}`, dados: newDados };
+      } else if (["nao", "não", "n"].includes(textoLower)) {
+        // Advance to next step
+        const fluxoDef = await loadFluxo(fluxo);
+        const stepIndex = (dados as any)._current_step;
+        const etapas_ = (fluxoDef?.etapas as any[]) || [];
+        const newDados = { ...dados as Record<string, any> };
+        delete newDados._current_step;
+        const nextIndex = stepIndex + 1;
+        if (nextIndex >= etapas_.length) {
+          resposta = buildConfirmacao(fluxoDef!, newDados);
+          updateSessao = { etapa: "confirmar", dados: newDados };
+        } else {
+          resposta = etapas_[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+          updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+        }
+      } else {
+        resposta = "Responda *SIM* para enviar mais um comprovante ou *NÃO* para continuar.";
       }
     }
     // ─── Confirmation step ───
