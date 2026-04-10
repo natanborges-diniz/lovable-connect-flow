@@ -2,8 +2,13 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 
-export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+  allowedRoles?: Array<"admin" | "operador" | "setor_usuario">;
+}
+
+export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
+  const { user, loading, roles, isAdmin } = useAuth();
 
   if (loading) {
     return (
@@ -15,6 +20,14 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!user) {
     return <Navigate to="/auth" replace />;
+  }
+
+  // If roles are specified, check access (admins always pass)
+  if (allowedRoles && !isAdmin && roles.length > 0) {
+    const hasAccess = roles.some((r) => allowedRoles.includes(r.role));
+    if (!hasAccess) {
+      return <Navigate to="/" replace />;
+    }
   }
 
   return <>{children}</>;

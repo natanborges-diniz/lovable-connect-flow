@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { email } = await req.json();
+    const { email, setor_id, role } = await req.json();
     if (!email || typeof email !== "string") {
       return new Response(JSON.stringify({ error: "email is required" }), {
         status: 400,
@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
       type: "magiclink",
       email,
       options: {
-        redirectTo: "https://lens-data-vision.lovable.app",
+        redirectTo: "https://atrium-link.lovable.app",
       },
     });
 
@@ -48,6 +48,27 @@ Deno.serve(async (req) => {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Provision user_role if setor_id and role provided
+    const userId = data.user?.id;
+    if (userId && (setor_id || role)) {
+      const assignedRole = role || "setor_usuario";
+      // Upsert role
+      await supabase
+        .from("user_roles")
+        .upsert(
+          { user_id: userId, role: assignedRole, setor_id: setor_id || null },
+          { onConflict: "user_id,role,setor_id" }
+        );
+
+      // Update profile setor_id if provided
+      if (setor_id) {
+        await supabase
+          .from("profiles")
+          .update({ setor_id })
+          .eq("id", userId);
+      }
     }
 
     return new Response(
