@@ -418,7 +418,7 @@ serve(async (req) => {
       // Pass tipo_bot from the registered phone type (loja, colaborador, departamento)
       const lojaInfoWithTipo = { ...lojaMatch, tipo_bot: corporateTipo };
       runInBackground(
-        triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaInfoWithTipo).catch(
+        triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaInfoWithTipo, storedMediaUrl, storedMediaMimeType).catch(
           (e) => console.error("Bot lojas trigger failed:", e)
         )
       );
