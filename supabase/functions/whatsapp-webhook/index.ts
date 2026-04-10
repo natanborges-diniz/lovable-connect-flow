@@ -642,7 +642,9 @@ async function triggerBotLojas(
   contatoId: string,
   phone: string,
   text: string,
-  lojaInfo: any
+  lojaInfo: any,
+  mediaUrl?: string | null,
+  mediaMimeType?: string | null
 ) {
   await fetch(`${supabaseUrl}/functions/v1/bot-lojas`, {
     method: "POST",
