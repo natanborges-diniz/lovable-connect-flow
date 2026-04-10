@@ -293,6 +293,18 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
         <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Breve descrição do fluxo" />
       </div>
 
+      <div className="space-y-1.5">
+        <Label>Setor Destino</Label>
+        <Select value={setorDestinoId} onValueChange={setSetorDestinoId}>
+          <SelectTrigger><SelectValue placeholder="Selecione o setor que recebe a demanda" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Nenhum (usar lógica padrão)</SelectItem>
+            {setores?.map((s) => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">O setor receberá notificação in-app quando uma solicitação for criada neste fluxo.</p>
+      </div>
+
       {/* Steps builder */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
