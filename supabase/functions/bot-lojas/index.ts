@@ -267,6 +267,8 @@ serve(async (req) => {
     const effectiveCodEmpresa = dados.loja_selecionada_cod || codEmpresa;
 
     if (tipo === "criar_solicitacao") {
+      let solicitacaoCriada: any = null;
+
       // For link_pagamento, call OB API first
       if (acao.endpoint === "payment-links") {
         if (!OPTICAL_BUSINESS_URL || !INTERNAL_SERVICE_SECRET) {
@@ -299,7 +301,7 @@ serve(async (req) => {
           dados.url = url;
           dados.payment_link_id = payResult.id;
 
-          const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
+          solicitacaoCriada = await createFinanceiroSolicitacao(supabase, contato_id, {
             assunto: `Link de Pagamento - R$ ${Number(dados.valor).toFixed(2)}`,
             descricao: `${dados.descricao}${dados.cliente ? ` | Cliente: ${dados.cliente}` : ""} | Parcelas: ${dados.parcelas}x`,
             tipo: acao.tipo_solicitacao,
@@ -308,10 +310,10 @@ serve(async (req) => {
             evento_descricao: `Link de pagamento R$ ${Number(dados.valor).toFixed(2)} gerado via bot. ${dados.descricao}`,
             evento_tipo: "link_pagamento_gerado",
           });
-          if (solicitacao) {
-            const protocolo = await generateProtocolo(solicitacao.id);
+          if (solicitacaoCriada) {
+            const protocolo = await generateProtocolo(solicitacaoCriada.id);
             dados._protocolo = protocolo;
-            if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+            if (dados.comprovantes?.length) await archiveComprovantes(solicitacaoCriada.id, protocolo, dados.comprovantes);
           }
         } catch (e) {
           console.error("Payment link error:", e);
@@ -327,7 +329,7 @@ serve(async (req) => {
         const descParts = Object.entries(dados)
           .filter(([k]) => !k.startsWith("_") && k !== "comprovantes" && k !== "lojas_map" && k !== "loja_selecionada_nome" && k !== "loja_selecionada_cod")
           .map(([k, v]) => `${k}: ${v}`).join(" | ");
-        const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
+        solicitacaoCriada = await createFinanceiroSolicitacao(supabase, contato_id, {
           assunto: `${fluxo.nome} - ${dados.valor ? `R$ ${Number(dados.valor).toFixed(2)}` : (dados.nome_cliente || dados.cliente || "")}`,
           descricao: descParts,
           tipo: acao.tipo_solicitacao,
@@ -336,16 +338,16 @@ serve(async (req) => {
           evento_descricao: `${fluxo.nome} solicitado via bot`,
           evento_tipo: `${acao.tipo_solicitacao}_solicitado`,
         });
-        if (solicitacao) {
-          const protocolo = await generateProtocolo(solicitacao.id);
+        if (solicitacaoCriada) {
+          const protocolo = await generateProtocolo(solicitacaoCriada.id);
           dados._protocolo = protocolo;
-          if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+          if (dados.comprovantes?.length) await archiveComprovantes(solicitacaoCriada.id, protocolo, dados.comprovantes);
         }
       }
 
       // Notify responsáveis via WhatsApp AND create in-app notifications for sector
       await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, effectiveNomeLoja, dados, fluxo.nome);
-      await criarNotificacaoSetor(supabase, fluxo, effectiveNomeLoja, dados, solicitacao?.id || null);
+      await criarNotificacaoSetor(supabase, fluxo, effectiveNomeLoja, dados, solicitacaoCriada?.id || null);
 
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
