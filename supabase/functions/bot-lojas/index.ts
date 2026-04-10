@@ -343,8 +343,9 @@ serve(async (req) => {
         }
       }
 
-      // Notify responsáveis
+      // Notify responsáveis via WhatsApp AND create in-app notifications for sector
       await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, effectiveNomeLoja, dados, fluxo.nome);
+      await criarNotificacaoSetor(supabase, fluxo, effectiveNomeLoja, dados, solicitacao?.id || null);
 
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
