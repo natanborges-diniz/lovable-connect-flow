@@ -1063,6 +1063,50 @@ export type Database = {
         }
         Relationships: []
       }
+      solicitacao_anexos: {
+        Row: {
+          created_at: string | null
+          descricao: string | null
+          id: string
+          mime_type: string | null
+          solicitacao_id: string
+          storage_path: string
+          tamanho_bytes: number | null
+          tipo: string
+          url_publica: string
+        }
+        Insert: {
+          created_at?: string | null
+          descricao?: string | null
+          id?: string
+          mime_type?: string | null
+          solicitacao_id: string
+          storage_path: string
+          tamanho_bytes?: number | null
+          tipo?: string
+          url_publica: string
+        }
+        Update: {
+          created_at?: string | null
+          descricao?: string | null
+          id?: string
+          mime_type?: string | null
+          solicitacao_id?: string
+          storage_path?: string
+          tamanho_bytes?: number | null
+          tipo?: string
+          url_publica?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "solicitacao_anexos_solicitacao_id_fkey"
+            columns: ["solicitacao_id"]
+            isOneToOne: false
+            referencedRelation: "solicitacoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       solicitacoes: {
         Row: {
           assunto: string
@@ -1075,6 +1119,7 @@ export type Database = {
           metadata: Json | null
           pipeline_coluna_id: string | null
           prioridade: Database["public"]["Enums"]["prioridade"]
+          protocolo: string | null
           status: Database["public"]["Enums"]["status_solicitacao"]
           tipo: string | null
           updated_at: string
@@ -1090,6 +1135,7 @@ export type Database = {
           metadata?: Json | null
           pipeline_coluna_id?: string | null
           prioridade?: Database["public"]["Enums"]["prioridade"]
+          protocolo?: string | null
           status?: Database["public"]["Enums"]["status_solicitacao"]
           tipo?: string | null
           updated_at?: string
@@ -1105,6 +1151,7 @@ export type Database = {
           metadata?: Json | null
           pipeline_coluna_id?: string | null
           prioridade?: Database["public"]["Enums"]["prioridade"]
+          protocolo?: string | null
           status?: Database["public"]["Enums"]["status_solicitacao"]
           tipo?: string | null
           updated_at?: string
