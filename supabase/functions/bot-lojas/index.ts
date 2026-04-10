@@ -140,10 +140,15 @@ serve(async (req) => {
       msg += `• Unidade: ${dados.loja_selecionada_nome}\n`;
     }
     for (const et of etapas) {
+      if (et.tipo_input === "imagem") continue; // skip image fields from confirmation text
       const val = dados[et.campo];
       if (val === null || val === undefined) continue;
       const displayVal = et.tipo_input === "decimal" ? `R$ ${Number(val).toFixed(2)}` : val;
       msg += `• ${et.campo}: ${displayVal}\n`;
+    }
+    // Show comprovantes count
+    if (dados.comprovantes && dados.comprovantes.length > 0) {
+      msg += `• Comprovantes: ${dados.comprovantes.length} arquivo(s) anexado(s)\n`;
     }
     msg += "\nResponda *SIM* para confirmar ou *NÃO* para cancelar.";
     return msg;
