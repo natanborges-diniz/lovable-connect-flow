@@ -85,7 +85,7 @@ serve(async (req) => {
   }
 
   // ─── Validate input by tipo_input ───
-  function validateInput(texto: string, etapa: any): { valid: boolean; value: any; error?: string } {
+  function validateInput(texto: string, etapa: any, context?: { media_url?: string }): { valid: boolean; value: any; error?: string } {
     const hint = "\n\n_Digite *0* para voltar ao menu._";
     const tipo = etapa.tipo_input || "texto";
     const validacao = etapa.validacao || {};
@@ -114,6 +114,12 @@ serve(async (req) => {
         const doc = texto.replace(/\D/g, "");
         if (doc.length !== 11 && doc.length !== 14) return { valid: false, value: null, error: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos." + hint };
         return { valid: true, value: doc };
+      }
+      case "imagem": {
+        if (!context?.media_url) {
+          return { valid: false, value: null, error: "⚠️ Por favor, envie uma *foto* ou *documento* (não texto)." + hint };
+        }
+        return { valid: true, value: context.media_url };
       }
       case "texto":
       default: {
