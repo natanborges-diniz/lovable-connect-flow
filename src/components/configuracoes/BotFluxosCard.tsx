@@ -247,7 +247,7 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
     if (!nome.trim()) { toast.error("Nome é obrigatório"); return; }
     setLoading(true);
     try {
-      const payload = { chave, nome, tipo_bot: tipoBot, descricao: descricao || null, etapas, acao_final: acaoFinal };
+      const payload = { chave, nome, tipo_bot: tipoBot, descricao: descricao || null, etapas, acao_final: acaoFinal, setor_destino_id: setorDestinoId || null };
       if (initial) {
         const { error } = await (supabase as any).from("bot_fluxos").update(payload).eq("id", initial.id);
         if (error) throw error;
