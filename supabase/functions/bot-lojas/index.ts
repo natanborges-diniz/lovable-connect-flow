@@ -349,8 +349,13 @@ serve(async (req) => {
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
       for (const [k, v] of Object.entries(dados)) {
+        if (k === "comprovantes" || k === "lojas_map") continue;
         const displayVal = typeof v === "number" ? Number(v).toFixed(2) : String(v || "");
         template = template.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), displayVal);
+      }
+      // Append protocolo
+      if (dados._protocolo) {
+        template += `\n\n📋 *Protocolo: ${dados._protocolo}*`;
       }
       return template + "\n\nDigite *menu* para nova operação.";
     }
