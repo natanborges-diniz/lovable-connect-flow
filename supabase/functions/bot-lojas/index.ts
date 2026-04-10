@@ -165,6 +165,94 @@ serve(async (req) => {
     return (data || []).filter((l: any) => l.cod_empresa);
   }
 
+  // ─── Load lojas + setores for selection ───
+  async function loadLojasESetores(): Promise<Array<{ nome: string; tipo: string; cod_empresa?: string }>> {
+    const { data: lojas } = await supabase
+      .from("telefones_lojas")
+      .select("nome_loja, cod_empresa")
+      .eq("tipo", "loja")
+      .eq("ativo", true)
+      .order("nome_loja");
+    const { data: setores } = await supabase
+      .from("setores")
+      .select("nome")
+      .eq("ativo", true)
+      .order("nome");
+    const items: Array<{ nome: string; tipo: string; cod_empresa?: string }> = [];
+    const uniqueLojas = new Map<string, string>();
+    for (const l of (lojas || [])) {
+      if (l.cod_empresa && !uniqueLojas.has(l.nome_loja)) {
+        uniqueLojas.set(l.nome_loja, l.cod_empresa);
+        items.push({ nome: l.nome_loja, tipo: "loja", cod_empresa: l.cod_empresa });
+      }
+    }
+    for (const s of (setores || [])) {
+      items.push({ nome: s.nome, tipo: "setor" });
+    }
+    return items;
+  }
+
+  // ─── Generate protocol number ───
+  async function generateProtocolo(solicitacaoId: string): Promise<string> {
+    const ano = new Date().getFullYear();
+    const { data: seqResult } = await supabase.rpc("nextval_protocolo", {});
+    // Fallback: if RPC doesn't exist, use a simple query
+    let seq: number;
+    if (seqResult !== null && seqResult !== undefined) {
+      seq = Number(seqResult);
+    } else {
+      // Direct SQL via postgrest won't work, use timestamp-based fallback
+      seq = Date.now() % 100000;
+    }
+    const protocolo = `SOL-${ano}-${String(seq).padStart(5, "0")}`;
+    await supabase.from("solicitacoes").update({ protocolo }).eq("id", solicitacaoId);
+    return protocolo;
+  }
+
+  // ─── Archive comprovantes to storage ───
+  async function archiveComprovantes(
+    solicitacaoId: string,
+    protocolo: string,
+    comprovantes: Array<{ url: string; mime_type?: string }>
+  ) {
+    const ano = new Date().getFullYear();
+    for (let i = 0; i < comprovantes.length; i++) {
+      const comp = comprovantes[i];
+      try {
+        // Download from original URL
+        const res = await fetch(comp.url);
+        if (!res.ok) continue;
+        const bytes = await res.arrayBuffer();
+        const mime = comp.mime_type || "application/octet-stream";
+        const extMap: Record<string, string> = {
+          "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+          "application/pdf": "pdf", "image/gif": "gif",
+        };
+        const ext = extMap[mime] || "bin";
+        const storagePath = `comprovantes/${ano}/${protocolo}/comprovante_${i + 1}.${ext}`;
+
+        await supabase.storage.from("whatsapp-media").upload(storagePath, bytes, {
+          contentType: mime,
+          upsert: true,
+        });
+
+        const { data: publicUrl } = supabase.storage.from("whatsapp-media").getPublicUrl(storagePath);
+
+        await supabase.from("solicitacao_anexos").insert({
+          solicitacao_id: solicitacaoId,
+          tipo: "comprovante",
+          descricao: `Comprovante ${i + 1}`,
+          storage_path: storagePath,
+          url_publica: publicUrl?.publicUrl || comp.url,
+          mime_type: mime,
+          tamanho_bytes: bytes.byteLength,
+        });
+      } catch (e) {
+        console.error(`[bot-lojas] Failed to archive comprovante ${i + 1}:`, e);
+      }
+    }
+  }
+
   // ─── Execute final action ───
   async function executarAcaoFinal(
     fluxo: any, dados: Record<string, any>,
