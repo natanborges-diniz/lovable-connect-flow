@@ -128,7 +128,12 @@ export default function Solicitacoes() {
           {detailItem && (
             <>
               <DialogHeader>
-                <DialogTitle>{detailItem.assunto}</DialogTitle>
+                <DialogTitle className="flex items-center gap-2">
+                  {detailItem.assunto}
+                  {(detailItem as any).protocolo && (
+                    <Badge variant="outline" className="font-mono text-xs">{(detailItem as any).protocolo}</Badge>
+                  )}
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
@@ -161,6 +166,9 @@ export default function Solicitacoes() {
                     <p className="text-sm mt-1">{detailItem.descricao}</p>
                   </div>
                 )}
+
+                {/* Anexos / Comprovantes */}
+                <AnexosSection solicitacaoId={detailItem.id} />
 
                 {/* Classificação IA */}
                 <ClassificacaoIA solicitacaoId={detailItem.id} classificacao={(detailItem as any).classificacao_ia} />
