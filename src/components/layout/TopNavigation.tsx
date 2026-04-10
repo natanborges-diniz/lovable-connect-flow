@@ -1,8 +1,15 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays } from "lucide-react";
+import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { useNotificacoes } from "@/hooks/useNotificacoes";
+import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import type { ModuleKey } from "./AppLayout";
 
 interface TopNavigationProps {
@@ -23,6 +30,16 @@ const modules: { key: ModuleKey; label: string; icon: React.ElementType; default
 export function TopNavigation({ activeModule }: TopNavigationProps) {
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
+  const { data: notificacoes, naoLidas, marcarLida, marcarTodasLidas } = useNotificacoes();
+  const [popoverOpen, setPopoverOpen] = useState(false);
+
+  const handleNotifClick = (notif: any) => {
+    if (!notif.lida) marcarLida.mutate(notif.id);
+    if (notif.referencia_id && notif.tipo === "solicitacao") {
+      navigate("/solicitacoes");
+    }
+    setPopoverOpen(false);
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full bg-surface border-b-2 border-primary">
@@ -71,6 +88,57 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Notifications */}
+        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 relative" title="Notificações">
+              <Bell className="h-4 w-4" />
+              {naoLidas > 0 && (
+                <Badge className="absolute -top-1 -right-1 h-4 min-w-[16px] px-1 text-[10px] flex items-center justify-center">
+                  {naoLidas > 99 ? "99+" : naoLidas}
+                </Badge>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80 p-0" align="end">
+            <div className="flex items-center justify-between px-4 py-2 border-b">
+              <span className="text-sm font-semibold">Notificações</span>
+              {naoLidas > 0 && (
+                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => marcarTodasLidas.mutate()}>
+                  Marcar todas como lidas
+                </Button>
+              )}
+            </div>
+            <ScrollArea className="max-h-80">
+              {!notificacoes?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Nenhuma notificação</p>
+              ) : (
+                notificacoes.map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => handleNotifClick(n)}
+                    className={cn(
+                      "w-full text-left px-4 py-3 border-b last:border-0 hover:bg-muted/50 transition-colors",
+                      !n.lida && "bg-primary/5"
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      {!n.lida && <span className="mt-1.5 h-2 w-2 rounded-full bg-primary flex-shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{n.titulo}</p>
+                        {n.mensagem && <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.mensagem}</p>}
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          {format(new Date(n.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </ScrollArea>
+          </PopoverContent>
+        </Popover>
 
         {/* User area */}
         <div className="flex items-center gap-2">

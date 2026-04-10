@@ -2,6 +2,7 @@ import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useSolicitacoes, useCreateSolicitacao, useUpdateSolicitacaoStatus } from "@/hooks/useSolicitacoes";
 import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
+import { useSolicitacaoComentarios, useCreateComentario } from "@/hooks/useSolicitacaoComentarios";
 import { useContatos } from "@/hooks/useContatos";
 import { StatusBadge, PrioridadeBadge, TipoContatoBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -13,13 +14,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Sparkles, Loader2, Paperclip, ExternalLink } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Plus, Search, Sparkles, Loader2, Paperclip, ExternalLink, MessageSquare, Send } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { StatusSolicitacao, Prioridade, TipoCanal, TipoContato } from "@/types/database";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 
 export default function Solicitacoes() {
   const [search, setSearch] = useState("");
@@ -124,7 +127,7 @@ export default function Solicitacoes() {
       </Card>
 
       <Dialog open={!!detailId} onOpenChange={(open) => !open && setDetailId(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {detailItem && (
             <>
               <DialogHeader>
@@ -169,6 +172,9 @@ export default function Solicitacoes() {
 
                 {/* Anexos / Comprovantes */}
                 <AnexosSection solicitacaoId={detailItem.id} />
+
+                {/* Comentários / Respostas */}
+                <ComentariosSection solicitacaoId={detailItem.id} />
 
                 {/* Classificação IA */}
                 <ClassificacaoIA solicitacaoId={detailItem.id} classificacao={(detailItem as any).classificacao_ia} />
@@ -360,6 +366,95 @@ function AnexosSection({ solicitacaoId }: { solicitacaoId: string }) {
             {a.descricao || a.tipo} — {a.mime_type}
           </a>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
+  const { data: comentarios, isLoading } = useSolicitacaoComentarios(solicitacaoId);
+  const createComentario = useCreateComentario();
+  const [texto, setTexto] = useState("");
+  const [tipo, setTipo] = useState<"interno" | "resposta_cliente">("interno");
+
+  const handleSend = () => {
+    if (!texto.trim()) return;
+    createComentario.mutate(
+      { solicitacao_id: solicitacaoId, conteudo: texto.trim(), tipo },
+      { onSuccess: () => setTexto("") }
+    );
+  };
+
+  return (
+    <div className="border-t pt-3 space-y-3">
+      <h4 className="text-sm font-medium flex items-center gap-1.5">
+        <MessageSquare className="h-4 w-4 text-muted-foreground" />
+        Comentários & Respostas
+      </h4>
+
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">Carregando...</p>
+      ) : comentarios?.length ? (
+        <ScrollArea className="max-h-48">
+          <div className="space-y-2 pr-2">
+            {comentarios.map((c) => (
+              <div
+                key={c.id}
+                className={cn(
+                  "rounded-lg px-3 py-2 text-sm",
+                  c.tipo === "resposta_cliente" ? "bg-primary/10 border border-primary/20" : "bg-muted/50"
+                )}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium">{c.autor_nome || "Sistema"}</span>
+                  <div className="flex items-center gap-1.5">
+                    {c.tipo === "resposta_cliente" && (
+                      <Badge variant="outline" className="text-[9px] h-4 px-1">WhatsApp</Badge>
+                    )}
+                    <span className="text-[10px] text-muted-foreground">
+                      {format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm whitespace-pre-wrap">{c.conteudo}</p>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      ) : (
+        <p className="text-xs text-muted-foreground">Nenhum comentário ainda</p>
+      )}
+
+      {/* New comment form */}
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Select value={tipo} onValueChange={(v) => setTipo(v as any)}>
+            <SelectTrigger className="w-48 h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="interno">Nota interna</SelectItem>
+              <SelectItem value="resposta_cliente">Responder via WhatsApp</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex gap-2">
+          <Textarea
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            rows={2}
+            className="text-sm"
+            placeholder={tipo === "resposta_cliente" ? "Mensagem que será enviada ao solicitante via WhatsApp..." : "Nota interna (visível apenas para a equipe)..."}
+          />
+          <Button
+            size="icon"
+            className="h-auto self-end"
+            disabled={!texto.trim() || createComentario.isPending}
+            onClick={handleSend}
+          >
+            {createComentario.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
       </div>
     </div>
   );
