@@ -1,83 +1,130 @@
 
 
-# Comunicação Interna via Sistema — Eliminar Dependência de WhatsApp para Setores Passivos
+# Evolução do INFOCO OPS — Ecossistema com Permissões Setoriais, SSO e Limpeza de Código Obsoleto
 
-## Visão Geral
+## Análise do Cenário Atual
 
-Substituir a necessidade de números de WhatsApp para setores internos por uma experiência nativa no sistema web. Os setores passivos (Financeiro, TI, Atendimento Gael) receberão demandas diretamente em seus pipelines setoriais, com notificações in-app e a capacidade de responder/interagir sem sair do sistema.
+O INFOCO OPS cresceu de um sistema de atendimento WhatsApp para um CRM completo com pipelines setoriais, bot interno, protocolo sequencial, comprovantes e comunicação interna. Porém, a operacionalidade atual tem lacunas:
 
-## Arquitetura Proposta
+- **Sem controle de acesso por setor** — qualquer usuário logado vê todos os módulos
+- **Login isolado** — não integrado com o Infoco Optical Business via SSO
+- **Notificações sem filtro setorial real** — a RLS filtra por `setor_id` do profile, mas o profile raramente tem `setor_id` preenchido
+- **Página Index.tsx** — ainda é um placeholder não utilizado
+- **Cadastro público aberto** — qualquer pessoa pode criar conta (aba "Cadastrar")
+- **Código com `as any` excessivo** — tipagem fraca em vários hooks e páginas
 
-```text
-Loja/Colaborador (WhatsApp)
-    │
-    ▼
-  Bot → Cria Solicitação + Protocolo
-    │
-    ├── Solicitação aparece no Pipeline do setor destino
-    │
-    ├── 🔔 Notificação in-app para usuários do setor
-    │
-    └── Setor responde via interface web
-         │
-         └── Sistema envia resposta ao solicitante via WhatsApp
+## Plano de Implementação
+
+### 1. Migração SQL — Permissões por Setor (user_roles)
+
+Criar tabela `user_roles` seguindo as melhores práticas de segurança:
+
+```sql
+CREATE TYPE public.app_role AS ENUM ('admin', 'operador', 'setor_usuario');
+
+CREATE TABLE public.user_roles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  role app_role NOT NULL,
+  setor_id uuid REFERENCES setores(id) ON DELETE SET NULL,
+  UNIQUE (user_id, role, setor_id)
+);
+
+-- Security definer function para evitar recursão RLS
+CREATE OR REPLACE FUNCTION public.has_role(...)
+CREATE OR REPLACE FUNCTION public.get_user_setor_ids(...)
 ```
 
-## Componentes a Implementar
+- `admin` vê tudo
+- `operador` vê tudo (back-office geral)
+- `setor_usuario` vê apenas o pipeline do seu setor
 
-### 1. Sistema de Notificações In-App
+### 2. Atualizar `profiles` — garantir `setor_id` preenchido
 
-**Migração SQL**: tabela `notificacoes`
-- `id`, `usuario_id` (profile), `setor_id`, `titulo`, `mensagem`, `tipo` (solicitacao, tarefa, etc.), `referencia_id`, `lida`, `created_at`
-- Com Realtime habilitado para push instantâneo
+A coluna `setor_id` já existe em `profiles`. Será usada como setor principal, mas `user_roles` permite múltiplos setores.
 
-**UI**: ícone de sino no header com badge de contagem, dropdown com lista de notificações, clique leva ao item relevante (solicitação/pipeline)
+### 3. SSO com Infoco Optical Business
 
-### 2. Painel de Resposta na Solicitação
+Atualizar a Edge Function `sso-login`:
+- Corrigir a URL de redirect (atualmente aponta para `lens-data-vision.lovable.app`, deve apontar para `atrium-link.lovable.app`)
+- Incluir `setor_id` e `role` nos metadados do magic link
+- Ao provisionar usuário, criar automaticamente o `user_role` adequado
+- No Optical Business, o botão "Acessar INFOCO OPS" chamará esta function passando email + setor
 
-Na página de Solicitações (ou no detalhe do card no Pipeline), adicionar uma seção de **comentários/respostas internas**:
+### 4. Navegação Condicional por Permissão
 
-**Migração SQL**: tabela `solicitacao_comentarios`
-- `id`, `solicitacao_id`, `autor_id` (profile), `autor_nome`, `conteudo`, `tipo` (interno, resposta_cliente), `created_at`
+**Arquivo**: `src/hooks/useAuth.tsx`
+- Adicionar fetch de `user_roles` junto ao profile
+- Expor `roles`, `setorIds`, `isAdmin`, `hasRole()` no contexto
 
-Quando o tipo for `resposta_cliente`, o sistema dispara automaticamente uma mensagem WhatsApp para o solicitante original usando o número da sessão/contato, incluindo o protocolo.
+**Arquivo**: `src/components/layout/TopNavigation.tsx`
+- Filtrar módulos visíveis com base nas roles:
+  - `admin`/`operador`: todos os módulos
+  - `setor_usuario` com setor "Financeiro": apenas Dashboard + Financeiro + Solicitações + Tarefas
+  - `setor_usuario` com setor "TI": apenas Dashboard + Solicitações + Tarefas
 
-### 3. Gatilho de Notificação na Criação de Solicitação
+**Arquivo**: `src/components/layout/AppLayout.tsx`
+- Redirecionar para o pipeline correto ao logar (ex: usuário do Financeiro cai em `/financeiro`)
 
-Modificar `bot-lojas/index.ts` — na `executarAcaoFinal`:
-- Em vez de (ou além de) enviar WhatsApp para o responsável, inserir registro em `notificacoes` para todos os usuários do setor destino
-- O setor destino é determinado pelo fluxo (cada `bot_fluxos` pode ter um campo `setor_destino_id`)
+### 5. Proteção de Rotas
 
-### 4. Edge Function para Resposta ao Solicitante
+**Arquivo**: `src/components/auth/ProtectedRoute.tsx`
+- Aceitar prop `allowedRoles` e `allowedSetores`
+- Redirecionar para rota padrão se o usuário não tiver permissão
 
-Nova edge function `responder-solicitacao`:
-- Recebe `solicitacao_id` + `mensagem`
-- Busca o contato original e seu último canal/provedor
-- Envia mensagem WhatsApp formatada: "📋 Protocolo SOL-2026-XXXXX\n\n{mensagem do setor}"
-- Registra como comentário tipo `resposta_cliente`
+**Arquivo**: `src/App.tsx`
+- Aplicar `allowedRoles` nas rotas sensíveis (Configurações → apenas admin)
 
-### 5. Campo `setor_destino_id` nos Fluxos
+### 6. Notificações com Cadência Setorial
 
-**Migração SQL**: adicionar coluna `setor_destino_id uuid` na tabela `bot_fluxos` (referência ao setor que recebe a demanda)
+Quando uma demanda chega ao setor:
+- Todos os `user_roles` com aquele `setor_id` recebem notificação
+- Ao conectar via SSO, as notificações pendentes aparecem imediatamente (já funciona via Realtime)
+- Adicionar som/vibração no navegador para novas notificações
 
-Na interface de configuração dos fluxos (`BotFluxosCard.tsx`), adicionar dropdown de setor destino.
+### 7. Remover Auth Pública (Cadastro Aberto)
 
-## Resultado
+- Remover aba "Cadastrar" do `Auth.tsx` — usuários serão provisionados via SSO ou manualmente por admin
+- Criar seção em Configurações para gerenciar usuários e atribuir setores/roles
 
-- **Setores internos não precisam de número WhatsApp** — recebem tudo no sistema
-- **Notificação instantânea** via Realtime quando chega nova solicitação
-- **Resposta centralizada** — setor responde pelo sistema, cliente recebe no WhatsApp
-- **Rastreabilidade completa** — protocolo + comentários + histórico no mesmo lugar
-- **Pipeline setorial** já existe (Financeiro, TI, Gael) — apenas vincula as solicitações
+### 8. Limpeza de Código Obsoleto
+
+| Item | Ação |
+|------|------|
+| `src/pages/Index.tsx` | Remover (placeholder não usado, rota `/` já aponta para Dashboard) |
+| `src/pages/NotFound.tsx` | Manter |
+| `as any` em hooks e páginas | Substituir por tipagem correta usando os types do Supabase |
+| SSO redirect URL hardcoded | Corrigir para URL real do projeto |
+| Rota duplicada (`/` → Dashboard + Index) | Eliminar conflito |
+
+### 9. Gestão de Usuários (Admin)
+
+Nova seção em **Configurações > Estrutura**:
+- Listar usuários (profiles)
+- Atribuir setor e role
+- Ativar/desativar usuários
+- Gerar link de acesso SSO manualmente
 
 ## Arquivos Modificados
 
 | Arquivo | Mudança |
 |---------|---------|
-| Migração SQL | Tabelas `notificacoes`, `solicitacao_comentarios`; coluna `setor_destino_id` em `bot_fluxos` |
-| `supabase/functions/bot-lojas/index.ts` | Criar notificação in-app ao invés de WhatsApp para setores |
-| `supabase/functions/responder-solicitacao/index.ts` | Nova function para enviar resposta ao solicitante via WhatsApp |
-| `src/components/layout/TopNavigation.tsx` | Ícone de notificações com badge e dropdown |
-| `src/pages/Solicitacoes.tsx` | Seção de comentários/respostas no detalhe |
-| `src/components/configuracoes/BotFluxosCard.tsx` | Dropdown de setor destino |
+| Migração SQL | `user_roles`, `app_role` enum, funções security definer |
+| `supabase/functions/sso-login/index.ts` | Corrigir redirect, provisionar role/setor |
+| `src/hooks/useAuth.tsx` | Carregar roles e setores do usuário |
+| `src/components/layout/TopNavigation.tsx` | Filtrar módulos por permissão |
+| `src/components/layout/AppLayout.tsx` | Redirect inicial por setor |
+| `src/components/auth/ProtectedRoute.tsx` | Controle de acesso por role/setor |
+| `src/App.tsx` | Rotas protegidas com roles |
+| `src/pages/Auth.tsx` | Remover cadastro público |
+| `src/pages/Index.tsx` | Deletar arquivo |
+| `src/pages/Configuracoes.tsx` | Seção de gestão de usuários |
+| `src/hooks/useNotificacoes.ts` | Notificação sonora |
+
+## Resultado Esperado
+
+- Usuário do Financeiro acessa via Optical Business → cai direto no pipeline Financeiro com notificações pendentes
+- Admin vê tudo, gerencia usuários e permissões
+- Código limpo, sem placeholders ou tipagem fraca
+- Ecossistema integrado entre os dois projetos
 
