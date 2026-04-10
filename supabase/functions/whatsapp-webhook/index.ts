@@ -655,6 +655,8 @@ async function triggerBotLojas(
       contato_id: contatoId,
       mensagem_texto: text,
       loja_info: lojaInfo,
+      media_url: mediaUrl || null,
+      media_mime_type: mediaMimeType || null,
     }),
   });
 }
