@@ -372,7 +372,8 @@ serve(async (req) => {
   }
 
   try {
-    const { atendimento_id, contato_id, mensagem_texto, loja_info } = await req.json();
+    const { atendimento_id, contato_id, mensagem_texto, loja_info, media_url, media_mime_type } = await req.json();
+    const mediaContext = { media_url, media_mime_type };
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
     // 1. Get or create bot session
