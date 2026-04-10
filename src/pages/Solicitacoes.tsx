@@ -89,6 +89,7 @@ export default function Solicitacoes() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Protocolo</TableHead>
                   <TableHead>Assunto</TableHead>
                   <TableHead>Contato</TableHead>
                   <TableHead>Status</TableHead>
@@ -100,6 +101,7 @@ export default function Solicitacoes() {
               <TableBody>
                 {solicitacoes.map((s) => (
                   <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(s.id)}>
+                    <TableCell className="font-mono text-xs text-primary">{(s as any).protocolo || "—"}</TableCell>
                     <TableCell className="font-medium">{s.assunto}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
