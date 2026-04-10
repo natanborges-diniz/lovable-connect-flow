@@ -1301,7 +1301,7 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      nextval_protocolo: { Args: never; Returns: number }
     }
     Enums: {
       direcao_mensagem: "inbound" | "outbound" | "internal"
