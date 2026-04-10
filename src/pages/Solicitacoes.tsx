@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useSolicitacoes, useCreateSolicitacao, useUpdateSolicitacaoStatus } from "@/hooks/useSolicitacoes";
+import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
 import { useContatos } from "@/hooks/useContatos";
 import { StatusBadge, PrioridadeBadge, TipoContatoBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Search, Sparkles, Loader2, Paperclip, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { StatusSolicitacao, Prioridade, TipoCanal, TipoContato } from "@/types/database";
