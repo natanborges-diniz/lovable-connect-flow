@@ -195,13 +195,26 @@ export function BotFluxosCard() {
 
 // ─── Fluxo Form (Create/Edit) ───
 
+function useSetores() {
+  return useQuery({
+    queryKey: ["setores"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).from("setores").select("id, nome").eq("ativo", true).order("nome");
+      if (error) throw error;
+      return data as Array<{ id: string; nome: string }>;
+    },
+  });
+}
+
 function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: () => void }) {
   const [nome, setNome] = useState(initial?.nome || "");
   const [tipoBot, setTipoBot] = useState(initial?.tipo_bot || "loja");
   const [descricao, setDescricao] = useState(initial?.descricao || "");
   const [etapas, setEtapas] = useState<Etapa[]>(initial?.etapas || []);
   const [acaoFinal, setAcaoFinal] = useState<AcaoFinal>(initial?.acao_final || { tipo: "criar_solicitacao" });
+  const [setorDestinoId, setSetorDestinoId] = useState<string>((initial as any)?.setor_destino_id || "");
   const [loading, setLoading] = useState(false);
+  const { data: setores } = useSetores();
 
   const chave = initial?.chave || nome
     .toLowerCase()
