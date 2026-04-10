@@ -193,6 +193,7 @@ export type Database = {
           etapas: Json
           id: string
           nome: string
+          setor_destino_id: string | null
           tipo_bot: string
           updated_at: string
         }
@@ -205,6 +206,7 @@ export type Database = {
           etapas?: Json
           id?: string
           nome: string
+          setor_destino_id?: string | null
           tipo_bot?: string
           updated_at?: string
         }
@@ -217,10 +219,19 @@ export type Database = {
           etapas?: Json
           id?: string
           nome?: string
+          setor_destino_id?: string | null
           tipo_bot?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "bot_fluxos_setor_destino_id_fkey"
+            columns: ["setor_destino_id"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       bot_menu_opcoes: {
         Row: {
@@ -820,6 +831,57 @@ export type Database = {
           },
         ]
       }
+      notificacoes: {
+        Row: {
+          created_at: string
+          id: string
+          lida: boolean
+          mensagem: string | null
+          referencia_id: string | null
+          setor_id: string | null
+          tipo: string
+          titulo: string
+          usuario_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lida?: boolean
+          mensagem?: string | null
+          referencia_id?: string | null
+          setor_id?: string | null
+          tipo?: string
+          titulo: string
+          usuario_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lida?: boolean
+          mensagem?: string | null
+          referencia_id?: string | null
+          setor_id?: string | null
+          tipo?: string
+          titulo?: string
+          usuario_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notificacoes_setor_id_fkey"
+            columns: ["setor_id"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notificacoes_usuario_id_fkey"
+            columns: ["usuario_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pipeline_automacoes: {
         Row: {
           ativo: boolean
@@ -1100,6 +1162,51 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "solicitacao_anexos_solicitacao_id_fkey"
+            columns: ["solicitacao_id"]
+            isOneToOne: false
+            referencedRelation: "solicitacoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      solicitacao_comentarios: {
+        Row: {
+          autor_id: string | null
+          autor_nome: string | null
+          conteudo: string
+          created_at: string
+          id: string
+          solicitacao_id: string
+          tipo: string
+        }
+        Insert: {
+          autor_id?: string | null
+          autor_nome?: string | null
+          conteudo: string
+          created_at?: string
+          id?: string
+          solicitacao_id: string
+          tipo?: string
+        }
+        Update: {
+          autor_id?: string | null
+          autor_nome?: string | null
+          conteudo?: string
+          created_at?: string
+          id?: string
+          solicitacao_id?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "solicitacao_comentarios_autor_id_fkey"
+            columns: ["autor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "solicitacao_comentarios_solicitacao_id_fkey"
             columns: ["solicitacao_id"]
             isOneToOne: false
             referencedRelation: "solicitacoes"

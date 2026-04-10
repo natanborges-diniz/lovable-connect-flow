@@ -195,13 +195,26 @@ export function BotFluxosCard() {
 
 // ─── Fluxo Form (Create/Edit) ───
 
+function useSetores() {
+  return useQuery({
+    queryKey: ["setores"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).from("setores").select("id, nome").eq("ativo", true).order("nome");
+      if (error) throw error;
+      return data as Array<{ id: string; nome: string }>;
+    },
+  });
+}
+
 function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: () => void }) {
   const [nome, setNome] = useState(initial?.nome || "");
   const [tipoBot, setTipoBot] = useState(initial?.tipo_bot || "loja");
   const [descricao, setDescricao] = useState(initial?.descricao || "");
   const [etapas, setEtapas] = useState<Etapa[]>(initial?.etapas || []);
   const [acaoFinal, setAcaoFinal] = useState<AcaoFinal>(initial?.acao_final || { tipo: "criar_solicitacao" });
+  const [setorDestinoId, setSetorDestinoId] = useState<string>((initial as any)?.setor_destino_id || "");
   const [loading, setLoading] = useState(false);
+  const { data: setores } = useSetores();
 
   const chave = initial?.chave || nome
     .toLowerCase()
@@ -234,7 +247,7 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
     if (!nome.trim()) { toast.error("Nome é obrigatório"); return; }
     setLoading(true);
     try {
-      const payload = { chave, nome, tipo_bot: tipoBot, descricao: descricao || null, etapas, acao_final: acaoFinal };
+      const payload = { chave, nome, tipo_bot: tipoBot, descricao: descricao || null, etapas, acao_final: acaoFinal, setor_destino_id: setorDestinoId || null };
       if (initial) {
         const { error } = await (supabase as any).from("bot_fluxos").update(payload).eq("id", initial.id);
         if (error) throw error;
@@ -278,6 +291,18 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
       <div className="space-y-1.5">
         <Label>Descrição</Label>
         <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Breve descrição do fluxo" />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Setor Destino</Label>
+        <Select value={setorDestinoId} onValueChange={setSetorDestinoId}>
+          <SelectTrigger><SelectValue placeholder="Selecione o setor que recebe a demanda" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Nenhum (usar lógica padrão)</SelectItem>
+            {setores?.map((s) => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">O setor receberá notificação in-app quando uma solicitação for criada neste fluxo.</p>
       </div>
 
       {/* Steps builder */}

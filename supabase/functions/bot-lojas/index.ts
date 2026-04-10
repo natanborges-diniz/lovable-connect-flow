@@ -267,6 +267,8 @@ serve(async (req) => {
     const effectiveCodEmpresa = dados.loja_selecionada_cod || codEmpresa;
 
     if (tipo === "criar_solicitacao") {
+      let solicitacaoCriada: any = null;
+
       // For link_pagamento, call OB API first
       if (acao.endpoint === "payment-links") {
         if (!OPTICAL_BUSINESS_URL || !INTERNAL_SERVICE_SECRET) {
@@ -299,7 +301,7 @@ serve(async (req) => {
           dados.url = url;
           dados.payment_link_id = payResult.id;
 
-          const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
+          solicitacaoCriada = await createFinanceiroSolicitacao(supabase, contato_id, {
             assunto: `Link de Pagamento - R$ ${Number(dados.valor).toFixed(2)}`,
             descricao: `${dados.descricao}${dados.cliente ? ` | Cliente: ${dados.cliente}` : ""} | Parcelas: ${dados.parcelas}x`,
             tipo: acao.tipo_solicitacao,
@@ -308,10 +310,10 @@ serve(async (req) => {
             evento_descricao: `Link de pagamento R$ ${Number(dados.valor).toFixed(2)} gerado via bot. ${dados.descricao}`,
             evento_tipo: "link_pagamento_gerado",
           });
-          if (solicitacao) {
-            const protocolo = await generateProtocolo(solicitacao.id);
+          if (solicitacaoCriada) {
+            const protocolo = await generateProtocolo(solicitacaoCriada.id);
             dados._protocolo = protocolo;
-            if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+            if (dados.comprovantes?.length) await archiveComprovantes(solicitacaoCriada.id, protocolo, dados.comprovantes);
           }
         } catch (e) {
           console.error("Payment link error:", e);
@@ -327,7 +329,7 @@ serve(async (req) => {
         const descParts = Object.entries(dados)
           .filter(([k]) => !k.startsWith("_") && k !== "comprovantes" && k !== "lojas_map" && k !== "loja_selecionada_nome" && k !== "loja_selecionada_cod")
           .map(([k, v]) => `${k}: ${v}`).join(" | ");
-        const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
+        solicitacaoCriada = await createFinanceiroSolicitacao(supabase, contato_id, {
           assunto: `${fluxo.nome} - ${dados.valor ? `R$ ${Number(dados.valor).toFixed(2)}` : (dados.nome_cliente || dados.cliente || "")}`,
           descricao: descParts,
           tipo: acao.tipo_solicitacao,
@@ -336,15 +338,16 @@ serve(async (req) => {
           evento_descricao: `${fluxo.nome} solicitado via bot`,
           evento_tipo: `${acao.tipo_solicitacao}_solicitado`,
         });
-        if (solicitacao) {
-          const protocolo = await generateProtocolo(solicitacao.id);
+        if (solicitacaoCriada) {
+          const protocolo = await generateProtocolo(solicitacaoCriada.id);
           dados._protocolo = protocolo;
-          if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+          if (dados.comprovantes?.length) await archiveComprovantes(solicitacaoCriada.id, protocolo, dados.comprovantes);
         }
       }
 
-      // Notify responsáveis
+      // Notify responsáveis via WhatsApp AND create in-app notifications for sector
       await notificarResponsaveis(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, fluxo.chave, effectiveNomeLoja, dados, fluxo.nome);
+      await criarNotificacaoSetor(supabase, fluxo, effectiveNomeLoja, dados, solicitacaoCriada?.id || null);
 
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
@@ -937,5 +940,66 @@ async function notificarResponsaveis(
     }
   } catch (e) {
     console.error("[bot-lojas] notificarResponsaveis error:", e);
+  }
+}
+
+// ─── Create in-app notifications for the destination sector ───
+async function criarNotificacaoSetor(
+  supabase: any,
+  fluxo: any,
+  nomeLoja: string,
+  dados: Record<string, any>,
+  solicitacaoId: string | null
+) {
+  try {
+    const setorDestinoId = fluxo.setor_destino_id;
+    if (!setorDestinoId) {
+      console.log(`[bot-lojas] No setor_destino_id for flow ${fluxo.chave}, skipping in-app notification`);
+      return;
+    }
+
+    // Get all profiles in this sector
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("setor_id", setorDestinoId)
+      .eq("ativo", true);
+
+    const protocolo = dados._protocolo || "";
+    const titulo = `Nova solicitação: ${fluxo.nome}`;
+    const mensagem = `🏪 ${nomeLoja}${protocolo ? ` | 📋 ${protocolo}` : ""}`;
+
+    // Create notification for each user in the sector + a sector-wide one
+    const notifs: any[] = [];
+
+    // Sector-wide notification (for any user assigned to this sector)
+    notifs.push({
+      setor_id: setorDestinoId,
+      titulo,
+      mensagem,
+      tipo: "solicitacao",
+      referencia_id: solicitacaoId,
+    });
+
+    // Individual notifications for each profile in the sector
+    if (profiles?.length) {
+      for (const p of profiles) {
+        notifs.push({
+          usuario_id: p.id,
+          setor_id: setorDestinoId,
+          titulo,
+          mensagem,
+          tipo: "solicitacao",
+          referencia_id: solicitacaoId,
+        });
+      }
+    }
+
+    if (notifs.length > 0) {
+      await supabase.from("notificacoes").insert(notifs);
+      console.log(`[bot-lojas] Created ${notifs.length} in-app notifications for sector ${setorDestinoId}`);
+    }
+  } catch (e) {
+    console.error("[bot-lojas] criarNotificacaoSetor error:", e);
   }
 }
