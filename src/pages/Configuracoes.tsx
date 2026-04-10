@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2, MessageSquare, Store, Brain, Zap } from "lucide-react";
+import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2, MessageSquare, Store, Brain, Zap, Users } from "lucide-react";
 import { KnowledgeBaseCard } from "@/components/configuracoes/KnowledgeBaseCard";
 import { LearningCard } from "@/components/configuracoes/LearningCard";
 import { TelefonesLojasCard } from "@/components/configuracoes/TelefonesLojasCard";
@@ -20,6 +20,7 @@ import { BotMenuCard } from "@/components/configuracoes/BotMenuCard";
 import { BotFluxosCard } from "@/components/configuracoes/BotFluxosCard";
 import { WhatsAppTemplatesCard } from "@/components/configuracoes/WhatsAppTemplatesCard";
 import { AutomacoesCard } from "@/components/configuracoes/AutomacoesCard";
+import { GestaoUsuariosCard } from "@/components/configuracoes/GestaoUsuariosCard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -94,12 +95,15 @@ export default function Configuracoes() {
       <PageHeader title="Configurações" description="Gerencie setores, filas, IA e integrações" />
 
       <Tabs value={currentTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="w-full grid grid-cols-5 mb-6">
+        <TabsList className="w-full grid grid-cols-6 mb-6">
           <TabsTrigger value="ia" className="flex items-center gap-1.5">
             <Brain className="h-4 w-4" /> IA
           </TabsTrigger>
           <TabsTrigger value="estrutura" className="flex items-center gap-1.5">
             <Building2 className="h-4 w-4" /> Estrutura
+          </TabsTrigger>
+          <TabsTrigger value="usuarios" className="flex items-center gap-1.5">
+            <Users className="h-4 w-4" /> Usuários
           </TabsTrigger>
           <TabsTrigger value="lojas" className="flex items-center gap-1.5">
             <Store className="h-4 w-4" /> Lojas
@@ -126,6 +130,13 @@ export default function Configuracoes() {
           <div className="grid gap-6">
             <SetoresCard />
             <FilasCard />
+          </div>
+        </TabsContent>
+
+        {/* ─── Usuários ─── */}
+        <TabsContent value="usuarios">
+          <div className="grid gap-6">
+            <GestaoUsuariosCard />
           </div>
         </TabsContent>
 

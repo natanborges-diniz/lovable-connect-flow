@@ -37,12 +37,15 @@ const App = () => (
               <Route path="/crm" element={<Pipeline />} />
               <Route path="/financeiro" element={<PipelineFinanceiro />} />
               <Route path="/agendamentos" element={<PipelineAgendamentos />} />
-              
               <Route path="/crm/contatos" element={<Contatos />} />
               <Route path="/solicitacoes" element={<Solicitacoes />} />
               <Route path="/atendimentos" element={<Atendimentos />} />
               <Route path="/tarefas" element={<Tarefas />} />
-              <Route path="/configuracoes" element={<Configuracoes />} />
+              <Route path="/configuracoes" element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <Configuracoes />
+                </ProtectedRoute>
+              } />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

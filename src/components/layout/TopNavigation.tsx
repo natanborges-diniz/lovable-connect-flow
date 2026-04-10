@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,13 +10,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import type { ModuleKey } from "./AppLayout";
 
 interface TopNavigationProps {
   activeModule: ModuleKey;
 }
 
-const modules: { key: ModuleKey; label: string; icon: React.ElementType; defaultPath: string }[] = [
+const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defaultPath: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, defaultPath: "/" },
   { key: "crm", label: "CRM", icon: Users, defaultPath: "/crm" },
   { key: "financeiro", label: "Financeiro", icon: DollarSign, defaultPath: "/financeiro" },
@@ -27,11 +29,65 @@ const modules: { key: ModuleKey; label: string; icon: React.ElementType; default
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
 ];
 
+// Map setor names to allowed modules
+const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
+  financeiro: ["dashboard", "financeiro", "solicitacoes", "tarefas"],
+  ti: ["dashboard", "solicitacoes", "tarefas"],
+  atendimento: ["dashboard", "atendimentos", "solicitacoes", "tarefas"],
+};
+
+function useSetorNames(setorIds: string[]) {
+  return useQuery({
+    queryKey: ["setor-names", setorIds],
+    enabled: setorIds.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("setores")
+        .select("id, nome")
+        .in("id", setorIds);
+      return data || [];
+    },
+  });
+}
+
 export function TopNavigation({ activeModule }: TopNavigationProps) {
   const navigate = useNavigate();
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, isAdmin, isOperador, getUserSetorIds, roles } = useAuth();
   const { data: notificacoes, naoLidas, marcarLida, marcarTodasLidas } = useNotificacoes();
   const [popoverOpen, setPopoverOpen] = useState(false);
+
+  const setorIds = getUserSetorIds();
+  const { data: setorNames } = useSetorNames(setorIds);
+
+  // Filter modules based on role
+  const visibleModules = (() => {
+    // No roles yet (loading or new user) — show all
+    if (roles.length === 0) return allModules;
+    // Admin/operador see everything
+    if (isAdmin || isOperador) return allModules;
+
+    // setor_usuario: filter by setor name
+    const allowedKeys = new Set<ModuleKey>(["dashboard", "solicitacoes", "tarefas"]);
+    if (setorNames) {
+      for (const s of setorNames) {
+        const key = s.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const mapped = SETOR_MODULE_MAP[key];
+        if (mapped) mapped.forEach((m) => allowedKeys.add(m));
+      }
+    }
+    return allModules.filter((m) => allowedKeys.has(m.key));
+  })();
+
+  // Notification sound
+  useEffect(() => {
+    if (naoLidas > 0) {
+      try {
+        const audio = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbsGczHjlkn9jl0YU2EBpGdaXU6b1ZIxEiR3Wr2ue6WCMRIkd1q9rnu1gjESJHdava57tYIxA=");
+        audio.volume = 0.3;
+        audio.play().catch(() => {});
+      } catch {}
+    }
+  }, [naoLidas]);
 
   const handleNotifClick = (notif: any) => {
     if (!notif.lida) marcarLida.mutate(notif.id);
@@ -59,7 +115,7 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
 
         {/* Module Tabs */}
         <nav className="flex items-center gap-1 overflow-x-auto" role="tablist" aria-label="Módulos do sistema">
-          {modules.map((module) => {
+          {visibleModules.map((module) => {
             const Icon = module.icon;
             const isActive = activeModule === module.key;
 

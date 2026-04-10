@@ -1394,6 +1394,38 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          setor_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          setor_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          setor_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_roles_setor_id_fkey"
+            columns: ["setor_id"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       funil_metricas_vendas: {
@@ -1408,9 +1440,19 @@ export type Database = {
       }
     }
     Functions: {
+      get_user_setor_ids: { Args: { _user_id: string }; Returns: string[] }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      is_admin: { Args: { _user_id: string }; Returns: boolean }
       nextval_protocolo: { Args: never; Returns: number }
     }
     Enums: {
+      app_role: "admin" | "operador" | "setor_usuario"
       direcao_mensagem: "inbound" | "outbound" | "internal"
       estagio_funil: "lead" | "qualificado" | "proposta" | "fechado" | "perdido"
       prioridade: "critica" | "alta" | "normal" | "baixa"
@@ -1554,6 +1596,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["admin", "operador", "setor_usuario"],
       direcao_mensagem: ["inbound", "outbound", "internal"],
       estagio_funil: ["lead", "qualificado", "proposta", "fechado", "perdido"],
       prioridade: ["critica", "alta", "normal", "baixa"],

@@ -1,6 +1,14 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
+
+type AppRole = "admin" | "operador" | "setor_usuario";
+
+interface UserRole {
+  id: string;
+  role: AppRole;
+  setor_id: string | null;
+}
 
 interface Profile {
   id: string;
@@ -16,7 +24,12 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: Profile | null;
+  roles: UserRole[];
   loading: boolean;
+  isAdmin: boolean;
+  isOperador: boolean;
+  hasRole: (role: AppRole) => boolean;
+  getUserSetorIds: () => string[];
   signOut: () => Promise<void>;
 }
 
@@ -24,7 +37,12 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
   profile: null,
+  roles: [],
   loading: true,
+  isAdmin: false,
+  isOperador: false,
+  hasRole: () => false,
+  getUserSetorIds: () => [],
   signOut: async () => {},
 });
 
@@ -32,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [roles, setRoles] = useState<UserRole[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
@@ -43,28 +62,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(data as Profile | null);
   };
 
+  const fetchRoles = async (userId: string) => {
+    const { data } = await supabase
+      .from("user_roles")
+      .select("*")
+      .eq("user_id", userId);
+    setRoles((data as any[] || []).map((r) => ({
+      id: r.id,
+      role: r.role as AppRole,
+      setor_id: r.setor_id,
+    })));
+  };
+
   useEffect(() => {
-    // Set up auth listener first
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          // Use setTimeout to avoid deadlock with Supabase client
-          setTimeout(() => fetchProfile(session.user.id), 0);
+          setTimeout(() => {
+            fetchProfile(session.user.id);
+            fetchRoles(session.user.id);
+          }, 0);
         } else {
           setProfile(null);
+          setRoles([]);
         }
         setLoading(false);
       }
     );
 
-    // Then check current session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
+        fetchRoles(session.user.id);
       }
       setLoading(false);
     });
@@ -72,15 +105,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const isAdmin = roles.some((r) => r.role === "admin");
+  const isOperador = roles.some((r) => r.role === "operador");
+
+  const hasRole = useCallback(
+    (role: AppRole) => roles.some((r) => r.role === role),
+    [roles]
+  );
+
+  const getUserSetorIds = useCallback(
+    () => roles.filter((r) => r.setor_id).map((r) => r.setor_id!),
+    [roles]
+  );
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
     setProfile(null);
+    setRoles([]);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, loading, isAdmin, isOperador, hasRole, getUserSetorIds, signOut }}>
       {children}
     </AuthContext.Provider>
   );

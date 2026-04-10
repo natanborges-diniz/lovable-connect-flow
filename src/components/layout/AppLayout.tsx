@@ -1,8 +1,9 @@
 import { useMemo } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, Navigate } from "react-router-dom";
 import { TopNavigation } from "./TopNavigation";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { useAuth } from "@/hooks/useAuth";
 
 export type ModuleKey = "dashboard" | "crm" | "financeiro" | "agendamentos" | "solicitacoes" | "atendimentos" | "tarefas" | "configuracoes";
 
@@ -20,6 +21,12 @@ export const moduleFromPath = (pathname: string): ModuleKey => {
 export function AppLayout() {
   const location = useLocation();
   const activeModule = useMemo(() => moduleFromPath(location.pathname), [location.pathname]);
+  const { isAdmin, isOperador, roles } = useAuth();
+
+  // Redirect configuracoes to / if not admin
+  if (location.pathname.startsWith("/configuracoes") && !isAdmin && roles.length > 0) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <SidebarProvider>
