@@ -299,7 +299,7 @@ serve(async (req) => {
           dados.url = url;
           dados.payment_link_id = payResult.id;
 
-          await createFinanceiroSolicitacao(supabase, contato_id, {
+          const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
             assunto: `Link de Pagamento - R$ ${Number(dados.valor).toFixed(2)}`,
             descricao: `${dados.descricao}${dados.cliente ? ` | Cliente: ${dados.cliente}` : ""} | Parcelas: ${dados.parcelas}x`,
             tipo: acao.tipo_solicitacao,
@@ -308,6 +308,11 @@ serve(async (req) => {
             evento_descricao: `Link de pagamento R$ ${Number(dados.valor).toFixed(2)} gerado via bot. ${dados.descricao}`,
             evento_tipo: "link_pagamento_gerado",
           });
+          if (solicitacao) {
+            const protocolo = await generateProtocolo(solicitacao.id);
+            dados._protocolo = protocolo;
+            if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+          }
         } catch (e) {
           console.error("Payment link error:", e);
           return "❌ Erro na comunicação com o sistema de pagamento. Tente novamente.\n\nDigite *menu* para voltar.";
@@ -319,8 +324,10 @@ serve(async (req) => {
           dados.valor_financiado = Number(dados.valor_compra) - Number(dados.valor_entrada);
         }
 
-        const descParts = Object.entries(dados).map(([k, v]) => `${k}: ${v}`).join(" | ");
-        await createFinanceiroSolicitacao(supabase, contato_id, {
+        const descParts = Object.entries(dados)
+          .filter(([k]) => !k.startsWith("_") && k !== "comprovantes" && k !== "lojas_map" && k !== "loja_selecionada_nome" && k !== "loja_selecionada_cod")
+          .map(([k, v]) => `${k}: ${v}`).join(" | ");
+        const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
           assunto: `${fluxo.nome} - ${dados.valor ? `R$ ${Number(dados.valor).toFixed(2)}` : (dados.nome_cliente || dados.cliente || "")}`,
           descricao: descParts,
           tipo: acao.tipo_solicitacao,
@@ -329,6 +336,11 @@ serve(async (req) => {
           evento_descricao: `${fluxo.nome} solicitado via bot`,
           evento_tipo: `${acao.tipo_solicitacao}_solicitado`,
         });
+        if (solicitacao) {
+          const protocolo = await generateProtocolo(solicitacao.id);
+          dados._protocolo = protocolo;
+          if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+        }
       }
 
       // Notify responsáveis
