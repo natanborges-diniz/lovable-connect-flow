@@ -334,3 +334,33 @@ function ClassificacaoIA({ solicitacaoId, classificacao }: { solicitacaoId: stri
     </div>
   );
 }
+
+function AnexosSection({ solicitacaoId }: { solicitacaoId: string }) {
+  const { data: anexos, isLoading } = useSolicitacaoAnexos(solicitacaoId);
+
+  if (isLoading) return null;
+  if (!anexos?.length) return null;
+
+  return (
+    <div className="border-t pt-3 space-y-2">
+      <h4 className="text-sm font-medium flex items-center gap-1.5">
+        <Paperclip className="h-4 w-4 text-muted-foreground" />
+        Comprovantes ({anexos.length})
+      </h4>
+      <div className="space-y-1.5">
+        {anexos.map((a: any) => (
+          <a
+            key={a.id}
+            href={a.url_publica}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm text-primary hover:underline bg-muted/50 rounded px-3 py-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            {a.descricao || a.tipo} — {a.mime_type}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
