@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -19,10 +18,34 @@ interface Responsavel {
   ativo: boolean;
 }
 
+interface TelefoneCorporativo {
+  id: string;
+  nome_loja: string;
+  nome_colaborador: string | null;
+  telefone: string;
+  tipo: string;
+  cargo: string | null;
+  departamento: string | null;
+}
+
+function getLabel(t: TelefoneCorporativo): string {
+  if (t.tipo === "colaborador" && t.nome_colaborador) {
+    return `${t.nome_colaborador}${t.cargo ? ` (${t.cargo})` : ""} — ${t.telefone}`;
+  }
+  if (t.tipo === "departamento") {
+    return `${t.nome_loja}${t.departamento ? ` / ${t.departamento}` : ""} — ${t.telefone}`;
+  }
+  return `${t.nome_loja} — ${t.telefone}`;
+}
+
+function getNome(t: TelefoneCorporativo): string {
+  if (t.tipo === "colaborador" && t.nome_colaborador) return t.nome_colaborador;
+  return t.nome_loja;
+}
+
 export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string }) {
   const queryClient = useQueryClient();
-  const [nome, setNome] = useState("");
-  const [telefone, setTelefone] = useState("");
+  const [selectedTelefoneId, setSelectedTelefoneId] = useState("");
   const [tipo, setTipo] = useState("primario");
 
   const { data: responsaveis, isLoading } = useQuery({
@@ -39,21 +62,34 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
     enabled: !!fluxoChave,
   });
 
+  const { data: telefonesCorporativos } = useQuery({
+    queryKey: ["telefones_lojas_ativos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("telefones_lojas")
+        .select("id, nome_loja, nome_colaborador, telefone, tipo, cargo, departamento")
+        .eq("ativo", true)
+        .order("tipo, nome_loja");
+      if (error) throw error;
+      return (data || []) as TelefoneCorporativo[];
+    },
+  });
+
   const addResponsavel = useMutation({
     mutationFn: async () => {
-      if (!nome.trim() || !telefone.trim()) throw new Error("Nome e telefone são obrigatórios");
+      const selected = telefonesCorporativos?.find((t) => t.id === selectedTelefoneId);
+      if (!selected) throw new Error("Selecione um telefone corporativo");
       const { error } = await (supabase as any).from("fluxo_responsaveis").insert({
         fluxo_chave: fluxoChave,
-        nome: nome.trim(),
-        telefone: telefone.replace(/\D/g, ""),
+        nome: getNome(selected),
+        telefone: selected.telefone.replace(/\D/g, ""),
         tipo,
       });
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["fluxo_responsaveis", fluxoChave] });
-      setNome("");
-      setTelefone("");
+      setSelectedTelefoneId("");
       toast.success("Responsável adicionado");
     },
     onError: (e: any) => toast.error(e.message),
@@ -79,6 +115,13 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
   });
 
   if (!fluxoChave) return null;
+
+  // Group by tipo
+  const grouped = (telefonesCorporativos || []).reduce<Record<string, TelefoneCorporativo[]>>((acc, t) => {
+    const key = t.tipo === "loja" ? "Lojas" : t.tipo === "colaborador" ? "Colaboradores" : "Departamentos";
+    (acc[key] = acc[key] || []).push(t);
+    return acc;
+  }, {});
 
   return (
     <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
@@ -123,12 +166,24 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
       {/* Add form */}
       <div className="flex items-end gap-2">
         <div className="flex-1 space-y-1">
-          <Label className="text-xs">Nome</Label>
-          <Input value={nome} onChange={(e) => setNome(e.target.value)} className="h-8 text-xs" placeholder="Nome do responsável" />
-        </div>
-        <div className="flex-1 space-y-1">
-          <Label className="text-xs">Telefone</Label>
-          <Input value={telefone} onChange={(e) => setTelefone(e.target.value)} className="h-8 text-xs" placeholder="5511999999999" />
+          <Label className="text-xs">Telefone Corporativo</Label>
+          <Select value={selectedTelefoneId} onValueChange={setSelectedTelefoneId}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(grouped).map(([grupo, items]) => (
+                <div key={grupo}>
+                  <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    {grupo}
+                  </div>
+                  {items.map((t) => (
+                    <SelectItem key={t.id} value={t.id} className="text-xs">
+                      {getLabel(t)}
+                    </SelectItem>
+                  ))}
+                </div>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="w-[120px] space-y-1">
           <Label className="text-xs">Tipo</Label>
@@ -145,7 +200,7 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
           size="sm"
           className="h-8"
           onClick={() => addResponsavel.mutate()}
-          disabled={!nome.trim() || !telefone.trim()}
+          disabled={!selectedTelefoneId}
         >
           <Plus className="h-3.5 w-3.5" />
         </Button>

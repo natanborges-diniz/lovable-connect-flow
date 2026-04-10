@@ -55,6 +55,8 @@ const TIPOS_INPUT = [
   { value: "inteiro", label: "Inteiro" },
   { value: "cpf", label: "CPF" },
   { value: "documento", label: "CPF/CNPJ" },
+  { value: "selecionar_loja_ou_setor", label: "Loja/Setor (lista)" },
+  { value: "imagem", label: "Imagem/Documento" },
 ];
 
 const TIPOS_ACAO = [
