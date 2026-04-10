@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useSolicitacoes, useCreateSolicitacao, useUpdateSolicitacaoStatus } from "@/hooks/useSolicitacoes";
+import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
 import { useContatos } from "@/hooks/useContatos";
 import { StatusBadge, PrioridadeBadge, TipoContatoBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Search, Sparkles, Loader2, Paperclip, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { StatusSolicitacao, Prioridade, TipoCanal, TipoContato } from "@/types/database";
@@ -88,6 +89,7 @@ export default function Solicitacoes() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Protocolo</TableHead>
                   <TableHead>Assunto</TableHead>
                   <TableHead>Contato</TableHead>
                   <TableHead>Status</TableHead>
@@ -99,6 +101,7 @@ export default function Solicitacoes() {
               <TableBody>
                 {solicitacoes.map((s) => (
                   <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(s.id)}>
+                    <TableCell className="font-mono text-xs text-primary">{(s as any).protocolo || "—"}</TableCell>
                     <TableCell className="font-medium">{s.assunto}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -125,7 +128,12 @@ export default function Solicitacoes() {
           {detailItem && (
             <>
               <DialogHeader>
-                <DialogTitle>{detailItem.assunto}</DialogTitle>
+                <DialogTitle className="flex items-center gap-2">
+                  {detailItem.assunto}
+                  {(detailItem as any).protocolo && (
+                    <Badge variant="outline" className="font-mono text-xs">{(detailItem as any).protocolo}</Badge>
+                  )}
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
@@ -158,6 +166,9 @@ export default function Solicitacoes() {
                     <p className="text-sm mt-1">{detailItem.descricao}</p>
                   </div>
                 )}
+
+                {/* Anexos / Comprovantes */}
+                <AnexosSection solicitacaoId={detailItem.id} />
 
                 {/* Classificação IA */}
                 <ClassificacaoIA solicitacaoId={detailItem.id} classificacao={(detailItem as any).classificacao_ia} />
@@ -320,6 +331,36 @@ function ClassificacaoIA({ solicitacaoId, classificacao }: { solicitacaoId: stri
           {result.justificativa && <p className="text-xs text-muted-foreground">{result.justificativa}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+function AnexosSection({ solicitacaoId }: { solicitacaoId: string }) {
+  const { data: anexos, isLoading } = useSolicitacaoAnexos(solicitacaoId);
+
+  if (isLoading) return null;
+  if (!anexos?.length) return null;
+
+  return (
+    <div className="border-t pt-3 space-y-2">
+      <h4 className="text-sm font-medium flex items-center gap-1.5">
+        <Paperclip className="h-4 w-4 text-muted-foreground" />
+        Comprovantes ({anexos.length})
+      </h4>
+      <div className="space-y-1.5">
+        {anexos.map((a: any) => (
+          <a
+            key={a.id}
+            href={a.url_publica}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm text-primary hover:underline bg-muted/50 rounded px-3 py-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            {a.descricao || a.tipo} — {a.mime_type}
+          </a>
+        ))}
+      </div>
     </div>
   );
 }

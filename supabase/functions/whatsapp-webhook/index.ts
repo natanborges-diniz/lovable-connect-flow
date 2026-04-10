@@ -418,7 +418,7 @@ serve(async (req) => {
       // Pass tipo_bot from the registered phone type (loja, colaborador, departamento)
       const lojaInfoWithTipo = { ...lojaMatch, tipo_bot: corporateTipo };
       runInBackground(
-        triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaInfoWithTipo).catch(
+        triggerBotLojas(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, lojaInfoWithTipo, storedMediaUrl, storedMediaMimeType).catch(
           (e) => console.error("Bot lojas trigger failed:", e)
         )
       );
@@ -642,7 +642,9 @@ async function triggerBotLojas(
   contatoId: string,
   phone: string,
   text: string,
-  lojaInfo: any
+  lojaInfo: any,
+  mediaUrl?: string | null,
+  mediaMimeType?: string | null
 ) {
   await fetch(`${supabaseUrl}/functions/v1/bot-lojas`, {
     method: "POST",
@@ -655,6 +657,8 @@ async function triggerBotLojas(
       contato_id: contatoId,
       mensagem_texto: text,
       loja_info: lojaInfo,
+      media_url: mediaUrl || null,
+      media_mime_type: mediaMimeType || null,
     }),
   });
 }

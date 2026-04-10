@@ -85,7 +85,7 @@ serve(async (req) => {
   }
 
   // ─── Validate input by tipo_input ───
-  function validateInput(texto: string, etapa: any): { valid: boolean; value: any; error?: string } {
+  function validateInput(texto: string, etapa: any, context?: { media_url?: string }): { valid: boolean; value: any; error?: string } {
     const hint = "\n\n_Digite *0* para voltar ao menu._";
     const tipo = etapa.tipo_input || "texto";
     const validacao = etapa.validacao || {};
@@ -115,6 +115,12 @@ serve(async (req) => {
         if (doc.length !== 11 && doc.length !== 14) return { valid: false, value: null, error: "⚠️ CPF deve ter 11 dígitos ou CNPJ 14 dígitos." + hint };
         return { valid: true, value: doc };
       }
+      case "imagem": {
+        if (!context?.media_url) {
+          return { valid: false, value: null, error: "⚠️ Por favor, envie uma *foto* ou *documento* (não texto)." + hint };
+        }
+        return { valid: true, value: context.media_url };
+      }
       case "texto":
       default: {
         if (validacao.min_length && texto.length < validacao.min_length) {
@@ -134,10 +140,15 @@ serve(async (req) => {
       msg += `• Unidade: ${dados.loja_selecionada_nome}\n`;
     }
     for (const et of etapas) {
+      if (et.tipo_input === "imagem") continue; // skip image fields from confirmation text
       const val = dados[et.campo];
       if (val === null || val === undefined) continue;
       const displayVal = et.tipo_input === "decimal" ? `R$ ${Number(val).toFixed(2)}` : val;
       msg += `• ${et.campo}: ${displayVal}\n`;
+    }
+    // Show comprovantes count
+    if (dados.comprovantes && dados.comprovantes.length > 0) {
+      msg += `• Comprovantes: ${dados.comprovantes.length} arquivo(s) anexado(s)\n`;
     }
     msg += "\nResponda *SIM* para confirmar ou *NÃO* para cancelar.";
     return msg;
@@ -152,6 +163,94 @@ serve(async (req) => {
       .eq("ativo", true)
       .order("nome_loja");
     return (data || []).filter((l: any) => l.cod_empresa);
+  }
+
+  // ─── Load lojas + setores for selection ───
+  async function loadLojasESetores(): Promise<Array<{ nome: string; tipo: string; cod_empresa?: string }>> {
+    const { data: lojas } = await supabase
+      .from("telefones_lojas")
+      .select("nome_loja, cod_empresa")
+      .eq("tipo", "loja")
+      .eq("ativo", true)
+      .order("nome_loja");
+    const { data: setores } = await supabase
+      .from("setores")
+      .select("nome")
+      .eq("ativo", true)
+      .order("nome");
+    const items: Array<{ nome: string; tipo: string; cod_empresa?: string }> = [];
+    const uniqueLojas = new Map<string, string>();
+    for (const l of (lojas || [])) {
+      if (l.cod_empresa && !uniqueLojas.has(l.nome_loja)) {
+        uniqueLojas.set(l.nome_loja, l.cod_empresa);
+        items.push({ nome: l.nome_loja, tipo: "loja", cod_empresa: l.cod_empresa });
+      }
+    }
+    for (const s of (setores || [])) {
+      items.push({ nome: s.nome, tipo: "setor" });
+    }
+    return items;
+  }
+
+  // ─── Generate protocol number ───
+  async function generateProtocolo(solicitacaoId: string): Promise<string> {
+    const ano = new Date().getFullYear();
+    const { data: seqResult } = await supabase.rpc("nextval_protocolo", {});
+    // Fallback: if RPC doesn't exist, use a simple query
+    let seq: number;
+    if (seqResult !== null && seqResult !== undefined) {
+      seq = Number(seqResult);
+    } else {
+      // Direct SQL via postgrest won't work, use timestamp-based fallback
+      seq = Date.now() % 100000;
+    }
+    const protocolo = `SOL-${ano}-${String(seq).padStart(5, "0")}`;
+    await supabase.from("solicitacoes").update({ protocolo }).eq("id", solicitacaoId);
+    return protocolo;
+  }
+
+  // ─── Archive comprovantes to storage ───
+  async function archiveComprovantes(
+    solicitacaoId: string,
+    protocolo: string,
+    comprovantes: Array<{ url: string; mime_type?: string }>
+  ) {
+    const ano = new Date().getFullYear();
+    for (let i = 0; i < comprovantes.length; i++) {
+      const comp = comprovantes[i];
+      try {
+        // Download from original URL
+        const res = await fetch(comp.url);
+        if (!res.ok) continue;
+        const bytes = await res.arrayBuffer();
+        const mime = comp.mime_type || "application/octet-stream";
+        const extMap: Record<string, string> = {
+          "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+          "application/pdf": "pdf", "image/gif": "gif",
+        };
+        const ext = extMap[mime] || "bin";
+        const storagePath = `comprovantes/${ano}/${protocolo}/comprovante_${i + 1}.${ext}`;
+
+        await supabase.storage.from("whatsapp-media").upload(storagePath, bytes, {
+          contentType: mime,
+          upsert: true,
+        });
+
+        const { data: publicUrl } = supabase.storage.from("whatsapp-media").getPublicUrl(storagePath);
+
+        await supabase.from("solicitacao_anexos").insert({
+          solicitacao_id: solicitacaoId,
+          tipo: "comprovante",
+          descricao: `Comprovante ${i + 1}`,
+          storage_path: storagePath,
+          url_publica: publicUrl?.publicUrl || comp.url,
+          mime_type: mime,
+          tamanho_bytes: bytes.byteLength,
+        });
+      } catch (e) {
+        console.error(`[bot-lojas] Failed to archive comprovante ${i + 1}:`, e);
+      }
+    }
   }
 
   // ─── Execute final action ───
@@ -200,7 +299,7 @@ serve(async (req) => {
           dados.url = url;
           dados.payment_link_id = payResult.id;
 
-          await createFinanceiroSolicitacao(supabase, contato_id, {
+          const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
             assunto: `Link de Pagamento - R$ ${Number(dados.valor).toFixed(2)}`,
             descricao: `${dados.descricao}${dados.cliente ? ` | Cliente: ${dados.cliente}` : ""} | Parcelas: ${dados.parcelas}x`,
             tipo: acao.tipo_solicitacao,
@@ -209,6 +308,11 @@ serve(async (req) => {
             evento_descricao: `Link de pagamento R$ ${Number(dados.valor).toFixed(2)} gerado via bot. ${dados.descricao}`,
             evento_tipo: "link_pagamento_gerado",
           });
+          if (solicitacao) {
+            const protocolo = await generateProtocolo(solicitacao.id);
+            dados._protocolo = protocolo;
+            if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+          }
         } catch (e) {
           console.error("Payment link error:", e);
           return "❌ Erro na comunicação com o sistema de pagamento. Tente novamente.\n\nDigite *menu* para voltar.";
@@ -220,8 +324,10 @@ serve(async (req) => {
           dados.valor_financiado = Number(dados.valor_compra) - Number(dados.valor_entrada);
         }
 
-        const descParts = Object.entries(dados).map(([k, v]) => `${k}: ${v}`).join(" | ");
-        await createFinanceiroSolicitacao(supabase, contato_id, {
+        const descParts = Object.entries(dados)
+          .filter(([k]) => !k.startsWith("_") && k !== "comprovantes" && k !== "lojas_map" && k !== "loja_selecionada_nome" && k !== "loja_selecionada_cod")
+          .map(([k, v]) => `${k}: ${v}`).join(" | ");
+        const solicitacao = await createFinanceiroSolicitacao(supabase, contato_id, {
           assunto: `${fluxo.nome} - ${dados.valor ? `R$ ${Number(dados.valor).toFixed(2)}` : (dados.nome_cliente || dados.cliente || "")}`,
           descricao: descParts,
           tipo: acao.tipo_solicitacao,
@@ -230,6 +336,11 @@ serve(async (req) => {
           evento_descricao: `${fluxo.nome} solicitado via bot`,
           evento_tipo: `${acao.tipo_solicitacao}_solicitado`,
         });
+        if (solicitacao) {
+          const protocolo = await generateProtocolo(solicitacao.id);
+          dados._protocolo = protocolo;
+          if (dados.comprovantes?.length) await archiveComprovantes(solicitacao.id, protocolo, dados.comprovantes);
+        }
       }
 
       // Notify responsáveis
@@ -238,8 +349,13 @@ serve(async (req) => {
       // Build response from template
       let template = acao.template_confirmacao || `✅ *${fluxo.nome} registrado com sucesso!*`;
       for (const [k, v] of Object.entries(dados)) {
+        if (k === "comprovantes" || k === "lojas_map") continue;
         const displayVal = typeof v === "number" ? Number(v).toFixed(2) : String(v || "");
         template = template.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), displayVal);
+      }
+      // Append protocolo
+      if (dados._protocolo) {
+        template += `\n\n📋 *Protocolo: ${dados._protocolo}*`;
       }
       return template + "\n\nDigite *menu* para nova operação.";
     }
@@ -256,7 +372,8 @@ serve(async (req) => {
   }
 
   try {
-    const { atendimento_id, contato_id, mensagem_texto, loja_info } = await req.json();
+    const { atendimento_id, contato_id, mensagem_texto, loja_info, media_url, media_mime_type } = await req.json();
+    const mediaContext = { media_url, media_mime_type };
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
     // 1. Get or create bot session
@@ -422,8 +539,53 @@ serve(async (req) => {
           resposta = "⚠️ Etapa inválida. Digite *menu* para recomeçar.";
           updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
         } else {
+          // Handle selecionar_loja_ou_setor type
+          if (currentEtapa.tipo_input === "selecionar_loja_ou_setor") {
+            const opcoes = (dados as any)._loja_setor_opcoes;
+            if (!opcoes) {
+              // First time: load and present options
+              const items = await loadLojasESetores();
+              if (items.length === 0) {
+                resposta = "⚠️ Nenhuma loja ou setor cadastrado.\n\n_Digite *0* para voltar ao menu._";
+              } else {
+                let msg = currentEtapa.mensagem + "\n\n";
+                const opMap: Record<string, { nome: string; tipo: string; cod_empresa?: string }> = {};
+                items.forEach((item, i) => {
+                  const label = item.tipo === "loja" ? `🏪 ${item.nome} (${item.cod_empresa})` : `🏢 ${item.nome} (setor)`;
+                  msg += `${i + 1}️⃣ ${label}\n`;
+                  opMap[String(i + 1)] = item;
+                });
+                msg += "\n_Digite o número ou *0* para voltar ao menu._";
+                resposta = msg;
+                updateSessao = { etapa: etapa, dados: { ...dados as Record<string, any>, _loja_setor_opcoes: opMap } };
+              }
+            } else {
+              // User selected
+              const selected = opcoes[texto];
+              if (!selected) {
+                resposta = "⚠️ Número inválido. Escolha uma opção da lista ou *0* para voltar.";
+              } else {
+                const displayValue = selected.tipo === "loja" ? `${selected.nome} (${selected.cod_empresa})` : selected.nome;
+                const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: displayValue };
+                delete newDados._loja_setor_opcoes;
+                if (selected.cod_empresa) {
+                  newDados.loja_ou_setor_cod = selected.cod_empresa;
+                  newDados.loja_ou_setor_nome = selected.nome;
+                }
+                const nextIndex = stepIndex + 1;
+                const etapas_ = fluxoDef.etapas as any[];
+                if (nextIndex >= etapas_.length) {
+                  resposta = buildConfirmacao(fluxoDef, newDados);
+                  updateSessao = { etapa: "confirmar", dados: newDados };
+                } else {
+                  resposta = etapas_[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+                  updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+                }
+              }
+            }
+          }
           // Handle skip for optional fields
-          if (!currentEtapa.obrigatorio && textoLower === "pular") {
+          else if (!currentEtapa.obrigatorio && textoLower === "pular") {
             const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: null };
             const nextIndex = stepIndex + 1;
 
@@ -437,36 +599,79 @@ serve(async (req) => {
             }
           } else {
             // Validate input
-            const validation = validateInput(texto, currentEtapa);
+            const validation = validateInput(texto, currentEtapa, mediaContext);
             if (!validation.valid) {
               resposta = validation.error!;
             } else {
-              const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: validation.value };
+              let newDados = { ...dados as Record<string, any> };
 
-              // Special: compute valor_financiado after valor_entrada
-              if (currentEtapa.campo === "valor_entrada" && newDados.valor_compra !== undefined) {
-                const entrada = Number(newDados.valor_entrada);
-                const compra = Number(newDados.valor_compra);
-                if (entrada > compra) {
-                  resposta = `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${compra.toFixed(2)}). Digite novamente:\n\n_Digite *0* para voltar ao menu._`;
-                } else {
-                  newDados.valor_financiado = compra - entrada;
+              // For imagem type, store in comprovantes array
+              if (currentEtapa.tipo_input === "imagem") {
+                const comprovantes = newDados.comprovantes || [];
+                comprovantes.push({ url: validation.value, mime_type: mediaContext.media_mime_type || null });
+                newDados.comprovantes = comprovantes;
+                newDados[currentEtapa.campo] = `${comprovantes.length} arquivo(s)`;
+                // Ask if more receipts
+                resposta = `✅ Comprovante ${comprovantes.length} recebido!\n\nDeseja enviar *mais um comprovante*?\nResponda *SIM* ou *NÃO*.`;
+                updateSessao = { etapa: "aguardando_mais_comprovantes", dados: { ...newDados, _current_step: stepIndex } };
+              } else {
+                newDados[currentEtapa.campo] = validation.value;
+
+                // Special: compute valor_financiado after valor_entrada
+                if (currentEtapa.campo === "valor_entrada" && newDados.valor_compra !== undefined) {
+                  const entrada = Number(newDados.valor_entrada);
+                  const compra = Number(newDados.valor_compra);
+                  if (entrada > compra) {
+                    resposta = `⚠️ Entrada (R$ ${entrada.toFixed(2)}) não pode ser maior que o valor da compra (R$ ${compra.toFixed(2)}). Digite novamente:\n\n_Digite *0* para voltar ao menu._`;
+                  } else {
+                    newDados.valor_financiado = compra - entrada;
+                  }
                 }
-              }
 
-              if (!resposta) {
-                const nextIndex = stepIndex + 1;
-                if (nextIndex >= etapas.length) {
-                  resposta = buildConfirmacao(fluxoDef, newDados);
-                  updateSessao = { etapa: "confirmar", dados: newDados };
-                } else {
-                  resposta = etapas[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
-                  updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+                if (!resposta) {
+                  const nextIndex = stepIndex + 1;
+                  if (nextIndex >= etapas.length) {
+                    resposta = buildConfirmacao(fluxoDef, newDados);
+                    updateSessao = { etapa: "confirmar", dados: newDados };
+                  } else {
+                    resposta = etapas[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+                    updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+                  }
                 }
               }
             }
           }
         }
+      }
+    }
+    // ─── Multiple receipt loop ───
+    else if (etapa === "aguardando_mais_comprovantes") {
+      if (["sim", "s"].includes(textoLower)) {
+        // Go back to the image step
+        const fluxoDef = await loadFluxo(fluxo);
+        const stepIndex = (dados as any)._current_step;
+        const etapas_ = (fluxoDef?.etapas as any[]) || [];
+        const imgEtapa = etapas_[stepIndex];
+        resposta = (imgEtapa?.mensagem || "📎 Envie o comprovante:") + "\n\n_Digite *0* para voltar ao menu._";
+        const newDados = { ...dados as Record<string, any> };
+        updateSessao = { etapa: `step_${stepIndex}`, dados: newDados };
+      } else if (["nao", "não", "n"].includes(textoLower)) {
+        // Advance to next step
+        const fluxoDef = await loadFluxo(fluxo);
+        const stepIndex = (dados as any)._current_step;
+        const etapas_ = (fluxoDef?.etapas as any[]) || [];
+        const newDados = { ...dados as Record<string, any> };
+        delete newDados._current_step;
+        const nextIndex = stepIndex + 1;
+        if (nextIndex >= etapas_.length) {
+          resposta = buildConfirmacao(fluxoDef!, newDados);
+          updateSessao = { etapa: "confirmar", dados: newDados };
+        } else {
+          resposta = etapas_[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+          updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
+        }
+      } else {
+        resposta = "Responda *SIM* para enviar mais um comprovante ou *NÃO* para continuar.";
       }
     }
     // ─── Confirmation step ───
