@@ -942,3 +942,64 @@ async function notificarResponsaveis(
     console.error("[bot-lojas] notificarResponsaveis error:", e);
   }
 }
+
+// ─── Create in-app notifications for the destination sector ───
+async function criarNotificacaoSetor(
+  supabase: any,
+  fluxo: any,
+  nomeLoja: string,
+  dados: Record<string, any>,
+  solicitacaoId: string | null
+) {
+  try {
+    const setorDestinoId = fluxo.setor_destino_id;
+    if (!setorDestinoId) {
+      console.log(`[bot-lojas] No setor_destino_id for flow ${fluxo.chave}, skipping in-app notification`);
+      return;
+    }
+
+    // Get all profiles in this sector
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("setor_id", setorDestinoId)
+      .eq("ativo", true);
+
+    const protocolo = dados._protocolo || "";
+    const titulo = `Nova solicitação: ${fluxo.nome}`;
+    const mensagem = `🏪 ${nomeLoja}${protocolo ? ` | 📋 ${protocolo}` : ""}`;
+
+    // Create notification for each user in the sector + a sector-wide one
+    const notifs: any[] = [];
+
+    // Sector-wide notification (for any user assigned to this sector)
+    notifs.push({
+      setor_id: setorDestinoId,
+      titulo,
+      mensagem,
+      tipo: "solicitacao",
+      referencia_id: solicitacaoId,
+    });
+
+    // Individual notifications for each profile in the sector
+    if (profiles?.length) {
+      for (const p of profiles) {
+        notifs.push({
+          usuario_id: p.id,
+          setor_id: setorDestinoId,
+          titulo,
+          mensagem,
+          tipo: "solicitacao",
+          referencia_id: solicitacaoId,
+        });
+      }
+    }
+
+    if (notifs.length > 0) {
+      await supabase.from("notificacoes").insert(notifs);
+      console.log(`[bot-lojas] Created ${notifs.length} in-app notifications for sector ${setorDestinoId}`);
+    }
+  } catch (e) {
+    console.error("[bot-lojas] criarNotificacaoSetor error:", e);
+  }
+}
