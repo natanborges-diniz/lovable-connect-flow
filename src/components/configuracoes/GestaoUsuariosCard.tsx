@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Users, Plus, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 
 type AppRole = "admin" | "operador" | "setor_usuario";
 
