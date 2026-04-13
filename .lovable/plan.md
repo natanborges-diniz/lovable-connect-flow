@@ -1,45 +1,78 @@
 
 
-# Remover Colunas "Atendimento Humano" e "Redirecionado" — Fila Humana via Flag
+# Reestruturação do Menu do Bot com Sub-Menus por Setor + "Falar com Equipe"
 
-## Contexto
+## Problema Atual
 
-As colunas "Atendimento Humano" (id: `6ed356cd-...`) e "Redirecionado" (id: `137630dc-...`) serão desativadas. A intervenção humana passa a ser gerenciada exclusivamente pela flag `atendimentos.modo = 'humano'`, com a Fila Humana (já implementada no Pipeline.tsx) como interface principal.
+O menu do bot para lojas/departamentos tem **13 opções em lista plana** — difícil de navegar. O pipeline "Atendimento Gael" é redundante, pois o bot já roteia automaticamente.
 
-## Mudanças
+## Nova Estrutura do Menu (3 níveis)
 
-### 1. Migração SQL — Desativar colunas e mover contatos órfãos
+```text
+Menu Principal:
+  1️⃣ 💰 Financeiro
+  2️⃣ 🖥️ TI
+  3️⃣ 📋 Operacional
 
-- `UPDATE pipeline_colunas SET ativo = false WHERE id IN ('6ed356cd-...', '137630dc-...')`
-- Contatos que estejam nessas colunas → mover para "Novo Contato" ou "Retorno" (conforme ciclo_funil)
-- Desativar automações vinculadas a essas colunas (`pipeline_automacoes`)
+→ Financeiro:
+  1️⃣ 💳 Cobranças (Link Pagamento, Boleto, Consulta CPF)
+  2️⃣ ↩️ Estornos e Devoluções (Estorno PIX, Estorno Cartão, Devolução OS)
+  3️⃣ ✅ Confirmações (Confirmação PIX)
+  4️⃣ 💵 Pagamentos (Reembolso, Pagamento Fornecedor)
+  5️⃣ 💬 Falar com a equipe
 
-### 2. `supabase/functions/ai-triage/index.ts`
+→ TI:
+  1️⃣ 🔧 Suporte Técnico
+  2️⃣ 🖨️ Impressões
+  3️⃣ 🔐 Autorização Dataweb
+  4️⃣ 💬 Falar com a equipe
 
-- Quando a IA escala para humano: **não mover para coluna "Atendimento Humano"**. Em vez disso, manter o contato na coluna atual e apenas setar `atendimentos.modo = 'humano'` (já faz isso parcialmente)
-- Remover referência a `pipeline_coluna: "Atendimento Humano"` — a coluna pipeline fica inalterada
-- Remover lógica de "Redirecionado" no prompt de localização — quando o cliente é irredutível sobre região, mover para "Perdidos" em vez de "Redirecionado"
-- Atualizar busca de coluna que faz `find(c => c.nome === "Atendimento Humano")` → remover, pois o contato permanece na coluna onde está
+→ Operacional:
+  1️⃣ 📋 Confirmar Comparecimento
+  2️⃣ 💬 Falar com a equipe
 
-### 3. `supabase/functions/vendas-recuperacao-cron/index.ts`
+→ Cobranças (sub-menu):
+  1️⃣ 🔗 Link de Pagamento
+  2️⃣ 📄 Boleto
+  3️⃣ 🔍 Consultar CPF
+```
 
-- Remover "Atendimento Humano" de `ELIGIBLE_COLUMNS` e `INACTIVITY_THRESHOLDS`
-- Contatos com `modo = 'humano'` devem ser ignorados pela cadência automática (já que o humano está cuidando)
+## Mudanças Técnicas
 
-### 4. `supabase/functions/whatsapp-webhook/index.ts`
+### 1. Migração SQL
 
-- Remover "Redirecionado" da lista de colunas terminais que acionam retorno (`["Abandonado", "Cancelado", "Perdidos", "Redirecionado"]` → remover "Redirecionado")
+- Adicionar coluna `parent_id uuid REFERENCES bot_menu_opcoes(id)` na tabela `bot_menu_opcoes`
+- Adicionar coluna `tipo text DEFAULT 'fluxo'` (valores: `submenu`, `fluxo`, `falar_equipe`)
+- Desativar setor "Atendimento Gael" e suas colunas (`pipeline_colunas WHERE setor_id = '32cbd99c-...'`)
+- Inserir novas opções de menu hierárquicas (setores → categorias → fluxos) e opções "Falar com equipe"
 
-### 5. `src/pages/Pipeline.tsx`
+### 2. `supabase/functions/bot-lojas/index.ts`
 
-- Remover função `isAtendimentoHumano` e referências visuais específicas à coluna (linhas 237-238, 396, 466-470)
-- Adicionar destaque visual nos cards do Kanban que têm `modo = 'humano'`: borda vermelha pulsante + ícone de alerta — independente de qual coluna estejam
-- A Fila Humana (linhas 328-381) já funciona corretamente baseada em `modo === "humano"` — manter como está
+- **`loadMenuOpcoes`**: Aceitar `parent_id` como filtro. Menu raiz = `parent_id IS NULL`
+- **`buildMenuDynamic`**: Adicionar botão "⬅️ Voltar" quando `parent_id` não é nulo
+- **Navegação no `menu_principal`**: Quando o usuário seleciona um item do tipo `submenu`, carregar os filhos e exibir o sub-menu (sem iniciar fluxo). Guardar na sessão o `parent_id` para suportar "voltar"
+- **Tipo `falar_equipe`**: Ao selecionar, criar uma notificação interna no setor correspondente via `mensagens_internas` + `notificacoes`, informar ao usuário que a equipe foi acionada
+
+### 3. `src/components/configuracoes/BotMenuCard.tsx`
+
+- Exibir hierarquia na tabela (indentação ou agrupamento por pai)
+- Formulário de criação: campo "Pai" (select com opções tipo `submenu`) e campo "Tipo" (submenu/fluxo/falar_equipe)
+
+### 4. Dados do Menu (via insert tool)
+
+Reorganizar as 13 opções existentes como filhas dos novos sub-menus, criando a árvore descrita acima.
+
+## "Falar com Equipe" — Comportamento
+
+1. Bot envia: "✅ Equipe do Financeiro acionada! Um colaborador entrará em contato em breve."
+2. Cria `notificacao` para o `setor_id` correspondente com `tipo = 'falar_equipe'`
+3. O operador do setor vê a notificação in-app e responde via comentários da solicitação ou mensageria interna
+4. Sessão do bot volta ao menu principal
 
 ## Resultado
 
-- Colunas desativadas no banco (não aparecem no Kanban)
-- IA escalona setando `modo = 'humano'` sem mover o card
-- Operador vê cards sinalizados na Fila Humana + destaque visual em qualquer coluna
-- Nenhum contato fica órfão
+- Menu limpo com 3 opções no nível raiz em vez de 13
+- Navegação intuitiva por setor → categoria → ação
+- "Falar com equipe" disponível em cada setor
+- Pipeline "Atendimento Gael" desativado (demandas genéricas resolvidas via "Falar com equipe")
 
