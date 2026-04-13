@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
   usePipelineColunas,
@@ -239,6 +240,9 @@ export default function PipelineFinanceiro() {
                 className="pl-9 w-60"
               />
             </div>
+            <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Nova Demanda
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setAddingColuna(true)}>
               <Plus className="h-4 w-4 mr-1" /> Coluna
             </Button>
