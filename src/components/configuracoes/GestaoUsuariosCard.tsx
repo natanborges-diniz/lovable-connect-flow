@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Users, Plus, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 
 type AppRole = "admin" | "operador" | "setor_usuario";
 
@@ -150,6 +151,7 @@ export function GestaoUsuariosCard() {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <DefaultUsuarioConfig />
         {!profiles?.length ? (
           <p className="text-sm text-muted-foreground text-center py-4">Nenhum usuário cadastrado</p>
         ) : (
