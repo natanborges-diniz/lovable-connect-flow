@@ -104,6 +104,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       ],
     },
   ],
+  mensagens: [
+    {
+      label: "Mensagens",
+      items: [
+        { title: "Conversas", url: "/mensagens", icon: MessageSquare },
+      ],
+    },
+  ],
 };
 
 export function AppSidebar({ activeModule }: AppSidebarProps) {
