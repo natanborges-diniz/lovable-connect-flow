@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 // Eligible sales columns for recovery (by name)
-const ELIGIBLE_COLUMNS = ["Novo Contato", "Lead", "Orçamento", "Qualificado", "Atendimento Humano", "Retorno"];
+const ELIGIBLE_COLUMNS = ["Novo Contato", "Lead", "Orçamento", "Qualificado", "Retorno"];
 
 // Delays: 48h for first, 72h for subsequent
 const DELAY_HOURS = [48, 72, 72];
@@ -16,7 +16,6 @@ const FINAL_WAIT_HOURS = 72;
 
 // Inactivity thresholds per column type (hours without inbound message)
 const INACTIVITY_THRESHOLDS: Record<string, number> = {
-  "Atendimento Humano": 2,
   "Reclamações": 24,
   // Default for intermediate columns
   default: 48,

@@ -246,7 +246,7 @@ serve(async (req) => {
         } else if (currentColuna?.setor_id) {
           // Corrige contatos não-corporativos presos em pipeline interno
           targetColunaId = retornoCol?.id ?? novoContatoCol?.id ?? null;
-        } else if (currentColuna && ["Abandonado", "Cancelado", "Perdidos", "Redirecionado"].includes(currentColuna.nome)) {
+        } else if (currentColuna && ["Abandonado", "Cancelado", "Perdidos"].includes(currentColuna.nome)) {
           targetColunaId = retornoCol?.id ?? null;
           // Increment ciclo_funil when returning from terminal column
           const currentCiclo = (contato as any).ciclo_funil || 1;
