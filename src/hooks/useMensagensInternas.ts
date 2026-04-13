@@ -24,8 +24,9 @@ export function useMensagensInternas() {
   // Realtime subscription
   useEffect(() => {
     if (!uid) return;
+    const channelName = `mensagens_internas_rt_${Date.now()}`;
     const channel = supabase
-      .channel("mensagens_internas_rt")
+      .channel(channelName)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mensagens_internas" },
