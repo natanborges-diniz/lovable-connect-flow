@@ -234,8 +234,11 @@ export default function Pipeline() {
     setDeleteConfirm(null);
   };
 
-  const isAtendimentoHumano = (colNome: string) =>
-    colNome.toLowerCase().includes("atendimento humano");
+  // Check if a contact has active human intervention via atendimento modo
+  const isContatoHumano = (contatoId: string) => {
+    const at = atendimentoByContato.get(contatoId);
+    return at?.modo === "humano";
+  };
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const firstColumnId = (colunas ?? []).sort((a, b) => a.ordem - b.ordem)[0]?.id;
@@ -393,7 +396,7 @@ export default function Pipeline() {
                 style={{ minHeight: "60vh" }}
               >
             {contatosByColuna.map((coluna, colIndex) => {
-              const isHumano = isAtendimentoHumano(coluna.nome);
+              const hasHumanCards = coluna.contatos.some((c: any) => isContatoHumano(c.id));
               return (
                 <Draggable key={coluna.id} draggableId={`col-${coluna.id}`} index={colIndex}>
                   {(colDragProvided, colDragSnapshot) => (

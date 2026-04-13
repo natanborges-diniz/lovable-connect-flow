@@ -131,6 +131,9 @@ async function processContato(
 
   if (!atendimento) return result;
 
+  // Skip contacts in human mode — operator is handling them
+  if (atendimento.modo === "humano" || atendimento.modo === "hibrido") return result;
+
   // Find last inbound message time
   const { data: lastInbound } = await supabase
     .from("mensagens")
