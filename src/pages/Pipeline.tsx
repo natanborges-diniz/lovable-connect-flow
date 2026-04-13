@@ -274,6 +274,46 @@ export default function Pipeline() {
         }
       />
 
+      {/* Segment Tabs */}
+      {!isLoading && segments.length > 1 && (
+        <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
+          <Button
+            size="sm"
+            variant={activeSegment === "todos" ? "default" : "outline"}
+            className="h-7 text-xs px-3"
+            onClick={() => setActiveSegment("todos")}
+          >
+            Todos
+            <Badge variant="secondary" className="ml-1.5 h-4 min-w-[16px] px-1 text-[10px]">
+              {filteredContatos.length}
+            </Badge>
+          </Button>
+          {segments.map((seg) => {
+            const isHumanoSeg = seg.toLowerCase().includes("terminal");
+            return (
+              <Button
+                key={seg}
+                size="sm"
+                variant={activeSegment === seg ? "default" : "outline"}
+                className={cn(
+                  "h-7 text-xs px-3",
+                  isHumanoSeg && segmentCounts[seg] > 0 && activeSegment !== seg && "border-destructive text-destructive"
+                )}
+                onClick={() => setActiveSegment(seg)}
+              >
+                {seg}
+                <Badge
+                  variant={isHumanoSeg && segmentCounts[seg] > 0 ? "destructive" : "secondary"}
+                  className="ml-1.5 h-4 min-w-[16px] px-1 text-[10px]"
+                >
+                  {segmentCounts[seg] || 0}
+                </Badge>
+              </Button>
+            );
+          })}
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
       ) : (
