@@ -204,11 +204,11 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     }
   }
 
-  // All pool exhausted — escalate to human
+  // All pool exhausted — escalate to human (keep current column, flag modo=humano)
   return {
     resposta: "Vou chamar um Consultor especializado pra te ajudar melhor, tá? Ele já entra em contato!",
     intencao: "outro",
-    pipeline_coluna: "Atendimento Humano",
+    pipeline_coluna: "Novo Contato",
     precisa_humano: true,
   };
 }
@@ -524,9 +524,9 @@ function buildRegionalCoverageBlock(): string {
 - Quando o cliente for de fora da nossa região, siga esta ESCADA DE PERSUASÃO:
   1º) Convide com carinho para conhecer nossas lojas em Osasco e região. Mencione diferenciais, promoções exclusivas e atendimento diferenciado. NÃO envie link do Google Maps.
   2º) Se o cliente insistir que é longe ou que prefere outra região, reforce o convite com argumentos de acesso fácil, atendimento personalizado e condições especiais. NÃO envie link do Google Maps.
-  3º) SOMENTE se o cliente se mostrar irredutível pela TERCEIRA VEZ: envie o link do Google Maps da loja mais próxima dele (da lista de LOJAS DISPONÍVEIS) e classifique como coluna_pipeline "Redirecionado".
+  3º) SOMENTE se o cliente se mostrar irredutível pela TERCEIRA VEZ: envie o link do Google Maps da loja mais próxima dele (da lista de LOJAS DISPONÍVEIS) e classifique como coluna_pipeline "Perdidos".
 - NUNCA envie o link do Google Maps logo na 1ª ou 2ª interação sobre localização.
-- Ao enviar o link (3ª tentativa), use coluna_pipeline "Redirecionado" para que o card saia do radar comercial.`;
+- Ao enviar o link (3ª tentativa), use coluna_pipeline "Perdidos" para que o card saia do radar comercial.`;
 }
 
 function buildSystemPromptFromCompiled(opts: {
@@ -1378,7 +1378,8 @@ serve(async (req) => {
       } else if (fn === "escalar_consultor") {
         resposta = args.resposta;
         precisa_humano = true;
-        pipeline_coluna = "Atendimento Humano";
+        // Keep contact in current column — human intervention is managed via modo='humano' flag
+        pipeline_coluna = "Novo Contato"; // Will be ignored since precisa_humano skips column move
         setor_sugerido = args.setor || "";
 
         await supabase.from("eventos_crm").insert({
@@ -1846,15 +1847,8 @@ serve(async (req) => {
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
 
     if (precisa_humano) {
-      // For human escalation, find column matching the contact's sector context
-      const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
-      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
-      const sectorFilteredCols = isCorporate
-        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
-        : colunas.filter((c: any) => c.setor_id === null);
-      const col = sectorFilteredCols.find((c: any) => c.nome === "Atendimento Humano")
-        || colunas.find((c: any) => c.nome === "Atendimento Humano" && c.setor_id === null);
-      if (col) contatoUpdates.pipeline_coluna_id = col.id;
+      // Human escalation: do NOT move the contact to a different column.
+      // The contact stays where it is; intervention is managed via atendimentos.modo = 'humano'.
     } else if (pipeline_coluna !== "Novo Contato") {
       // Filter columns by contact type to avoid cross-sector assignment
       const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
@@ -1992,15 +1986,10 @@ async function handleEscalation(
 
   await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, resposta);
 
-  // Load colunas for pipeline update
-  const { data: colunas } = await supabase.from("pipeline_colunas").select("id, nome").eq("ativo", true);
-  const col = (colunas || []).find((c: any) => c.nome === "Atendimento Humano");
-
+  // Human escalation: keep contact in current column, only change modo
   await supabase.from("atendimentos").update({ modo: "hibrido" }).eq("id", atendimentoId);
 
-  const updates: any = { ultimo_contato_at: new Date().toISOString() };
-  if (col) updates.pipeline_coluna_id = col.id;
-  await supabase.from("contatos").update(updates).eq("id", contatoId);
+  await supabase.from("contatos").update({ ultimo_contato_at: new Date().toISOString() }).eq("id", contatoId);
 
   await supabase.from("eventos_crm").insert({
     contato_id: contatoId, tipo: "escalonamento_humano",
@@ -2012,6 +2001,6 @@ async function handleEscalation(
   return jsonResponse({
     status: "ok", tools_used: [`escalar_consultor_${trigger}`],
     intencao: "escalonamento", precisa_humano: true,
-    pipeline_coluna_sugerida: "Atendimento Humano", setor_sugerido: "", modo: "hibrido",
+    pipeline_coluna_sugerida: null, setor_sugerido: "", modo: "hibrido",
   });
 }

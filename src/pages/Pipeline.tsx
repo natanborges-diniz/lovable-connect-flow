@@ -234,8 +234,6 @@ export default function Pipeline() {
     setDeleteConfirm(null);
   };
 
-  const isAtendimentoHumano = (colNome: string) =>
-    colNome.toLowerCase().includes("atendimento humano");
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const firstColumnId = (colunas ?? []).sort((a, b) => a.ordem - b.ordem)[0]?.id;
@@ -393,7 +391,6 @@ export default function Pipeline() {
                 style={{ minHeight: "60vh" }}
               >
             {contatosByColuna.map((coluna, colIndex) => {
-              const isHumano = isAtendimentoHumano(coluna.nome);
               return (
                 <Draggable key={coluna.id} draggableId={`col-${coluna.id}`} index={colIndex}>
                   {(colDragProvided, colDragSnapshot) => (
@@ -405,16 +402,14 @@ export default function Pipeline() {
                     <Card
                       className={cn(
                         "border-t-4",
-                        isHumano
-                          ? "border-t-destructive bg-destructive/5 ring-2 ring-destructive/20"
-                          : coluna.isInternal
-                            ? "border-t-accent-foreground bg-accent/10"
-                            : `border-t-${coluna.cor}`
+                        coluna.isInternal
+                          ? "border-t-accent-foreground bg-accent/10"
+                          : `border-t-${coluna.cor}`
                       )}
                     >
                       <CardHeader className="pb-2 pt-3 px-3 cursor-grab active:cursor-grabbing" {...colDragProvided.dragHandleProps}>
                         <div className="flex items-center justify-between gap-1">
-                          {coluna.isInternal && !isHumano && (
+                          {coluna.isInternal && (
                             <Badge variant="outline" className="text-[9px] px-1 py-0 mr-1 border-accent-foreground/30 text-accent-foreground">Interno</Badge>
                           )}
                         {editingColuna === coluna.id ? (
@@ -439,18 +434,12 @@ export default function Pipeline() {
                         ) : (
                           <>
                             <div className="flex items-center gap-1.5 min-w-0">
-                              {isHumano && <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />}
-                              <CardTitle className={cn("text-sm font-semibold truncate", isHumano && "text-destructive")}>
+                              <CardTitle className="text-sm font-semibold truncate">
                                 {coluna.nome}
                               </CardTitle>
                             </div>
                             <div className="flex items-center gap-0.5">
-                              <span className={cn(
-                                "text-xs font-medium px-1.5 py-0.5 rounded-full mr-1",
-                                isHumano
-                                  ? "bg-destructive/15 text-destructive"
-                                  : "bg-muted text-muted-foreground"
-                              )}>
+                              <span className="text-xs font-medium px-1.5 py-0.5 rounded-full mr-1 bg-muted text-muted-foreground">
                                 {coluna.contatos.length}
                               </span>
                               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditColuna(coluna.id, coluna.nome)}>
@@ -463,11 +452,6 @@ export default function Pipeline() {
                           </>
                         )}
                       </div>
-                      {isHumano && coluna.contatos.length > 0 && (
-                        <p className="text-[10px] text-destructive font-medium mt-1 animate-pulse">
-                          ⚠ {coluna.contatos.length} aguardando atendimento humano
-                        </p>
-                      )}
                     </CardHeader>
                     <Droppable droppableId={coluna.id}>
                       {(provided, snapshot) => (
@@ -481,6 +465,7 @@ export default function Pipeline() {
                         >
                           {coluna.contatos.map((contato, index) => {
                             const atInfo = atendimentoByContato.get(contato.id);
+                            const cardIsHumano = atInfo?.modo === "humano";
                             return (
                               <Draggable key={contato.id} draggableId={contato.id} index={index}>
                                 {(provided, snapshot) => (
@@ -490,7 +475,7 @@ export default function Pipeline() {
                                     className={cn(
                                       "shadow-sm transition-all cursor-pointer hover:shadow-md hover:ring-1 hover:ring-primary/30",
                                       snapshot.isDragging && "shadow-lg ring-2 ring-primary/20",
-                                      isHumano && "border-destructive/30"
+                                      cardIsHumano && "border-destructive/50 ring-1 ring-destructive/30 animate-pulse"
                                     )}
                                     onClick={() => setSelectedContatoId(contato.id)}
                                   >
