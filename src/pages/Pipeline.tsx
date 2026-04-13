@@ -5,10 +5,13 @@ import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { useContatos, useUpdateContato } from "@/hooks/useContatos";
 import {
   usePipelineColunas,
+  usePipelineColunasAll,
   useCreatePipelineColuna,
   useUpdatePipelineColuna,
   useDeletePipelineColuna,
+  type PipelineColunaComSetor,
 } from "@/hooks/usePipelineColunas";
+import { TransferPipelineDialog } from "@/components/pipeline/TransferPipelineDialog";
 import { TipoContatoBadge, AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
