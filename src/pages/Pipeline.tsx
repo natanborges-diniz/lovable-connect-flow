@@ -50,6 +50,7 @@ export default function Pipeline() {
   const [search, setSearch] = useState("");
   const [cicloFilter, setCicloFilter] = useState<"todos" | "novos" | "retornos">("todos");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
+  const [activeSegment, setActiveSegment] = useState<string>("todos");
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunasVendas, isLoading: loadingColunasVendas } = usePipelineColunas();
   const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
