@@ -5,10 +5,13 @@ import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { useContatos, useUpdateContato } from "@/hooks/useContatos";
 import {
   usePipelineColunas,
+  usePipelineColunasAll,
   useCreatePipelineColuna,
   useUpdatePipelineColuna,
   useDeletePipelineColuna,
+  
 } from "@/hooks/usePipelineColunas";
+import { TransferPipelineDialog } from "@/components/pipeline/TransferPipelineDialog";
 import { TipoContatoBadge, AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -710,9 +713,23 @@ function ConversationPanel({
 }) {
   const { data: contatos } = useContatos();
   const contato = contatos?.find((c) => c.id === contatoId);
-  const { data: allColunas } = usePipelineColunas();
+  const { data: allColunas } = usePipelineColunasAll();
   const updateContato = useUpdateContato();
   const queryClient = useQueryClient();
+
+  // Transfer dialog state
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferDestino, setTransferDestino] = useState<"lojas" | "financeiro" | "ti">("lojas");
+  const [transferColunaId, setTransferColunaId] = useState("");
+  const [transferColunaNome, setTransferColunaNome] = useState("");
+
+  // Known setor name mappings
+  const SETOR_MAP: Record<string, "lojas" | "financeiro" | "ti"> = {
+    "Loja": "lojas",
+    "Lojas": "lojas",
+    "Financeiro": "financeiro",
+    "TI": "ti",
+  };
 
   // Find the latest open atendimento for this contato
   const { data: atendimentoData } = useQuery({
@@ -733,12 +750,12 @@ function ConversationPanel({
 
   const atendimentoId = atendimentoData?.id || atendimentoInfo?.id;
 
-  // Group columns by grupo_funil for selector
+  // Group columns by setor_nome for selector
   const colunasGrouped = useMemo(() => {
     if (!allColunas) return {};
     const groups: Record<string, typeof allColunas> = {};
     for (const col of allColunas) {
-      const g = col.grupo_funil || "Outros";
+      const g = col.setor_nome || "CRM";
       if (!groups[g]) groups[g] = [];
       groups[g].push(col);
     }
@@ -747,11 +764,28 @@ function ConversationPanel({
 
   const handleMoveToColumn = async (colunaId: string) => {
     if (!contato) return;
+
+    // Find the selected column to determine its setor
+    const selectedCol = allColunas?.find((c) => c.id === colunaId);
+    if (!selectedCol) return;
+
+    const setorNome = selectedCol.setor_nome || "CRM";
+    const destinoKey = SETOR_MAP[setorNome];
+
+    // If moving to another pipeline, open transfer dialog
+    if (destinoKey) {
+      setTransferDestino(destinoKey);
+      setTransferColunaId(colunaId);
+      setTransferColunaNome(selectedCol.nome);
+      setTransferOpen(true);
+      return;
+    }
+
+    // Same pipeline (CRM) — move directly
     const previousColunaId = contato.pipeline_coluna_id;
     updateContato.mutate({ id: contatoId, pipeline_coluna_id: colunaId } as any, {
       onSuccess: () => {
         toast.success("Contato movido com sucesso");
-        // Trigger automations
         supabase.functions.invoke("pipeline-automations", {
           body: {
             entity_type: "contato",
@@ -762,6 +796,11 @@ function ConversationPanel({
         });
       },
     });
+  };
+
+  const handleTransferSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ["contatos"] });
+    queryClient.invalidateQueries({ queryKey: ["pipeline_colunas_all"] });
   };
 
   const handleEncerrarAtendimento = async () => {
@@ -825,13 +864,15 @@ function ConversationPanel({
             value={contato?.pipeline_coluna_id || ""}
             onValueChange={handleMoveToColumn}
           >
-            <SelectTrigger className="h-7 text-xs w-48">
+            <SelectTrigger className="h-7 text-xs w-52">
               <SelectValue placeholder="Selecionar coluna" />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(colunasGrouped).map(([grupo, cols]) => (
-                <div key={grupo}>
-                  <p className="text-[10px] font-semibold text-muted-foreground px-2 pt-1.5 pb-0.5 uppercase">{grupo}</p>
+              {Object.entries(colunasGrouped).map(([setor, cols]) => (
+                <div key={setor}>
+                  <p className="text-[10px] font-bold text-muted-foreground px-2 pt-2 pb-0.5 uppercase tracking-wider border-t first:border-t-0">
+                    ── {setor} ──
+                  </p>
                   {(cols as any[]).sort((a, b) => a.ordem - b.ordem).map((col) => (
                     <SelectItem key={col.id} value={col.id} className="text-xs">
                       {col.nome}
@@ -853,6 +894,17 @@ function ConversationPanel({
       </div>
 
       <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />
+
+      <TransferPipelineDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        destino={transferDestino}
+        contatoId={contatoId}
+        contatoNome={contato?.nome ?? "Contato"}
+        colunaDestinoId={transferColunaId}
+        colunaDestinoNome={transferColunaNome}
+        onSuccess={handleTransferSuccess}
+      />
     </>
   );
 }

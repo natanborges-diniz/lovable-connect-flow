@@ -9,8 +9,13 @@ export interface PipelineColuna {
   ordem: number;
   ativo: boolean;
   grupo_funil: string | null;
+  setor_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PipelineColunaComSetor extends PipelineColuna {
+  setor_nome: string | null;
 }
 
 export function usePipelineColunas(setorId?: string | null) {
@@ -36,6 +41,24 @@ export function usePipelineColunas(setorId?: string | null) {
   });
 }
 
+export function usePipelineColunasAll() {
+  return useQuery({
+    queryKey: ["pipeline_colunas_all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pipeline_colunas")
+        .select("*, setores(nome)")
+        .eq("ativo", true)
+        .order("ordem", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((col: any) => ({
+        ...col,
+        setor_nome: col.setores?.nome ?? "CRM",
+      })) as PipelineColunaComSetor[];
+    },
+  });
+}
+
 export function useCreatePipelineColuna() {
   const qc = useQueryClient();
   return useMutation({
@@ -50,6 +73,7 @@ export function useCreatePipelineColuna() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pipeline_colunas"] });
+      qc.invalidateQueries({ queryKey: ["pipeline_colunas_all"] });
       toast.success("Coluna criada");
     },
     onError: (e) => toast.error("Erro ao criar coluna: " + e.message),
@@ -71,6 +95,7 @@ export function useUpdatePipelineColuna() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pipeline_colunas"] });
+      qc.invalidateQueries({ queryKey: ["pipeline_colunas_all"] });
       toast.success("Coluna atualizada");
     },
     onError: (e) => toast.error("Erro: " + e.message),
@@ -89,6 +114,7 @@ export function useDeletePipelineColuna() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pipeline_colunas"] });
+      qc.invalidateQueries({ queryKey: ["pipeline_colunas_all"] });
       qc.invalidateQueries({ queryKey: ["contatos"] });
       toast.success("Coluna removida");
     },
