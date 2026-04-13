@@ -1,61 +1,79 @@
 
 
-# Separar Nível de Acesso e Áreas do Sistema — UI Clara
+# Mensageria Interna — Chat entre Usuários do Sistema
 
-## Problema Atual
+## Contexto
 
-A tela de gestão de usuários tem **duas colunas que fazem a mesma coisa**:
-- "Setor Principal" (campo `profiles.setor_id`) — dropdown de setor
-- "Permissões" (registros em `user_roles` com `setor_id`) — badges com setor
-
-O admin não sabe qual usar, e ambos gravam setor em lugares diferentes. Confusão total.
+Atualmente a comunicação interna ocorre apenas via comentários em solicitações e notificações passivas. Não existe um canal de **chat direto** entre usuários logados no sistema.
 
 ## Solução
 
-Redesenhar a tabela com **duas colunas claras e distintas**:
+Criar um módulo de **Mensageria Interna** acessível por todos os usuários, com conversas diretas (1:1) e notificação em tempo real.
+
+## Arquitetura
 
 ```text
-| Nome | E-mail | Nível de Acesso | Áreas do Sistema | Ativo |
+mensagens_internas (nova tabela)
+├── id (uuid)
+├── remetente_id (uuid → profiles.id)
+├── destinatario_id (uuid → profiles.id)
+├── conversa_id (text) — hash ordenado dos dois user_ids
+├── conteudo (text)
+├── lida (boolean, default false)
+├── created_at (timestamptz)
+
+Realtime: ALTER PUBLICATION supabase_realtime ADD TABLE mensagens_internas;
 ```
-
-### Nível de Acesso (substitui "Permissões")
-- Dropdown simples: **Admin** / **Operador** / **Setor**
-- Admin = tudo; Operador = vê tudo sem gerenciar; Setor = acesso restrito
-- Grava em `user_roles.role`
-
-### Áreas do Sistema (substitui "Setor Principal")
-- Só aparece quando o nível é **Setor**
-- Permite adicionar **múltiplos setores** (badges com "×" para remover)
-- Cada badge mostra o nome do setor (ex: "Financeiro", "Loja · DINIZ PRIMITIVA I")
-- Quando seleciona setor "Loja", aparece o sub-dropdown de unidade
-- Grava em `user_roles` (cada setor = um registro)
-
-### Remoção da coluna "Setor Principal"
-- Remove o dropdown de `profiles.setor_id` da UI
-- O `profiles.setor_id` passa a ser **sincronizado automaticamente** com o primeiro setor do `user_roles` (para manter compatibilidade com RLS de notificações)
 
 ## Implementação
 
-### 1. Redesenhar `GestaoUsuariosCard.tsx`
-- Remover coluna "Setor Principal" e a mutation `updateProfileSetor`
-- Coluna "Nível de Acesso": dropdown Admin/Operador/Setor (muda o role de todos os user_roles do usuário)
-- Coluna "Áreas do Sistema": lista de setores atribuídos (visível só para setor_usuario), com botão "+" para adicionar setor e "×" para remover
-- Auto-sync: ao alterar user_roles, atualizar `profiles.setor_id` com o primeiro setor
+### 1. Migração SQL
+- Criar tabela `mensagens_internas` com RLS:
+  - SELECT: `remetente_id = auth.uid() OR destinatario_id = auth.uid()`
+  - INSERT: `remetente_id = auth.uid()`
+  - UPDATE (marcar lida): `destinatario_id = auth.uid()`
+- Habilitar Realtime na tabela
+- Índices em `conversa_id` e `destinatario_id`
 
-### 2. Labels descritivos
-- Tooltips ou subtítulos explicativos:
-  - Nível de Acesso: "Define o que o usuário pode fazer"
-  - Áreas do Sistema: "Define quais módulos o usuário pode ver"
+### 2. Nova rota `/mensagens`
+- Adicionar em `App.tsx` como rota protegida
+- Adicionar módulo "mensagens" no `ModuleKey` e `TopNavigation`
+- Ícone: `Mail` ou `MessageCircle`
 
-## Arquivos Modificados
+### 3. Página `Mensagens.tsx` — Layout de chat
+- **Painel esquerdo**: lista de conversas (agrupadas por `conversa_id`), mostrando nome do outro usuário, última mensagem e badge de não lidas
+- **Painel direito**: thread de mensagens da conversa selecionada, com input de texto e envio
+- Botão "Nova conversa" com dropdown de usuários ativos (query em `profiles`)
+
+### 4. Hook `useMensagensInternas.ts`
+- `useConversas()` — lista conversas do usuário com contagem de não lidas
+- `useMensagensConversa(conversaId)` — mensagens de uma conversa específica
+- `useEnviarMensagem()` — mutation para inserir mensagem
+- `useMarcarLida()` — marca mensagens como lidas ao abrir conversa
+- Realtime subscription para novas mensagens
+
+### 5. Badge de não lidas no TopNavigation
+- Ao lado do ícone de Mensagens, mostrar badge com total de mensagens não lidas (similar ao de notificações)
+
+### 6. Acesso por role
+- **Todos os roles** (admin, operador, setor_usuario) têm acesso ao módulo de mensagens
+- Adicionar "mensagens" ao `SETOR_MODULE_MAP` para todos os setores
+
+## Arquivos
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/components/configuracoes/GestaoUsuariosCard.tsx` | Redesenho completo das colunas da tabela |
+| Migração SQL | Criar tabela `mensagens_internas` + RLS + Realtime |
+| `src/pages/Mensagens.tsx` | Nova página com layout de chat (lista + thread) |
+| `src/hooks/useMensagensInternas.ts` | Hook com queries, mutations e realtime |
+| `src/App.tsx` | Adicionar rota `/mensagens` |
+| `src/components/layout/AppLayout.tsx` | Adicionar "mensagens" ao `ModuleKey` |
+| `src/components/layout/TopNavigation.tsx` | Adicionar módulo + badge de não lidas |
 
 ## Resultado
 
-- Admin vê claramente: "esse usuário é Operador" vs "esse usuário do Setor só acessa Financeiro e TI"
-- Sem duplicidade de informação
-- `profiles.setor_id` mantido em sync para RLS, mas invisível na UI
+- Usuários podem conversar diretamente entre si dentro da aplicação
+- Notificação visual em tempo real (badge) quando recebem mensagens
+- Histórico de conversas persistente
+- Segregado por RLS — cada usuário só vê suas próprias conversas
 
