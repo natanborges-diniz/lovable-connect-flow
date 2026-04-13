@@ -64,23 +64,26 @@ serve(async (req) => {
     return data;
   }
 
-  // ─── Load menu options filtered by tipo_bot ───
-  async function loadMenuOpcoes(tipoBot = "loja"): Promise<Array<{ chave: string; titulo: string; emoji: string; fluxo: string; ordem: number }>> {
+  // ─── Load menu options filtered by tipo_bot and parent_id ───
+  async function loadMenuOpcoes(tipoBot = "loja", parentId: string | null = null): Promise<Array<{ id: string; chave: string; titulo: string; emoji: string; fluxo: string; ordem: number; tipo: string; parent_id: string | null; setor_id: string | null }>> {
     try {
-      const { data } = await supabase
+      let query = supabase
         .from("bot_menu_opcoes")
-        .select("chave, titulo, emoji, fluxo, ordem")
+        .select("id, chave, titulo, emoji, fluxo, ordem, tipo, parent_id, setor_id")
         .eq("ativo", true)
         .eq("tipo_bot", tipoBot)
         .order("ordem");
+
+      if (parentId) {
+        query = query.eq("parent_id", parentId);
+      } else {
+        query = query.is("parent_id", null);
+      }
+
+      const { data } = await query;
       return data || [];
     } catch {
-      return [
-        { chave: "link_pagamento", titulo: "Gerar Link de Pagamento", emoji: "1️⃣", fluxo: "link_pagamento", ordem: 1 },
-        { chave: "gerar_boleto", titulo: "Gerar Boleto", emoji: "2️⃣", fluxo: "gerar_boleto", ordem: 2 },
-        { chave: "consulta_cpf", titulo: "Consultar CPF", emoji: "3️⃣", fluxo: "consulta_cpf", ordem: 3 },
-        { chave: "confirmar_comparecimento", titulo: "Confirmar Comparecimento", emoji: "4️⃣", fluxo: "confirmar_comparecimento", ordem: 4 },
-      ];
+      return [];
     }
   }
 
