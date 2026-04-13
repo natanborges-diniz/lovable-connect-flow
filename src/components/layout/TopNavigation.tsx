@@ -34,6 +34,7 @@ const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
   financeiro: ["dashboard", "financeiro", "solicitacoes", "tarefas"],
   ti: ["dashboard", "solicitacoes", "tarefas"],
   atendimento: ["dashboard", "atendimentos", "solicitacoes", "tarefas"],
+  loja: ["dashboard", "agendamentos"],
 };
 
 function useSetorNames(setorIds: string[]) {

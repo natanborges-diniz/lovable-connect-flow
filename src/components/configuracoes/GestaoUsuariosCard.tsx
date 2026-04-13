@@ -13,6 +13,22 @@ import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 
 type AppRole = "admin" | "operador" | "setor_usuario";
 
+function useLojas() {
+  return useQuery({
+    queryKey: ["telefones-lojas-nomes"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("telefones_lojas")
+        .select("nome_loja")
+        .eq("tipo", "loja")
+        .eq("ativo", true);
+      if (error) throw error;
+      const unique = [...new Set((data || []).map((d) => d.nome_loja))].sort();
+      return unique;
+    },
+  });
+}
+
 function useProfiles() {
   return useQuery({
     queryKey: ["admin-profiles"],
@@ -35,7 +51,7 @@ function useAllRoles() {
         .from("user_roles")
         .select("*");
       if (error) throw error;
-      return data as Array<{ id: string; user_id: string; role: AppRole; setor_id: string | null }>;
+      return data as Array<{ id: string; user_id: string; role: AppRole; setor_id: string | null; loja_nome: string | null }>;
     },
   });
 }
@@ -55,17 +71,22 @@ export function GestaoUsuariosCard() {
   const { data: profiles, isLoading: loadingProfiles } = useProfiles();
   const { data: allRoles, isLoading: loadingRoles } = useAllRoles();
   const { data: setores } = useSetores();
+  const { data: lojas } = useLojas();
   const queryClient = useQueryClient();
 
   const [addingFor, setAddingFor] = useState<string | null>(null);
   const [newRole, setNewRole] = useState<AppRole>("setor_usuario");
   const [newSetorId, setNewSetorId] = useState("");
+  const [newLojaNome, setNewLojaNome] = useState("");
+
+  const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
+  const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
 
   const addRole = useMutation({
-    mutationFn: async ({ userId, role, setorId }: { userId: string; role: AppRole; setorId?: string }) => {
-      const { error } = await supabase
+    mutationFn: async ({ userId, role, setorId, lojaNome }: { userId: string; role: AppRole; setorId?: string; lojaNome?: string }) => {
+      const { error } = await (supabase as any)
         .from("user_roles")
-        .insert({ user_id: userId, role, setor_id: setorId || null });
+        .insert({ user_id: userId, role, setor_id: setorId || null, loja_nome: lojaNome || null });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -73,6 +94,7 @@ export function GestaoUsuariosCard() {
       setAddingFor(null);
       setNewRole("setor_usuario");
       setNewSetorId("");
+      setNewLojaNome("");
       toast.success("Permissão adicionada");
     },
     onError: (e: any) => toast.error(e.message),
@@ -194,6 +216,7 @@ export function GestaoUsuariosCard() {
                           <Badge key={r.id} variant={roleBadgeVariant(r.role) as any} className="text-[10px] gap-1">
                             {roleLabel(r.role)}
                             {r.setor_id && <span className="opacity-70">({getSetorName(r.setor_id)})</span>}
+                            {r.loja_nome && <span className="opacity-70">· {r.loja_nome}</span>}
                             <button
                               onClick={() => removeRole.mutate(r.id)}
                               className="ml-0.5 hover:text-destructive"
@@ -216,13 +239,25 @@ export function GestaoUsuariosCard() {
                               </SelectContent>
                             </Select>
                             {newRole === "setor_usuario" && (
-                              <Select value={newSetorId} onValueChange={setNewSetorId}>
+                              <Select value={newSetorId} onValueChange={(v) => { setNewSetorId(v); setNewLojaNome(""); }}>
                                 <SelectTrigger className="h-6 w-28 text-[10px]">
                                   <SelectValue placeholder="Setor" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {setores?.map((s) => (
                                     <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {newRole === "setor_usuario" && isLojaSetor(newSetorId) && (
+                              <Select value={newLojaNome} onValueChange={setNewLojaNome}>
+                                <SelectTrigger className="h-6 w-36 text-[10px]">
+                                  <SelectValue placeholder="Selecione a loja" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {lojas?.map((l) => (
+                                    <SelectItem key={l} value={l}>{l}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
@@ -234,8 +269,9 @@ export function GestaoUsuariosCard() {
                                 userId: p.id,
                                 role: newRole,
                                 setorId: newRole === "setor_usuario" ? newSetorId : undefined,
+                                lojaNome: newRole === "setor_usuario" && isLojaSetor(newSetorId) ? newLojaNome : undefined,
                               })}
-                              disabled={addRole.isPending || (newRole === "setor_usuario" && !newSetorId)}
+                              disabled={addRole.isPending || (newRole === "setor_usuario" && !newSetorId) || (newRole === "setor_usuario" && isLojaSetor(newSetorId) && !newLojaNome)}
                             >
                               OK
                             </Button>
