@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Bot, GripVertical, Trash2, Loader2, Pencil } from "lucide-react";
+import { Plus, Bot, GripVertical, Trash2, Loader2, Pencil, ChevronRight, FolderOpen, MessageSquare, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 interface MenuOpcao {
@@ -23,6 +23,9 @@ interface MenuOpcao {
   ordem: number;
   ativo: boolean;
   tipo_bot: string;
+  tipo: string;
+  parent_id: string | null;
+  setor_id: string | null;
 }
 
 interface Fluxo {
@@ -38,6 +41,12 @@ const TIPOS_BOT = [
   { value: "cliente_lab", label: "Cliente Lab" },
 ];
 
+const TIPOS_OPCAO = [
+  { value: "fluxo", label: "Fluxo", icon: Zap },
+  { value: "submenu", label: "Sub-menu", icon: FolderOpen },
+  { value: "falar_equipe", label: "Falar com Equipe", icon: MessageSquare },
+];
+
 function useMenuOpcoes() {
   return useQuery({
     queryKey: ["bot_menu_opcoes"],
@@ -45,7 +54,7 @@ function useMenuOpcoes() {
       const { data, error } = await (supabase as any)
         .from("bot_menu_opcoes")
         .select("*")
-        .order("tipo_bot, ordem");
+        .order("ordem");
       if (error) throw error;
       return (data || []) as MenuOpcao[];
     },
@@ -66,6 +75,43 @@ function useFluxosForSelect(tipoBot: string) {
       return (data || []) as Fluxo[];
     },
   });
+}
+
+function useSetores() {
+  return useQuery({
+    queryKey: ["setores_ativos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("setores")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+}
+
+// Build tree structure from flat list
+function buildTree(opcoes: MenuOpcao[], parentId: string | null = null, depth = 0): Array<MenuOpcao & { depth: number }> {
+  const result: Array<MenuOpcao & { depth: number }> = [];
+  const children = opcoes.filter(o => o.parent_id === parentId).sort((a, b) => a.ordem - b.ordem);
+  for (const child of children) {
+    result.push({ ...child, depth });
+    result.push(...buildTree(opcoes, child.id, depth + 1));
+  }
+  return result;
+}
+
+function getTipoIcon(tipo: string) {
+  const found = TIPOS_OPCAO.find(t => t.value === tipo);
+  return found?.icon || Zap;
+}
+
+function getTipoBadgeVariant(tipo: string): "default" | "secondary" | "outline" | "destructive" {
+  if (tipo === "submenu") return "default";
+  if (tipo === "falar_equipe") return "secondary";
+  return "outline";
 }
 
 export function BotMenuCard() {
@@ -95,7 +141,8 @@ export function BotMenuCard() {
     onError: (e: any) => toast.error("Erro: " + e.message),
   });
 
-  const filtered = opcoes?.filter(o => filterTipoBot === "all" || o.tipo_bot === filterTipoBot) || [];
+  const allFiltered = opcoes?.filter(o => filterTipoBot === "all" || o.tipo_bot === filterTipoBot) || [];
+  const treeItems = buildTree(allFiltered, null);
 
   return (
     <Card className="shadow-card">
@@ -120,6 +167,7 @@ export function BotMenuCard() {
             <DialogContent>
               <DialogHeader><DialogTitle>Nova Opção do Menu</DialogTitle></DialogHeader>
               <CreateOpcaoForm
+                allOpcoes={opcoes || []}
                 nextOrdem={(opcoes?.length || 0) + 1}
                 onSubmit={() => {
                   queryClient.invalidateQueries({ queryKey: ["bot_menu_opcoes"] });
@@ -132,19 +180,19 @@ export function BotMenuCard() {
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground mb-4">
-          Configure as opções exibidas no menu interativo do bot. Filtre por tipo de bot para gerenciar menus específicos.
+          Menu hierárquico com sub-menus por setor. Opções tipo "Sub-menu" agrupam fluxos; "Falar com Equipe" notifica o setor internamente.
         </p>
         {isLoading ? (
           <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-        ) : !filtered.length ? (
+        ) : !treeItems.length ? (
           <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma opção cadastrada</p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12">#</TableHead>
-                <TableHead className="w-16">Emoji</TableHead>
                 <TableHead>Título</TableHead>
+                <TableHead>Tipo</TableHead>
                 <TableHead>Fluxo</TableHead>
                 <TableHead>Bot</TableHead>
                 <TableHead className="w-20">Ativo</TableHead>
@@ -152,35 +200,51 @@ export function BotMenuCard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((op) => (
-                <TableRow key={op.id}>
-                  <TableCell className="text-muted-foreground font-mono text-xs">
-                    <GripVertical className="h-4 w-4 inline mr-1 text-muted-foreground/50" />
-                    {op.ordem}
-                  </TableCell>
-                  <TableCell className="text-lg">{op.emoji}</TableCell>
-                  <TableCell className="font-medium">{op.titulo}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="font-mono text-[10px]">{op.fluxo}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="text-xs">{op.tipo_bot}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Switch checked={op.ativo} onCheckedChange={(v) => toggleAtivo.mutate({ id: op.id, ativo: v })} />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditItem(op)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteOpcao.mutate(op.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {treeItems.map((op) => {
+                const Icon = getTipoIcon(op.tipo);
+                return (
+                  <TableRow key={op.id} className={!op.ativo ? "opacity-40" : ""}>
+                    <TableCell className="text-muted-foreground font-mono text-xs">
+                      <GripVertical className="h-4 w-4 inline mr-1 text-muted-foreground/50" />
+                      {op.ordem}
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-1" style={{ paddingLeft: `${op.depth * 20}px` }}>
+                        {op.depth > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/50" />}
+                        <span className="text-lg mr-1">{op.emoji}</span>
+                        {op.titulo}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getTipoBadgeVariant(op.tipo)} className="text-xs gap-1">
+                        <Icon className="h-3 w-3" />
+                        {TIPOS_OPCAO.find(t => t.value === op.tipo)?.label || op.tipo}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {op.tipo === "fluxo" && (
+                        <Badge variant="outline" className="font-mono text-[10px]">{op.fluxo}</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="text-xs">{op.tipo_bot}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Switch checked={op.ativo} onCheckedChange={(v) => toggleAtivo.mutate({ id: op.id, ativo: v })} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditItem(op)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteOpcao.mutate(op.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
@@ -192,6 +256,7 @@ export function BotMenuCard() {
           {editItem && (
             <EditOpcaoForm
               item={editItem}
+              allOpcoes={opcoes || []}
               onSubmit={() => {
                 queryClient.invalidateQueries({ queryKey: ["bot_menu_opcoes"] });
                 setEditItem(null);
@@ -204,13 +269,19 @@ export function BotMenuCard() {
   );
 }
 
-function CreateOpcaoForm({ nextOrdem, onSubmit }: { nextOrdem: number; onSubmit: () => void }) {
+function CreateOpcaoForm({ nextOrdem, allOpcoes, onSubmit }: { nextOrdem: number; allOpcoes: MenuOpcao[]; onSubmit: () => void }) {
   const [titulo, setTitulo] = useState("");
   const [emoji, setEmoji] = useState(`${nextOrdem}️⃣`);
   const [tipoBot, setTipoBot] = useState("loja");
+  const [tipo, setTipo] = useState("fluxo");
   const [fluxo, setFluxo] = useState("");
+  const [parentId, setParentId] = useState<string>("_none");
+  const [setorId, setSetorId] = useState<string>("_none");
   const [loading, setLoading] = useState(false);
   const { data: fluxos } = useFluxosForSelect(tipoBot);
+  const { data: setores } = useSetores();
+
+  const subMenuParents = allOpcoes.filter(o => o.tipo === "submenu" && o.ativo);
 
   const chave = titulo
     .toLowerCase()
@@ -220,12 +291,23 @@ function CreateOpcaoForm({ nextOrdem, onSubmit }: { nextOrdem: number; onSubmit:
     .replace(/^_|_$/g, "");
 
   const handleCreate = async () => {
-    if (!titulo.trim() || !fluxo) return;
+    if (!titulo.trim()) return;
+    if (tipo === "fluxo" && !fluxo) return;
     setLoading(true);
     try {
       const { error } = await (supabase as any)
         .from("bot_menu_opcoes")
-        .insert({ chave, titulo, emoji, fluxo, ordem: nextOrdem, tipo_bot: tipoBot });
+        .insert({
+          chave,
+          titulo,
+          emoji,
+          fluxo: tipo === "fluxo" ? fluxo : (tipo === "submenu" ? "_submenu" : "_falar_equipe"),
+          ordem: nextOrdem,
+          tipo_bot: tipoBot,
+          tipo,
+          parent_id: parentId === "_none" ? null : parentId,
+          setor_id: setorId === "_none" ? null : setorId,
+        });
       if (error) throw error;
       toast.success("Opção criada");
       onSubmit();
@@ -240,13 +322,24 @@ function CreateOpcaoForm({ nextOrdem, onSubmit }: { nextOrdem: number; onSubmit:
     <div className="space-y-4">
       <div className="space-y-1.5">
         <Label>Título</Label>
-        <Input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex: Consultar Estoque" />
+        <Input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex: 💳 Cobranças" />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Emoji</Label>
           <Input value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="1️⃣" />
         </div>
+        <div className="space-y-1.5">
+          <Label>Tipo</Label>
+          <Select value={tipo} onValueChange={setTipo}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TIPOS_OPCAO.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Tipo de Bot</Label>
           <Select value={tipoBot} onValueChange={(v) => { setTipoBot(v); setFluxo(""); }}>
@@ -256,20 +349,44 @@ function CreateOpcaoForm({ nextOrdem, onSubmit }: { nextOrdem: number; onSubmit:
             </SelectContent>
           </Select>
         </div>
+        <div className="space-y-1.5">
+          <Label>Pai (sub-menu)</Label>
+          <Select value={parentId} onValueChange={setParentId}>
+            <SelectTrigger><SelectValue placeholder="Raiz" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_none">— Raiz —</SelectItem>
+              {subMenuParents.map(p => <SelectItem key={p.id} value={p.id}>{p.titulo}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      <div className="space-y-1.5">
-        <Label>Fluxo</Label>
-        <Select value={fluxo} onValueChange={setFluxo}>
-          <SelectTrigger><SelectValue placeholder="Selecione um fluxo" /></SelectTrigger>
-          <SelectContent>
-            {fluxos?.map(f => <SelectItem key={f.chave} value={f.chave}>{f.nome}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      {tipo === "fluxo" && (
+        <div className="space-y-1.5">
+          <Label>Fluxo</Label>
+          <Select value={fluxo} onValueChange={setFluxo}>
+            <SelectTrigger><SelectValue placeholder="Selecione um fluxo" /></SelectTrigger>
+            <SelectContent>
+              {fluxos?.map(f => <SelectItem key={f.chave} value={f.chave}>{f.nome}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {(tipo === "submenu" || tipo === "falar_equipe") && (
+        <div className="space-y-1.5">
+          <Label>Setor vinculado</Label>
+          <Select value={setorId} onValueChange={setSetorId}>
+            <SelectTrigger><SelectValue placeholder="Opcional" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_none">— Nenhum —</SelectItem>
+              {setores?.map(s => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {chave && (
         <p className="text-xs text-muted-foreground">Chave: <code className="bg-muted px-1 rounded">{chave}</code></p>
       )}
-      <Button onClick={handleCreate} disabled={loading || !titulo.trim() || !fluxo} className="w-full">
+      <Button onClick={handleCreate} disabled={loading || !titulo.trim() || (tipo === "fluxo" && !fluxo)} className="w-full">
         {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
         Criar Opção
       </Button>
@@ -277,18 +394,24 @@ function CreateOpcaoForm({ nextOrdem, onSubmit }: { nextOrdem: number; onSubmit:
   );
 }
 
-function EditOpcaoForm({ item, onSubmit }: { item: MenuOpcao; onSubmit: () => void }) {
+function EditOpcaoForm({ item, allOpcoes, onSubmit }: { item: MenuOpcao; allOpcoes: MenuOpcao[]; onSubmit: () => void }) {
   const [titulo, setTitulo] = useState(item.titulo);
   const [emoji, setEmoji] = useState(item.emoji);
   const [tipoBot, setTipoBot] = useState(item.tipo_bot);
+  const [tipo, setTipo] = useState(item.tipo || "fluxo");
   const [fluxo, setFluxo] = useState(item.fluxo);
   const [ordem, setOrdem] = useState(item.ordem);
+  const [parentId, setParentId] = useState<string>(item.parent_id || "_none");
+  const [setorId, setSetorId] = useState<string>(item.setor_id || "_none");
   const [descricao, setDescricao] = useState(item.descricao || "");
   const [loading, setLoading] = useState(false);
   const { data: fluxos } = useFluxosForSelect(tipoBot);
+  const { data: setores } = useSetores();
+
+  const subMenuParents = allOpcoes.filter(o => o.tipo === "submenu" && o.ativo && o.id !== item.id);
 
   const handleSave = async () => {
-    if (!titulo.trim() || !fluxo) return;
+    if (!titulo.trim()) return;
     setLoading(true);
     try {
       const chave = titulo
@@ -299,7 +422,18 @@ function EditOpcaoForm({ item, onSubmit }: { item: MenuOpcao; onSubmit: () => vo
         .replace(/^_|_$/g, "");
       const { error } = await (supabase as any)
         .from("bot_menu_opcoes")
-        .update({ titulo, emoji, fluxo, ordem, tipo_bot: tipoBot, chave, descricao: descricao || null })
+        .update({
+          titulo,
+          emoji,
+          fluxo: tipo === "fluxo" ? fluxo : (tipo === "submenu" ? "_submenu" : "_falar_equipe"),
+          ordem,
+          tipo_bot: tipoBot,
+          tipo,
+          chave,
+          descricao: descricao || null,
+          parent_id: parentId === "_none" ? null : parentId,
+          setor_id: setorId === "_none" ? null : setorId,
+        })
         .eq("id", item.id);
       if (error) throw error;
       toast.success("Opção atualizada");
@@ -327,6 +461,17 @@ function EditOpcaoForm({ item, onSubmit }: { item: MenuOpcao; onSubmit: () => vo
           <Input type="number" value={ordem} onChange={(e) => setOrdem(Number(e.target.value))} />
         </div>
         <div className="space-y-1.5">
+          <Label>Tipo</Label>
+          <Select value={tipo} onValueChange={setTipo}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TIPOS_OPCAO.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
           <Label>Tipo de Bot</Label>
           <Select value={tipoBot} onValueChange={(v) => { setTipoBot(v); setFluxo(""); }}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -335,21 +480,45 @@ function EditOpcaoForm({ item, onSubmit }: { item: MenuOpcao; onSubmit: () => vo
             </SelectContent>
           </Select>
         </div>
+        <div className="space-y-1.5">
+          <Label>Pai (sub-menu)</Label>
+          <Select value={parentId} onValueChange={setParentId}>
+            <SelectTrigger><SelectValue placeholder="Raiz" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_none">— Raiz —</SelectItem>
+              {subMenuParents.map(p => <SelectItem key={p.id} value={p.id}>{p.titulo}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      <div className="space-y-1.5">
-        <Label>Fluxo</Label>
-        <Select value={fluxo} onValueChange={setFluxo}>
-          <SelectTrigger><SelectValue placeholder="Selecione um fluxo" /></SelectTrigger>
-          <SelectContent>
-            {fluxos?.map(f => <SelectItem key={f.chave} value={f.chave}>{f.nome}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      {tipo === "fluxo" && (
+        <div className="space-y-1.5">
+          <Label>Fluxo</Label>
+          <Select value={fluxo} onValueChange={setFluxo}>
+            <SelectTrigger><SelectValue placeholder="Selecione um fluxo" /></SelectTrigger>
+            <SelectContent>
+              {fluxos?.map(f => <SelectItem key={f.chave} value={f.chave}>{f.nome}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {(tipo === "submenu" || tipo === "falar_equipe") && (
+        <div className="space-y-1.5">
+          <Label>Setor vinculado</Label>
+          <Select value={setorId} onValueChange={setSetorId}>
+            <SelectTrigger><SelectValue placeholder="Opcional" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_none">— Nenhum —</SelectItem>
+              {setores?.map(s => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="space-y-1.5">
         <Label>Descrição (opcional)</Label>
-        <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Texto auxiliar para o menu" />
+        <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Texto auxiliar" />
       </div>
-      <Button onClick={handleSave} disabled={loading || !titulo.trim() || !fluxo} className="w-full">
+      <Button onClick={handleSave} disabled={loading || !titulo.trim() || (tipo === "fluxo" && !fluxo)} className="w-full">
         {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
         Salvar Alterações
       </Button>
