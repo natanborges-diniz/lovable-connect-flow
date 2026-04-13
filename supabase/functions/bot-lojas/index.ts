@@ -410,66 +410,102 @@ serve(async (req) => {
     let resposta = "";
     let updateSessao: Record<string, unknown> = {};
 
-    // Determine tipo_bot from loja_info or default
     const tipoBot = loja_info?.tipo_bot || "loja";
-    const menuOpcoes = await loadMenuOpcoes(tipoBot);
+    
+    // Determine current parent_id from session data for sub-menu navigation
+    const currentParentId = (dados as any)?._menu_parent_id || null;
+    const menuOpcoes = await loadMenuOpcoes(tipoBot, currentParentId);
 
-    const { fluxo, etapa, dados } = sessao;
+    const { fluxo, etapa, dados: dadosSessao } = sessao;
 
     // ─── Global navigation ───
-    if (textoLower === "menu" || textoLower === "voltar" || textoLower === "0") {
+    if (textoLower === "menu" || (textoLower === "0" && fluxo !== "menu_principal")) {
       updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
-      resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
+      const rootOpcoes = await loadMenuOpcoes(tipoBot, null);
+      resposta = buildMenuDynamic(nomeLoja, rootOpcoes, false);
     }
-    // ─── Menu principal ───
+    // ─── "Voltar" in sub-menu: go up one level ───
+    else if (fluxo === "menu_principal" && etapa === "inicio" && (textoLower === "voltar" || textoLower === "0") && currentParentId) {
+      // Find parent's parent
+      const { data: parentOption } = await supabase
+        .from("bot_menu_opcoes")
+        .select("parent_id")
+        .eq("id", currentParentId)
+        .single();
+      const grandParentId = parentOption?.parent_id || null;
+      const parentOpcoes = await loadMenuOpcoes(tipoBot, grandParentId);
+      updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: grandParentId ? { _menu_parent_id: grandParentId } : {} };
+      resposta = buildMenuDynamic(nomeLoja, parentOpcoes, !!grandParentId);
+    }
+    // ─── Menu principal (works for any level) ───
     else if (fluxo === "menu_principal" && etapa === "inicio") {
       const selectedIndex = parseInt(texto) - 1;
       const selectedOption = menuOpcoes[selectedIndex];
 
       if (selectedOption) {
-        const selectedFluxo = selectedOption.fluxo;
-        const fluxoDef = await loadFluxo(selectedFluxo);
+        // ─── SUBMENU: navigate deeper ───
+        if (selectedOption.tipo === "submenu") {
+          const childOpcoes = await loadMenuOpcoes(tipoBot, selectedOption.id);
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: { _menu_parent_id: selectedOption.id } };
+          resposta = buildMenuDynamic(nomeLoja, childOpcoes, true);
+        }
+        // ─── FALAR COM EQUIPE: notify sector ───
+        else if (selectedOption.tipo === "falar_equipe") {
+          const setorId = selectedOption.setor_id;
+          let setorNome = "equipe";
+          if (setorId) {
+            const { data: setorData } = await supabase.from("setores").select("nome").eq("id", setorId).single();
+            setorNome = setorData?.nome || "equipe";
+          }
+          // Create in-app notification for the sector
+          await criarNotificacaoFalarEquipe(supabase, setorId, nomeLoja, contato_id);
+          resposta = `✅ Equipe do *${setorNome}* acionada! Um colaborador entrará em contato em breve.\n\nDigite *menu* para nova operação.`;
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        }
+        // ─── FLUXO: start flow (existing logic) ───
+        else {
+          const selectedFluxo = selectedOption.fluxo;
+          const fluxoDef = await loadFluxo(selectedFluxo);
 
-        if (!fluxoDef) {
-          resposta = `⚠️ Fluxo "${selectedFluxo}" não encontrado. ${buildMenuDynamic(nomeLoja, menuOpcoes)}`;
-        } else if (fluxoDef.acao_final?.tipo === "fluxo_especial" && fluxoDef.acao_final?.fluxo_especial === "confirmar_comparecimento") {
-          // Special flow: confirmar_comparecimento (requires appointment listing)
-          const result = await handleConfirmarComparecimento(supabase, loja_info, dados);
-          resposta = result.resposta;
-          updateSessao = result.update;
-        } else {
-          // Generic flow: start at first step
-          const etapas = fluxoDef.etapas as any[];
-          if (etapas.length > 0) {
-            // Check if non-loja needs to select a store first (e.g. payment-links)
-            if (tipoBot !== "loja" && fluxoDef.acao_final?.endpoint === "payment-links") {
-              const lojasDisponiveis = await loadLojasAtivas();
-              if (lojasDisponiveis.length === 0) {
-                resposta = "⚠️ Nenhuma loja cadastrada para seleção. Contate o administrador.\n\nDigite *menu* para voltar.";
-                updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+          if (!fluxoDef) {
+            const rootOpcoes = await loadMenuOpcoes(tipoBot, currentParentId);
+            resposta = `⚠️ Fluxo "${selectedFluxo}" não encontrado. ${buildMenuDynamic(nomeLoja, rootOpcoes, !!currentParentId)}`;
+          } else if (fluxoDef.acao_final?.tipo === "fluxo_especial" && fluxoDef.acao_final?.fluxo_especial === "confirmar_comparecimento") {
+            const result = await handleConfirmarComparecimento(supabase, loja_info, dados);
+            resposta = result.resposta;
+            updateSessao = result.update;
+          } else {
+            const etapas = fluxoDef.etapas as any[];
+            if (etapas.length > 0) {
+              if (tipoBot !== "loja" && fluxoDef.acao_final?.endpoint === "payment-links") {
+                const lojasDisponiveis = await loadLojasAtivas();
+                if (lojasDisponiveis.length === 0) {
+                  resposta = "⚠️ Nenhuma loja cadastrada para seleção. Contate o administrador.\n\nDigite *menu* para voltar.";
+                  updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+                } else {
+                  let msg = "🏪 *Selecione a unidade para gerar o link:*\n\n";
+                  const lojaMap: Record<string, { nome: string; cod: string }> = {};
+                  lojasDisponiveis.forEach((loja, i) => {
+                    msg += `${i + 1}️⃣ ${loja.nome_loja} (${loja.cod_empresa})\n`;
+                    lojaMap[String(i + 1)] = { nome: loja.nome_loja, cod: loja.cod_empresa };
+                  });
+                  msg += "\n_Digite o número da unidade desejada ou *0* para voltar._";
+                  resposta = msg;
+                  updateSessao = { fluxo: selectedFluxo, etapa: "selecionar_loja", dados: { lojas_map: lojaMap } };
+                }
               } else {
-                let msg = "🏪 *Selecione a unidade para gerar o link:*\n\n";
-                const lojaMap: Record<string, { nome: string; cod: string }> = {};
-                lojasDisponiveis.forEach((loja, i) => {
-                  msg += `${i + 1}️⃣ ${loja.nome_loja} (${loja.cod_empresa})\n`;
-                  lojaMap[String(i + 1)] = { nome: loja.nome_loja, cod: loja.cod_empresa };
-                });
-                msg += "\n_Digite o número da unidade desejada ou *0* para voltar._";
-                resposta = msg;
-                updateSessao = { fluxo: selectedFluxo, etapa: "selecionar_loja", dados: { lojas_map: lojaMap } };
+                const primeiraEtapa = etapas[0];
+                resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
+                updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
               }
             } else {
-              const primeiraEtapa = etapas[0];
-              resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
-              updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
+              resposta = "⚠️ Fluxo sem etapas configuradas.";
+              updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
             }
-          } else {
-            resposta = "⚠️ Fluxo sem etapas configuradas.";
-            updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
           }
         }
       } else {
-        resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
+        resposta = buildMenuDynamic(nomeLoja, menuOpcoes, !!currentParentId);
       }
     }
     // ─── Confirmar Comparecimento (special flow) ───
