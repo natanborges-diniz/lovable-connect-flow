@@ -216,6 +216,7 @@ export function GestaoUsuariosCard() {
                           <Badge key={r.id} variant={roleBadgeVariant(r.role) as any} className="text-[10px] gap-1">
                             {roleLabel(r.role)}
                             {r.setor_id && <span className="opacity-70">({getSetorName(r.setor_id)})</span>}
+                            {r.loja_nome && <span className="opacity-70">· {r.loja_nome}</span>}
                             <button
                               onClick={() => removeRole.mutate(r.id)}
                               className="ml-0.5 hover:text-destructive"
@@ -238,13 +239,25 @@ export function GestaoUsuariosCard() {
                               </SelectContent>
                             </Select>
                             {newRole === "setor_usuario" && (
-                              <Select value={newSetorId} onValueChange={setNewSetorId}>
+                              <Select value={newSetorId} onValueChange={(v) => { setNewSetorId(v); setNewLojaNome(""); }}>
                                 <SelectTrigger className="h-6 w-28 text-[10px]">
                                   <SelectValue placeholder="Setor" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {setores?.map((s) => (
                                     <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {newRole === "setor_usuario" && isLojaSetor(newSetorId) && (
+                              <Select value={newLojaNome} onValueChange={setNewLojaNome}>
+                                <SelectTrigger className="h-6 w-36 text-[10px]">
+                                  <SelectValue placeholder="Selecione a loja" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {lojas?.map((l) => (
+                                    <SelectItem key={l} value={l}>{l}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
@@ -256,8 +269,9 @@ export function GestaoUsuariosCard() {
                                 userId: p.id,
                                 role: newRole,
                                 setorId: newRole === "setor_usuario" ? newSetorId : undefined,
+                                lojaNome: newRole === "setor_usuario" && isLojaSetor(newSetorId) ? newLojaNome : undefined,
                               })}
-                              disabled={addRole.isPending || (newRole === "setor_usuario" && !newSetorId)}
+                              disabled={addRole.isPending || (newRole === "setor_usuario" && !newSetorId) || (newRole === "setor_usuario" && isLojaSetor(newSetorId) && !newLojaNome)}
                             >
                               OK
                             </Button>
