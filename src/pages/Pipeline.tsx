@@ -25,8 +25,7 @@ import {
 } from "@/components/ui/select";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
-  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw, LogOut,
-  ChevronDown, ChevronUp, UserCheck,
+  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -814,7 +813,7 @@ function ConversationPanel({
     );
   }
 
-  const currentColuna = allColunas?.find((c) => c.id === contato?.pipeline_coluna_id);
+  
 
   return (
     <>
