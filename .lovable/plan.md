@@ -1,44 +1,62 @@
 
 
-# Setor e Role Padrão para Novos Usuários
+# Segregação de Agendamentos por Loja — Permissões por Unidade
 
 ## Problema
-Quando um usuário entra no sistema (via SSO ou primeiro login), ele não recebe nenhum `user_role`, ficando sem acesso configurado.
+
+O setor chamado "Agendamentos" é na verdade o setor das **Lojas**. Cada loja (ex: DINIZ PRIMITIVA I) precisa ver **apenas os agendamentos da sua unidade**, enquanto admin/operador vê tudo. Hoje não existe vínculo entre o usuário e a loja específica.
 
 ## Solução
-Armazenar uma configuração de "setor padrão" e "role padrão" na tabela `configuracoes_ia` (que já serve como key-value store) e aplicar automaticamente no trigger `handle_new_user` quando um novo usuário é criado.
 
-## Implementação
+### 1. Renomear setor "Agendamentos" → "Loja"
 
-### 1. Configuração na UI (GestaoUsuariosCard)
-Adicionar no topo do card uma seção "Padrão para novos usuários" com dois dropdowns:
-- **Role padrão** (admin / operador / setor_usuario) — salva em `configuracoes_ia` com chave `default_role`
-- **Setor padrão** (lista de setores ativos) — salva em `configuracoes_ia` com chave `default_setor_id`
+Atualizar o registro na tabela `setores` (id: `277307f3-...`) de "Agendamentos" para "Loja".
 
-### 2. Migração SQL — Atualizar `handle_new_user`
-Modificar a função `handle_new_user` para, após criar o profile, buscar as configurações padrão e inserir automaticamente um registro em `user_roles`:
+### 2. Adicionar campo `loja_nome` na tabela `user_roles`
 
-```sql
--- Dentro do handle_new_user, após INSERT INTO profiles:
-SELECT valor INTO _default_role FROM configuracoes_ia WHERE chave = 'default_role';
-SELECT valor INTO _default_setor FROM configuracoes_ia WHERE chave = 'default_setor_id';
+Novo campo opcional que identifica **qual loja específica** o `setor_usuario` do setor "Loja" pode ver. Exemplo: um usuário com `setor_id = Loja` e `loja_nome = "DINIZ PRIMITIVA I"` só verá agendamentos dessa unidade.
 
-IF _default_role IS NOT NULL THEN
-  INSERT INTO user_roles (user_id, role, setor_id)
-  VALUES (NEW.id, _default_role::app_role, _default_setor::uuid)
-  ON CONFLICT DO NOTHING;
-  
-  -- Atualizar setor no profile
-  IF _default_setor IS NOT NULL THEN
-    UPDATE profiles SET setor_id = _default_setor::uuid WHERE id = NEW.id;
-  END IF;
-END IF;
+```text
+user_roles
+├── user_id
+├── role (setor_usuario)
+├── setor_id → setores.id (Loja)
+└── loja_nome (NEW) → "DINIZ PRIMITIVA I"
 ```
 
-### 3. Arquivos modificados
+### 3. Filtro automático no Pipeline de Agendamentos
+
+Em `PipelineAgendamentos.tsx`:
+- Se `isAdmin` ou `isOperador`: mostra tudo (com filtro manual por loja)
+- Se `setor_usuario` com setor "Loja": aplica `filtroLoja` automático com o `loja_nome` do `user_roles`, sem dropdown de troca
+
+### 4. Atualizar navegação
+
+Em `TopNavigation.tsx`, adicionar mapeamento:
+- Setor "loja" → módulos: `["dashboard", "agendamentos"]`
+
+### 5. Gestão de Usuários — seleção de loja
+
+Em `GestaoUsuariosCard.tsx`, quando o admin atribui setor "Loja" a um usuário, mostrar um dropdown adicional com as lojas de `telefones_lojas` (tipo = 'loja') para definir o `loja_nome`.
+
+### 6. Expor `loja_nome` no useAuth
+
+Atualizar `useAuth.tsx` para incluir `loja_nome` dos roles do usuário, disponibilizando para o pipeline filtrar automaticamente.
+
+## Arquivos Modificados
 
 | Arquivo | Mudança |
 |---------|---------|
-| Migração SQL | Atualizar função `handle_new_user` para aplicar role/setor padrão |
-| `src/components/configuracoes/GestaoUsuariosCard.tsx` | Seção de configuração de defaults com dois dropdowns |
+| Migração SQL | `ALTER TABLE user_roles ADD COLUMN loja_nome text` |
+| Data update | `UPDATE setores SET nome = 'Loja' WHERE id = '277307f3-...'` |
+| `src/hooks/useAuth.tsx` | Expor `loja_nome` do user_role |
+| `src/pages/PipelineAgendamentos.tsx` | Auto-filtrar por `loja_nome` para `setor_usuario` |
+| `src/components/layout/TopNavigation.tsx` | Mapear setor "loja" → `["dashboard", "agendamentos"]` |
+| `src/components/configuracoes/GestaoUsuariosCard.tsx` | Dropdown de loja ao atribuir setor "Loja" |
+
+## Resultado
+
+- DINIZ PRIMITIVA I loga → vê apenas seus agendamentos
+- Admin/Operador → vê todas as lojas com filtro manual
+- Gestão centralizada: admin atribui loja + setor em Configurações
 
