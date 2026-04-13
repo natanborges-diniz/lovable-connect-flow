@@ -8,6 +8,7 @@ interface UserRole {
   id: string;
   role: AppRole;
   setor_id: string | null;
+  loja_nome: string | null;
 }
 
 interface Profile {
@@ -30,6 +31,7 @@ interface AuthContextType {
   isOperador: boolean;
   hasRole: (role: AppRole) => boolean;
   getUserSetorIds: () => string[];
+  getUserLojaNames: () => string[];
   signOut: () => Promise<void>;
 }
 
@@ -43,6 +45,7 @@ const AuthContext = createContext<AuthContextType>({
   isOperador: false,
   hasRole: () => false,
   getUserSetorIds: () => [],
+  getUserLojaNames: () => [],
   signOut: async () => {},
 });
 
@@ -71,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       id: r.id,
       role: r.role as AppRole,
       setor_id: r.setor_id,
+      loja_nome: r.loja_nome || null,
     })));
   };
 
@@ -118,6 +122,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [roles]
   );
 
+  const getUserLojaNames = useCallback(
+    () => roles.filter((r) => r.loja_nome).map((r) => r.loja_nome!),
+    [roles]
+  );
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -127,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, loading, isAdmin, isOperador, hasRole, getUserSetorIds, signOut }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, loading, isAdmin, isOperador, hasRole, getUserSetorIds, getUserLojaNames, signOut }}>
       {children}
     </AuthContext.Provider>
   );
