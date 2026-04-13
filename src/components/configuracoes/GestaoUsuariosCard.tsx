@@ -13,6 +13,22 @@ import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 
 type AppRole = "admin" | "operador" | "setor_usuario";
 
+function useLojas() {
+  return useQuery({
+    queryKey: ["telefones-lojas-nomes"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("telefones_lojas")
+        .select("nome_loja")
+        .eq("tipo", "loja")
+        .eq("ativo", true);
+      if (error) throw error;
+      const unique = [...new Set((data || []).map((d) => d.nome_loja))].sort();
+      return unique;
+    },
+  });
+}
+
 function useProfiles() {
   return useQuery({
     queryKey: ["admin-profiles"],
@@ -35,7 +51,7 @@ function useAllRoles() {
         .from("user_roles")
         .select("*");
       if (error) throw error;
-      return data as Array<{ id: string; user_id: string; role: AppRole; setor_id: string | null }>;
+      return data as Array<{ id: string; user_id: string; role: AppRole; setor_id: string | null; loja_nome: string | null }>;
     },
   });
 }

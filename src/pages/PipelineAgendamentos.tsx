@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAgendamentos, Agendamento } from "@/hooks/useAgendamentos";
 import { Card, CardContent } from "@/components/ui/card";
