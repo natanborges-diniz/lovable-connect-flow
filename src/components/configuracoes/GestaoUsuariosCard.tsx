@@ -71,11 +71,16 @@ export function GestaoUsuariosCard() {
   const { data: profiles, isLoading: loadingProfiles } = useProfiles();
   const { data: allRoles, isLoading: loadingRoles } = useAllRoles();
   const { data: setores } = useSetores();
+  const { data: lojas } = useLojas();
   const queryClient = useQueryClient();
 
   const [addingFor, setAddingFor] = useState<string | null>(null);
   const [newRole, setNewRole] = useState<AppRole>("setor_usuario");
   const [newSetorId, setNewSetorId] = useState("");
+  const [newLojaNome, setNewLojaNome] = useState("");
+
+  const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
+  const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
 
   const addRole = useMutation({
     mutationFn: async ({ userId, role, setorId }: { userId: string; role: AppRole; setorId?: string }) => {
