@@ -234,11 +234,6 @@ export default function Pipeline() {
     setDeleteConfirm(null);
   };
 
-  // Check if a contact has active human intervention via atendimento modo
-  const isContatoHumano = (contatoId: string) => {
-    const at = atendimentoByContato.get(contatoId);
-    return at?.modo === "humano";
-  };
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const firstColumnId = (colunas ?? []).sort((a, b) => a.ordem - b.ordem)[0]?.id;
