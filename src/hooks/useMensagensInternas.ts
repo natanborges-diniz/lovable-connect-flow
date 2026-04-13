@@ -45,8 +45,8 @@ export function useMensagensInternas() {
           qc.invalidateQueries({ queryKey: ["conversas-internas"] });
           qc.invalidateQueries({ queryKey: ["total-nao-lidas"] });
         }
-      )
-      .subscribe();
+      );
+    channel.subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [uid, qc]);
 
