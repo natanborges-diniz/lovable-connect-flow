@@ -83,10 +83,10 @@ export function GestaoUsuariosCard() {
   const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
 
   const addRole = useMutation({
-    mutationFn: async ({ userId, role, setorId }: { userId: string; role: AppRole; setorId?: string }) => {
-      const { error } = await supabase
+    mutationFn: async ({ userId, role, setorId, lojaNome }: { userId: string; role: AppRole; setorId?: string; lojaNome?: string }) => {
+      const { error } = await (supabase as any)
         .from("user_roles")
-        .insert({ user_id: userId, role, setor_id: setorId || null });
+        .insert({ user_id: userId, role, setor_id: setorId || null, loja_nome: lojaNome || null });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -94,6 +94,7 @@ export function GestaoUsuariosCard() {
       setAddingFor(null);
       setNewRole("setor_usuario");
       setNewSetorId("");
+      setNewLojaNome("");
       toast.success("Permissão adicionada");
     },
     onError: (e: any) => toast.error(e.message),
