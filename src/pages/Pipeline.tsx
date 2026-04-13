@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
@@ -16,6 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
   MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw,
@@ -314,6 +321,62 @@ export default function Pipeline() {
         </div>
       )}
 
+      {/* Human Queue Panel */}
+      {!isLoading && (() => {
+        const humanCards = (contatos ?? []).filter((c) => {
+          const at = atendimentoByContato.get(c.id);
+          return at?.modo === "humano";
+        });
+        if (humanCards.length === 0) return null;
+        return (
+          <Card className="mb-4 border-destructive/30 bg-destructive/5">
+            <CardHeader className="py-2 px-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-destructive animate-pulse" />
+                <CardTitle className="text-sm text-destructive">
+                  Fila de Atendimento Humano
+                </CardTitle>
+                <Badge variant="destructive" className="text-xs">
+                  {humanCards.length}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="px-4 pb-3">
+              <div className="flex gap-2 overflow-x-auto">
+                {humanCards
+                  .sort((a, b) => new Date(a.ultimo_contato_at || a.created_at).getTime() - new Date(b.ultimo_contato_at || b.created_at).getTime())
+                  .map((c) => {
+                    const coluna = colunas.find((col) => col.id === c.pipeline_coluna_id);
+                    return (
+                      <Card
+                        key={c.id}
+                        className="flex-shrink-0 w-56 cursor-pointer hover:ring-1 hover:ring-destructive/50 border-destructive/20"
+                        onClick={() => setSelectedContatoId(c.id)}
+                      >
+                        <CardContent className="p-2.5 space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <User className="h-3.5 w-3.5 text-destructive" />
+                            <p className="font-medium text-xs truncate">{c.nome}</p>
+                          </div>
+                          {coluna && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0">{coluna.nome}</Badge>
+                          )}
+                          {c.ultimo_contato_at && (
+                            <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                              <Clock className="h-2.5 w-2.5" />
+                              Esperando {formatDistanceToNow(new Date(c.ultimo_contato_at), { locale: ptBR })}
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
       ) : (
@@ -503,7 +566,7 @@ export default function Pipeline() {
                                             className="h-6 text-[10px] px-2 text-muted-foreground hover:text-primary"
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              navigate(`/atendimentos?open=${atInfo.id}`);
+                                              navigate(`/crm/conversas?open=${atInfo.id}`);
                                             }}
                                           >
                                             <MessageSquare className="h-3 w-3 mr-1" />
@@ -647,6 +710,9 @@ function ConversationPanel({
 }) {
   const { data: contatos } = useContatos();
   const contato = contatos?.find((c) => c.id === contatoId);
+  const { data: allColunas } = usePipelineColunas();
+  const updateContato = useUpdateContato();
+  const queryClient = useQueryClient();
 
   // Find the latest open atendimento for this contato
   const { data: atendimentoData } = useQuery({
@@ -667,6 +733,70 @@ function ConversationPanel({
 
   const atendimentoId = atendimentoData?.id || atendimentoInfo?.id;
 
+  // Group columns by grupo_funil for selector
+  const colunasGrouped = useMemo(() => {
+    if (!allColunas) return {};
+    const groups: Record<string, typeof allColunas> = {};
+    for (const col of allColunas) {
+      const g = col.grupo_funil || "Outros";
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(col);
+    }
+    return groups;
+  }, [allColunas]);
+
+  const handleMoveToColumn = async (colunaId: string) => {
+    if (!contato) return;
+    const previousColunaId = contato.pipeline_coluna_id;
+    updateContato.mutate({ id: contatoId, pipeline_coluna_id: colunaId } as any, {
+      onSuccess: () => {
+        toast.success("Contato movido com sucesso");
+        // Trigger automations
+        supabase.functions.invoke("pipeline-automations", {
+          body: {
+            entity_type: "contato",
+            entity_id: contatoId,
+            coluna_id: colunaId,
+            coluna_anterior_id: previousColunaId,
+          },
+        });
+      },
+    });
+  };
+
+  const handleEncerrarAtendimento = async () => {
+    if (!atendimentoId) return;
+    try {
+      // Generate summary
+      await supabase.functions.invoke("summarize-atendimento", {
+        body: { atendimento_id: atendimentoId },
+      });
+
+      // Close atendimento
+      const { error } = await supabase
+        .from("atendimentos")
+        .update({ status: "encerrado", fim_at: new Date().toISOString() } as any)
+        .eq("id", atendimentoId);
+      if (error) throw error;
+
+      // Cancel recovery cadence
+      if (contato) {
+        const meta = (contato.metadata as any) || {};
+        if (meta.recuperacao_vendas) {
+          await supabase.from("contatos").update({
+            metadata: { ...meta, recuperacao_vendas: { ...meta.recuperacao_vendas, status: "encerrado_manual" } },
+          } as any).eq("id", contatoId);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["atendimento_contato", contatoId] });
+      queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+      toast.success("Atendimento encerrado com sucesso");
+    } catch (e: any) {
+      toast.error("Erro ao encerrar: " + e.message);
+    }
+  };
+
   if (!atendimentoId) {
     return (
       <>
@@ -683,7 +813,48 @@ function ConversationPanel({
     );
   }
 
-  return <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />;
+  
+
+  return (
+    <>
+      {/* Column selector + close controls */}
+      <div className="flex items-center gap-2 flex-wrap border-b pb-2 mb-2">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="text-xs text-muted-foreground shrink-0">Etapa:</span>
+          <Select
+            value={contato?.pipeline_coluna_id || ""}
+            onValueChange={handleMoveToColumn}
+          >
+            <SelectTrigger className="h-7 text-xs w-48">
+              <SelectValue placeholder="Selecionar coluna" />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(colunasGrouped).map(([grupo, cols]) => (
+                <div key={grupo}>
+                  <p className="text-[10px] font-semibold text-muted-foreground px-2 pt-1.5 pb-0.5 uppercase">{grupo}</p>
+                  {(cols as any[]).sort((a, b) => a.ordem - b.ordem).map((col) => (
+                    <SelectItem key={col.id} value={col.id} className="text-xs">
+                      {col.nome}
+                    </SelectItem>
+                  ))}
+                </div>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={handleEncerrarAtendimento}
+        >
+          <X className="h-3 w-3 mr-1" /> Encerrar Atendimento
+        </Button>
+      </div>
+
+      <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />
+    </>
+  );
 }
 
 function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; contatoNome: string }) {

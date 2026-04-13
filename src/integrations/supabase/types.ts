@@ -534,6 +534,48 @@ export type Database = {
         }
         Relationships: []
       }
+      cron_jobs: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          descricao: string | null
+          expressao_cron: string
+          funcao_alvo: string
+          id: string
+          nome: string
+          payload: Json
+          pg_cron_job_id: number | null
+          ultimo_disparo: string | null
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          expressao_cron?: string
+          funcao_alvo: string
+          id?: string
+          nome: string
+          payload?: Json
+          pg_cron_job_id?: number | null
+          ultimo_disparo?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          expressao_cron?: string
+          funcao_alvo?: string
+          id?: string
+          nome?: string
+          payload?: Json
+          pg_cron_job_id?: number | null
+          ultimo_disparo?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       eventos_crm: {
         Row: {
           contato_id: string
@@ -1498,6 +1540,11 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       nextval_protocolo: { Args: never; Returns: number }
+      schedule_cron_job: {
+        Args: { cron_expression: string; job_name: string; sql_command: string }
+        Returns: number
+      }
+      unschedule_cron_job: { Args: { job_name: string }; Returns: undefined }
     }
     Enums: {
       app_role: "admin" | "operador" | "setor_usuario"
