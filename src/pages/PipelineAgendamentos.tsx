@@ -1,10 +1,12 @@
 import { useState, useMemo } from "react";
+import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAgendamentos, Agendamento } from "@/hooks/useAgendamentos";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarDays, MapPin, User, FileText, ShoppingCart, CheckCircle2, AlertCircle } from "lucide-react";
+import { CalendarDays, MapPin, User, FileText, ShoppingCart, CheckCircle2, AlertCircle, Plus } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -40,6 +42,7 @@ export default function PipelineAgendamentos() {
   const queryClient = useQueryClient();
   const [selectedAg, setSelectedAg] = useState<Agendamento | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const lojas = useMemo(() => {
     const set = new Set(agendamentos.map((a) => a.loja_nome));
@@ -139,21 +142,26 @@ export default function PipelineAgendamentos() {
         title="Pipeline de Agendamentos"
         description="Arraste cards entre colunas para disparar automações. Clique para editar."
         actions={
-          !isLojaUser ? (
-            <Select value={filtroLoja} onValueChange={(v) => setFiltroLoja(v === "all" ? "" : v)}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Todas as lojas" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as lojas</SelectItem>
-                {lojas.map((l) => (
-                  <SelectItem key={l} value={l}>{l}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Badge variant="outline" className="text-xs">{userLojas[0]}</Badge>
-          )
+          <div className="flex items-center gap-2">
+            {!isLojaUser ? (
+              <Select value={filtroLoja} onValueChange={(v) => setFiltroLoja(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Todas as lojas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as lojas</SelectItem>
+                  {lojas.map((l) => (
+                    <SelectItem key={l} value={l}>{l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Badge variant="outline" className="text-xs">{userLojas[0]}</Badge>
+            )}
+            <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Nova Demanda
+            </Button>
+          </div>
         }
       />
 
@@ -298,6 +306,12 @@ export default function PipelineAgendamentos() {
         agendamento={selectedAg}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+      />
+
+      <CreateCardDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        pipelineType="agendamento"
       />
     </div>
   );

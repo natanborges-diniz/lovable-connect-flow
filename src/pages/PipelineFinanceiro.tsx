@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
   usePipelineColunas,
@@ -109,6 +110,8 @@ export default function PipelineFinanceiro() {
   const [addingColuna, setAddingColuna] = useState(false);
   const [newColunaNome, setNewColunaNome] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const firstColumnId = (colunas ?? []).sort((a, b) => a.ordem - b.ordem)[0]?.id;
 
   const updateSolicitacaoColuna = useMutation({
     mutationFn: async ({ id, pipeline_coluna_id }: { id: string; pipeline_coluna_id: string }) => {
@@ -239,6 +242,9 @@ export default function PipelineFinanceiro() {
                 className="pl-9 w-60"
               />
             </div>
+            <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Nova Demanda
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setAddingColuna(true)}>
               <Plus className="h-4 w-4 mr-1" /> Coluna
             </Button>
@@ -626,6 +632,14 @@ export default function PipelineFinanceiro() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CreateCardDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        pipelineType="financeiro"
+        firstColumnId={firstColumnId}
+        setorId={setorId}
+      />
     </>
   );
 }

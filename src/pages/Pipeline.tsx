@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { useContatos, useUpdateContato } from "@/hooks/useContatos";
 import {
   usePipelineColunas,
@@ -201,6 +202,9 @@ export default function Pipeline() {
   const isAtendimentoHumano = (colNome: string) =>
     colNome.toLowerCase().includes("atendimento humano");
 
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const firstColumnId = (colunas ?? []).sort((a, b) => a.ordem - b.ordem)[0]?.id;
+
   return (
     <>
       <PageHeader
@@ -235,6 +239,9 @@ export default function Pipeline() {
                 className="pl-9 w-60"
               />
             </div>
+            <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Nova Demanda
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setAddingColuna(true)}>
               <Plus className="h-4 w-4 mr-1" /> Coluna
             </Button>
@@ -536,6 +543,13 @@ export default function Pipeline() {
           )}
         </DialogContent>
       </Dialog>
+
+      <CreateCardDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        pipelineType="crm"
+        firstColumnId={firstColumnId}
+      />
 
       {/* Confirm delete dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
