@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAgendamentos, Agendamento } from "@/hooks/useAgendamentos";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { AgendamentoDialog } from "@/components/agendamentos/AgendamentoDialog";
+import { useAuth } from "@/hooks/useAuth";
 
 const STATUS_COLUMNS = [
   { key: "agendado", label: "Agendado", color: "bg-blue-500" },
@@ -29,8 +30,13 @@ const STATUS_COLUMNS = [
 ];
 
 export default function PipelineAgendamentos() {
+  const { isAdmin, isOperador, getUserLojaNames } = useAuth();
+  const userLojas = getUserLojaNames();
+  const isLojaUser = !isAdmin && !isOperador && userLojas.length > 0;
+
   const [filtroLoja, setFiltroLoja] = useState<string>("");
-  const { data: agendamentos = [], isLoading } = useAgendamentos(filtroLoja || undefined);
+  const effectiveFiltro = isLojaUser ? userLojas[0] : filtroLoja;
+  const { data: agendamentos = [], isLoading } = useAgendamentos(effectiveFiltro || undefined);
   const queryClient = useQueryClient();
   const [selectedAg, setSelectedAg] = useState<Agendamento | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -133,17 +139,21 @@ export default function PipelineAgendamentos() {
         title="Pipeline de Agendamentos"
         description="Arraste cards entre colunas para disparar automações. Clique para editar."
         actions={
-          <Select value={filtroLoja} onValueChange={(v) => setFiltroLoja(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Todas as lojas" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as lojas</SelectItem>
-              {lojas.map((l) => (
-                <SelectItem key={l} value={l}>{l}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          !isLojaUser ? (
+            <Select value={filtroLoja} onValueChange={(v) => setFiltroLoja(v === "all" ? "" : v)}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Todas as lojas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas as lojas</SelectItem>
+                {lojas.map((l) => (
+                  <SelectItem key={l} value={l}>{l}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Badge variant="outline" className="text-xs">{userLojas[0]}</Badge>
+          )
         }
       />
 
