@@ -1398,6 +1398,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          loja_nome: string | null
           role: Database["public"]["Enums"]["app_role"]
           setor_id: string | null
           user_id: string
@@ -1405,6 +1406,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          loja_nome?: string | null
           role: Database["public"]["Enums"]["app_role"]
           setor_id?: string | null
           user_id: string
@@ -1412,6 +1414,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          loja_nome?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           setor_id?: string | null
           user_id?: string
