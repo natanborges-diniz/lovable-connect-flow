@@ -766,13 +766,68 @@ serve(async (req) => {
 });
 
 // ─── Menu builder ───
-function buildMenuDynamic(nomeLoja: string, opcoes: Array<{ emoji: string; titulo: string }>): string {
-  let menu = `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n`;
+function buildMenuDynamic(nomeLoja: string, opcoes: Array<{ emoji: string; titulo: string }>, isSubMenu: boolean): string {
+  let menu = isSubMenu
+    ? `Escolha uma opção:\n\n`
+    : `Olá *${nomeLoja}*! 👋\n\nEscolha uma opção:\n\n`;
   opcoes.forEach((op, i) => {
     menu += `${op.emoji || `${i + 1}️⃣`} ${op.titulo}\n`;
   });
-  menu += `\n_Digite o número da opção desejada._\n_A qualquer momento, digite *0* para voltar ao menu._`;
+  if (isSubMenu) {
+    menu += `\n0️⃣ ⬅️ Voltar`;
+  }
+  menu += `\n\n_Digite o número da opção desejada._`;
   return menu;
+}
+
+// ─── "Falar com equipe" notification creator ───
+async function criarNotificacaoFalarEquipe(
+  supabase: any,
+  setorId: string | null,
+  nomeLoja: string,
+  contatoId: string
+) {
+  try {
+    const notifs: any[] = [];
+    
+    // Sector-wide notification
+    if (setorId) {
+      notifs.push({
+        setor_id: setorId,
+        titulo: `💬 ${nomeLoja} quer falar com a equipe`,
+        mensagem: `A loja ${nomeLoja} solicitou contato direto via bot.`,
+        tipo: "falar_equipe",
+        referencia_id: null,
+      });
+
+      // Individual notifications for sector members
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("setor_id", setorId)
+        .eq("ativo", true);
+
+      if (profiles?.length) {
+        for (const p of profiles) {
+          notifs.push({
+            usuario_id: p.id,
+            setor_id: setorId,
+            titulo: `💬 ${nomeLoja} quer falar com a equipe`,
+            mensagem: `A loja ${nomeLoja} solicitou contato direto via bot.`,
+            tipo: "falar_equipe",
+            referencia_id: null,
+          });
+        }
+      }
+    }
+
+    if (notifs.length > 0) {
+      await supabase.from("notificacoes").insert(notifs);
+      console.log(`[bot-lojas] Created ${notifs.length} falar_equipe notifications for sector ${setorId}`);
+    }
+  } catch (e) {
+    console.error("[bot-lojas] criarNotificacaoFalarEquipe error:", e);
+  }
 }
 
 // ─── Confirmar Comparecimento (special handler) ───
