@@ -120,14 +120,38 @@ export default function Pipeline() {
     );
   });
 
-  
+  // Build segment groups from grupo_funil
+  const grupoFunilSet = new Set<string>();
+  for (const col of colunas) {
+    grupoFunilSet.add(col.grupo_funil || "Outros");
+  }
+  const segmentOrder = ["Triagem", "Comercial", "Pós-Venda", "SAC", "Outros", "Terminal"];
+  const segments = Array.from(grupoFunilSet).sort((a, b) => {
+    const ia = segmentOrder.indexOf(a);
+    const ib = segmentOrder.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
   const colunasInternasIds = new Set((colunasInternas ?? []).map(c => c.id));
 
-  const contatosByColuna = (colunas ?? []).map((col) => ({
+  // Filter columns by active segment
+  const filteredColunas = activeSegment === "todos"
+    ? colunas
+    : colunas.filter(c => (c.grupo_funil || "Outros") === activeSegment);
+
+  const contatosByColuna = (filteredColunas ?? []).map((col) => ({
     ...col,
     isInternal: colunasInternasIds.has(col.id),
     contatos: filteredContatos.filter((c) => c.pipeline_coluna_id === col.id),
   }));
+
+  // Count contacts per segment for badges
+  const segmentCounts: Record<string, number> = {};
+  for (const seg of segments) {
+    const segCols = colunas.filter(c => (c.grupo_funil || "Outros") === seg);
+    const segColIds = new Set(segCols.map(c => c.id));
+    segmentCounts[seg] = filteredContatos.filter(c => c.pipeline_coluna_id && segColIds.has(c.pipeline_coluna_id)).length;
+  }
 
   const semColuna = filteredContatos.filter(
     (c) => !c.pipeline_coluna_id || !(colunas ?? []).some((col) => col.id === c.pipeline_coluna_id)
