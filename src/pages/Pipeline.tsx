@@ -322,6 +322,62 @@ export default function Pipeline() {
         </div>
       )}
 
+      {/* Human Queue Panel */}
+      {!isLoading && (() => {
+        const humanCards = (contatos ?? []).filter((c) => {
+          const at = atendimentoByContato.get(c.id);
+          return at?.modo === "humano";
+        });
+        if (humanCards.length === 0) return null;
+        return (
+          <Card className="mb-4 border-destructive/30 bg-destructive/5">
+            <CardHeader className="py-2 px-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-destructive animate-pulse" />
+                <CardTitle className="text-sm text-destructive">
+                  Fila de Atendimento Humano
+                </CardTitle>
+                <Badge variant="destructive" className="text-xs">
+                  {humanCards.length}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="px-4 pb-3">
+              <div className="flex gap-2 overflow-x-auto">
+                {humanCards
+                  .sort((a, b) => new Date(a.ultimo_contato_at || a.created_at).getTime() - new Date(b.ultimo_contato_at || b.created_at).getTime())
+                  .map((c) => {
+                    const coluna = colunas.find((col) => col.id === c.pipeline_coluna_id);
+                    return (
+                      <Card
+                        key={c.id}
+                        className="flex-shrink-0 w-56 cursor-pointer hover:ring-1 hover:ring-destructive/50 border-destructive/20"
+                        onClick={() => setSelectedContatoId(c.id)}
+                      >
+                        <CardContent className="p-2.5 space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <User className="h-3.5 w-3.5 text-destructive" />
+                            <p className="font-medium text-xs truncate">{c.nome}</p>
+                          </div>
+                          {coluna && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0">{coluna.nome}</Badge>
+                          )}
+                          {c.ultimo_contato_at && (
+                            <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                              <Clock className="h-2.5 w-2.5" />
+                              Esperando {formatDistanceToNow(new Date(c.ultimo_contato_at), { locale: ptBR })}
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
       ) : (
