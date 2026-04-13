@@ -534,6 +534,48 @@ export type Database = {
         }
         Relationships: []
       }
+      cron_jobs: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          descricao: string | null
+          expressao_cron: string
+          funcao_alvo: string
+          id: string
+          nome: string
+          payload: Json
+          pg_cron_job_id: number | null
+          ultimo_disparo: string | null
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          expressao_cron?: string
+          funcao_alvo: string
+          id?: string
+          nome: string
+          payload?: Json
+          pg_cron_job_id?: number | null
+          ultimo_disparo?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          expressao_cron?: string
+          funcao_alvo?: string
+          id?: string
+          nome?: string
+          payload?: Json
+          pg_cron_job_id?: number | null
+          ultimo_disparo?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       eventos_crm: {
         Row: {
           contato_id: string
