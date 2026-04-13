@@ -9,7 +9,7 @@ import {
   useCreatePipelineColuna,
   useUpdatePipelineColuna,
   useDeletePipelineColuna,
-  type PipelineColunaComSetor,
+  
 } from "@/hooks/usePipelineColunas";
 import { TransferPipelineDialog } from "@/components/pipeline/TransferPipelineDialog";
 import { TipoContatoBadge, AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
