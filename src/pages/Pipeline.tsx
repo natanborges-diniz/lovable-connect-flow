@@ -396,7 +396,6 @@ export default function Pipeline() {
                 style={{ minHeight: "60vh" }}
               >
             {contatosByColuna.map((coluna, colIndex) => {
-              const hasHumanCards = coluna.contatos.some((c: any) => isContatoHumano(c.id));
               return (
                 <Draggable key={coluna.id} draggableId={`col-${coluna.id}`} index={colIndex}>
                   {(colDragProvided, colDragSnapshot) => (
