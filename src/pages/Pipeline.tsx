@@ -544,6 +544,13 @@ export default function Pipeline() {
         </DialogContent>
       </Dialog>
 
+      <CreateCardDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        pipelineType="crm"
+        firstColumnId={firstColumnId}
+      />
+
       {/* Confirm delete dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <AlertDialogContent>
