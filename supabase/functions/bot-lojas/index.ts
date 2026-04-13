@@ -736,7 +736,8 @@ serve(async (req) => {
     }
     // ─── Fallback ───
     else {
-      resposta = buildMenuDynamic(nomeLoja, menuOpcoes);
+      const rootOpcoes = await loadMenuOpcoes(tipoBot, null);
+      resposta = buildMenuDynamic(nomeLoja, rootOpcoes, false);
       updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
     }
 
