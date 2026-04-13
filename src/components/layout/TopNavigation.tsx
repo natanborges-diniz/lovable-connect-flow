@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Bell } from "lucide-react";
+import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Bell, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -26,15 +26,16 @@ const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defa
   { key: "solicitacoes", label: "Solicitações", icon: FileText, defaultPath: "/solicitacoes" },
   { key: "atendimentos", label: "Atendimentos", icon: MessageSquare, defaultPath: "/atendimentos" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
+  { key: "mensagens", label: "Mensagens", icon: Mail, defaultPath: "/mensagens" },
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
 ];
 
 // Map setor names to allowed modules
 const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
-  financeiro: ["dashboard", "financeiro", "solicitacoes", "tarefas"],
-  ti: ["dashboard", "solicitacoes", "tarefas"],
-  atendimento: ["dashboard", "atendimentos", "solicitacoes", "tarefas"],
-  loja: ["dashboard", "agendamentos"],
+  financeiro: ["dashboard", "financeiro", "solicitacoes", "tarefas", "mensagens"],
+  ti: ["dashboard", "solicitacoes", "tarefas", "mensagens"],
+  atendimento: ["dashboard", "atendimentos", "solicitacoes", "tarefas", "mensagens"],
+  loja: ["dashboard", "agendamentos", "mensagens"],
 };
 
 function useSetorNames(setorIds: string[]) {

@@ -92,7 +92,7 @@ export default function Mensagens() {
 
   return (
     <div>
-      <PageHeader title="Mensagens" subtitle="Comunicação interna entre usuários" />
+      <PageHeader title="Mensagens" description="Comunicação interna entre usuários" />
       <div className="flex border rounded-lg bg-card h-[calc(100vh-12rem)] overflow-hidden">
         {/* Left: Conversation list */}
         <div className="w-80 border-r flex flex-col flex-shrink-0">
