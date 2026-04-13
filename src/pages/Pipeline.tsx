@@ -50,6 +50,7 @@ export default function Pipeline() {
   const [search, setSearch] = useState("");
   const [cicloFilter, setCicloFilter] = useState<"todos" | "novos" | "retornos">("todos");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
+  const [activeSegment, setActiveSegment] = useState<string>("todos");
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunasVendas, isLoading: loadingColunasVendas } = usePipelineColunas();
   const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
@@ -119,14 +120,38 @@ export default function Pipeline() {
     );
   });
 
-  
+  // Build segment groups from grupo_funil
+  const grupoFunilSet = new Set<string>();
+  for (const col of colunas) {
+    grupoFunilSet.add(col.grupo_funil || "Outros");
+  }
+  const segmentOrder = ["Triagem", "Comercial", "Pós-Venda", "SAC", "Outros", "Terminal"];
+  const segments = Array.from(grupoFunilSet).sort((a, b) => {
+    const ia = segmentOrder.indexOf(a);
+    const ib = segmentOrder.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
   const colunasInternasIds = new Set((colunasInternas ?? []).map(c => c.id));
 
-  const contatosByColuna = (colunas ?? []).map((col) => ({
+  // Filter columns by active segment
+  const filteredColunas = activeSegment === "todos"
+    ? colunas
+    : colunas.filter(c => (c.grupo_funil || "Outros") === activeSegment);
+
+  const contatosByColuna = (filteredColunas ?? []).map((col) => ({
     ...col,
     isInternal: colunasInternasIds.has(col.id),
     contatos: filteredContatos.filter((c) => c.pipeline_coluna_id === col.id),
   }));
+
+  // Count contacts per segment for badges
+  const segmentCounts: Record<string, number> = {};
+  for (const seg of segments) {
+    const segCols = colunas.filter(c => (c.grupo_funil || "Outros") === seg);
+    const segColIds = new Set(segCols.map(c => c.id));
+    segmentCounts[seg] = filteredContatos.filter(c => c.pipeline_coluna_id && segColIds.has(c.pipeline_coluna_id)).length;
+  }
 
   const semColuna = filteredContatos.filter(
     (c) => !c.pipeline_coluna_id || !(colunas ?? []).some((col) => col.id === c.pipeline_coluna_id)
@@ -248,6 +273,46 @@ export default function Pipeline() {
           </div>
         }
       />
+
+      {/* Segment Tabs */}
+      {!isLoading && segments.length > 1 && (
+        <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
+          <Button
+            size="sm"
+            variant={activeSegment === "todos" ? "default" : "outline"}
+            className="h-7 text-xs px-3"
+            onClick={() => setActiveSegment("todos")}
+          >
+            Todos
+            <Badge variant="secondary" className="ml-1.5 h-4 min-w-[16px] px-1 text-[10px]">
+              {filteredContatos.length}
+            </Badge>
+          </Button>
+          {segments.map((seg) => {
+            const isHumanoSeg = seg.toLowerCase().includes("terminal");
+            return (
+              <Button
+                key={seg}
+                size="sm"
+                variant={activeSegment === seg ? "default" : "outline"}
+                className={cn(
+                  "h-7 text-xs px-3",
+                  isHumanoSeg && segmentCounts[seg] > 0 && activeSegment !== seg && "border-destructive text-destructive"
+                )}
+                onClick={() => setActiveSegment(seg)}
+              >
+                {seg}
+                <Badge
+                  variant={isHumanoSeg && segmentCounts[seg] > 0 ? "destructive" : "secondary"}
+                  className="ml-1.5 h-4 min-w-[16px] px-1 text-[10px]"
+                >
+                  {segmentCounts[seg] || 0}
+                </Badge>
+              </Button>
+            );
+          })}
+        </div>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>

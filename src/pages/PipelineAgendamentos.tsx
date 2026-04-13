@@ -139,7 +139,7 @@ export default function PipelineAgendamentos() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        title="Pipeline de Agendamentos"
+        title="Pipeline Lojas"
         description="Arraste cards entre colunas para disparar automações. Clique para editar."
         actions={
           <div className="flex items-center gap-2">

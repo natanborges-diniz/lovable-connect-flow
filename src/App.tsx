@@ -11,8 +11,7 @@ import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
 import PipelineFinanceiro from "./pages/PipelineFinanceiro";
 import PipelineAgendamentos from "./pages/PipelineAgendamentos";
-
-import Solicitacoes from "./pages/Solicitacoes";
+import PipelineTI from "./pages/PipelineTI";
 import Atendimentos from "./pages/Atendimentos";
 import Tarefas from "./pages/Tarefas";
 import Mensagens from "./pages/Mensagens";
@@ -36,11 +35,11 @@ const App = () => (
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/crm" element={<Pipeline />} />
-              <Route path="/financeiro" element={<PipelineFinanceiro />} />
-              <Route path="/agendamentos" element={<PipelineAgendamentos />} />
+              <Route path="/crm/conversas" element={<Atendimentos />} />
               <Route path="/crm/contatos" element={<Contatos />} />
-              <Route path="/solicitacoes" element={<Solicitacoes />} />
-              <Route path="/atendimentos" element={<Atendimentos />} />
+              <Route path="/financeiro" element={<PipelineFinanceiro />} />
+              <Route path="/lojas" element={<PipelineAgendamentos />} />
+              <Route path="/ti" element={<PipelineTI />} />
               <Route path="/tarefas" element={<Tarefas />} />
               <Route path="/mensagens" element={<Mensagens />} />
               <Route path="/configuracoes" element={

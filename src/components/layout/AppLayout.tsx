@@ -5,14 +5,13 @@ import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
 
-export type ModuleKey = "dashboard" | "crm" | "financeiro" | "agendamentos" | "solicitacoes" | "atendimentos" | "tarefas" | "mensagens" | "configuracoes";
+export type ModuleKey = "dashboard" | "crm" | "financeiro" | "lojas" | "ti" | "tarefas" | "mensagens" | "configuracoes";
 
 export const moduleFromPath = (pathname: string): ModuleKey => {
-  if (pathname.startsWith("/agendamentos")) return "agendamentos";
+  if (pathname.startsWith("/lojas")) return "lojas";
   if (pathname.startsWith("/financeiro")) return "financeiro";
   if (pathname.startsWith("/crm")) return "crm";
-  if (pathname.startsWith("/solicitacoes")) return "solicitacoes";
-  if (pathname.startsWith("/atendimentos")) return "atendimentos";
+  if (pathname.startsWith("/ti")) return "ti";
   if (pathname.startsWith("/tarefas")) return "tarefas";
   if (pathname.startsWith("/mensagens")) return "mensagens";
   if (pathname.startsWith("/configuracoes")) return "configuracoes";
