@@ -711,6 +711,9 @@ function ConversationPanel({
 }) {
   const { data: contatos } = useContatos();
   const contato = contatos?.find((c) => c.id === contatoId);
+  const { data: allColunas } = usePipelineColunas();
+  const updateContato = useUpdateContato();
+  const queryClient = useQueryClient();
 
   // Find the latest open atendimento for this contato
   const { data: atendimentoData } = useQuery({
@@ -731,6 +734,70 @@ function ConversationPanel({
 
   const atendimentoId = atendimentoData?.id || atendimentoInfo?.id;
 
+  // Group columns by grupo_funil for selector
+  const colunasGrouped = useMemo(() => {
+    if (!allColunas) return {};
+    const groups: Record<string, typeof allColunas> = {};
+    for (const col of allColunas) {
+      const g = col.grupo_funil || "Outros";
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(col);
+    }
+    return groups;
+  }, [allColunas]);
+
+  const handleMoveToColumn = async (colunaId: string) => {
+    if (!contato) return;
+    const previousColunaId = contato.pipeline_coluna_id;
+    updateContato.mutate({ id: contatoId, pipeline_coluna_id: colunaId } as any, {
+      onSuccess: () => {
+        toast.success("Contato movido com sucesso");
+        // Trigger automations
+        supabase.functions.invoke("pipeline-automations", {
+          body: {
+            entity_type: "contato",
+            entity_id: contatoId,
+            coluna_id: colunaId,
+            coluna_anterior_id: previousColunaId,
+          },
+        });
+      },
+    });
+  };
+
+  const handleEncerrarAtendimento = async () => {
+    if (!atendimentoId) return;
+    try {
+      // Generate summary
+      await supabase.functions.invoke("summarize-atendimento", {
+        body: { atendimento_id: atendimentoId },
+      });
+
+      // Close atendimento
+      const { error } = await supabase
+        .from("atendimentos")
+        .update({ status: "encerrado", fim_at: new Date().toISOString() } as any)
+        .eq("id", atendimentoId);
+      if (error) throw error;
+
+      // Cancel recovery cadence
+      if (contato) {
+        const meta = (contato.metadata as any) || {};
+        if (meta.recuperacao_vendas) {
+          await supabase.from("contatos").update({
+            metadata: { ...meta, recuperacao_vendas: { ...meta.recuperacao_vendas, status: "encerrado_manual" } },
+          } as any).eq("id", contatoId);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["atendimento_contato", contatoId] });
+      queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+      toast.success("Atendimento encerrado com sucesso");
+    } catch (e: any) {
+      toast.error("Erro ao encerrar: " + e.message);
+    }
+  };
+
   if (!atendimentoId) {
     return (
       <>
@@ -747,7 +814,48 @@ function ConversationPanel({
     );
   }
 
-  return <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />;
+  const currentColuna = allColunas?.find((c) => c.id === contato?.pipeline_coluna_id);
+
+  return (
+    <>
+      {/* Column selector + close controls */}
+      <div className="flex items-center gap-2 flex-wrap border-b pb-2 mb-2">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="text-xs text-muted-foreground shrink-0">Etapa:</span>
+          <Select
+            value={contato?.pipeline_coluna_id || ""}
+            onValueChange={handleMoveToColumn}
+          >
+            <SelectTrigger className="h-7 text-xs w-48">
+              <SelectValue placeholder="Selecionar coluna" />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(colunasGrouped).map(([grupo, cols]) => (
+                <div key={grupo}>
+                  <p className="text-[10px] font-semibold text-muted-foreground px-2 pt-1.5 pb-0.5 uppercase">{grupo}</p>
+                  {(cols as any[]).sort((a, b) => a.ordem - b.ordem).map((col) => (
+                    <SelectItem key={col.id} value={col.id} className="text-xs">
+                      {col.nome}
+                    </SelectItem>
+                  ))}
+                </div>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={handleEncerrarAtendimento}
+        >
+          <X className="h-3 w-3 mr-1" /> Encerrar Atendimento
+        </Button>
+      </div>
+
+      <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />
+    </>
+  );
 }
 
 function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; contatoNome: string }) {
