@@ -243,6 +243,9 @@ export type Database = {
           fluxo: string
           id: string
           ordem: number
+          parent_id: string | null
+          setor_id: string | null
+          tipo: string
           tipo_bot: string
           titulo: string
           updated_at: string
@@ -256,6 +259,9 @@ export type Database = {
           fluxo: string
           id?: string
           ordem?: number
+          parent_id?: string | null
+          setor_id?: string | null
+          tipo?: string
           tipo_bot?: string
           titulo: string
           updated_at?: string
@@ -269,11 +275,29 @@ export type Database = {
           fluxo?: string
           id?: string
           ordem?: number
+          parent_id?: string | null
+          setor_id?: string | null
+          tipo?: string
           tipo_bot?: string
           titulo?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "bot_menu_opcoes_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "bot_menu_opcoes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bot_menu_opcoes_setor_id_fkey"
+            columns: ["setor_id"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       bot_sessoes: {
         Row: {
