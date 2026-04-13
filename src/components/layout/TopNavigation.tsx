@@ -137,7 +137,14 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
                   isActive ? "text-primary" : "text-muted-foreground"
                 )}
               >
-                <Icon className="h-4 w-4" />
+                <div className="relative">
+                  <Icon className="h-4 w-4" />
+                  {module.key === "mensagens" && msgNaoLidas > 0 && (
+                    <Badge className="absolute -top-2 -right-3 h-4 min-w-[16px] px-1 text-[10px] flex items-center justify-center">
+                      {msgNaoLidas > 99 ? "99+" : msgNaoLidas}
+                    </Badge>
+                  )}
+                </div>
                 <span className="hidden md:inline">{module.label}</span>
                 {isActive && (
                   <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
