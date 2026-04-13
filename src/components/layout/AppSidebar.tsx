@@ -1,8 +1,8 @@
 import { useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings,
-  Search as SearchIcon, Plus, List, Clock, Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap
+  LayoutDashboard, Users, ListTodo, Settings,
+  Kanban, DollarSign, CalendarDays,
+  Brain, Building2, Store, Zap, MessageSquare, Monitor
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -48,6 +48,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "CRM",
       items: [
         { title: "Pipeline", url: "/crm", icon: Kanban },
+        { title: "Conversas WhatsApp", url: "/crm/conversas", icon: MessageSquare },
         { title: "Todos os Contatos", url: "/crm/contatos", icon: Users },
       ],
     },
@@ -60,27 +61,19 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       ],
     },
   ],
-  agendamentos: [
+  lojas: [
     {
-      label: "Agendamentos",
+      label: "Lojas",
       items: [
-        { title: "Pipeline Agendamentos", url: "/agendamentos", icon: CalendarDays },
+        { title: "Pipeline Lojas", url: "/lojas", icon: CalendarDays },
       ],
     },
   ],
-  solicitacoes: [
+  ti: [
     {
-      label: "Solicitações",
+      label: "TI",
       items: [
-        { title: "Todas as Solicitações", url: "/solicitacoes", icon: FileText },
-      ],
-    },
-  ],
-  atendimentos: [
-    {
-      label: "Atendimentos",
-      items: [
-        { title: "Todos os Atendimentos", url: "/atendimentos", icon: MessageSquare },
+        { title: "Pipeline TI", url: "/ti", icon: Monitor },
       ],
     },
   ],

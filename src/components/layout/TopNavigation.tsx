@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Bell, Mail } from "lucide-react";
+import { LayoutDashboard, Users, Settings, LogOut, DollarSign, Bell, Mail, Store, Monitor, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -22,21 +22,19 @@ interface TopNavigationProps {
 const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defaultPath: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, defaultPath: "/" },
   { key: "crm", label: "CRM", icon: Users, defaultPath: "/crm" },
+  { key: "lojas", label: "Lojas", icon: Store, defaultPath: "/lojas" },
   { key: "financeiro", label: "Financeiro", icon: DollarSign, defaultPath: "/financeiro" },
-  { key: "agendamentos", label: "Agendamentos", icon: CalendarDays, defaultPath: "/agendamentos" },
-  { key: "solicitacoes", label: "Solicitações", icon: FileText, defaultPath: "/solicitacoes" },
-  { key: "atendimentos", label: "Atendimentos", icon: MessageSquare, defaultPath: "/atendimentos" },
+  { key: "ti", label: "TI", icon: Monitor, defaultPath: "/ti" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
   { key: "mensagens", label: "Mensagens", icon: Mail, defaultPath: "/mensagens" },
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
 ];
 
-// Map setor names to allowed modules
 const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
-  financeiro: ["dashboard", "financeiro", "solicitacoes", "tarefas", "mensagens"],
-  ti: ["dashboard", "solicitacoes", "tarefas", "mensagens"],
-  atendimento: ["dashboard", "atendimentos", "solicitacoes", "tarefas", "mensagens"],
-  loja: ["dashboard", "agendamentos", "mensagens"],
+  financeiro: ["dashboard", "financeiro", "tarefas", "mensagens"],
+  ti: ["dashboard", "ti", "tarefas", "mensagens"],
+  atendimento: ["dashboard", "crm", "tarefas", "mensagens"],
+  loja: ["dashboard", "lojas", "mensagens"],
 };
 
 function useSetorNames(setorIds: string[]) {
@@ -64,15 +62,11 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
   const setorIds = getUserSetorIds();
   const { data: setorNames } = useSetorNames(setorIds);
 
-  // Filter modules based on role
   const visibleModules = (() => {
-    // No roles yet (loading or new user) — show all
     if (roles.length === 0) return allModules;
-    // Admin/operador see everything
     if (isAdmin || isOperador) return allModules;
 
-    // setor_usuario: filter by setor name
-    const allowedKeys = new Set<ModuleKey>(["dashboard", "solicitacoes", "tarefas"]);
+    const allowedKeys = new Set<ModuleKey>(["dashboard", "tarefas"]);
     if (setorNames) {
       for (const s of setorNames) {
         const key = s.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -83,7 +77,6 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
     return allModules.filter((m) => allowedKeys.has(m.key));
   })();
 
-  // Notification sound
   useEffect(() => {
     if (naoLidas > 0) {
       try {
@@ -97,7 +90,7 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
   const handleNotifClick = (notif: any) => {
     if (!notif.lida) marcarLida.mutate(notif.id);
     if (notif.referencia_id && notif.tipo === "solicitacao") {
-      navigate("/solicitacoes");
+      navigate("/financeiro");
     }
     setPopoverOpen(false);
   };
@@ -105,7 +98,6 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
   return (
     <header className="sticky top-0 z-50 w-full bg-surface border-b-2 border-primary">
       <div className="flex h-14 items-center px-4 gap-4">
-        {/* Logo */}
         <div className="flex items-center gap-2 mr-4">
           <button
             onClick={() => navigate("/")}
@@ -118,7 +110,6 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
           </button>
         </div>
 
-        {/* Module Tabs */}
         <nav className="flex items-center gap-1 overflow-x-auto" role="tablist" aria-label="Módulos do sistema">
           {visibleModules.map((module) => {
             const Icon = module.icon;
@@ -154,10 +145,8 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
           })}
         </nav>
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Notifications */}
         <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
           <PopoverTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8 relative" title="Notificações">
@@ -208,7 +197,6 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
           </PopoverContent>
         </Popover>
 
-        {/* User area */}
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground hidden sm:inline">
             {profile?.nome || "Operador"}
