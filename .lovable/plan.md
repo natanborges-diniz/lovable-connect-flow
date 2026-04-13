@@ -1,62 +1,61 @@
 
 
-# Segregação de Agendamentos por Loja — Permissões por Unidade
+# Separar Nível de Acesso e Áreas do Sistema — UI Clara
 
-## Problema
+## Problema Atual
 
-O setor chamado "Agendamentos" é na verdade o setor das **Lojas**. Cada loja (ex: DINIZ PRIMITIVA I) precisa ver **apenas os agendamentos da sua unidade**, enquanto admin/operador vê tudo. Hoje não existe vínculo entre o usuário e a loja específica.
+A tela de gestão de usuários tem **duas colunas que fazem a mesma coisa**:
+- "Setor Principal" (campo `profiles.setor_id`) — dropdown de setor
+- "Permissões" (registros em `user_roles` com `setor_id`) — badges com setor
+
+O admin não sabe qual usar, e ambos gravam setor em lugares diferentes. Confusão total.
 
 ## Solução
 
-### 1. Renomear setor "Agendamentos" → "Loja"
-
-Atualizar o registro na tabela `setores` (id: `277307f3-...`) de "Agendamentos" para "Loja".
-
-### 2. Adicionar campo `loja_nome` na tabela `user_roles`
-
-Novo campo opcional que identifica **qual loja específica** o `setor_usuario` do setor "Loja" pode ver. Exemplo: um usuário com `setor_id = Loja` e `loja_nome = "DINIZ PRIMITIVA I"` só verá agendamentos dessa unidade.
+Redesenhar a tabela com **duas colunas claras e distintas**:
 
 ```text
-user_roles
-├── user_id
-├── role (setor_usuario)
-├── setor_id → setores.id (Loja)
-└── loja_nome (NEW) → "DINIZ PRIMITIVA I"
+| Nome | E-mail | Nível de Acesso | Áreas do Sistema | Ativo |
 ```
 
-### 3. Filtro automático no Pipeline de Agendamentos
+### Nível de Acesso (substitui "Permissões")
+- Dropdown simples: **Admin** / **Operador** / **Setor**
+- Admin = tudo; Operador = vê tudo sem gerenciar; Setor = acesso restrito
+- Grava em `user_roles.role`
 
-Em `PipelineAgendamentos.tsx`:
-- Se `isAdmin` ou `isOperador`: mostra tudo (com filtro manual por loja)
-- Se `setor_usuario` com setor "Loja": aplica `filtroLoja` automático com o `loja_nome` do `user_roles`, sem dropdown de troca
+### Áreas do Sistema (substitui "Setor Principal")
+- Só aparece quando o nível é **Setor**
+- Permite adicionar **múltiplos setores** (badges com "×" para remover)
+- Cada badge mostra o nome do setor (ex: "Financeiro", "Loja · DINIZ PRIMITIVA I")
+- Quando seleciona setor "Loja", aparece o sub-dropdown de unidade
+- Grava em `user_roles` (cada setor = um registro)
 
-### 4. Atualizar navegação
+### Remoção da coluna "Setor Principal"
+- Remove o dropdown de `profiles.setor_id` da UI
+- O `profiles.setor_id` passa a ser **sincronizado automaticamente** com o primeiro setor do `user_roles` (para manter compatibilidade com RLS de notificações)
 
-Em `TopNavigation.tsx`, adicionar mapeamento:
-- Setor "loja" → módulos: `["dashboard", "agendamentos"]`
+## Implementação
 
-### 5. Gestão de Usuários — seleção de loja
+### 1. Redesenhar `GestaoUsuariosCard.tsx`
+- Remover coluna "Setor Principal" e a mutation `updateProfileSetor`
+- Coluna "Nível de Acesso": dropdown Admin/Operador/Setor (muda o role de todos os user_roles do usuário)
+- Coluna "Áreas do Sistema": lista de setores atribuídos (visível só para setor_usuario), com botão "+" para adicionar setor e "×" para remover
+- Auto-sync: ao alterar user_roles, atualizar `profiles.setor_id` com o primeiro setor
 
-Em `GestaoUsuariosCard.tsx`, quando o admin atribui setor "Loja" a um usuário, mostrar um dropdown adicional com as lojas de `telefones_lojas` (tipo = 'loja') para definir o `loja_nome`.
-
-### 6. Expor `loja_nome` no useAuth
-
-Atualizar `useAuth.tsx` para incluir `loja_nome` dos roles do usuário, disponibilizando para o pipeline filtrar automaticamente.
+### 2. Labels descritivos
+- Tooltips ou subtítulos explicativos:
+  - Nível de Acesso: "Define o que o usuário pode fazer"
+  - Áreas do Sistema: "Define quais módulos o usuário pode ver"
 
 ## Arquivos Modificados
 
 | Arquivo | Mudança |
 |---------|---------|
-| Migração SQL | `ALTER TABLE user_roles ADD COLUMN loja_nome text` |
-| Data update | `UPDATE setores SET nome = 'Loja' WHERE id = '277307f3-...'` |
-| `src/hooks/useAuth.tsx` | Expor `loja_nome` do user_role |
-| `src/pages/PipelineAgendamentos.tsx` | Auto-filtrar por `loja_nome` para `setor_usuario` |
-| `src/components/layout/TopNavigation.tsx` | Mapear setor "loja" → `["dashboard", "agendamentos"]` |
-| `src/components/configuracoes/GestaoUsuariosCard.tsx` | Dropdown de loja ao atribuir setor "Loja" |
+| `src/components/configuracoes/GestaoUsuariosCard.tsx` | Redesenho completo das colunas da tabela |
 
 ## Resultado
 
-- DINIZ PRIMITIVA I loga → vê apenas seus agendamentos
-- Admin/Operador → vê todas as lojas com filtro manual
-- Gestão centralizada: admin atribui loja + setor em Configurações
+- Admin vê claramente: "esse usuário é Operador" vs "esse usuário do Setor só acessa Financeiro e TI"
+- Sem duplicidade de informação
+- `profiles.setor_id` mantido em sync para RLS, mas invisível na UI
 
