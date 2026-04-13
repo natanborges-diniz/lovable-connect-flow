@@ -831,6 +831,51 @@ export type Database = {
           },
         ]
       }
+      mensagens_internas: {
+        Row: {
+          conteudo: string
+          conversa_id: string
+          created_at: string
+          destinatario_id: string
+          id: string
+          lida: boolean
+          remetente_id: string
+        }
+        Insert: {
+          conteudo: string
+          conversa_id: string
+          created_at?: string
+          destinatario_id: string
+          id?: string
+          lida?: boolean
+          remetente_id: string
+        }
+        Update: {
+          conteudo?: string
+          conversa_id?: string
+          created_at?: string
+          destinatario_id?: string
+          id?: string
+          lida?: boolean
+          remetente_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mensagens_internas_destinatario_id_fkey"
+            columns: ["destinatario_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mensagens_internas_remetente_id_fkey"
+            columns: ["remetente_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notificacoes: {
         Row: {
           created_at: string

@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Bell } from "lucide-react";
+import { LayoutDashboard, Users, FileText, MessageSquare, ListTodo, Settings, LogOut, DollarSign, CalendarDays, Bell, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotificacoes } from "@/hooks/useNotificacoes";
 import { Badge } from "@/components/ui/badge";
+import { useMensagensInternas } from "@/hooks/useMensagensInternas";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
@@ -26,15 +27,16 @@ const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defa
   { key: "solicitacoes", label: "Solicitações", icon: FileText, defaultPath: "/solicitacoes" },
   { key: "atendimentos", label: "Atendimentos", icon: MessageSquare, defaultPath: "/atendimentos" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
+  { key: "mensagens", label: "Mensagens", icon: Mail, defaultPath: "/mensagens" },
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
 ];
 
 // Map setor names to allowed modules
 const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
-  financeiro: ["dashboard", "financeiro", "solicitacoes", "tarefas"],
-  ti: ["dashboard", "solicitacoes", "tarefas"],
-  atendimento: ["dashboard", "atendimentos", "solicitacoes", "tarefas"],
-  loja: ["dashboard", "agendamentos"],
+  financeiro: ["dashboard", "financeiro", "solicitacoes", "tarefas", "mensagens"],
+  ti: ["dashboard", "solicitacoes", "tarefas", "mensagens"],
+  atendimento: ["dashboard", "atendimentos", "solicitacoes", "tarefas", "mensagens"],
+  loja: ["dashboard", "agendamentos", "mensagens"],
 };
 
 function useSetorNames(setorIds: string[]) {
@@ -56,6 +58,8 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
   const { profile, signOut, isAdmin, isOperador, getUserSetorIds, roles } = useAuth();
   const { data: notificacoes, naoLidas, marcarLida, marcarTodasLidas } = useNotificacoes();
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const { totalNaoLidas } = useMensagensInternas();
+  const msgNaoLidas = totalNaoLidas.data || 0;
 
   const setorIds = getUserSetorIds();
   const { data: setorNames } = useSetorNames(setorIds);
@@ -133,7 +137,14 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
                   isActive ? "text-primary" : "text-muted-foreground"
                 )}
               >
-                <Icon className="h-4 w-4" />
+                <div className="relative">
+                  <Icon className="h-4 w-4" />
+                  {module.key === "mensagens" && msgNaoLidas > 0 && (
+                    <Badge className="absolute -top-2 -right-3 h-4 min-w-[16px] px-1 text-[10px] flex items-center justify-center">
+                      {msgNaoLidas > 99 ? "99+" : msgNaoLidas}
+                    </Badge>
+                  )}
+                </div>
                 <span className="hidden md:inline">{module.label}</span>
                 {isActive && (
                   <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />

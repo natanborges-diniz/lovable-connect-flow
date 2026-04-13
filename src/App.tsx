@@ -15,6 +15,7 @@ import PipelineAgendamentos from "./pages/PipelineAgendamentos";
 import Solicitacoes from "./pages/Solicitacoes";
 import Atendimentos from "./pages/Atendimentos";
 import Tarefas from "./pages/Tarefas";
+import Mensagens from "./pages/Mensagens";
 import Configuracoes from "./pages/Configuracoes";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
@@ -41,6 +42,7 @@ const App = () => (
               <Route path="/solicitacoes" element={<Solicitacoes />} />
               <Route path="/atendimentos" element={<Atendimentos />} />
               <Route path="/tarefas" element={<Tarefas />} />
+              <Route path="/mensagens" element={<Mensagens />} />
               <Route path="/configuracoes" element={
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <Configuracoes />
