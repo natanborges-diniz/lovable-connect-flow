@@ -503,7 +503,7 @@ export default function Pipeline() {
                                             className="h-6 text-[10px] px-2 text-muted-foreground hover:text-primary"
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              navigate(`/atendimentos?open=${atInfo.id}`);
+                                              navigate(`/crm/conversas?open=${atInfo.id}`);
                                             }}
                                           >
                                             <MessageSquare className="h-3 w-3 mr-1" />
