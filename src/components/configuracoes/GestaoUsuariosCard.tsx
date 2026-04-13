@@ -151,6 +151,7 @@ export function GestaoUsuariosCard() {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <DefaultUsuarioConfig />
         {!profiles?.length ? (
           <p className="text-sm text-muted-foreground text-center py-4">Nenhum usuário cadastrado</p>
         ) : (
