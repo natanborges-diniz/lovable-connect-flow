@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotificacoes } from "@/hooks/useNotificacoes";
 import { Badge } from "@/components/ui/badge";
+import { useMensagensInternas } from "@/hooks/useMensagensInternas";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
@@ -57,6 +58,8 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
   const { profile, signOut, isAdmin, isOperador, getUserSetorIds, roles } = useAuth();
   const { data: notificacoes, naoLidas, marcarLida, marcarTodasLidas } = useNotificacoes();
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const { totalNaoLidas } = useMensagensInternas();
+  const msgNaoLidas = totalNaoLidas.data || 0;
 
   const setorIds = getUserSetorIds();
   const { data: setorNames } = useSetorNames(setorIds);
