@@ -864,13 +864,15 @@ function ConversationPanel({
             value={contato?.pipeline_coluna_id || ""}
             onValueChange={handleMoveToColumn}
           >
-            <SelectTrigger className="h-7 text-xs w-48">
+            <SelectTrigger className="h-7 text-xs w-52">
               <SelectValue placeholder="Selecionar coluna" />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(colunasGrouped).map(([grupo, cols]) => (
-                <div key={grupo}>
-                  <p className="text-[10px] font-semibold text-muted-foreground px-2 pt-1.5 pb-0.5 uppercase">{grupo}</p>
+              {Object.entries(colunasGrouped).map(([setor, cols]) => (
+                <div key={setor}>
+                  <p className="text-[10px] font-bold text-muted-foreground px-2 pt-2 pb-0.5 uppercase tracking-wider border-t first:border-t-0">
+                    ── {setor} ──
+                  </p>
                   {(cols as any[]).sort((a, b) => a.ordem - b.ordem).map((col) => (
                     <SelectItem key={col.id} value={col.id} className="text-xs">
                       {col.nome}
@@ -892,6 +894,17 @@ function ConversationPanel({
       </div>
 
       <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />
+
+      <TransferPipelineDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        destino={transferDestino}
+        contatoId={contatoId}
+        contatoNome={contato?.nome ?? "Contato"}
+        colunaDestinoId={transferColunaId}
+        colunaDestinoNome={transferColunaNome}
+        onSuccess={handleTransferSuccess}
+      />
     </>
   );
 }
