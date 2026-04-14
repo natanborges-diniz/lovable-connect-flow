@@ -1040,21 +1040,7 @@ serve(async (req) => {
       }
 
       return await handleNonClientEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, fornecedorMsg, "fornecedor_b2b");
-}
-
-function buildNonClientBlock(): string {
-  return `# CONTATOS NÃO-CLIENTE
-Se a pessoa se identificar como:
-- De outra unidade Diniz, franqueado, da Diniz Franchising, gerente de outra loja
-- Fornecedor, representante comercial, distribuidor
-- Alguém oferecendo produtos/serviços (B2B)
-- Alguém buscando parceria comercial ou empresarial
-
-→ NÃO trate como cliente. NÃO ofereça produtos, preços, agendamentos ou orçamentos.
-→ Use escalar_consultor com motivo específico: "contato_rede_diniz", "fornecedor_b2b" ou "proposta_parceria".
-→ Responda: "Entendido! Vou direcionar para o responsável da nossa equipe."
-→ NUNCA tente vender ou fazer triagem de produto para essas pessoas.`;
-}
+    }
 
 
     if (matchesSubjectChange(currentMsg)) {
