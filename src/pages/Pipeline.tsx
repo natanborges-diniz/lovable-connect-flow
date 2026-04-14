@@ -192,7 +192,22 @@ export default function Pipeline() {
     if (destColunaId === sourceColunaId) return;
 
     updateContato.mutate({ id: contatoId, pipeline_coluna_id: destColunaId } as any, {
-      onSuccess: () => {
+      onSuccess: async () => {
+        // Auto-reset modo from humano to ia on column move
+        const at = atendimentoByContato.get(contatoId);
+        if (at?.modo === "humano") {
+          const { error: modoErr } = await supabase
+            .from("atendimentos")
+            .update({ modo: "ia" } as any)
+            .eq("id", at.id);
+          if (modoErr) {
+            console.error("[MODO] Error resetting to IA:", modoErr);
+          } else {
+            toast.info("Modo IA reativado automaticamente");
+            queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+          }
+        }
+
         // Trigger automations explicitly
         supabase.functions.invoke("pipeline-automations", {
           body: {
@@ -982,19 +997,15 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
           <Badge
             variant="outline"
             className={cn(
-              "text-[10px] cursor-pointer select-none",
+              "text-[10px] select-none",
               atendimento.modo === "ia"
-                ? "border-primary/50 text-primary hover:bg-primary/10"
-                : "border-warning/50 text-warning hover:bg-warning/10"
+                ? "border-primary/50 text-primary"
+                : atendimento.modo === "humano"
+                  ? "border-warning/50 text-warning"
+                  : "border-muted-foreground/50 text-muted-foreground"
             )}
-            onClick={async () => {
-              const newModo = atendimento.modo === "ia" ? "humano" : "ia";
-              const { error } = await supabase.from("atendimentos").update({ modo: newModo } as any).eq("id", atendimentoId);
-              if (error) { toast.error("Erro: " + error.message); return; }
-              toast.success(newModo === "ia" ? "Modo IA reativado" : "Modo humano ativado");
-            }}
           >
-            {atendimento.modo === "ia" ? "🤖 IA" : "👤 Humano"} (clique p/ alternar)
+            {atendimento.modo === "ia" ? "🤖 IA" : atendimento.modo === "humano" ? "👤 Humano" : "🔄 Híbrido"}
           </Badge>
         </div>
       )}
