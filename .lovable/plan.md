@@ -1,61 +1,72 @@
 
 
-# Descrições Detalhadas + Parâmetros Configuráveis nos Crons
+# Triagem Inteligente: 3 Grupos de Contato no WhatsApp
 
-## Objetivo
+## Situação Atual
 
-Transformar a tela de crons de uma tabela técnica em um painel informativo e configurável, onde cada cron mostra em linguagem simples o que faz, permite expandir o fluxo completo, e permite ajustar os parâmetros operacionais (tempos, tentativas, etc.) sem mexer em código.
+- A IA trata todos os contatos não-corporativos como clientes potenciais
+- Já existem colunas **Compras** e **Parcerias** no pipeline (grupo "outros")
+- Já existem intenções `compras` e `parceria` no enum da tool `responder`
+- Não existe detecção pré-LLM para rede Diniz, franchising, fornecedores ou B2B
+- Setores existentes: Financeiro, Loja, TI — sem setor "Compras"
+
+## Decisão de Arquitetura
+
+**Abordagem simples**: a IA detecta que o contato NÃO é cliente → escalona imediatamente para o operador humano com contexto claro sobre o tipo de contato. O operador decide o destino manualmente. Sem criar novos setores por enquanto.
+
+As colunas **Compras** e **Parcerias** já existem no pipeline e serão usadas pelo operador para posicionar os cards após a triagem.
 
 ## Mudanças
 
-### 1. Dicionário de descrições e fluxos por função (front-end)
+### 1. Detecção pré-LLM (roteador determinístico)
 
-Criar um mapa `CRON_DETAILS` indexado por `funcao_alvo` contendo:
-- `resumo`: frase curta em português simples
-- `fluxo`: array de etapas descrevendo o passo-a-passo
-- `parametros`: lista de parâmetros configuráveis com nome, label, tipo (number/select), valor default, e unidade
+Adicionar regex no `ai-triage` para detectar padrões antes do LLM processar:
 
-Exemplo para `agendamentos-cron`:
-- Resumo: "Gerencia o ciclo de vida dos agendamentos nas lojas"
-- Fluxo: 7 etapas (lembrete 24h antes, 2a tentativa, cobranca loja, 2a cobranca, timeout, cobranças agendadas, abandono)
-- Parâmetros: horas para 2a tentativa de lembrete (4h), horas para 2a cobrança loja (3h), horas timeout loja (6h), horas para abandono (48h), max tentativas recuperação (2)
+**Rede Diniz / Franchising:**
+- "sou da Diniz", "Diniz de [cidade]", "outra unidade", "franqueado", "franchising", "lojista Diniz", "sou gerente da", "sou da loja"
 
-Exemplo para `vendas-recuperacao-cron`:
-- Resumo: "Recupera leads inativos no pipeline de vendas via IA"
-- Fluxo: 5 etapas (detecta inatividade, 1a msg IA em 48h, 2a em 72h, 3a em 72h, move para Perdidos)
-- Parâmetros: delay 1a tentativa (48h), delay 2a (72h), delay 3a (72h), espera final (72h), max tentativas (3), colunas elegíveis
+**Fornecedores / B2B:**
+- "representante comercial", "ofereço/oferta de", "fornecedor", "proposta comercial", "parceria", "distribuidor", "vendo [produto] para", "tabela de preços"
 
-### 2. Redesign do CronJobsCard (front-end)
+Quando detectado: escalona para humano com mensagem educada e motivo específico (ex: `contato_rede_diniz`, `fornecedor_b2b`, `proposta_parceria`). Move o card para a coluna **Parcerias** ou **Compras** conforme o caso.
 
-Substituir a tabela por cards individuais por cron, cada um contendo:
-- Header com nome, badge de status (ativo/inativo), switch, e botões de ação
-- Resumo em texto simples sempre visível
-- Collapsible "Ver fluxo completo" que mostra as etapas numeradas com ícones
-- Collapsible "Configurar parâmetros" que mostra inputs editáveis para os valores configuráveis
-- Botão "Salvar parâmetros" que grava os valores no campo `payload` do cron_job
+### 2. Instruções no system prompt do LLM
 
-### 3. Edge functions leem parâmetros do payload (back-end)
+Adicionar bloco no prompt para os casos que o regex não pegar:
 
-Atualizar `agendamentos-cron` e `vendas-recuperacao-cron` para ler os tempos/thresholds do `payload` recebido (que vem do `cron_jobs.payload`), usando os valores atuais como fallback default. Exemplo:
-```typescript
-const DELAY_HOURS_1 = payload?.delay_primeira_tentativa ?? 48;
+```text
+# CONTATOS NÃO-CLIENTE
+Se a pessoa se identificar como:
+- De outra unidade Diniz, franqueado, ou Diniz Franchising
+- Fornecedor, representante comercial, distribuidor
+- Alguém oferecendo produtos/serviços (B2B)
+- Alguém buscando parceria
+
+→ NÃO trate como cliente. NÃO ofereça produtos, preços ou agendamentos.
+→ Use escalar_consultor com motivo específico.
+→ Responda: "Entendido! Vou direcionar para o responsável da nossa equipe."
 ```
 
-### 4. Migração de dados
+### 3. Contexto no escalonamento
 
-Nenhuma migração de banco necessária. O campo `payload` (jsonb) já existe e será usado para armazenar os parâmetros configuráveis.
+Quando o operador recebe o card na fila humana, o metadata do atendimento incluirá:
+- `motivo_escalonamento`: tipo específico (rede_diniz, fornecedor, parceria)
+- Isso aparece visualmente para o operador saber que **não é cliente**
+
+### 4. Contato marcado como tipo adequado
+
+Quando a IA detecta fornecedor/B2B, atualiza o `contato.tipo` para `fornecedor` (já existe no enum). Para rede Diniz, usa tag `rede_diniz`.
 
 ## Arquivos Modificados
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/components/configuracoes/CronJobsCard.tsx` | Redesign completo: cards com descrições, fluxo expandível, e painel de parâmetros configuráveis |
-| `supabase/functions/agendamentos-cron/index.ts` | Ler parâmetros do payload em vez de constantes hardcoded |
-| `supabase/functions/vendas-recuperacao-cron/index.ts` | Ler parâmetros do payload em vez de constantes hardcoded |
+| `supabase/functions/ai-triage/index.ts` | Regex pré-LLM para rede Diniz e B2B + bloco no system prompt + atualizar tipo do contato quando detectado |
 
-## Detalhes Técnicos
+## O que NÃO muda
 
-- Os parâmetros são salvos via `manage-cron-jobs` action `update`, que já atualiza o `payload`
-- O `manage-cron-jobs` já repassa o `payload` na chamada HTTP do pg_cron, então as edge functions já recebem esses valores
-- Para crons desconhecidos (criados manualmente), mantém a visualização atual em formato tabela
+- Nenhum setor novo criado (operador roteia manualmente)
+- Nenhuma migração de banco necessária
+- O fluxo de lojas (bot-lojas) continua inalterado
+- O fluxo de clientes continua inalterado
 
