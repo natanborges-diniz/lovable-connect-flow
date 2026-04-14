@@ -26,6 +26,47 @@ const SUBJECT_CHANGE_KEYWORDS = [
   "muda o assunto", "assunto diferente",
 ];
 
+// ── PRE-LLM: Rede Diniz / Franchising detection ──
+const REDE_DINIZ_PATTERNS = [
+  /sou d[ao] diniz/i,
+  /diniz de \w+/i,
+  /diniz franchising/i,
+  /outra unidade/i,
+  /franqueado/i,
+  /sou franqueado/i,
+  /lojista diniz/i,
+  /sou gerente d[aoe]/i,
+  /sou d[ao] loja d/i,
+  /trabalho n[ao] diniz/i,
+  /somos d[ao] diniz/i,
+  /outra [oó]tica diniz/i,
+  /filial diniz/i,
+];
+
+// ── PRE-LLM: Fornecedor / B2B detection ──
+const FORNECEDOR_B2B_PATTERNS = [
+  /representante comercial/i,
+  /proposta comercial/i,
+  /tabela de pre[çc]os? (para|pra) /i,
+  /sou fornecedor/i,
+  /somos fornecedores/i,
+  /distribuidor[a]? d[eao]/i,
+  /ofere[çc]o /i,
+  /oferta de (servi[çc]o|produto)/i,
+  /vendo \w+ para (lojas|empresas|[oó]ticas)/i,
+  /parceria (comercial|empresarial)/i,
+  /gostaria de oferecer/i,
+  /apresentar (nosso|nossa|meu|minha) (produto|servi[çc]o|empresa|marca)/i,
+];
+
+function matchesRedeDiniz(msg: string): boolean {
+  return REDE_DINIZ_PATTERNS.some((re) => re.test(msg));
+}
+
+function matchesFornecedorB2B(msg: string): boolean {
+  return FORNECEDOR_B2B_PATTERNS.some((re) => re.test(msg));
+}
+
 function norm(t: string): string {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
@@ -529,6 +570,20 @@ function buildRegionalCoverageBlock(): string {
 - Ao enviar o link (3ª tentativa), use coluna_pipeline "Perdidos" para que o card saia do radar comercial.`;
 }
 
+function buildNonClientBlock(): string {
+  return `# CONTATOS NÃO-CLIENTE
+Se a pessoa se identificar como:
+- De outra unidade Diniz, franqueado, da Diniz Franchising, gerente de outra loja
+- Fornecedor, representante comercial, distribuidor
+- Alguém oferecendo produtos/serviços (B2B)
+- Alguém buscando parceria comercial ou empresarial
+
+→ NÃO trate como cliente. NÃO ofereça produtos, preços, agendamentos ou orçamentos.
+→ Use escalar_consultor com motivo específico: "contato_rede_diniz", "fornecedor_b2b" ou "proposta_parceria".
+→ Responda: "Entendido! Vou direcionar para o responsável da nossa equipe."
+→ NUNCA tente vender ou fazer triagem de produto para essas pessoas.`;
+}
+
 function buildSystemPromptFromCompiled(opts: {
   compiledPrompt: string;
   regrasProibidas: { regra: string; categoria: string }[];
@@ -552,6 +607,7 @@ function buildSystemPromptFromCompiled(opts: {
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
+  s.push(buildNonClientBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
@@ -625,6 +681,7 @@ function buildSystemPrompt(opts: {
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
+  s.push(buildNonClientBlock());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
@@ -963,7 +1020,45 @@ serve(async (req) => {
       return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, contactLensMsg, "lentes_de_contato");
     }
 
-    // ── 3. PRE-LLM ROUTER: subject change → deterministic ──
+    // ── 2.6. PRE-LLM ROUTER: Rede Diniz / Franchising → escalation + tag ──
+    if (matchesRedeDiniz(currentMsg) && !isHibrido) {
+      console.log("[ROUTER] Rede Diniz / Franchising detected — escalation");
+      const redeDinizMsg = "Entendido! Vou direcionar para o responsável da nossa equipe. Um momento! 🤝";
+      
+      // Tag contact as rede_diniz
+      const { data: ctData } = await supabase.from("contatos").select("tags, metadata").eq("id", contatoId).single();
+      const existingTags: string[] = (ctData?.tags || []);
+      if (!existingTags.includes("rede_diniz")) {
+        await supabase.from("contatos").update({ tags: [...existingTags, "rede_diniz"] }).eq("id", contatoId);
+      }
+
+      // Move to Parcerias column
+      const { data: parceriasCol } = await supabase.from("pipeline_colunas").select("id").eq("nome", "Parcerias").limit(1).single();
+      if (parceriasCol) {
+        await supabase.from("contatos").update({ pipeline_coluna_id: parceriasCol.id }).eq("id", contatoId);
+      }
+
+      return await handleNonClientEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, redeDinizMsg, "contato_rede_diniz");
+    }
+
+    // ── 2.7. PRE-LLM ROUTER: Fornecedor / B2B → escalation + update tipo ──
+    if (matchesFornecedorB2B(currentMsg) && !isHibrido) {
+      console.log("[ROUTER] Fornecedor / B2B detected — escalation");
+      const fornecedorMsg = "Entendido! Vou direcionar para o responsável da nossa equipe. Um momento! 🤝";
+      
+      // Update contact type to fornecedor
+      await supabase.from("contatos").update({ tipo: "fornecedor" }).eq("id", contatoId);
+
+      // Move to Compras column
+      const { data: comprasCol } = await supabase.from("pipeline_colunas").select("id").eq("nome", "Compras").limit(1).single();
+      if (comprasCol) {
+        await supabase.from("contatos").update({ pipeline_coluna_id: comprasCol.id }).eq("id", contatoId);
+      }
+
+      return await handleNonClientEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, fornecedorMsg, "fornecedor_b2b");
+    }
+
+
     if (matchesSubjectChange(currentMsg)) {
       console.log("[ROUTER] Subject change detected — deterministic response");
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE);
@@ -2002,5 +2097,40 @@ async function handleEscalation(
     status: "ok", tools_used: [`escalar_consultor_${trigger}`],
     intencao: "escalonamento", precisa_humano: true,
     pipeline_coluna_sugerida: null, setor_sugerido: "", modo: "hibrido",
+  });
+}
+
+async function handleNonClientEscalation(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  atendimentoId: string, contatoId: string, mensagem: string, trigger: string
+) {
+  await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, mensagem);
+
+  // Set modo to humano (not hibrido) — this is NOT a client, operator takes full control
+  await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimentoId);
+
+  await supabase.from("contatos").update({ ultimo_contato_at: new Date().toISOString() }).eq("id", contatoId);
+
+  // Auto-generate summary for the operator
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/summarize-atendimento`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id: atendimentoId }),
+    });
+  } catch (_) { /* best effort */ }
+
+  await supabase.from("eventos_crm").insert({
+    contato_id: contatoId, tipo: "escalonamento_humano",
+    descricao: `Escalonamento automático (${trigger}): contato não-cliente detectado`,
+    metadata: { trigger, motivo: trigger, tipo_contato: trigger, mensagem },
+    referencia_tipo: "atendimento", referencia_id: atendimentoId,
+  });
+
+  return jsonResponse({
+    status: "ok", tools_used: [`non_client_${trigger}`],
+    intencao: trigger, precisa_humano: true,
+    pipeline_coluna_sugerida: trigger === "contato_rede_diniz" ? "Parcerias" : "Compras",
+    setor_sugerido: "", modo: "humano",
   });
 }
