@@ -1,78 +1,59 @@
 
 
-# Reestruturação do Menu do Bot com Sub-Menus por Setor + "Falar com Equipe"
+# Saída Segura da Fila Humana — Via Movimentação de Coluna
 
-## Problema Atual
+## Situação Atual
 
-O menu do bot para lojas/departamentos tem **13 opções em lista plana** — difícil de navegar. O pipeline "Atendimento Gael" é redundante, pois o bot já roteia automaticamente.
+- O toggle `IA ↔ Humano` é um clique livre no badge do atendimento (linha 990-998 do Pipeline.tsx)
+- O operador pode alternar sem nenhuma ação funcional no pipeline
+- Não há vínculo entre "devolver para IA" e a posição do card no Kanban
 
-## Nova Estrutura do Menu (3 níveis)
+## Nova Regra
 
-```text
-Menu Principal:
-  1️⃣ 💰 Financeiro
-  2️⃣ 🖥️ TI
-  3️⃣ 📋 Operacional
+O operador **só pode devolver o atendimento para a IA** ao **mover o card para outra coluna**. Ao fazer isso, o sistema automaticamente reseta `modo = 'ia'`, seguindo o fluxo normal de automações da coluna de destino.
 
-→ Financeiro:
-  1️⃣ 💳 Cobranças (Link Pagamento, Boleto, Consulta CPF)
-  2️⃣ ↩️ Estornos e Devoluções (Estorno PIX, Estorno Cartão, Devolução OS)
-  3️⃣ ✅ Confirmações (Confirmação PIX)
-  4️⃣ 💵 Pagamentos (Reembolso, Pagamento Fornecedor)
-  5️⃣ 💬 Falar com a equipe
+O toggle manual direto (clique no badge) será **removido** — eliminando o risco de devolver para IA sem contexto ou sem ação.
 
-→ TI:
-  1️⃣ 🔧 Suporte Técnico
-  2️⃣ 🖨️ Impressões
-  3️⃣ 🔐 Autorização Dataweb
-  4️⃣ 💬 Falar com a equipe
+## Mudanças
 
-→ Operacional:
-  1️⃣ 📋 Confirmar Comparecimento
-  2️⃣ 💬 Falar com a equipe
+### 1. `src/pages/Pipeline.tsx` — `onDragEnd` (linhas 170-210)
 
-→ Cobranças (sub-menu):
-  1️⃣ 🔗 Link de Pagamento
-  2️⃣ 📄 Boleto
-  3️⃣ 🔍 Consultar CPF
+Após o `updateContato.mutate` bem-sucedido, verificar se o contato está em `modo = 'humano'`. Se sim, resetar automaticamente para `modo = 'ia'`:
+
+```typescript
+// Dentro do onSuccess do updateContato.mutate:
+const at = atendimentoByContato.get(contatoId);
+if (at?.modo === "humano") {
+  await supabase.from("atendimentos")
+    .update({ modo: "ia" })
+    .eq("id", at.id);
+  toast.info("Modo IA reativado automaticamente");
+}
 ```
 
-## Mudanças Técnicas
+### 2. `src/pages/Pipeline.tsx` — Remover toggle manual (linhas 982-998)
 
-### 1. Migração SQL
+Substituir o badge clicável por um badge **somente leitura** que indica o modo atual, sem onClick. O operador vê o estado mas não pode alterná-lo diretamente.
 
-- Adicionar coluna `parent_id uuid REFERENCES bot_menu_opcoes(id)` na tabela `bot_menu_opcoes`
-- Adicionar coluna `tipo text DEFAULT 'fluxo'` (valores: `submenu`, `fluxo`, `falar_equipe`)
-- Desativar setor "Atendimento Gael" e suas colunas (`pipeline_colunas WHERE setor_id = '32cbd99c-...'`)
-- Inserir novas opções de menu hierárquicas (setores → categorias → fluxos) e opções "Falar com equipe"
+### 3. Nenhuma mudança no banco
 
-### 2. `supabase/functions/bot-lojas/index.ts`
+A coluna `modo` já existe. Não há migração necessária.
 
-- **`loadMenuOpcoes`**: Aceitar `parent_id` como filtro. Menu raiz = `parent_id IS NULL`
-- **`buildMenuDynamic`**: Adicionar botão "⬅️ Voltar" quando `parent_id` não é nulo
-- **Navegação no `menu_principal`**: Quando o usuário seleciona um item do tipo `submenu`, carregar os filhos e exibir o sub-menu (sem iniciar fluxo). Guardar na sessão o `parent_id` para suportar "voltar"
-- **Tipo `falar_equipe`**: Ao selecionar, criar uma notificação interna no setor correspondente via `mensagens_internas` + `notificacoes`, informar ao usuário que a equipe foi acionada
+## Fluxo Final
 
-### 3. `src/components/configuracoes/BotMenuCard.tsx`
-
-- Exibir hierarquia na tabela (indentação ou agrupamento por pai)
-- Formulário de criação: campo "Pai" (select com opções tipo `submenu`) e campo "Tipo" (submenu/fluxo/falar_equipe)
-
-### 4. Dados do Menu (via insert tool)
-
-Reorganizar as 13 opções existentes como filhas dos novos sub-menus, criando a árvore descrita acima.
-
-## "Falar com Equipe" — Comportamento
-
-1. Bot envia: "✅ Equipe do Financeiro acionada! Um colaborador entrará em contato em breve."
-2. Cria `notificacao` para o `setor_id` correspondente com `tipo = 'falar_equipe'`
-3. O operador do setor vê a notificação in-app e responde via comentários da solicitação ou mensageria interna
-4. Sessão do bot volta ao menu principal
+```text
+1. IA detecta necessidade → seta modo = 'humano'
+2. Card aparece na Fila Humana (destaque pulsante)
+3. Operador clica, lê contexto, conversa com cliente
+4. Operador arrasta card para a coluna adequada (ex: Orçamento → Agendamento)
+5. Sistema automaticamente: modo = 'ia' + dispara automações da coluna destino
+6. Card sai da Fila Humana, IA retoma
+```
 
 ## Resultado
 
-- Menu limpo com 3 opções no nível raiz em vez de 13
-- Navegação intuitiva por setor → categoria → ação
-- "Falar com equipe" disponível em cada setor
-- Pipeline "Atendimento Gael" desativado (demandas genéricas resolvidas via "Falar com equipe")
+- Sem toggle manual = sem risco de devolver para IA "no vácuo"
+- Toda devolução é vinculada a uma ação funcional (mover coluna)
+- Automações da coluna destino são executadas normalmente
+- Operador mantém visibilidade do modo via badge read-only
 
