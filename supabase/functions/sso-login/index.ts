@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { email, setor_id, role } = await req.json();
+    const { email, setor_id, role, nome } = await req.json();
     if (!email || typeof email !== "string") {
       return new Response(JSON.stringify({ error: "email is required" }), {
         status: 400,
@@ -40,6 +40,7 @@ Deno.serve(async (req) => {
       email,
       options: {
         redirectTo: "https://atrium-link.lovable.app",
+        data: nome ? { nome } : undefined,
       },
     });
 
