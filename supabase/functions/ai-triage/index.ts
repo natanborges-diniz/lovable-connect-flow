@@ -570,6 +570,20 @@ function buildRegionalCoverageBlock(): string {
 - Ao enviar o link (3ª tentativa), use coluna_pipeline "Perdidos" para que o card saia do radar comercial.`;
 }
 
+function buildNonClientBlock(): string {
+  return `# CONTATOS NÃO-CLIENTE
+Se a pessoa se identificar como:
+- De outra unidade Diniz, franqueado, da Diniz Franchising, gerente de outra loja
+- Fornecedor, representante comercial, distribuidor
+- Alguém oferecendo produtos/serviços (B2B)
+- Alguém buscando parceria comercial ou empresarial
+
+→ NÃO trate como cliente. NÃO ofereça produtos, preços, agendamentos ou orçamentos.
+→ Use escalar_consultor com motivo específico: "contato_rede_diniz", "fornecedor_b2b" ou "proposta_parceria".
+→ Responda: "Entendido! Vou direcionar para o responsável da nossa equipe."
+→ NUNCA tente vender ou fazer triagem de produto para essas pessoas.`;
+}
+
 function buildSystemPromptFromCompiled(opts: {
   compiledPrompt: string;
   regrasProibidas: { regra: string; categoria: string }[];
@@ -593,6 +607,7 @@ function buildSystemPromptFromCompiled(opts: {
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
+  s.push(buildNonClientBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
@@ -666,6 +681,7 @@ function buildSystemPrompt(opts: {
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
+  s.push(buildNonClientBlock());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
@@ -2081,5 +2097,40 @@ async function handleEscalation(
     status: "ok", tools_used: [`escalar_consultor_${trigger}`],
     intencao: "escalonamento", precisa_humano: true,
     pipeline_coluna_sugerida: null, setor_sugerido: "", modo: "hibrido",
+  });
+}
+
+async function handleNonClientEscalation(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  atendimentoId: string, contatoId: string, mensagem: string, trigger: string
+) {
+  await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, mensagem);
+
+  // Set modo to humano (not hibrido) — this is NOT a client, operator takes full control
+  await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimentoId);
+
+  await supabase.from("contatos").update({ ultimo_contato_at: new Date().toISOString() }).eq("id", contatoId);
+
+  // Auto-generate summary for the operator
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/summarize-atendimento`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id: atendimentoId }),
+    });
+  } catch (_) { /* best effort */ }
+
+  await supabase.from("eventos_crm").insert({
+    contato_id: contatoId, tipo: "escalonamento_humano",
+    descricao: `Escalonamento automático (${trigger}): contato não-cliente detectado`,
+    metadata: { trigger, motivo: trigger, tipo_contato: trigger, mensagem },
+    referencia_tipo: "atendimento", referencia_id: atendimentoId,
+  });
+
+  return jsonResponse({
+    status: "ok", tools_used: [`non_client_${trigger}`],
+    intencao: trigger, precisa_humano: true,
+    pipeline_coluna_sugerida: trigger === "contato_rede_diniz" ? "Parcerias" : "Compras",
+    setor_sugerido: "", modo: "humano",
   });
 }
