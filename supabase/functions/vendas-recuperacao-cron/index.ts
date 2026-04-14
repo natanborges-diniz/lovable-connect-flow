@@ -6,21 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Eligible sales columns for recovery (by name)
-const ELIGIBLE_COLUMNS = ["Novo Contato", "Lead", "Orçamento", "Qualificado", "Retorno"];
-
-// Delays: 48h for first, 72h for subsequent
-const DELAY_HOURS = [48, 72, 72];
-// After 3rd attempt, wait 72h then move to Perdidos
-const FINAL_WAIT_HOURS = 72;
-
-// Inactivity thresholds per column type (hours without inbound message)
-const INACTIVITY_THRESHOLDS: Record<string, number> = {
-  "Reclamações": 24,
-  // Default for intermediate columns
-  default: 48,
-};
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -30,8 +15,37 @@ serve(async (req) => {
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+  // Read configurable parameters from payload (with defaults)
+  let payload: Record<string, any> = {};
   try {
-    // ── 0. PROCESS PENDING LEMBRETES (reminders) ──
+    const body = await req.json();
+    payload = body || {};
+  } catch {
+    // No body = manual trigger
+  }
+
+  const DELAY_HOURS = [
+    payload.delay_primeira_tentativa ?? 48,
+    payload.delay_segunda_tentativa ?? 72,
+    payload.delay_terceira_tentativa ?? 72,
+  ];
+  const FINAL_WAIT_HOURS = payload.espera_final ?? 72;
+  const MAX_TENTATIVAS = payload.max_tentativas ?? 3;
+  const INACTIVITY_DEFAULT = payload.inatividade_default ?? 48;
+
+  // Eligible columns — configurable via payload
+  const colunasElegiveisStr = payload.colunas_elegiveis ?? "Novo Contato,Lead,Orçamento,Qualificado,Retorno";
+  const ELIGIBLE_COLUMNS = typeof colunasElegiveisStr === "string"
+    ? colunasElegiveisStr.split(",").map((s: string) => s.trim()).filter(Boolean)
+    : colunasElegiveisStr;
+
+  const INACTIVITY_THRESHOLDS: Record<string, number> = {
+    "Reclamações": 24,
+    default: INACTIVITY_DEFAULT,
+  };
+
+  try {
+    // ── 0. PROCESS PENDING LEMBRETES ──
     const lembretesEnviados = await processLembretes(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // ── 1. Get eligible sales columns IDs ──
@@ -80,7 +94,8 @@ serve(async (req) => {
       try {
         const result = await processContato(
           supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-          contato, colunas, perdidosCol, now
+          contato, colunas, perdidosCol, now,
+          DELAY_HOURS, FINAL_WAIT_HOURS, MAX_TENTATIVAS, INACTIVITY_THRESHOLDS
         );
         processed += result.processed;
         movedToPerdidos += result.movedToPerdidos;
@@ -107,18 +122,18 @@ serve(async (req) => {
 // ── Process a single contact ──
 async function processContato(
   supabase: any, SUPABASE_URL: string, SUPABASE_SERVICE_ROLE_KEY: string,
-  contato: any, colunas: any[], perdidosCol: any, now: Date
+  contato: any, colunas: any[], perdidosCol: any, now: Date,
+  DELAY_HOURS: number[], FINAL_WAIT_HOURS: number, MAX_TENTATIVAS: number,
+  INACTIVITY_THRESHOLDS: Record<string, number>
 ) {
   const result = { processed: 0, movedToPerdidos: 0, inactivityAlerts: 0 };
   const meta = (contato.metadata as any) || {};
   const recuperacao = meta.recuperacao_vendas || { tentativas: 0 };
   const tentativas = recuperacao.tentativas || 0;
 
-  // Find column name for this contact
   const currentCol = colunas.find((c: any) => c.id === contato.pipeline_coluna_id);
   const colNome = currentCol?.nome || "";
 
-  // Find latest open atendimento
   const { data: atendimento } = await supabase
     .from("atendimentos")
     .select("id, created_at, modo")
@@ -131,8 +146,43 @@ async function processContato(
 
   if (!atendimento) return result;
 
-  // Skip contacts in human mode — operator is handling them
-  if (atendimento.modo === "humano" || atendimento.modo === "hibrido") return result;
+  // Skip contacts in human mode
+  if (atendimento.modo === "humano" || atendimento.modo === "hibrido") {
+    // Inactivity alerts for human-mode
+    const { data: lastInbound } = await supabase
+      .from("mensagens")
+      .select("created_at")
+      .eq("atendimento_id", atendimento.id)
+      .eq("direcao", "inbound")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (lastInbound) {
+      const hoursSinceInbound = (now.getTime() - new Date(lastInbound.created_at).getTime()) / (1000 * 60 * 60);
+      const threshold = INACTIVITY_THRESHOLDS[colNome] || INACTIVITY_THRESHOLDS.default;
+      if (hoursSinceInbound >= threshold) {
+        const { data: existingNotif } = await supabase
+          .from("notificacoes")
+          .select("id")
+          .eq("referencia_id", contato.id)
+          .eq("tipo", "inatividade_humano")
+          .gte("created_at", new Date(now.getTime() - threshold * 60 * 60 * 1000).toISOString())
+          .limit(1);
+
+        if (!existingNotif?.length) {
+          await supabase.from("notificacoes").insert({
+            titulo: `⚠ Inatividade: ${contato.nome}`,
+            mensagem: `Contato em "${colNome}" aguardando atendimento humano há ${Math.round(hoursSinceInbound)}h`,
+            tipo: "inatividade_humano",
+            referencia_id: contato.id,
+          });
+          result.inactivityAlerts++;
+        }
+      }
+    }
+    return result;
+  }
 
   // Find last inbound message time
   const { data: lastInbound } = await supabase
@@ -147,49 +197,19 @@ async function processContato(
   if (!lastInbound) return result;
 
   const lastInboundAt = new Date(lastInbound.created_at);
-  const hoursSinceInbound = (now.getTime() - lastInboundAt.getTime()) / (1000 * 60 * 60);
-
-  // ── Inactivity alerts (for human-mode contacts) ──
-  if (atendimento.modo === "humano") {
-    const threshold = INACTIVITY_THRESHOLDS[colNome] || INACTIVITY_THRESHOLDS.default;
-    if (hoursSinceInbound >= threshold) {
-      // Check if alert already exists recently
-      const { data: existingNotif } = await supabase
-        .from("notificacoes")
-        .select("id")
-        .eq("referencia_id", contato.id)
-        .eq("tipo", "inatividade_humano")
-        .gte("created_at", new Date(now.getTime() - threshold * 60 * 60 * 1000).toISOString())
-        .limit(1);
-
-      if (!existingNotif?.length) {
-        await supabase.from("notificacoes").insert({
-          titulo: `⚠ Inatividade: ${contato.nome}`,
-          mensagem: `Contato em "${colNome}" aguardando atendimento humano há ${Math.round(hoursSinceInbound)}h`,
-          tipo: "inatividade_humano",
-          referencia_id: contato.id,
-        });
-        result.inactivityAlerts++;
-        console.log(`[INACTIVITY] Alert for ${contato.nome} in "${colNome}" (${Math.round(hoursSinceInbound)}h)`);
-      }
-    }
-    return result; // Don't run recovery for human-mode contacts
-  }
 
   // ── Recovery cadence (IA-mode only) ──
 
-  // If already completed 3 attempts, check if time to move to Perdidos
-  if (tentativas >= 3) {
+  // If already completed max attempts, check if time to move to Perdidos
+  if (tentativas >= MAX_TENTATIVAS) {
     const lastAttemptAt = recuperacao.ultima_tentativa_at ? new Date(recuperacao.ultima_tentativa_at) : lastInboundAt;
     const hoursSinceLastAttempt = (now.getTime() - lastAttemptAt.getTime()) / (1000 * 60 * 60);
 
     if (hoursSinceLastAttempt >= FINAL_WAIT_HOURS) {
-      // Close atendimento first
       await supabase.from("atendimentos")
         .update({ status: "encerrado", fim_at: now.toISOString() })
         .eq("id", atendimento.id);
 
-      // Move to Perdidos
       await supabase.from("contatos").update({
         pipeline_coluna_id: perdidosCol.id,
         metadata: { ...meta, recuperacao_vendas: { ...recuperacao, status: "perdido" } },
@@ -198,7 +218,7 @@ async function processContato(
       await supabase.from("eventos_crm").insert({
         contato_id: contato.id,
         tipo: "lead_perdido",
-        descricao: "Lead movido para Perdidos após 3 tentativas de recuperação sem resposta. Atendimento encerrado automaticamente.",
+        descricao: `Lead movido para Perdidos após ${MAX_TENTATIVAS} tentativas de recuperação sem resposta. Atendimento encerrado automaticamente.`,
       });
 
       result.movedToPerdidos++;
@@ -208,9 +228,8 @@ async function processContato(
   }
 
   // Determine required delay
-  const requiredDelay = DELAY_HOURS[tentativas];
+  const requiredDelay = DELAY_HOURS[tentativas] ?? DELAY_HOURS[DELAY_HOURS.length - 1] ?? 72;
 
-  // Reference time: first attempt = last inbound; subsequent = last attempt
   const referenceTime = tentativas === 0
     ? lastInboundAt
     : (recuperacao.ultima_tentativa_at ? new Date(recuperacao.ultima_tentativa_at) : lastInboundAt);
@@ -224,7 +243,6 @@ async function processContato(
     resumoContexto = await generateSummary(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento.id, contato.id);
   }
 
-  // Use AI to generate contextual recovery message
   const firstName = contato.nome.split(" ")[0];
   try {
     const aiResp = await fetch(`${SUPABASE_URL}/functions/v1/responder-solicitacao`, {
@@ -238,21 +256,19 @@ async function processContato(
         modo: "recuperacao",
         contexto: {
           tentativa: tentativas + 1,
-          total_tentativas: 3,
+          total_tentativas: MAX_TENTATIVAS,
           nome_cliente: firstName,
           resumo: resumoContexto,
-          is_final: tentativas === 2,
+          is_final: tentativas === MAX_TENTATIVAS - 1,
         },
       }),
     });
 
     if (!aiResp.ok) {
-      // Fallback to template if AI fails
       console.warn(`AI recovery failed for ${contato.id}, falling back to template`);
       await sendRecoveryTemplate(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, contato, tentativas, firstName, resumoContexto);
     }
 
-    // Update metadata with recovery state
     const updatedRecuperacao = {
       tentativas: tentativas + 1,
       ultima_tentativa_at: now.toISOString(),
@@ -266,12 +282,12 @@ async function processContato(
     await supabase.from("eventos_crm").insert({
       contato_id: contato.id,
       tipo: "recuperacao_tentativa",
-      descricao: `Tentativa ${tentativas + 1}/3 de recuperação via IA`,
+      descricao: `Tentativa ${tentativas + 1}/${MAX_TENTATIVAS} de recuperação via IA`,
       metadata: { tentativa: tentativas + 1 },
     });
 
     result.processed++;
-    console.log(`[RECOVERY] ${contato.nome}: attempt ${tentativas + 1}/3 via IA`);
+    console.log(`[RECOVERY] ${contato.nome}: attempt ${tentativas + 1}/${MAX_TENTATIVAS} via IA`);
   } catch (sendErr) {
     console.error(`Send error for ${contato.id}:`, sendErr);
   }
@@ -311,7 +327,7 @@ async function sendRecoveryTemplate(
   contato: any, tentativas: number, firstName: string, resumoContexto: string
 ) {
   const TEMPLATES = ["retomada_contexto_1", "retomada_contexto_2", "retomada_despedida"];
-  const templateName = TEMPLATES[tentativas];
+  const templateName = TEMPLATES[tentativas] || TEMPLATES[TEMPLATES.length - 1];
 
   await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
     method: "POST",
