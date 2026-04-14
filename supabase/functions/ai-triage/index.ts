@@ -26,6 +26,47 @@ const SUBJECT_CHANGE_KEYWORDS = [
   "muda o assunto", "assunto diferente",
 ];
 
+// ── PRE-LLM: Rede Diniz / Franchising detection ──
+const REDE_DINIZ_PATTERNS = [
+  /sou d[ao] diniz/i,
+  /diniz de \w+/i,
+  /diniz franchising/i,
+  /outra unidade/i,
+  /franqueado/i,
+  /sou franqueado/i,
+  /lojista diniz/i,
+  /sou gerente d[aoe]/i,
+  /sou d[ao] loja d/i,
+  /trabalho n[ao] diniz/i,
+  /somos d[ao] diniz/i,
+  /outra [oó]tica diniz/i,
+  /filial diniz/i,
+];
+
+// ── PRE-LLM: Fornecedor / B2B detection ──
+const FORNECEDOR_B2B_PATTERNS = [
+  /representante comercial/i,
+  /proposta comercial/i,
+  /tabela de pre[çc]os? (para|pra) /i,
+  /sou fornecedor/i,
+  /somos fornecedores/i,
+  /distribuidor[a]? d[eao]/i,
+  /ofere[çc]o /i,
+  /oferta de (servi[çc]o|produto)/i,
+  /vendo \w+ para (lojas|empresas|[oó]ticas)/i,
+  /parceria (comercial|empresarial)/i,
+  /gostaria de oferecer/i,
+  /apresentar (nosso|nossa|meu|minha) (produto|servi[çc]o|empresa|marca)/i,
+];
+
+function matchesRedeDiniz(msg: string): boolean {
+  return REDE_DINIZ_PATTERNS.some((re) => re.test(msg));
+}
+
+function matchesFornecedorB2B(msg: string): boolean {
+  return FORNECEDOR_B2B_PATTERNS.some((re) => re.test(msg));
+}
+
 function norm(t: string): string {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
