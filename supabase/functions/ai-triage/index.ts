@@ -1004,7 +1004,45 @@ serve(async (req) => {
       return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, contactLensMsg, "lentes_de_contato");
     }
 
-    // ── 3. PRE-LLM ROUTER: subject change → deterministic ──
+    // ── 2.6. PRE-LLM ROUTER: Rede Diniz / Franchising → escalation + tag ──
+    if (matchesRedeDiniz(currentMsg) && !isHibrido) {
+      console.log("[ROUTER] Rede Diniz / Franchising detected — escalation");
+      const redeDinizMsg = "Entendido! Vou direcionar para o responsável da nossa equipe. Um momento! 🤝";
+      
+      // Tag contact as rede_diniz
+      const { data: ctData } = await supabase.from("contatos").select("tags, metadata").eq("id", contatoId).single();
+      const existingTags: string[] = (ctData?.tags || []);
+      if (!existingTags.includes("rede_diniz")) {
+        await supabase.from("contatos").update({ tags: [...existingTags, "rede_diniz"] }).eq("id", contatoId);
+      }
+
+      // Move to Parcerias column
+      const { data: parceriasCol } = await supabase.from("pipeline_colunas").select("id").eq("nome", "Parcerias").limit(1).single();
+      if (parceriasCol) {
+        await supabase.from("contatos").update({ pipeline_coluna_id: parceriasCol.id }).eq("id", contatoId);
+      }
+
+      return await handleNonClientEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, redeDinizMsg, "contato_rede_diniz");
+    }
+
+    // ── 2.7. PRE-LLM ROUTER: Fornecedor / B2B → escalation + update tipo ──
+    if (matchesFornecedorB2B(currentMsg) && !isHibrido) {
+      console.log("[ROUTER] Fornecedor / B2B detected — escalation");
+      const fornecedorMsg = "Entendido! Vou direcionar para o responsável da nossa equipe. Um momento! 🤝";
+      
+      // Update contact type to fornecedor
+      await supabase.from("contatos").update({ tipo: "fornecedor" }).eq("id", contatoId);
+
+      // Move to Compras column
+      const { data: comprasCol } = await supabase.from("pipeline_colunas").select("id").eq("nome", "Compras").limit(1).single();
+      if (comprasCol) {
+        await supabase.from("contatos").update({ pipeline_coluna_id: comprasCol.id }).eq("id", contatoId);
+      }
+
+      return await handleNonClientEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, fornecedorMsg, "fornecedor_b2b");
+    }
+
+
     if (matchesSubjectChange(currentMsg)) {
       console.log("[ROUTER] Subject change detected — deterministic response");
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE);
