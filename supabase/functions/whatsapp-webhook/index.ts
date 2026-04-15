@@ -55,17 +55,14 @@ serve(async (req) => {
     let contato = contatoResult?.[0] || null;
 
     if (!contato) {
-      // Use upsert to handle race conditions with unique telefone index
+      // Insert new contato; if race condition hits the partial unique index, fetch instead
       const { data: newContato, error: createErr } = await supabase
         .from("contatos")
-        .upsert(
-          { nome: senderName || phone, tipo: "cliente", telefone: phone },
-          { onConflict: "telefone", ignoreDuplicates: true }
-        )
+        .insert({ nome: senderName || phone, tipo: "cliente", telefone: phone })
         .select()
         .single();
       if (createErr) {
-        // If upsert still fails, try fetching again
+        // Likely duplicate from race condition – fetch existing
         const { data: retry } = await supabase
           .from("contatos")
           .select("*")
