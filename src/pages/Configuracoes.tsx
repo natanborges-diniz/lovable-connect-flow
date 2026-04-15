@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2, MessageSquare, Store, Brain, Zap, Users, Timer } from "lucide-react";
 import { KnowledgeBaseCard } from "@/components/configuracoes/KnowledgeBaseCard";
 import { LearningCard } from "@/components/configuracoes/LearningCard";
