@@ -1,40 +1,41 @@
 
 
-# Fix: bot-lojas `dados is not defined` Error
+# Limpar Menu de Configurações: Sidebar como Navegação Única
 
 ## Problema
 
-O número 8878 (Departamento Direção) envia mensagens, o webhook recebe corretamente e roteia para o `bot-lojas`, mas o bot crashia com:
+A página de Configurações tem **duas navegações redundantes**: a sidebar lateral (5 itens) e uma barra de tabs horizontal dentro da página (7 itens). Isso torna o menu extenso e confuso.
+
+## Solução
+
+Remover a barra de tabs horizontal da página e usar **apenas a sidebar** para navegação. Adicionar os 2 itens faltantes (Usuários e Crons) na sidebar.
+
+## Mudanças
+
+### 1. Sidebar — adicionar itens faltantes (`AppSidebar.tsx`)
+
+Adicionar "Usuários" e "Crons" ao menu do módulo `configuracoes`:
 
 ```
-ReferenceError: dados is not defined (line 428)
+IA
+Estrutura
+Usuários      ← novo
+Lojas
+WhatsApp
+Automações
+Crons         ← novo
 ```
 
-**Causa raiz**: Na linha 416, o código referencia `dados` antes de ser declarado. A variável `dados` só é desestruturada na linha 419 como `dados: dadosSessao`. Ou seja, na linha 416 o nome `dados` simplesmente não existe no escopo.
+### 2. Página — remover TabsList (`Configuracoes.tsx`)
 
-```typescript
-// Linha 416 — BUG: "dados" não existe ainda
-const currentParentId = (dados as any)?._menu_parent_id || null;
+- Remover o componente `<TabsList>` com os 7 `<TabsTrigger>`
+- Manter os `<TabsContent>` controlados pelo `?tab=` da URL (já funciona via sidebar)
+- O resultado: página limpa mostrando apenas o conteúdo da seção selecionada
 
-// Linha 419 — é aqui que "dados" é extraído com nome "dadosSessao"
-const { fluxo, etapa, dados: dadosSessao } = sessao;
-```
-
-## Correção
-
-Mover a desestruturação de `sessao` para **antes** da linha 416, e usar o nome correto `dadosSessao` (ou renomear para `dados`):
-
-```typescript
-// Desestruturar ANTES de usar
-const { fluxo, etapa, dados: dadosSessao } = sessao;
-const currentParentId = (dadosSessao as any)?._menu_parent_id || null;
-```
-
-## Arquivo Modificado
+## Arquivos Modificados
 
 | Arquivo | Mudança |
 |---------|---------|
-| `supabase/functions/bot-lojas/index.ts` | Reordenar linhas 416-419: mover desestruturação antes do uso de `dados` e corrigir referência para `dadosSessao` |
-
-Após a correção, redeploy da edge function.
+| `src/components/layout/AppSidebar.tsx` | Adicionar Usuários e Crons ao menu `configuracoes` |
+| `src/pages/Configuracoes.tsx` | Remover `TabsList` / `TabsTrigger`, manter apenas `TabsContent` |
 
