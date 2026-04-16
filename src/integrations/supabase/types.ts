@@ -600,6 +600,119 @@ export type Database = {
         }
         Relationships: []
       }
+      demanda_mensagens: {
+        Row: {
+          anexo_mime: string | null
+          anexo_url: string | null
+          autor_id: string | null
+          autor_nome: string | null
+          conteudo: string
+          created_at: string
+          demanda_id: string
+          direcao: string
+          encaminhada_ao_cliente: boolean
+          id: string
+          metadata: Json | null
+          tipo_conteudo: string
+        }
+        Insert: {
+          anexo_mime?: string | null
+          anexo_url?: string | null
+          autor_id?: string | null
+          autor_nome?: string | null
+          conteudo: string
+          created_at?: string
+          demanda_id: string
+          direcao: string
+          encaminhada_ao_cliente?: boolean
+          id?: string
+          metadata?: Json | null
+          tipo_conteudo?: string
+        }
+        Update: {
+          anexo_mime?: string | null
+          anexo_url?: string | null
+          autor_id?: string | null
+          autor_nome?: string | null
+          conteudo?: string
+          created_at?: string
+          demanda_id?: string
+          direcao?: string
+          encaminhada_ao_cliente?: boolean
+          id?: string
+          metadata?: Json | null
+          tipo_conteudo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "demanda_mensagens_demanda_id_fkey"
+            columns: ["demanda_id"]
+            isOneToOne: false
+            referencedRelation: "demandas_loja"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      demandas_loja: {
+        Row: {
+          atendimento_cliente_id: string
+          contato_cliente_id: string
+          created_at: string
+          encerrada_at: string | null
+          id: string
+          loja_nome: string
+          loja_telefone: string
+          metadata: Json | null
+          numero_curto: number
+          pergunta: string
+          protocolo: string
+          solicitante_id: string | null
+          solicitante_nome: string | null
+          status: string
+          ultima_mensagem_loja_at: string | null
+          updated_at: string
+          vista_pelo_operador: boolean
+        }
+        Insert: {
+          atendimento_cliente_id: string
+          contato_cliente_id: string
+          created_at?: string
+          encerrada_at?: string | null
+          id?: string
+          loja_nome: string
+          loja_telefone: string
+          metadata?: Json | null
+          numero_curto?: number
+          pergunta: string
+          protocolo: string
+          solicitante_id?: string | null
+          solicitante_nome?: string | null
+          status?: string
+          ultima_mensagem_loja_at?: string | null
+          updated_at?: string
+          vista_pelo_operador?: boolean
+        }
+        Update: {
+          atendimento_cliente_id?: string
+          contato_cliente_id?: string
+          created_at?: string
+          encerrada_at?: string | null
+          id?: string
+          loja_nome?: string
+          loja_telefone?: string
+          metadata?: Json | null
+          numero_curto?: number
+          pergunta?: string
+          protocolo?: string
+          solicitante_id?: string | null
+          solicitante_nome?: string | null
+          status?: string
+          ultima_mensagem_loja_at?: string | null
+          updated_at?: string
+          vista_pelo_operador?: boolean
+        }
+        Relationships: []
+      }
       eventos_crm: {
         Row: {
           contato_id: string
