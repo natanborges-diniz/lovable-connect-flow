@@ -157,6 +157,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [resumo, setResumo] = useState<string | null>(atendimento?.metadata?.resumo_ia || null);
   const [resumoLoading, setResumoLoading] = useState(false);
   const [sendingOutbound, setSendingOutbound] = useState(false);
+  const [resumoOpen, setResumoOpen] = useState(false);
+  const [demandasOpen, setDemandasOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
