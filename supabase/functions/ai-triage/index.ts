@@ -614,7 +614,8 @@ function buildSystemPromptFromCompiled(opts: {
 
   s.push(buildDateContext());
 
-  // Continuity and regional rules BEFORE compiled prompt (maximum weight)
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
@@ -688,7 +689,8 @@ function buildSystemPrompt(opts: {
   // Date/time context FIRST — so the model always knows the current date
   s.push(buildDateContext());
 
-  // Continuity and regional rules BEFORE identity (maximum weight)
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());

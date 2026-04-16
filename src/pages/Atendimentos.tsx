@@ -224,7 +224,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
       </DialogHeader>
 
       {atendimento && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
           <AtendimentoStatusBadge status={atendimento.status} />
           <Badge variant="outline" className="capitalize">{atendimento.canal}</Badge>
           {atendimento.canal_provedor && (
@@ -272,7 +272,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
         ) : (
           mensagens.map((m: any) => (
-            <div key={m.id} className={cn("max-w-[80%] rounded-lg px-3 py-2 text-sm", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
+            <div key={m.id} className={cn("max-w-[75%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
               {m.remetente_nome && <p className="text-xs font-medium opacity-70 mb-0.5">{m.remetente_nome} {m.direcao === "internal" && "• nota interna"}</p>}
               <p className="whitespace-pre-wrap">{m.conteudo}</p>
               <div className="flex items-center justify-between">
