@@ -256,7 +256,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             </Badge>
             {atendimento.contato?.nome && <span className="text-xs text-muted-foreground truncate min-w-0">• {atendimento.contato.nome}</span>}
             <Select value={atendimento.status} onValueChange={(v) => onStatusChange(v as StatusAtendimento)}>
-              <SelectTrigger className="ml-auto w-36 h-7 text-xs">
+              <SelectTrigger className="ml-auto w-32 h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -267,97 +267,88 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             </Select>
           </div>
         )}
-      </div>
 
-      {/* Conteúdo scrollável (mensagens + resumo) */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-3 space-y-3 bg-app-bg">
-        {/* Resumo IA - compacto */}
-        <div className="rounded-md border bg-card p-2.5 space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="text-xs font-medium flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 text-primary" />
-              Resumo IA
-            </h4>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 text-[11px] px-2"
-              disabled={resumoLoading || !mensagens?.length}
-              onClick={async () => {
-                setResumoLoading(true);
-                try {
-                  const { data, error } = await supabase.functions.invoke("summarize-atendimento", {
-                    body: { atendimento_id: id },
-                  });
-                  if (error) throw error;
-                  if (data.error) throw new Error(data.error);
-                  setResumo(data.resumo);
-                  toast.success("Resumo gerado");
-                } catch (e: any) {
-                  toast.error("Erro ao gerar resumo: " + e.message);
-                } finally {
-                  setResumoLoading(false);
-                }
-              }}
-            >
-              {resumoLoading ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Gerando</> : <><FileText className="h-3 w-3 mr-1" /> {resumo ? "Atualizar" : "Gerar"}</>}
-            </Button>
-          </div>
-          {resumo ? (
-            <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">{resumo}</p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground/70 italic">Nenhum resumo gerado ainda.</p>
-          )}
-        </div>
-
-        {/* Demandas à Loja - canal privado operador↔loja */}
-        <div className="rounded-md border bg-card p-2.5">
-          <DemandaLojaPanel atendimentoId={id} modo={(atendimento as any)?.modo || "ia"} />
-        </div>
-
-        {/* Mensagens */}
-        <div className="space-y-2">
-          {!mensagens?.length ? (
-            <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
-          ) : (
-            mensagens.map((m: any) => (
-              <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
-                {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota"}</p>}
-                <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
-                <div className="flex items-center justify-between gap-2 mt-1">
-                  <p className="text-[10px] opacity-50">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
-                  {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
-                    <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
-                  )}
-                </div>
+        {/* Toolbar compacta: Resumo IA + Demandas como popovers */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Popover open={resumoOpen} onOpenChange={setResumoOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 text-[11px] px-2">
+                <Sparkles className="h-3 w-3 mr-1 text-primary" />
+                Resumo IA
+                {resumo && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-primary" />}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold flex items-center gap-1.5">
+                  <Sparkles className="h-3 w-3 text-primary" /> Resumo IA
+                </h4>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-[11px] px-2"
+                  disabled={resumoLoading || !mensagens?.length}
+                  onClick={async () => {
+                    setResumoLoading(true);
+                    try {
+                      const { data, error } = await supabase.functions.invoke("summarize-atendimento", {
+                        body: { atendimento_id: id },
+                      });
+                      if (error) throw error;
+                      if (data.error) throw new Error(data.error);
+                      setResumo(data.resumo);
+                      toast.success("Resumo gerado");
+                    } catch (e: any) {
+                      toast.error("Erro ao gerar resumo: " + e.message);
+                    } finally {
+                      setResumoLoading(false);
+                    }
+                  }}
+                >
+                  {resumoLoading ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Gerando</> : <><FileText className="h-3 w-3 mr-1" /> {resumo ? "Atualizar" : "Gerar"}</>}
+                </Button>
               </div>
-            ))
-          )}
+              {resumo ? (
+                <div className="max-h-64 overflow-y-auto pr-1">
+                  <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">{resumo}</p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground/70 italic">Nenhum resumo gerado ainda. Clique em "Gerar".</p>
+              )}
+            </PopoverContent>
+          </Popover>
+
+          <Popover open={demandasOpen} onOpenChange={setDemandasOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 text-[11px] px-2">
+                <Pin className="h-3 w-3 mr-1 text-primary" />
+                Demandas à Loja
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-96 p-3 max-h-[60vh] overflow-y-auto">
+              <DemandaLojaPanel atendimentoId={id} modo={(atendimento as any)?.modo || "ia"} />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
-      {/* Footer fixo - composer */}
-      <div className="border-t p-3 shrink-0 bg-background">
-        <div className="flex items-end gap-2">
-          <div className="flex-1 min-w-0 space-y-1">
-            <div className="flex gap-1">
-              <Button variant={msgDirecao === "outbound" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("outbound")}>Resposta</Button>
-              <Button variant={msgDirecao === "internal" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("internal")}>Nota Interna</Button>
+      {/* Conteúdo scrollável (mensagens) */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-3 space-y-2 bg-app-bg">
+        {!mensagens?.length ? (
+          <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
+        ) : (
+          mensagens.map((m: any) => (
+            <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
+              {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota"}</p>}
+              <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
+              <div className="flex items-center justify-between gap-2 mt-1">
+                <p className="text-[10px] opacity-50">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
+                {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
+                  <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
+                )}
+              </div>
             </div>
-            <Textarea
-              value={msgText}
-              onChange={(e) => setMsgText(e.target.value)}
-              placeholder={msgDirecao === "internal" ? "Nota interna (não visível ao contato)..." : "Digite sua mensagem..."}
-              rows={2}
-              className="resize-none"
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            />
-          </div>
-          <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending || sendingOutbound} size="icon" className="h-10 w-10 shrink-0">
-            {sendingOutbound ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </Button>
-        </div>
+          ))
+        )}
       </div>
-    </>
-  );
-}
+
