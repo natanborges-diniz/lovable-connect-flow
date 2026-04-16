@@ -408,6 +408,17 @@ serve(async (req) => {
     // 7. Check homologação mode
     const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
 
+    // 7.5. DEMANDA LOJA — if message is from a store, check if it's a reply to a demand
+    if (isCorporate && !shouldSkipBot) {
+      const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
+      if (demandaRoute.handled) {
+        console.log(`[DEMANDA] Routed reply to demanda ${demandaRoute.demandaId} (numero #${demandaRoute.numeroCurto})`);
+        return new Response(JSON.stringify({ status: "ok", action: "demanda_reply", demanda_id: demandaRoute.demandaId }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // 8. Trigger appropriate bot (fire-and-forget)
     if (shouldSkipBot) {
       console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
