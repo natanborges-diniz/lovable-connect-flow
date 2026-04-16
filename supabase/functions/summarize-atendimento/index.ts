@@ -46,21 +46,19 @@ serve(async (req) => {
       return `${dir} (${m.remetente_nome || "—"}): ${m.conteudo}`;
     }).join("\n");
 
-    const prompt = `Resuma o atendimento abaixo de forma profissional e objetiva.
+    const prompt = `Resuma o atendimento abaixo em NO MÁXIMO 3 frases curtas. Texto corrido, sem markdown, sem títulos, sem listas, sem bullets.
 
 Contexto:
 - Solicitação: ${atendimento?.solicitacao?.assunto || "N/A"}
-- Contato: ${atendimento?.contato?.nome || "N/A"} (${atendimento?.contato?.tipo || "N/A"})
+- Contato: ${atendimento?.contato?.nome || "N/A"}
 - Canal: ${atendimento?.canal || "N/A"}
 
-Histórico de mensagens:
+Histórico:
 ${historico}
 
-Gere um resumo com:
-1. Motivo do contato
-2. Principais pontos discutidos
-3. Resolução ou pendências
-4. Ações necessárias (se houver)`;
+Formato: "[Motivo do contato]. [O que foi feito]. [Pendência/próximo passo]."
+
+Exemplo: "Cliente quer status de óculos não retirado (CPF informado). IA escalou para consultor da loja. Aguardando retorno."`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -71,7 +69,7 @@ Gere um resumo com:
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: [
-          { role: "system", content: "Você é um assistente que gera resumos concisos de atendimentos ao cliente." },
+          { role: "system", content: "Você gera resumos ULTRA-CURTOS (máx 3 frases) de atendimentos. Sem markdown, sem listas, sem títulos. Apenas texto corrido objetivo." },
           { role: "user", content: prompt },
         ],
       }),
