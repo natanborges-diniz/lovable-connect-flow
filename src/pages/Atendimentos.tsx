@@ -12,10 +12,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText } from "lucide-react";
+import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -157,6 +157,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [resumo, setResumo] = useState<string | null>(atendimento?.metadata?.resumo_ia || null);
   const [resumoLoading, setResumoLoading] = useState(false);
   const [sendingOutbound, setSendingOutbound] = useState(false);
+  const [resumoOpen, setResumoOpen] = useState(false);
+  const [demandasOpen, setDemandasOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
@@ -254,7 +256,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             </Badge>
             {atendimento.contato?.nome && <span className="text-xs text-muted-foreground truncate min-w-0">• {atendimento.contato.nome}</span>}
             <Select value={atendimento.status} onValueChange={(v) => onStatusChange(v as StatusAtendimento)}>
-              <SelectTrigger className="ml-auto w-36 h-7 text-xs">
+              <SelectTrigger className="ml-auto w-32 h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -265,73 +267,89 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             </Select>
           </div>
         )}
+
+        {/* Toolbar compacta: Resumo IA + Demandas como popovers */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Popover open={resumoOpen} onOpenChange={setResumoOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 text-[11px] px-2">
+                <Sparkles className="h-3 w-3 mr-1 text-primary" />
+                Resumo IA
+                {resumo && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-primary" />}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold flex items-center gap-1.5">
+                  <Sparkles className="h-3 w-3 text-primary" /> Resumo IA
+                </h4>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-[11px] px-2"
+                  disabled={resumoLoading || !mensagens?.length}
+                  onClick={async () => {
+                    setResumoLoading(true);
+                    try {
+                      const { data, error } = await supabase.functions.invoke("summarize-atendimento", {
+                        body: { atendimento_id: id },
+                      });
+                      if (error) throw error;
+                      if (data.error) throw new Error(data.error);
+                      setResumo(data.resumo);
+                      toast.success("Resumo gerado");
+                    } catch (e: any) {
+                      toast.error("Erro ao gerar resumo: " + e.message);
+                    } finally {
+                      setResumoLoading(false);
+                    }
+                  }}
+                >
+                  {resumoLoading ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Gerando</> : <><FileText className="h-3 w-3 mr-1" /> {resumo ? "Atualizar" : "Gerar"}</>}
+                </Button>
+              </div>
+              {resumo ? (
+                <div className="max-h-64 overflow-y-auto pr-1">
+                  <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">{resumo}</p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground/70 italic">Nenhum resumo gerado ainda. Clique em "Gerar".</p>
+              )}
+            </PopoverContent>
+          </Popover>
+
+          <Popover open={demandasOpen} onOpenChange={setDemandasOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 text-[11px] px-2">
+                <Pin className="h-3 w-3 mr-1 text-primary" />
+                Demandas à Loja
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-96 p-3 max-h-[60vh] overflow-y-auto">
+              <DemandaLojaPanel atendimentoId={id} modo={(atendimento as any)?.modo || "ia"} />
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
-      {/* Conteúdo scrollável (mensagens + resumo) */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-3 space-y-3 bg-app-bg">
-        {/* Resumo IA - compacto */}
-        <div className="rounded-md border bg-card p-2.5 space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="text-xs font-medium flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 text-primary" />
-              Resumo IA
-            </h4>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 text-[11px] px-2"
-              disabled={resumoLoading || !mensagens?.length}
-              onClick={async () => {
-                setResumoLoading(true);
-                try {
-                  const { data, error } = await supabase.functions.invoke("summarize-atendimento", {
-                    body: { atendimento_id: id },
-                  });
-                  if (error) throw error;
-                  if (data.error) throw new Error(data.error);
-                  setResumo(data.resumo);
-                  toast.success("Resumo gerado");
-                } catch (e: any) {
-                  toast.error("Erro ao gerar resumo: " + e.message);
-                } finally {
-                  setResumoLoading(false);
-                }
-              }}
-            >
-              {resumoLoading ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Gerando</> : <><FileText className="h-3 w-3 mr-1" /> {resumo ? "Atualizar" : "Gerar"}</>}
-            </Button>
-          </div>
-          {resumo ? (
-            <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">{resumo}</p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground/70 italic">Nenhum resumo gerado ainda.</p>
-          )}
-        </div>
-
-        {/* Demandas à Loja - canal privado operador↔loja */}
-        <div className="rounded-md border bg-card p-2.5">
-          <DemandaLojaPanel atendimentoId={id} modo={(atendimento as any)?.modo || "ia"} />
-        </div>
-
-        {/* Mensagens */}
-        <div className="space-y-2">
-          {!mensagens?.length ? (
-            <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
-          ) : (
-            mensagens.map((m: any) => (
-              <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
-                {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota"}</p>}
-                <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
-                <div className="flex items-center justify-between gap-2 mt-1">
-                  <p className="text-[10px] opacity-50">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
-                  {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
-                    <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
-                  )}
-                </div>
+      {/* Conteúdo scrollável (mensagens) */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-3 space-y-2 bg-app-bg">
+        {!mensagens?.length ? (
+          <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
+        ) : (
+          mensagens.map((m: any) => (
+            <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
+              {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota"}</p>}
+              <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
+              <div className="flex items-center justify-between gap-2 mt-1">
+                <p className="text-[10px] opacity-50">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
+                {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
+                  <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
+                )}
               </div>
-            ))
-          )}
-        </div>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Footer fixo - composer */}
@@ -359,3 +377,4 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
     </>
   );
 }
+
