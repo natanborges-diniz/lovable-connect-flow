@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
+import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
@@ -305,6 +306,11 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           ) : (
             <p className="text-[11px] text-muted-foreground/70 italic">Nenhum resumo gerado ainda.</p>
           )}
+        </div>
+
+        {/* Demandas à Loja - canal privado operador↔loja */}
+        <div className="rounded-md border bg-card p-2.5">
+          <DemandaLojaPanel atendimentoId={id} modo={(atendimento as any)?.modo || "ia"} />
         </div>
 
         {/* Mensagens */}

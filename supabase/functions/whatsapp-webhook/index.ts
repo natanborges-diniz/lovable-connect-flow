@@ -408,6 +408,17 @@ serve(async (req) => {
     // 7. Check homologação mode
     const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
 
+    // 7.5. DEMANDA LOJA — if message is from a store, check if it's a reply to a demand
+    if (isCorporate && !shouldSkipBot) {
+      const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
+      if (demandaRoute.handled) {
+        console.log(`[DEMANDA] Routed reply to demanda ${demandaRoute.demandaId} (numero #${demandaRoute.numeroCurto})`);
+        return new Response(JSON.stringify({ status: "ok", action: "demanda_reply", demanda_id: demandaRoute.demandaId }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // 8. Trigger appropriate bot (fire-and-forget)
     if (shouldSkipBot) {
       console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
@@ -704,6 +715,64 @@ async function triggerAiTriage(
       ...(mediaInfo && { media: mediaInfo }),
     }),
   });
+}
+
+// ─── Route store reply to an active demanda (if message starts with #NN) ───
+async function routeDemandaResposta(
+  supabase: any,
+  phone: string,
+  text: string,
+  mediaUrl: string | null,
+  mediaMime: string | null
+): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number }> {
+  const cleanPhone = phone.replace(/\D/g, "");
+  const trimmed = (text || "").trim();
+
+  // Match patterns: "#42", "#42 ...", "#DEM-42", "#dem42 ..."
+  const match = trimmed.match(/^#\s*(?:dem[-\s]?)?(\d{1,6})\b\s*([\s\S]*)/i);
+  if (!match) return { handled: false };
+
+  const numero = parseInt(match[1], 10);
+  const conteudo = (match[2] || "").trim();
+
+  // Find open demanda for this store + number
+  const { data: demanda } = await supabase
+    .from("demandas_loja")
+    .select("id, numero_curto, status, loja_telefone")
+    .eq("numero_curto", numero)
+    .neq("status", "encerrada")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!demanda) return { handled: false };
+
+  const demandaPhone = String(demanda.loja_telefone).replace(/\D/g, "");
+  if (demandaPhone !== cleanPhone) {
+    console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${demandaPhone}`);
+    return { handled: false };
+  }
+
+  await supabase.from("demanda_mensagens").insert({
+    demanda_id: demanda.id,
+    direcao: "loja_para_operador",
+    autor_nome: "Loja",
+    conteudo: conteudo || (mediaUrl ? "[anexo enviado]" : ""),
+    tipo_conteudo: mediaUrl ? "media" : "text",
+    anexo_url: mediaUrl || null,
+    anexo_mime: mediaMime || null,
+  });
+
+  await supabase
+    .from("demandas_loja")
+    .update({
+      status: "respondida",
+      ultima_mensagem_loja_at: new Date().toISOString(),
+      vista_pelo_operador: false,
+    })
+    .eq("id", demanda.id);
+
+  return { handled: true, demandaId: demanda.id, numeroCurto: numero };
 }
 
 function runInBackground(promise: Promise<unknown>) {
