@@ -352,3 +352,29 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         )}
       </div>
 
+      {/* Footer fixo - composer */}
+      <div className="border-t p-3 shrink-0 bg-background">
+        <div className="flex items-end gap-2">
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex gap-1">
+              <Button variant={msgDirecao === "outbound" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("outbound")}>Resposta</Button>
+              <Button variant={msgDirecao === "internal" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("internal")}>Nota Interna</Button>
+            </div>
+            <Textarea
+              value={msgText}
+              onChange={(e) => setMsgText(e.target.value)}
+              placeholder={msgDirecao === "internal" ? "Nota interna (não visível ao contato)..." : "Digite sua mensagem..."}
+              rows={2}
+              className="resize-none"
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            />
+          </div>
+          <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending || sendingOutbound} size="icon" className="h-10 w-10 shrink-0">
+            {sendingOutbound ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
