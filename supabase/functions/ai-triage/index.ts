@@ -549,6 +549,17 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
   return block;
 }
 
+function buildFirstContactBlock(inboundCount: number): string {
+  if (inboundCount > 1) return "";
+  return `# PRIMEIRA INTERAÇÃO
+- Cumprimente o cliente de forma calorosa e natural (ex: "Oi! Tudo bem? 😊").
+- Pergunte como pode ajudá-lo. NÃO assuma o que ele precisa.
+- NÃO mencione receita, lentes, agendamento ou qualquer serviço na primeira mensagem.
+- Deixe o CLIENTE dizer o que deseja antes de fazer qualquer triagem.
+- Exemplo: "Oi! Aqui é o Gael das Óticas Diniz Osasco 😊 Como posso te ajudar hoje?"
+- Mantenha a mensagem curta e acolhedora — máximo 2 frases.`;
+}
+
 function buildContinuityBlock(inboundCount: number): string {
   if (inboundCount <= 1) return "";
   return `# CONTINUIDADE DE CONVERSA
@@ -603,7 +614,8 @@ function buildSystemPromptFromCompiled(opts: {
 
   s.push(buildDateContext());
 
-  // Continuity and regional rules BEFORE compiled prompt (maximum weight)
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
@@ -677,7 +689,8 @@ function buildSystemPrompt(opts: {
   // Date/time context FIRST — so the model always knows the current date
   s.push(buildDateContext());
 
-  // Continuity and regional rules BEFORE identity (maximum weight)
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
