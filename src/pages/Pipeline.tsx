@@ -81,6 +81,7 @@ export default function Pipeline() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens" }, () => {
         queryClient.invalidateQueries({ queryKey: ["contatos"] });
         queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+        queryClient.invalidateQueries({ queryKey: ["pipeline_latest_messages"] });
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -99,6 +100,34 @@ export default function Pipeline() {
     },
   });
   const atendimentoByContato = new Map((atendimentosAtivos || []).map((a) => [a.contato_id, a]));
+  const activeAtendimentoIds = useMemo(() => (atendimentosAtivos ?? []).map((a) => a.id), [atendimentosAtivos]);
+
+  const { data: latestMessagesByAtendimento = {} } = useQuery({
+    queryKey: ["pipeline_latest_messages", activeAtendimentoIds.join(",")],
+    enabled: activeAtendimentoIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("mensagens")
+        .select("id, atendimento_id, direcao, created_at, remetente_nome, tipo_conteudo")
+        .in("atendimento_id", activeAtendimentoIds)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      return (data ?? []).reduce((acc, msg) => {
+        if (msg.direcao === "internal") return acc;
+        if (!acc[msg.atendimento_id]) acc[msg.atendimento_id] = msg;
+        return acc;
+      }, {} as Record<string, { id: string; atendimento_id: string; direcao: string; created_at: string; remetente_nome: string | null; tipo_conteudo: string }>);
+    },
+    initialData: {},
+  });
+
+  const hasPendingCustomerReply = (contatoId: string) => {
+    const atendimento = atendimentoByContato.get(contatoId);
+    if (!atendimento) return false;
+    return latestMessagesByAtendimento[atendimento.id]?.direcao === "inbound";
+  };
 
   const updateContato = useUpdateContato();
   const createColuna = useCreatePipelineColuna();
@@ -340,6 +369,7 @@ export default function Pipeline() {
           const at = atendimentoByContato.get(c.id);
           return at?.modo === "humano";
         });
+        const waitingReplyCount = humanCards.filter((c) => hasPendingCustomerReply(c.id)).length;
         if (humanCards.length === 0) return null;
         return (
           <Card className="mb-4 border-destructive/30 bg-destructive/5">
@@ -352,6 +382,11 @@ export default function Pipeline() {
                 <Badge variant="destructive" className="text-xs">
                   {humanCards.length}
                 </Badge>
+                {waitingReplyCount > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {waitingReplyCount} com resposta nova
+                  </Badge>
+                )}
               </div>
             </CardHeader>
             <CardContent className="px-4 pb-3">
@@ -360,6 +395,7 @@ export default function Pipeline() {
                   .sort((a, b) => new Date(a.ultimo_contato_at || a.created_at).getTime() - new Date(b.ultimo_contato_at || b.created_at).getTime())
                   .map((c) => {
                     const coluna = colunas.find((col) => col.id === c.pipeline_coluna_id);
+                    const hasNewReply = hasPendingCustomerReply(c.id);
                     return (
                       <Card
                         key={c.id}
@@ -370,9 +406,13 @@ export default function Pipeline() {
                           <div className="flex items-center gap-1.5">
                             <User className="h-3.5 w-3.5 text-destructive" />
                             <p className="font-medium text-xs truncate">{c.nome}</p>
+                            {hasNewReply && <span className="h-2 w-2 rounded-full bg-destructive animate-pulse shrink-0" />}
                           </div>
                           {coluna && (
                             <Badge variant="outline" className="text-[9px] px-1 py-0">{coluna.nome}</Badge>
+                          )}
+                          {hasNewReply && (
+                            <p className="text-[10px] font-medium text-destructive">Cliente respondeu</p>
                           )}
                           {c.ultimo_contato_at && (
                             <p className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -478,6 +518,7 @@ export default function Pipeline() {
                           {coluna.contatos.map((contato, index) => {
                             const atInfo = atendimentoByContato.get(contato.id);
                             const cardIsHumano = atInfo?.modo === "humano";
+                            const hasNewReply = hasPendingCustomerReply(contato.id);
                             return (
                               <Draggable key={contato.id} draggableId={contato.id} index={index}>
                                 {(provided, snapshot) => (
@@ -503,6 +544,7 @@ export default function Pipeline() {
                                         <div className="min-w-0 flex-1">
                                           <div className="flex items-center gap-1.5 flex-wrap">
                                             <p className="font-medium text-sm truncate">{contato.nome}</p>
+                                            {hasNewReply && <span className="h-2 w-2 rounded-full bg-destructive animate-pulse shrink-0" />}
                                             {atInfo && (
                                               atInfo.modo === "ia" ? (
                                                 <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-primary/50 text-primary">
@@ -917,9 +959,11 @@ function ConversationPanel({
 function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; contatoNome: string }) {
   const { data: mensagens, refetch } = useMensagens(atendimentoId);
   const createMensagem = useCreateMensagem();
+  const queryClient = useQueryClient();
   const [msgText, setMsgText] = useState("");
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
   const [sendingOutbound, setSendingOutbound] = useState(false);
+  const [modoLoading, setModoLoading] = useState<"ia" | "humano" | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Fetch atendimento details
@@ -950,6 +994,55 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [mensagens]);
+
+  const latestExternalMessage = useMemo(() => {
+    const externalMessages = (mensagens ?? []).filter((m: any) => m.direcao !== "internal");
+    return externalMessages[externalMessages.length - 1] ?? null;
+  }, [mensagens]);
+
+  const hasPendingCustomerReply = latestExternalMessage?.direcao === "inbound";
+
+  const handleSetModo = async (targetMode: "ia" | "humano") => {
+    if (!atendimento || atendimento.modo === targetMode) return;
+
+    try {
+      setModoLoading(targetMode);
+
+      const { error } = await supabase
+        .from("atendimentos")
+        .update({ modo: targetMode } as any)
+        .eq("id", atendimentoId);
+
+      if (error) throw error;
+
+      queryClient.invalidateQueries({ queryKey: ["atendimento_detail", atendimentoId] });
+      queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+      queryClient.invalidateQueries({ queryKey: ["atendimento_contato"] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline_latest_messages"] });
+
+      if (targetMode === "ia" && hasPendingCustomerReply) {
+        const mensagemTexto = latestExternalMessage?.conteudo?.trim() || `[${(latestExternalMessage as any)?.tipo_conteudo || "mensagem"}]`;
+        const { data, error: invokeError } = await supabase.functions.invoke("ai-triage", {
+          body: {
+            atendimento_id: atendimentoId,
+            mensagem_texto: mensagemTexto,
+            forcar_processamento: true,
+          },
+        });
+
+        if (invokeError) throw invokeError;
+        if (data?.error) throw new Error(data.error);
+
+        toast.success("IA reativada e lendo a última resposta do cliente");
+      } else {
+        toast.success(targetMode === "humano" ? "Conversa assumida pelo humano" : "IA reativada");
+      }
+    } catch (e: any) {
+      toast.error(`Falha ao ${targetMode === "humano" ? "assumir a conversa" : "devolver para IA"}: ` + (e?.message || "Erro desconhecido"));
+    } finally {
+      setModoLoading(null);
+    }
+  };
 
   const handleSend = async () => {
     const texto = msgText.trim();
@@ -1006,6 +1099,37 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
           >
             {atendimento.modo === "ia" ? "🤖 IA" : atendimento.modo === "humano" ? "👤 Humano" : "🔄 Híbrido"}
           </Badge>
+          {atendimento.modo === "humano" && hasPendingCustomerReply && (
+            <Badge variant="destructive" className="text-[10px] animate-pulse">
+              Cliente respondeu
+            </Badge>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            {atendimento.modo !== "humano" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={!!modoLoading}
+                onClick={() => handleSetModo("humano")}
+              >
+                {modoLoading === "humano" ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <User className="h-3 w-3 mr-1" />}
+                Assumir humano
+              </Button>
+            )}
+            {atendimento.modo !== "ia" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={!!modoLoading}
+                onClick={() => handleSetModo("ia")}
+              >
+                {modoLoading === "ia" ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Bot className="h-3 w-3 mr-1" />}
+                Devolver para IA
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
