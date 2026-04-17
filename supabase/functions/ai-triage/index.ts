@@ -1386,10 +1386,13 @@ serve(async (req) => {
           if (m.conteudo && m.conteudo !== "[image]") content.push({ type: "text", text: m.conteudo });
           messages.push({ role, content });
         } else {
-          // If this is the CURRENT message and image failed, inject system hint
-          if (latestImageCtxIndex === i) {
-            messages.push({ role, content: imageCaption });
-            messages.push({ role: "system", content: "[SISTEMA: O cliente enviou uma imagem mas não foi possível processá-la visualmente. Reconheça o recebimento, pergunte se é uma receita e peça reenvio com boa iluminação se necessário.]" });
+          // Image could not be delivered to the model. NEVER pretend we read it.
+          messages.push({ role, content: imageCaption });
+          messages.push({
+            role: "system",
+            content: "[SISTEMA: ⚠️ Há uma imagem do cliente no histórico que NÃO foi entregue ao modelo (falha de download). NUNCA diga 'recebi sua receita', 'parece ser uma receita' ou similar. NÃO chame interpretar_receita. Peça ao cliente que reenvie a foto da receita com boa iluminação, sem reflexos, segurando firme. Se ele já reclamou que enviou ('já mandei'), peça desculpa pelo problema técnico e oriente o reenvio uma única vez.]",
+          });
+        }
           } else {
             messages.push({ role, content: imageCaption });
           }
