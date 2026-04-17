@@ -1872,6 +1872,23 @@ serve(async (req) => {
         pipeline_coluna = args.coluna_pipeline || "Novo Contato";
         setor_sugerido = args.setor || "";
 
+        // ── GUARDRAIL: cannot move to Agendamento via `responder` alone ──
+        // Real bookings MUST go through agendar_visita / reagendar_visita (which writes to public.agendamentos).
+        // Without that record, the trigger on_agendamento_status_change never fires and no reminders go out.
+        if (/agendamento/i.test(pipeline_coluna)) {
+          console.log("[GUARDRAIL] Blocked move to 'Agendamento' via responder — only agendar_visita can persist a booking. Falling back to 'Qualificado'.");
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "agendamento_fantasma_bloqueado",
+            descricao: "IA tentou mover para 'Agendamento' sem chamar agendar_visita — bloqueado.",
+            metadata: { resposta: resposta.substring(0, 200), intencao },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          pipeline_coluna = intencao === "agendamento" ? "Qualificado" : pipeline_coluna === "Agendamento" ? "Qualificado" : pipeline_coluna;
+          if (pipeline_coluna === "Agendamento") pipeline_coluna = "Qualificado";
+        }
+
       } else if (fn === "escalar_consultor") {
         // ── ANTI-REESCALATION on humano→ia handoff ──
         // If we just got the conversation back from a human, block escalations that
