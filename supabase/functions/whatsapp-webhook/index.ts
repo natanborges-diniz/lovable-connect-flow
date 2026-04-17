@@ -741,7 +741,24 @@ async function triggerAiTriage(
   });
 }
 
-// ─── Route store reply to an active demanda (if message starts with #NN) ───
+// ─── Trigger Bridge Mensageria (modo ponte) ───
+async function triggerBridgeMensageria(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  payload: { contato_id: string; atendimento_id: string; conteudo: string; tipo_conteudo: string; media_url: string | null }
+) {
+  await fetch(`${supabaseUrl}/functions/v1/bridge-mensageria`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      direction: "whatsapp_to_interno",
+      ...payload,
+    }),
+  });
+}
 async function routeDemandaResposta(
   supabase: any,
   phone: string,
