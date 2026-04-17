@@ -813,6 +813,46 @@ Se a pessoa se identificar como:
 → NUNCA tente vender ou fazer triagem de produto para essas pessoas.`;
 }
 
+function buildLentesContatoKnowledgeBlock(): string {
+  return `# 👁️ LENTES DE CONTATO — CONHECIMENTO E REGRAS
+
+## Quando usar a tool consultar_lentes_contato
+- Cliente pede orçamento/preço de LENTES DE CONTATO (não óculos).
+- Para óculos, continue usando consultar_lentes.
+- Precisa de receita salva. Se não houver, peça foto da receita uma única vez.
+
+## Tipos de descarte (usar para explicar)
+- DIÁRIA: descarta após 1 uso. Caixas de 30/90 unidades. Mais higiênica, sem precisar de soluções/estojo. Combo 3+1 NÃO se aplica.
+- QUINZENAL: cada lente dura 15 dias por olho. Caixas geralmente de 6 unidades. Requer solução multiuso e estojo.
+- MENSAL: cada lente dura 30 dias por olho. Caixas geralmente de 6 unidades. Requer solução multiuso e estojo.
+
+## COMBO 3+1 (mensais e quinzenais)
+- Cada caixa contém N unidades (campo unidades_por_caixa).
+- 1 unidade = 1 mês (mensal) ou 15 dias (quinzenal) — POR OLHO.
+- MESMA dioptria nos 2 olhos (sph + cyl iguais OD/OE): 1 caixa atende AMBOS os olhos → divide a duração por 2.
+  - Ex.: caixa de 6 unidades mensal, mesma dioptria → 1 cx = 3 meses.
+- DIOPTRIA DIFERENTE entre OD/OE: 1 caixa por olho (mínimo 2 caixas iniciais).
+  - Ex.: caixa de 6 unidades mensal, dioptrias diferentes → 2 cx = 6 meses.
+- Comprando 3 caixas, a 4ª vai de cortesia (combo 3+1).
+  - Mesma dioptria + 6un/cx mensal: 4 cx = 12 meses (1 ano completo).
+  - Dioptria diferente + 6un/cx mensal: 4 cx = 12 meses (1 ano completo).
+- DIÁRIAS: combo 3+1 NÃO se aplica.
+
+## TÓRICAS (astigmatismo)
+- Cilíndrico ≥ |0.75| em qualquer olho ⇒ OBRIGATORIAMENTE lente TÓRICA (com correção de astigmatismo).
+- Tóricas são SEMPRE SOB ENCOMENDA — pagamento confirma o pedido.
+- Sempre informe que o prazo de entrega depende da fabricante e que o pagamento garante a reserva.
+
+## Marcas — prioridade comercial
+- 1º) DNZ (marca própria, melhor custo-benefício) — sempre que a receita for compatível.
+- 2º) Demais marcas conforme compatibilidade técnica e preferência do cliente.
+
+## Apresentação de orçamento
+- Sempre apresente: produto, descarte, valor por caixa, plano sugerido (caixas + duração) e o combo 3+1 quando aplicável.
+- Para tóricas, deixe claro o aviso de encomenda.
+- Termine convidando à visita à loja para concluir o pedido (presencial fecha melhor).`;
+}
+
 function buildSystemPromptFromCompiled(opts: {
   compiledPrompt: string;
   regrasProibidas: { regra: string; categoria: string }[];
