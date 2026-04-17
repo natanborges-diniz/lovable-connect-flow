@@ -892,7 +892,20 @@ function sanitizePushName(rawName: string | null | undefined, phone: string, kee
   return name;
 }
 
-function shouldKeepBrandName(rawName: string | null | undefined, text: string | null | undefined): boolean {
+// Detects whether the WhatsApp pushName looks like a real person name (vs phone digits, brand, generic word).
+function looksLikeRealName(rawName: string | null | undefined, phone: string): boolean {
+  const name = (rawName || "").trim();
+  if (!name) return false;
+  if (name === phone) return false;
+  // Mostly digits → not a name
+  if (/^\+?\d[\d\s().-]*$/.test(name)) return false;
+  // Brand patterns
+  if (BRAND_NAME_PATTERNS.some((re) => re.test(name))) return false;
+  // Need at least 2 letter chars and ideally a space (first+last) OR be a clearly capitalized word ≥3 letras
+  const letters = name.replace(/[^A-Za-zÀ-ÿ]/g, "");
+  if (letters.length < 3) return false;
+  return true;
+}
   const name = (rawName || "").trim();
   const msg = (text || "").toLowerCase();
   if (!name || !BRAND_NAME_PATTERNS.some((re) => re.test(name))) return false;
