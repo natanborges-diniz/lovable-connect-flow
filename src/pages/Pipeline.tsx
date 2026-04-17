@@ -63,9 +63,8 @@ export default function Pipeline() {
   const [activeSegment, setActiveSegment] = useState<string>("todos");
   const { data: contatos, isLoading: loadingContatos } = useContatos();
   const { data: colunasVendas, isLoading: loadingColunasVendas } = usePipelineColunas();
-  const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
-  const { data: colunasInternas, isLoading: loadingColunasInternas } = usePipelineColunas(ATENDIMENTO_GAEL_SETOR_ID);
-  const colunas = [...(colunasVendas ?? []), ...(colunasInternas ?? [])];
+  // CRM exibe apenas vendas (setor_id IS NULL). Atendimento Corporativo agora vive em /interno.
+  const colunas = colunasVendas ?? [];
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
