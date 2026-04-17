@@ -759,6 +759,8 @@ async function triggerBridgeMensageria(
     }),
   });
 }
+
+// ─── Route store reply to an active demanda (if message starts with #NN) ───
 async function routeDemandaResposta(
   supabase: any,
   phone: string,
