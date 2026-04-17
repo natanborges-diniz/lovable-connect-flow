@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
-  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw,
+  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw, Image as ImageIcon, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -1149,13 +1149,42 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
         {!mensagens?.length ? (
           <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
         ) : (
-          mensagens.map((m: any) => (
-            <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
-              {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota interna"}</p>}
-              <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
-              <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
-            </div>
-          ))
+          mensagens.map((m: any) => {
+            const mediaUrl = m?.metadata?.media_url as string | undefined;
+            const mimeType = (m?.metadata?.mime_type as string | undefined) || "";
+            const isImage = (m?.tipo_conteudo || "text") === "image" && !!mediaUrl;
+            const isDocument = !!mediaUrl && !isImage;
+
+            return (
+              <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
+                {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota interna"}</p>}
+                {isImage ? (
+                  <a href={mediaUrl} target="_blank" rel="noreferrer" className="block mb-2">
+                    <img
+                      src={mediaUrl}
+                      alt={m.conteudo && m.conteudo !== "[image]" ? m.conteudo : "Imagem enviada pelo cliente"}
+                      className="max-h-72 w-full rounded-md object-contain bg-background/40"
+                      loading="lazy"
+                    />
+                  </a>
+                ) : null}
+                {isDocument ? (
+                  <a
+                    href={mediaUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mb-2 flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-3 py-2 text-xs underline-offset-2 hover:underline"
+                  >
+                    {mimeType.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                    <span className="truncate">Ver anexo</span>
+                    <ExternalLink className="ml-auto h-3.5 w-3.5" />
+                  </a>
+                ) : null}
+                {m.conteudo && m.conteudo !== "[image]" && <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>}
+                <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
+              </div>
+            );
+          })
         )}
       </div>
 
