@@ -140,6 +140,50 @@ function imageContextFallback(recentOutbound: string[]): string {
   return IMAGE_CONTEXT_FALLBACK_POOL[0]; // Always return something for images
 }
 
+// ── Pending intent detector (used after humano→ia handoff) ──
+function detectPendingIntent(
+  recentInbound: string[],
+  hasUnparsedImage: boolean,
+  hasReceitas: boolean,
+): { intent: string; hint: string } | null {
+  const joined = recentInbound.slice(-5).map((t) => String(t || "").toLowerCase()).join(" | ");
+  if (!joined.trim() && !hasUnparsedImage) return null;
+
+  if (hasUnparsedImage && !hasReceitas) {
+    return {
+      intent: "prescription_pending",
+      hint: "Cliente enviou imagem (provável receita) ainda não interpretada. PRIORIDADE: chamar interpretar_receita agora.",
+    };
+  }
+  if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|que dia|que horas|disponibilidade)\b/i.test(joined)) {
+    return {
+      intent: "scheduling",
+      hint: "Cliente quer AGENDAR. Continue o agendamento — pergunte loja/data/hora se faltar, ou use agendar_cliente se já tiver os dados.",
+    };
+  }
+  if (/\b(pre[çc]o|valor|or[çc]amento|quanto custa|quanto fica|quanto sai)\b/i.test(joined)) {
+    return {
+      intent: "quote",
+      hint: hasReceitas
+        ? "Cliente quer ORÇAMENTO e já há receita salva. Use consultar_lentes para responder com opções."
+        : "Cliente quer ORÇAMENTO mas falta receita. Peça foto da receita uma única vez.",
+    };
+  }
+  if (/\b(endere[çc]o|onde fica|onde [eé]|como chegar|fica onde|qual loja|maps)\b/i.test(joined)) {
+    return {
+      intent: "location",
+      hint: "Cliente quer ENDEREÇO/LOCALIZAÇÃO. Responda com endereço da loja relevante (use base de conhecimento de lojas).",
+    };
+  }
+  if (/\b(confirma[rs]?|confirmado|fechado|pode marcar|pode agendar|t[aá] bom|beleza)\b/i.test(joined)) {
+    return {
+      intent: "confirmation",
+      hint: "Cliente está CONFIRMANDO algo discutido. Identifique o que e finalize a ação correspondente.",
+    };
+  }
+  return null;
+}
+
 function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
   resposta: string;
   intencao: string;
