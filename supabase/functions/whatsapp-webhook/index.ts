@@ -908,7 +908,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.documentMessage) {
       return {
         phone,
-        senderName: body.data.pushName || phone,
+        senderName: safePushName,
         text: msgData.documentMessage.caption || msgData.documentMessage.fileName || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -922,7 +922,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.audioMessage) {
       return {
         phone,
-        senderName: body.data.pushName || phone,
+        senderName: safePushName,
         text: "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -936,7 +936,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.videoMessage) {
       return {
         phone,
-        senderName: body.data.pushName || phone,
+        senderName: safePushName,
         text: msgData.videoMessage.caption || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -949,7 +949,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     // Text message (fallback)
     return {
       phone,
-      senderName: body.data.pushName || phone,
+      senderName: safePushName,
       text: msgData?.conversation || msgData?.extendedTextMessage?.text || "",
       messageId: body.data.key.id || "",
       source: "evolution_api",
