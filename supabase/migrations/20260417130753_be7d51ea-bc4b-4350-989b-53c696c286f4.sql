@@ -1,0 +1,1 @@
+UPDATE public.atendimentos SET modo = 'humano' WHERE modo = 'hibrido' AND status != 'encerrado';
