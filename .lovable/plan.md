@@ -1,105 +1,60 @@
 
 
-## Refinamento da Lógica de Combo e Tóricas
+## Saneamento corporativo — cobertura atual e futura
 
-Atualizo o plano anterior com 2 correções críticas que você apontou:
+### Resposta direta
+Sim — o plano cobre o caso atual (Natan) **e** previne para qualquer número futuro. Mas preciso ajustar 2 pontos do plano original para ficar 100%.
 
-### A) Lógica correta do combo "3+1" (baseada em unidades/caixa)
+### O que o webhook já faz (linha 121-150)
+- Detecta `lojaMatch` em `telefones_lojas` toda mensagem inbound.
+- Atualiza `contato.tipo` para `loja`/`colaborador` se diferente.
+- Preserva nome da marca/loja.
 
-A planilha tem coluna `unidades_por_caixa` (6, 30, etc). A IA precisa raciocinar:
+### O que falta (gap que pegou o Natan)
+O webhook **não trata** contatos pré-existentes que:
+1. Têm `pipeline_coluna_id` apontando pro CRM Vendas (legado de quando eram "cliente").
+2. Têm atendimento aberto em `modo='humano'` órfão (escalonado antes do cadastro corporativo).
+3. Não têm `setor_destino` apontando pro setor corporativo.
 
-**Regra de cálculo de duração (mensais e quinzenais)**:
-- Cada unidade dura 1 mês (mensal) ou 15 dias (quinzenal)
-- Uma caixa = N unidades → N meses (mensal) ou N/2 meses (quinzenal) **por olho**
-- Se mesma dioptria nos 2 olhos: 1 caixa atende ambos olhos → divide duração por 2
-- Se dioptria diferente: 1 caixa por olho (mínimo 2 caixas)
+### Plano ajustado (cobre presente e futuro)
 
-**Exemplo prático (caixa de 6 unidades, mensal)**:
-| Cenário | Caixas necessárias | Duração | Combo aplicável |
-|---------|---|---|---|
-| Mesma dioptria OD=OE | 1 caixa | 3 meses (6÷2) | 3+1 → 12 meses |
-| Mesma dioptria OD=OE | 2 caixas | 6 meses | — |
-| Dioptria diferente | 2 caixas (mín) | 6 meses (1 cx p/ olho) | — |
-| Dioptria diferente | 4 caixas (3+1) | **12 meses (1 ano)** | ✅ Plano anual |
+**1. Saneamento one-shot via SQL (resolve todos os corporativos hoje)**
+Não só o Natan — varre TODOS os contatos cujo telefone está em `telefones_lojas` ativo e:
+- Limpa `pipeline_coluna_id` se aponta para coluna do setor CRM Vendas.
+- Define `setor_destino` para o setor "Atendimento Corporativo" (Interno).
+- Garante `tipo` = `loja` ou `colaborador`.
+- Encerra atendimentos abertos em `modo='humano'` SEM atendente humano atribuído (são órfãos do bot-lojas).
+- Loga em `eventos_crm` como `saneamento_corporativo_lote`.
 
-**Combo regra**: comprou 3 caixas → ganha a 4ª. Lógica do "plano anual":
-- **Mesma dioptria** + 6un/cx: 3+1 = 4 cx → 12 meses (4 caixas × 6un ÷ 2 olhos = 12 meses)
-- **Dioptria diferente** + 6un/cx: 3+1 = 4 cx → 12 meses (4 caixas × 6un ÷ 2 olhos = 12 meses)
-- Diárias (caixas de 30/90): combo não se aplica (já vendidas em packs maiores)
+**2. Saneamento contínuo no webhook (cobre números futuros)**
+Estende o bloco `if (isCorporate)` (linha 139-150) para, além de atualizar `tipo`/`nome`:
+- Se `contato.pipeline_coluna_id` pertence a coluna de setor CRM Vendas → setar `pipeline_coluna_id = null`.
+- Se `contato.setor_destino` está vazio ou aponta pra setor não-corporativo → setar para setor corporativo (id buscado uma vez via cache em memória ou query rápida).
+- Se há atendimento aberto em `modo='humano'` SEM `atendente_nome` (= órfão, ninguém pegou) → reverter para `modo='ia'` ou encerrar (decisão: encerrar, pois `bot-lojas` cria sessão própria).
+- Logar evento `reclassificacao_corporativa`.
 
-### B) Detecção de tórica reformulada
+Resultado: **qualquer número** que entrar em `telefones_lojas` (agora ou no futuro) será saneado automaticamente na próxima mensagem que enviar.
 
-Tórica não é só pelo nome — é pela **necessidade do cliente**:
-- Se receita tem **cilíndrico ≥ |0.75|** em qualquer olho → **OBRIGATORIAMENTE** lente tórica
-- Filtra apenas produtos com `is_toric = true` E que cubram o eixo da receita
-- Aviso: "sob encomenda — pagamento confirma o pedido"
+**3. Trigger opcional (defesa em profundidade)**
+Adicionar trigger `AFTER INSERT OR UPDATE ON telefones_lojas` que:
+- Quando um número é cadastrado/ativado, busca contato existente por telefone e roda o mesmo saneamento (limpa CRM, ajusta tipo/setor, encerra humano órfão).
+- Garante saneamento **imediato** ao cadastrar, sem precisar esperar nova mensagem.
 
-Lentes tóricas serão marcadas pela presença de `cylinder_min/max` na planilha (não nulo) OU pelo nome contendo "Toric"/"Astig"/etc.
+**4. Filtro visual da Fila Humana (já estava no plano)**
+Em `useAtendimentos`/`Pipeline.tsx`, excluir da fila humana cards onde `contato.tipo` ∈ {`loja`, `colaborador`, `fornecedor`}. Defesa de UI.
 
-## Mudanças no Plano
-
-### Estrutura do banco (`pricing_lentes_contato`)
-Adiciono colunas chave para a lógica:
-- `unidades_por_caixa` (int) — 6, 30, 90
-- `dias_por_unidade` (int) — 30 (mensal), 15 (quinzenal), 1 (diário)
-- `is_toric` (bool) — derivado da planilha (cilindro disponível)
-- `cylinder_min/max` (numeric) — range de cilindro coberto
-- `cylinder_axes_disponiveis` (texto livre) — ex: "10° em 10°" ou "todos"
-
-### Tool `consultar_lentes_contato` — lógica refinada
-Recebe a receita (esférico OD/OE, cilíndrico OD/OE), determina:
-
-1. **Precisa tórica?** Se `|cyl_OD| ≥ 0.75` OU `|cyl_OE| ≥ 0.75` → filtra `is_toric = true`
-2. **Filtra por sphere/cylinder** dentro do range do produto
-3. **Prioriza DNZ** quando compatível
-4. **Calcula plano sugerido**:
-   - Se mesma dioptria OD=OE (sph e cyl iguais) → "1 caixa atende os 2 olhos"
-   - Se diferentes → "Mínimo 2 caixas (1 por olho)"
-   - Sempre apresenta a opção 3+1 quando aplicável (mensais/quinzenais)
-   - Calcula meses de duração e exibe: "4 caixas = 12 meses (1 ano completo)"
-5. **Tóricas**: adiciona aviso "sob encomenda — pagamento confirma pedido"
-
-### Bloco do prompt (`buildLentesContatoKnowledgeBlock`)
-Inclui regra explícita para a IA raciocinar sobre o combo:
-
-```
-COMBO 3+1 (mensais/quinzenais):
-- Cada caixa contém N unidades (ver unidades_por_caixa)
-- 1 unidade = 1 mês (mensal) ou 15 dias (quinzenal) — POR OLHO
-- Mesma dioptria OD/OE: 1 caixa atende ambos (divide duração por 2)
-- Dioptria diferente: 1 caixa por olho (mínimo 2 caixas iniciais)
-- Comprando 3 caixas, a 4ª é grátis (plano anual)
-- Diárias: combo NÃO se aplica
-
-TÓRICAS (astigmatismo):
-- Cilíndrico ≥ 0.75 em qualquer olho → OBRIGATORIAMENTE tórica
-- Sempre SOB ENCOMENDA — pagamento confirma o pedido
-- Informar prazo estimado de entrega
-```
-
-### Saudação personalizada
-(sem mudança do plano anterior — confirma nome se vier `senderName` válido, caso contrário pergunta)
-
-## Arquivos a alterar
+### Arquivos a alterar
 
 | Arquivo | Mudança |
 |---|---|
-| Migration `<timestamp>_lentes_contato.sql` | Cria tabela `pricing_lentes_contato` com colunas refinadas (unidades_por_caixa, dias_por_unidade, is_toric, cylinder ranges) |
-| Migration data load | INSERT dos 50+ produtos da planilha com `unidades_por_caixa` correto |
-| `supabase/functions/ai-triage/index.ts` | Remove escalação determinística de "lentes de contato"; adiciona tool `consultar_lentes_contato` com lógica de combo correta; adiciona bloco de conhecimento; ajusta `buildFirstContactBlock` para confirmar nome; adiciona tool `registrar_nome_cliente` |
-| `supabase/functions/whatsapp-webhook/index.ts` | Helper `looksLikeRealName()`; flag `nome_confirmado` em metadata |
-| Desativar regra proibida `lentes_de_contato` | UPDATE em `ia_regras_proibidas` |
-| Nova regra: "Tóricas sob encomenda" | INSERT em `ia_regras_proibidas` |
-| `mem://ia/lentes-de-contato-orcamento.md` | Documenta lógica de combo (mesma vs diferente dioptria), cálculo de duração, regra das tóricas (cyl ≥ 0.75) |
-| `mem://ia/saudacao-confirma-nome.md` | Protocolo de saudação inicial |
-| `mem://index.md` | Adiciona referências |
+| Migration `<ts>_saneamento_corporativo.sql` | (a) saneamento one-shot em todos os corporativos hoje; (b) trigger `on_telefone_loja_change` chamando função `sanitize_corporate_contact(telefone)` |
+| `supabase/functions/whatsapp-webhook/index.ts` (linha 139-150) | Estender bloco `isCorporate`: limpar `pipeline_coluna_id` se for de setor Vendas, setar `setor_destino` corporativo, encerrar atendimento humano órfão |
+| `src/hooks/useAtendimentos.ts` (a confirmar) | Filtrar fila humana por `contato.tipo === 'cliente'` |
+| `mem://crm/fila-prioridade-humana.md` | Documentar exclusão de corporativos + saneamento automático |
 
-## Pendência da planilha
-Vou ler o XLSX para confirmar:
-- Coluna exata de "unidades por caixa" 
-- Quais produtos têm cilíndrico disponível (= toric)
-- Range de cilindro/eixo de cada um
-- Se DNZ está separado por linha de produto
+### Pendência mínima de descoberta
+- Confirmar UUID do setor "Atendimento Corporativo" (Interno) e do setor CRM Vendas (consulta em `setores`/`pipeline_colunas`).
+- Confirmar arquivo exato que monta a fila humana (provável `useAtendimentos.ts`).
 
-Posso prosseguir com essa implementação?
+Posso prosseguir com essa versão ajustada?
 
