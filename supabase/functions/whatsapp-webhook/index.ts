@@ -927,13 +927,13 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
   if (body.data?.key?.remoteJid) {
     const phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
     const msgData = body.data.message;
-    const safePushName = sanitizePushName(body.data.pushName, phone);
+    const rawPushName = body.data.pushName || phone;
 
     // Image message
     if (msgData?.imageMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: msgData.imageMessage.caption || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -947,7 +947,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.documentMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: msgData.documentMessage.caption || msgData.documentMessage.fileName || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -961,7 +961,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.audioMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -975,7 +975,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.videoMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: msgData.videoMessage.caption || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -988,7 +988,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     // Text message (fallback)
     return {
       phone,
-      senderName: safePushName,
+      senderName: rawPushName,
       text: msgData?.conversation || msgData?.extendedTextMessage?.text || "",
       messageId: body.data.key.id || "",
       source: "evolution_api",
