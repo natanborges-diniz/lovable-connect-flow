@@ -1,27 +1,28 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertTriangle, Bot, RefreshCw, Send, UserCog, Wand2, Users, Building2, Globe, ChevronDown } from "lucide-react";
+import { AlertTriangle, Bot, RefreshCw, Send, UserCog, Wand2, Users, Building2, Globe, Save, Check } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAtendimentosOrfaos, useRecuperarAtendimentos, type OrfaoRow, type PublicoFiltro } from "@/hooks/useAtendimentosOrfaos";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
 const MENSAGEM_PADRAO = "Olá! Desculpe a demora em responder, estamos retomando seu atendimento agora. Em instantes nossa equipe vai te atender. 🙏";
+const CHAVE_MSG = "recuperacao_mensagem_desculpas";
 
 interface PublicoOpt {
   key: PublicoFiltro;
@@ -55,27 +56,56 @@ const PUBLICOS: PublicoOpt[] = [
   },
 ];
 
+const IDADE_MARCAS = [15, 30, 60, 180, 360, 720, 1440];
+const formatIdade = (m: number) => {
+  if (m < 60) return `${m} min`;
+  if (m < 1440) return `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`;
+  return `${Math.floor(m / 1440)}d`;
+};
+
 export function RecuperacaoCard() {
+  const qc = useQueryClient();
   const [publico, setPublico] = useState<PublicoFiltro>("clientes");
-  const [idadeMin, setIdadeMin] = useState<number>(15);
-  const [setorId, setSetorId] = useState<string>("all");
-  const [modoFiltro, setModoFiltro] = useState<string>("all");
+  const [idadeIdx, setIdadeIdx] = useState<number>(0); // index em IDADE_MARCAS
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [mensagem, setMensagem] = useState<string>(MENSAGEM_PADRAO);
-  const [filtrosAvancados, setFiltrosAvancados] = useState(false);
+  const [mensagemOriginal, setMensagemOriginal] = useState<string>(MENSAGEM_PADRAO);
 
-  const { data: setores } = useQuery({
-    queryKey: ["setores"],
+  // Carrega mensagem salva
+  useQuery({
+    queryKey: ["config", CHAVE_MSG],
     queryFn: async () => {
-      const { data } = await supabase.from("setores").select("id, nome").order("nome");
-      return data || [];
+      const { data } = await supabase
+        .from("configuracoes_ia")
+        .select("valor")
+        .eq("chave", CHAVE_MSG)
+        .maybeSingle();
+      const valor = data?.valor || MENSAGEM_PADRAO;
+      setMensagem(valor);
+      setMensagemOriginal(valor);
+      return valor;
     },
   });
 
+  const salvarMensagem = useMutation({
+    mutationFn: async (novoTexto: string) => {
+      const { error } = await supabase
+        .from("configuracoes_ia")
+        .upsert({ chave: CHAVE_MSG, valor: novoTexto }, { onConflict: "chave" });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setMensagemOriginal(mensagem);
+      toast.success("Mensagem padrão salva");
+      qc.invalidateQueries({ queryKey: ["config", CHAVE_MSG] });
+    },
+    onError: (e: any) => toast.error("Erro ao salvar: " + e.message),
+  });
+
+  const idadeMin = IDADE_MARCAS[idadeIdx];
+
   const { data, isLoading, refetch, isFetching } = useAtendimentosOrfaos({
     idade_min: idadeMin,
-    setor_id: setorId === "all" ? undefined : setorId,
-    modo: modoFiltro === "all" ? undefined : modoFiltro,
     publico,
   });
   const recuperar = useRecuperarAtendimentos();
@@ -108,7 +138,6 @@ export function RecuperacaoCard() {
     );
   };
 
-  // Preview do lote inteligente
   const preview = useMemo(() => {
     const ia = orfaos.filter((o) => o.minutos_pendente < 60).length;
     const iaDesculpa = orfaos.filter((o) => o.minutos_pendente >= 60 && o.minutos_pendente < 360).length;
@@ -127,6 +156,8 @@ export function RecuperacaoCard() {
     if (key === "internos") return counts.internos;
     return totalGeral;
   };
+
+  const mensagemAlterada = mensagem !== mensagemOriginal;
 
   return (
     <Card className="shadow-card">
@@ -148,7 +179,7 @@ export function RecuperacaoCard() {
       <CardContent className="space-y-4">
         {/* Seletor de Público */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Quem você quer recuperar?</Label>
+          <Label className="text-sm font-medium">1. Quem você quer recuperar?</Label>
           <TooltipProvider delayDuration={200}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               {PUBLICOS.map((p) => {
@@ -190,65 +221,59 @@ export function RecuperacaoCard() {
           </TooltipProvider>
         </div>
 
-        {/* Filtros avançados (collapsible) */}
-        <Collapsible open={filtrosAvancados} onOpenChange={setFiltrosAvancados}>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground -ml-2">
-              <ChevronDown className={cn("h-3 w-3 mr-1 transition-transform", filtrosAvancados && "rotate-180")} />
-              Filtros avançados (idade, setor específico, modo)
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-2">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded-md border bg-muted/30">
-              <div className="space-y-1">
-                <Label className="text-xs">Idade mínima</Label>
-                <Select value={String(idadeMin)} onValueChange={(v) => setIdadeMin(parseInt(v))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="15">&gt; 15 minutos</SelectItem>
-                    <SelectItem value="60">&gt; 1 hora</SelectItem>
-                    <SelectItem value="360">&gt; 6 horas</SelectItem>
-                    <SelectItem value="1440">&gt; 24 horas</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Setor específico</Label>
-                <Select value={setorId} onValueChange={setSetorId}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    {(setores || []).map((s: any) => (
-                      <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Modo</Label>
-                <Select value={modoFiltro} onValueChange={setModoFiltro}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="ia">IA</SelectItem>
-                    <SelectItem value="hibrido">Híbrido</SelectItem>
-                    <SelectItem value="humano">Humano</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+        {/* Slider de idade */}
+        <div className="space-y-2 p-3 rounded-md border bg-muted/30">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">2. Pendentes há mais de:</Label>
+            <Badge variant="outline" className="font-mono">{formatIdade(idadeMin)}</Badge>
+          </div>
+          <Slider
+            value={[idadeIdx]}
+            onValueChange={(v) => setIdadeIdx(v[0])}
+            min={0}
+            max={IDADE_MARCAS.length - 1}
+            step={1}
+          />
+          <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+            {IDADE_MARCAS.map((m) => (
+              <span key={m}>{formatIdade(m)}</span>
+            ))}
+          </div>
+        </div>
 
-        {/* Mensagem de desculpas */}
+        {/* Mensagem de desculpas com persistência */}
         <div className="space-y-1">
-          <Label className="text-xs">Mensagem de desculpas (usada em escalonamento e envio em lote)</Label>
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">3. Mensagem de desculpas (usada em escalonamento e envio em lote)</Label>
+            <Button
+              size="sm"
+              variant={mensagemAlterada ? "default" : "ghost"}
+              className="h-7 text-xs"
+              disabled={!mensagemAlterada || salvarMensagem.isPending}
+              onClick={() => salvarMensagem.mutate(mensagem)}
+            >
+              {mensagemAlterada ? <Save className="h-3 w-3 mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+              {mensagemAlterada ? "Salvar como padrão" : "Salvo"}
+            </Button>
+          </div>
           <Textarea
             value={mensagem}
             onChange={(e) => setMensagem(e.target.value)}
             rows={2}
             className="text-sm"
           />
+          {mensagemAlterada && (
+            <p className="text-[10px] text-warning">
+              Alterações não salvas — clique em "Salvar como padrão" para persistir, ou use "Restaurar" para descartar.
+              <button
+                type="button"
+                className="ml-2 underline"
+                onClick={() => setMensagem(mensagemOriginal)}
+              >
+                Restaurar
+              </button>
+            </p>
+          )}
         </div>
 
         {/* Ações em lote */}
@@ -359,14 +384,33 @@ export function RecuperacaoCard() {
                     <TableCell className="text-xs text-muted-foreground">{o.setor_nome || "Cliente"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="ghost" title="Acionar IA" disabled={recuperar.isPending}
-                          onClick={() => executar("acionar_ia", [o.atendimento_id])}>
-                          <Bot className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" title="Escalar humano" disabled={recuperar.isPending}
-                          onClick={() => executar("escalar_humano", [o.atendimento_id])}>
-                          <UserCog className="h-4 w-4" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="ghost" disabled={recuperar.isPending}
+                              onClick={() => executar("acionar_ia", [o.atendimento_id])}>
+                              <Bot className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Acionar IA</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="ghost" disabled={recuperar.isPending}
+                              onClick={() => executar("mensagem_desculpas", [o.atendimento_id])}>
+                              <Send className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Enviar desculpas</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="ghost" disabled={recuperar.isPending}
+                              onClick={() => executar("escalar_humano", [o.atendimento_id])}>
+                              <UserCog className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Escalar humano</TooltipContent>
+                        </Tooltip>
                       </div>
                     </TableCell>
                   </TableRow>
