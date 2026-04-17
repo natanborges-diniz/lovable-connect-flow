@@ -443,6 +443,17 @@ serve(async (req) => {
           (e) => console.error("Bot lojas trigger failed:", e)
         )
       );
+    } else if (atendimentoModo === "ponte") {
+      // Modo PONTE: contato é operado por usuário interno via mensageria. Espelha pra mensagem interna.
+      runInBackground(
+        triggerBridgeMensageria(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+          contato_id: contato.id,
+          atendimento_id: atendimentoId,
+          conteudo: text,
+          tipo_conteudo: tipoConteudo,
+          media_url: storedMediaUrl,
+        }).catch((e) => console.error("Bridge mensageria failed:", e))
+      );
     } else if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
       runInBackground(
         triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, {
@@ -726,6 +737,25 @@ async function triggerAiTriage(
       contato_id: contatoId,
       mensagem_texto: text,
       ...(mediaInfo && { media: mediaInfo }),
+    }),
+  });
+}
+
+// ─── Trigger Bridge Mensageria (modo ponte) ───
+async function triggerBridgeMensageria(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  payload: { contato_id: string; atendimento_id: string; conteudo: string; tipo_conteudo: string; media_url: string | null }
+) {
+  await fetch(`${supabaseUrl}/functions/v1/bridge-mensageria`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      direction: "whatsapp_to_interno",
+      ...payload,
     }),
   });
 }

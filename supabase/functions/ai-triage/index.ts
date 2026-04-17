@@ -1123,6 +1123,9 @@ serve(async (req) => {
     if (atendimento.modo === "humano") {
       return jsonResponse({ status: "skipped", reason: "modo humano" });
     }
+    if (atendimento.modo === "ponte") {
+      return jsonResponse({ status: "skipped", reason: "modo ponte (operado via mensageria interna)" });
+    }
 
     // ── 1.5. DEBOUNCE — prevent parallel processing for rapid messages ──
     const meta = (atendimento.metadata as Record<string, any>) || {};

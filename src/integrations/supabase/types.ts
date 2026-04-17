@@ -462,6 +462,39 @@ export type Database = {
         }
         Relationships: []
       }
+      contato_ponte: {
+        Row: {
+          ativo: boolean
+          contato_id: string
+          conversa_id: string
+          created_at: string
+          id: string
+          responsavel_user_id: string
+          setor_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          contato_id: string
+          conversa_id: string
+          created_at?: string
+          id?: string
+          responsavel_user_id: string
+          setor_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          contato_id?: string
+          conversa_id?: string
+          created_at?: string
+          id?: string
+          responsavel_user_id?: string
+          setor_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       contatos: {
         Row: {
           ativo: boolean
@@ -1677,10 +1710,16 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       nextval_protocolo: { Args: never; Returns: number }
+      resolve_responsavel_setor: {
+        Args: { _setor_id: string }
+        Returns: string
+      }
       schedule_cron_job: {
         Args: { cron_expression: string; job_name: string; sql_command: string }
         Returns: number
       }
+      setup_contato_ponte: { Args: { _contato_id: string }; Returns: string }
+      unique_responsavel_setor: { Args: { _setor_id: string }; Returns: string }
       unschedule_cron_job: { Args: { job_name: string }; Returns: undefined }
     }
     Enums: {
