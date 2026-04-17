@@ -54,11 +54,19 @@ serve(async (req) => {
 
     let contato = contatoResult?.[0] || null;
 
+    // Detect if pushName looks like a real person name (vs a phone number, brand, etc.)
+    const realName = looksLikeRealName(senderName, phone) ? senderName : null;
+    const initialNome = realName || phone;
+
     if (!contato) {
       // Insert new contato; if race condition hits the partial unique index, fetch instead
+      const initialMetadata: Record<string, unknown> = {
+        nome_perfil_whatsapp: senderName || null,
+        nome_confirmado: false, // só vira true quando o cliente confirmar pela IA
+      };
       const { data: newContato, error: createErr } = await supabase
         .from("contatos")
-        .insert({ nome: senderName || phone, tipo: "cliente", telefone: phone })
+        .insert({ nome: initialNome, tipo: "cliente", telefone: phone, metadata: initialMetadata })
         .select()
         .single();
       if (createErr) {
@@ -73,10 +81,20 @@ serve(async (req) => {
       } else {
         contato = newContato;
       }
-    } else if (contato.nome !== senderName && contato.nome === phone) {
+    } else if (realName && contato.nome === phone) {
       // Upgrade placeholder phone-name to a better real person/store name when available.
-      await supabase.from("contatos").update({ nome: senderName }).eq("id", contato.id);
-      contato = { ...contato, nome: senderName };
+      const meta = (contato.metadata as Record<string, unknown>) || {};
+      await supabase.from("contatos").update({
+        nome: realName,
+        metadata: { ...meta, nome_perfil_whatsapp: senderName },
+      }).eq("id", contato.id);
+      contato = { ...contato, nome: realName };
+    } else if (senderName && (!(contato.metadata as any)?.nome_perfil_whatsapp)) {
+      // Save the WhatsApp profile name for later confirmation by IA
+      const meta = (contato.metadata as Record<string, unknown>) || {};
+      await supabase.from("contatos").update({
+        metadata: { ...meta, nome_perfil_whatsapp: senderName },
+      }).eq("id", contato.id);
     }
 
     // 2. Find or create canal (with provedor)
@@ -872,6 +890,21 @@ function sanitizePushName(rawName: string | null | undefined, phone: string, kee
   if (!name) return phone;
   if (!keepBrandName && BRAND_NAME_PATTERNS.some((re) => re.test(name))) return phone;
   return name;
+}
+
+// Detects whether the WhatsApp pushName looks like a real person name (vs phone digits, brand, generic word).
+function looksLikeRealName(rawName: string | null | undefined, phone: string): boolean {
+  const name = (rawName || "").trim();
+  if (!name) return false;
+  if (name === phone) return false;
+  // Mostly digits → not a name
+  if (/^\+?\d[\d\s().-]*$/.test(name)) return false;
+  // Brand patterns
+  if (BRAND_NAME_PATTERNS.some((re) => re.test(name))) return false;
+  // Need at least 2 letter chars and ideally a space (first+last) OR be a clearly capitalized word ≥3 letras
+  const letters = name.replace(/[^A-Za-zÀ-ÿ]/g, "");
+  if (letters.length < 3) return false;
+  return true;
 }
 
 function shouldKeepBrandName(rawName: string | null | undefined, text: string | null | undefined): boolean {
