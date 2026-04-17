@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.watchdog-loop-ia]
 verify_jwt = false
+
+[functions.watchdog-inbound-orfao]
+verify_jwt = false
