@@ -988,17 +988,11 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <MessageSquare className="h-5 w-5" />
-          {contatoNome}
-        </DialogTitle>
-      </DialogHeader>
-
+      {/* Status strip (parte do header geral) */}
       {atendimento && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="px-4 py-2 border-b shrink-0 flex items-center gap-2 flex-wrap bg-background">
           <AtendimentoStatusBadge status={atendimento.status as any} />
-          <Badge variant="outline" className="capitalize">{atendimento.canal}</Badge>
+          <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>
           <Badge
             variant="outline"
             className={cn(
@@ -1017,47 +1011,51 @@ function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; conta
 
       {/* AI Summary card */}
       {atendimento && (atendimento as any).metadata?.resumo_ia && (
-        <div className="rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 flex gap-2 items-start">
-          <FileText className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
-          <div className="text-sm text-yellow-800 dark:text-yellow-200">
+        <div className="mx-4 mt-2 rounded-lg border border-warning-muted bg-warning-soft px-3 py-2 flex gap-2 items-start shrink-0">
+          <FileText className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+          <div className="text-sm text-warning">
             <p className="font-medium text-xs mb-1">Resumo IA</p>
             <p className="whitespace-pre-wrap text-xs">{(atendimento as any).metadata.resumo_ia}</p>
           </div>
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-auto min-h-[200px] max-h-[400px] space-y-2 p-3 bg-app-bg rounded-lg border">
+      {/* Mensagens scrolláveis */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-3 space-y-2 bg-app-bg">
         {!mensagens?.length ? (
           <p className="text-sm text-muted-foreground text-center py-8">Nenhuma mensagem ainda</p>
         ) : (
           mensagens.map((m: any) => (
-            <div key={m.id} className={cn("max-w-[80%] rounded-lg px-3 py-2 text-sm", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
-              {m.remetente_nome && <p className="text-xs font-medium opacity-70 mb-0.5">{m.remetente_nome} {m.direcao === "internal" && "• nota interna"}</p>}
-              <p className="whitespace-pre-wrap">{m.conteudo}</p>
+            <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
+              {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota interna"}</p>}
+              <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
               <p className="text-[10px] opacity-50 mt-1">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
             </div>
           ))
         )}
       </div>
 
-      <div className="flex items-end gap-2">
-        <div className="flex-1 space-y-1">
-          <div className="flex gap-1">
-            <Button variant={msgDirecao === "outbound" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("outbound")}>Resposta</Button>
-            <Button variant={msgDirecao === "internal" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("internal")}>Nota Interna</Button>
+      {/* Composer fixo no rodapé */}
+      <div className="border-t p-3 shrink-0 bg-background">
+        <div className="flex items-end gap-2">
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex gap-1">
+              <Button variant={msgDirecao === "outbound" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("outbound")}>Resposta</Button>
+              <Button variant={msgDirecao === "internal" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("internal")}>Nota Interna</Button>
+            </div>
+            <Textarea
+              value={msgText}
+              onChange={(e) => setMsgText(e.target.value)}
+              placeholder={msgDirecao === "internal" ? "Nota interna..." : "Digite sua mensagem..."}
+              rows={2}
+              className="resize-none"
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            />
           </div>
-          <Textarea
-            value={msgText}
-            onChange={(e) => setMsgText(e.target.value)}
-            placeholder={msgDirecao === "internal" ? "Nota interna..." : "Digite sua mensagem..."}
-            rows={2}
-            className="resize-none"
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          />
+          <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending || sendingOutbound} size="icon" className="h-10 w-10 shrink-0">
+            {sendingOutbound ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
         </div>
-        <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending || sendingOutbound} size="icon" className="h-10 w-10">
-          {sendingOutbound ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-        </Button>
       </div>
     </>
   );
