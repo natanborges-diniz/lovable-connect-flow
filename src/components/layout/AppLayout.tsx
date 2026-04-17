@@ -31,9 +31,9 @@ export function AppLayout() {
     return <Navigate to="/mensagens" replace />;
   }
 
-  // Setor users não têm acesso ao Dashboard — redireciona para Mensagens
+  // Setor users não têm acesso ao Dashboard — redireciona para Interno (pipeline do setor)
   if (isSetorOnly && location.pathname === "/") {
-    return <Navigate to="/mensagens" replace />;
+    return <Navigate to="/interno" replace />;
   }
 
   return (

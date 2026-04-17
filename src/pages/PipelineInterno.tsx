@@ -102,7 +102,7 @@ export default function PipelineInterno() {
   const colunasIds = new Set((colunas ?? []).map(c => c.id));
   const contatosFiltradosBase = (contatos ?? []).filter((c) =>
     (c.pipeline_coluna_id && colunasIds.has(c.pipeline_coluna_id)) ||
-    c.setor_destino === ATENDIMENTO_CORPORATIVO_SETOR_ID
+    c.setor_destino === activeSetorId
   );
 
   const filteredContatos = contatosFiltradosBase.filter((c) => {
@@ -174,7 +174,7 @@ export default function PipelineInterno() {
     createColuna.mutate({
       nome: newColunaNome.trim(),
       ordem: maxOrdem + 1,
-      setor_id: ATENDIMENTO_CORPORATIVO_SETOR_ID,
+      setor_id: activeSetorId,
     });
     setNewColunaNome("");
     setAddingColuna(false);
