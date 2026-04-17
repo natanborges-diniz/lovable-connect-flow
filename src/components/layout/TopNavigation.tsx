@@ -37,7 +37,11 @@ const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
   atendimento: ["dashboard", "crm", "tarefas", "mensagens"],
   loja: ["dashboard", "lojas", "mensagens"],
   "atendimento corporativo": ["dashboard", "interno", "mensagens"],
+  "dpto armacoes": ["dashboard", "interno", "mensagens", "tarefas"],
 };
+
+// Fallback para setores não mapeados (departamentos novos operam via Ponte de Mensageria)
+const DEFAULT_SETOR_MODULES: ModuleKey[] = ["dashboard", "interno", "mensagens", "tarefas"];
 
 function useSetorNames(setorIds: string[]) {
   return useQuery({
@@ -68,12 +72,12 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
     if (roles.length === 0) return allModules;
     if (isAdmin || isOperador) return allModules;
 
-    const allowedKeys = new Set<ModuleKey>(["dashboard", "tarefas"]);
+    const allowedKeys = new Set<ModuleKey>(["dashboard", "tarefas", "mensagens"]);
     if (setorNames) {
       for (const s of setorNames) {
         const key = s.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const mapped = SETOR_MODULE_MAP[key];
-        if (mapped) mapped.forEach((m) => allowedKeys.add(m));
+        const mapped = SETOR_MODULE_MAP[key] ?? DEFAULT_SETOR_MODULES;
+        mapped.forEach((m) => allowedKeys.add(m));
       }
     }
     return allModules.filter((m) => allowedKeys.has(m.key));
