@@ -32,20 +32,21 @@ const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defa
 ];
 
 const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
-  financeiro: ["dashboard", "financeiro", "tarefas", "mensagens"],
-  ti: ["dashboard", "ti", "tarefas", "mensagens"],
-  atendimento: ["dashboard", "crm", "tarefas", "mensagens"],
-  loja: ["dashboard", "lojas", "mensagens"],
-  "atendimento corporativo": ["dashboard", "interno", "mensagens"],
-  "dpto armacoes": ["dashboard", "interno", "mensagens", "tarefas"],
+  financeiro: ["financeiro", "tarefas", "mensagens"],
+  ti: ["ti", "tarefas", "mensagens"],
+  atendimento: ["crm", "tarefas", "mensagens"],
+  loja: ["lojas", "mensagens"],
+  "atendimento corporativo": ["interno", "mensagens"],
+  "dpto armacoes": ["interno", "mensagens", "tarefas"],
 };
 
 // Fallback para setores não mapeados (departamentos novos operam via Ponte de Mensageria)
-const DEFAULT_SETOR_MODULES: ModuleKey[] = ["dashboard", "interno", "mensagens", "tarefas"];
+const DEFAULT_SETOR_MODULES: ModuleKey[] = ["interno", "mensagens", "tarefas"];
 
 function useSetorNames(setorIds: string[]) {
+  const stableKey = [...setorIds].sort().join(",");
   return useQuery({
-    queryKey: ["setor-names", setorIds],
+    queryKey: ["setor-names", stableKey],
     enabled: setorIds.length > 0,
     queryFn: async () => {
       const { data } = await supabase
@@ -72,13 +73,17 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
     if (roles.length === 0) return allModules;
     if (isAdmin || isOperador) return allModules;
 
-    const allowedKeys = new Set<ModuleKey>(["dashboard", "tarefas", "mensagens"]);
-    if (setorNames) {
+    // Setor users: NO dashboard. Start com tarefas+mensagens como base universal.
+    const allowedKeys = new Set<ModuleKey>(["tarefas", "mensagens"]);
+    if (setorNames && setorNames.length > 0) {
       for (const s of setorNames) {
         const key = s.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const mapped = SETOR_MODULE_MAP[key] ?? DEFAULT_SETOR_MODULES;
         mapped.forEach((m) => allowedKeys.add(m));
       }
+    } else if (setorIds.length > 0) {
+      // Setor user mas nomes ainda não carregaram → aplica fallback genérico
+      DEFAULT_SETOR_MODULES.forEach((m) => allowedKeys.add(m));
     }
     return allModules.filter((m) => allowedKeys.has(m.key));
   })();
