@@ -231,7 +231,7 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const action = url.searchParams.get("action") || "list";
+    const action = url.searchParams.get("action");
 
     if (req.method === "GET" || action === "list") {
       const idade = parseInt(url.searchParams.get("idade_min") || "15", 10);
