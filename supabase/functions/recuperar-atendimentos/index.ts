@@ -24,9 +24,28 @@ interface OrfaoRow {
   minutos_pendente: number;
 }
 
+// Setor "Atendimento Corporativo" — comunicação interna (lojas, colaboradores, departamentos)
+const ATENDIMENTO_CORPORATIVO_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+
+async function getSetoresInternos(supabase: any): Promise<string[]> {
+  // Setores considerados "internos": Atendimento Corporativo + qualquer setor configurado (Lojas, Financeiro, TI…)
+  // Heurística: todo setor com setor_id NÃO-NULO em pipeline_colunas é "interno". Vendas/CRM tem setor_id=NULL.
+  const { data } = await supabase.from("setores").select("id").eq("ativo", true);
+  const ids = (data || []).map((s: any) => s.id);
+  // Garante que o corporativo entra mesmo se inativo
+  if (!ids.includes(ATENDIMENTO_CORPORATIVO_SETOR_ID)) ids.push(ATENDIMENTO_CORPORATIVO_SETOR_ID);
+  return ids;
+}
+
 async function detectarOrfaos(
   supabase: any,
-  filters: { idade_min_min?: number; setor_id?: string | null; modo?: string | null }
+  filters: {
+    idade_min_min?: number;
+    setor_id?: string | null;
+    modo?: string | null;
+    publico?: "clientes" | "internos" | "todos" | null;
+    setores_internos?: string[];
+  }
 ): Promise<OrfaoRow[]> {
   const idadeMin = filters.idade_min_min ?? 15;
 
