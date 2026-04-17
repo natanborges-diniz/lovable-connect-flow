@@ -109,6 +109,9 @@ serve(async (req) => {
     const isCorporate = isLoja;
     const corporateTipo = lojaMatch?.tipo || "loja"; // loja, colaborador, departamento
 
+    // Only preserve brand/store names for known corporate numbers.
+    senderName = sanitizePushName(senderName, phone, isCorporate);
+
     // Update contato.tipo based on corporate phone type
     if (isCorporate) {
       const tipoContato = corporateTipo === "colaborador" ? "colaborador" : "loja";
@@ -814,7 +817,7 @@ interface NormalizedMessage {
 
 // ── Filter out brand/store names that come as pushName from customers
 // who saved our store contact in their phones (e.g., "Óticas Diniz", "Diniz", etc).
-// In these cases, fall back to the phone number so a human can rename the contact later.
+// For real corporate/store numbers, keep the provided brand name.
 const BRAND_NAME_PATTERNS: RegExp[] = [
   /[óo]ticas?\s*diniz/i,
   /^diniz$/i,
@@ -824,11 +827,10 @@ const BRAND_NAME_PATTERNS: RegExp[] = [
   /franchising/i,
 ];
 
-function sanitizePushName(rawName: string | null | undefined, phone: string): string {
+function sanitizePushName(rawName: string | null | undefined, phone: string, keepBrandName = false): string {
   const name = (rawName || "").trim();
   if (!name) return phone;
-  // If the pushName matches a known brand pattern, ignore it (saved as our store in their phone).
-  if (BRAND_NAME_PATTERNS.some((re) => re.test(name))) return phone;
+  if (!keepBrandName && BRAND_NAME_PATTERNS.some((re) => re.test(name))) return phone;
   return name;
 }
 
