@@ -2,7 +2,7 @@ import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy
+  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -74,6 +74,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "TI",
       items: [
         { title: "Pipeline TI", url: "/ti", icon: Monitor },
+      ],
+    },
+  ],
+  interno: [
+    {
+      label: "Atendimento Interno",
+      items: [
+        { title: "Pipeline Corporativo", url: "/interno", icon: Headset },
       ],
     },
   ],
