@@ -87,6 +87,9 @@ export function GestaoUsuariosCard() {
   const [addingAreaFor, setAddingAreaFor] = useState<string | null>(null);
   const [newSetorId, setNewSetorId] = useState("");
   const [newLojaNome, setNewLojaNome] = useState("");
+  // Pending "setor" intent: user picked Setor in dropdown but hasn't added any area yet.
+  // Without this, currentLevel falls back to null and the Áreas column hides the picker.
+  const [pendingSetorIntent, setPendingSetorIntent] = useState<Set<string>>(new Set());
 
   const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
   const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
