@@ -1202,13 +1202,9 @@ serve(async (req) => {
       return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword");
     }
 
-    // ── 2.5. PRE-LLM ROUTER: contact lens detection → deterministic escalation ──
-    const CONTACT_LENS_RE = /lentes?\s*de\s*contato/i;
-    if (CONTACT_LENS_RE.test(currentMsg) && !isHibrido) {
-      console.log("[ROUTER] Contact lens detected — deterministic escalation");
-      const contactLensMsg = "Lentes de contato é com nosso Consultor especializado! Para adiantar seu atendimento, me conta: você já usa lentes de contato? Se sim, qual marca/tipo (diária, mensal, anual) e tem receita atualizada? Vou passar tudo pro Consultor te atender já preparado 🤝";
-      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, contactLensMsg, "lentes_de_contato");
-    }
+    // ── 2.5. (REMOVIDO) Escalação determinística de lentes de contato ──
+    // Agora a IA tem catálogo (pricing_lentes_contato) e usa a tool consultar_lentes_contato.
+    // Tóricas: aviso "sob encomenda — pagamento confirma o pedido".
 
     // ── 2.6. PRE-LLM ROUTER: Rede Diniz / Franchising → escalation + tag ──
     if (matchesRedeDiniz(currentMsg) && !isHibrido) {
