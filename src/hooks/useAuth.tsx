@@ -152,6 +152,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [roles]
   );
 
+  // Fallback: usa profile.setor_id quando user_roles ainda não tem setor.
+  // Garante que SSO/cross-login não fique sem setor por atraso de provisionamento.
+  const getEffectiveSetorIds = useCallback(() => {
+    const fromRoles = roles.filter((r) => r.setor_id).map((r) => r.setor_id!);
+    if (fromRoles.length > 0) return fromRoles;
+    if (profile?.setor_id) return [profile.setor_id];
+    return [];
+  }, [roles, profile]);
+
   const getUserLojaNames = useCallback(
     () => roles.filter((r) => r.loja_nome).map((r) => r.loja_nome!),
     [roles]
@@ -166,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, loading, isAdmin, isOperador, hasRole, getUserSetorIds, getUserLojaNames, signOut }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, loading, isAdmin, isOperador, hasRole, getUserSetorIds, getEffectiveSetorIds, getUserLojaNames, signOut }}>
       {children}
     </AuthContext.Provider>
   );
