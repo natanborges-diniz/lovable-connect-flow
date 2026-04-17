@@ -140,6 +140,50 @@ function imageContextFallback(recentOutbound: string[]): string {
   return IMAGE_CONTEXT_FALLBACK_POOL[0]; // Always return something for images
 }
 
+// ── Pending intent detector (used after humano→ia handoff) ──
+function detectPendingIntent(
+  recentInbound: string[],
+  hasUnparsedImage: boolean,
+  hasReceitas: boolean,
+): { intent: string; hint: string } | null {
+  const joined = recentInbound.slice(-5).map((t) => String(t || "").toLowerCase()).join(" | ");
+  if (!joined.trim() && !hasUnparsedImage) return null;
+
+  if (hasUnparsedImage && !hasReceitas) {
+    return {
+      intent: "prescription_pending",
+      hint: "Cliente enviou imagem (provável receita) ainda não interpretada. PRIORIDADE: chamar interpretar_receita agora.",
+    };
+  }
+  if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|que dia|que horas|disponibilidade)\b/i.test(joined)) {
+    return {
+      intent: "scheduling",
+      hint: "Cliente quer AGENDAR. Continue o agendamento — pergunte loja/data/hora se faltar, ou use agendar_cliente se já tiver os dados.",
+    };
+  }
+  if (/\b(pre[çc]o|valor|or[çc]amento|quanto custa|quanto fica|quanto sai)\b/i.test(joined)) {
+    return {
+      intent: "quote",
+      hint: hasReceitas
+        ? "Cliente quer ORÇAMENTO e já há receita salva. Use consultar_lentes para responder com opções."
+        : "Cliente quer ORÇAMENTO mas falta receita. Peça foto da receita uma única vez.",
+    };
+  }
+  if (/\b(endere[çc]o|onde fica|onde [eé]|como chegar|fica onde|qual loja|maps)\b/i.test(joined)) {
+    return {
+      intent: "location",
+      hint: "Cliente quer ENDEREÇO/LOCALIZAÇÃO. Responda com endereço da loja relevante (use base de conhecimento de lojas).",
+    };
+  }
+  if (/\b(confirma[rs]?|confirmado|fechado|pode marcar|pode agendar|t[aá] bom|beleza)\b/i.test(joined)) {
+    return {
+      intent: "confirmation",
+      hint: "Cliente está CONFIRMANDO algo discutido. Identifique o que e finalize a ação correspondente.",
+    };
+  }
+  return null;
+}
+
 function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
   resposta: string;
   intencao: string;
@@ -933,12 +977,14 @@ serve(async (req) => {
   let atendimentoIdForCleanup: string | null = null;
 
   try {
-    const { atendimento_id, mensagem_texto, contato_id, media, forcar_processamento } = await req.json();
+    const { atendimento_id, mensagem_texto, contato_id, media, forcar_processamento, motivo_disparo } = await req.json();
     const isTranscribedAudio = media?.is_transcribed_audio === true;
     const forceMode = forcar_processamento === true;
+    const isDevolucaoHumanoIA = motivo_disparo === "devolucao_humano_ia";
     atendimentoIdForCleanup = atendimento_id;
     if (!atendimento_id) throw new Error("atendimento_id is required");
-    if (forceMode) console.log("[FORCE] forcar_processamento=true — bypassing debounce/locks");
+    if (forceMode) console.log(`[FORCE] forcar_processamento=true | motivo=${motivo_disparo || "n/a"} — bypassing debounce/locks`);
+    if (isDevolucaoHumanoIA) console.log("[DEVOLUCAO] humano→ia handoff — continuity mode active");
 
     // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
@@ -1314,6 +1360,21 @@ serve(async (req) => {
 
     // ── 6. BUILD MESSAGES — use last 20 from the 60 loaded ──
     const contextWindow = allMsgs.slice(-20);
+
+    // Detect pending intent (used for devolução humano→ia, but informative in any case)
+    const recentInboundTexts = allMsgs
+      .filter((m: any) => m.direcao === "inbound")
+      .slice(-5)
+      .map((m: any) => String(m.conteudo || ""));
+    const pendingIntent = detectPendingIntent(
+      recentInboundTexts,
+      hasRecentUnparsedPrescriptionImage,
+      receitas.length > 0,
+    );
+    if (isDevolucaoHumanoIA) {
+      console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"}`);
+    }
+
     const messages: any[] = [
       { role: "system", content: systemPrompt },
       {
@@ -1321,6 +1382,18 @@ serve(async (req) => {
         content:
           "INTERPRETAÇÃO DO HISTÓRICO: mensagens com prefixo [HUMANO - Nome] foram enviadas pela equipe humana; [IA], [SISTEMA], [RECUPERAÇÃO] e [BOT LOJAS] são saídas automáticas/assistidas já enviadas ao cliente; mensagens com role user são do cliente. Use isso para continuidade e nunca confunda mensagem humana com mensagem do cliente.",
       },
+      ...(isDevolucaoHumanoIA
+        ? [{
+            role: "system",
+            content: `[CONTEXTO: DEVOLUÇÃO HUMANO→IA] O operador humano acabou de devolver esta conversa para você continuar.
+- Analise as últimas 10 mensagens e identifique a INTENÇÃO PENDENTE do cliente (ex: agendar, pedir preço, endereço, confirmar horário, dúvida sobre receita).
+- Continue NATURALMENTE de onde a conversa parou. NÃO se reapresente. NÃO diga "Quer que eu retome?" nem mensagens genéricas tipo "Sobre o que estávamos falando".
+- Aja sobre a intenção pendente: use a tool correta (responder, agendar_cliente, consultar_lentes, interpretar_receita) com base no que o cliente pediu por último.
+- Se houver imagem inbound não interpretada nas últimas 5 mensagens, PRIORIZE interpretar_receita.
+- NÃO escale para humano novamente, exceto se: (a) surgir reclamação grave NOVA após a devolução, (b) cliente pedir explicitamente "falar com humano" agora, ou (c) bloqueio técnico real (ex: receita ilegível após tentativa). NÃO escale pelo MESMO motivo já tratado pela equipe humana.
+- Se as últimas mensagens forem vagas e nenhuma intenção for clara, responda CURTO e contextual ("Voltei pra te ajudar — em que posso continuar?") em vez de escalar.${pendingIntent ? `\n\nINTENÇÃO PENDENTE DETECTADA: ${pendingIntent.intent.toUpperCase()} — ${pendingIntent.hint}` : ""}`,
+          }]
+        : []),
       ...(hasRecentUnparsedPrescriptionImage && receitas.length === 0
         ? [{
             role: "system",
@@ -1528,6 +1601,40 @@ serve(async (req) => {
         setor_sugerido = args.setor || "";
 
       } else if (fn === "escalar_consultor") {
+        // ── ANTI-REESCALATION on humano→ia handoff ──
+        // If we just got the conversation back from a human, block escalations that
+        // recycle a motive already handled (no new explicit human request, no fresh complaint).
+        const motivoStr = String(args.motivo || "").toLowerCase();
+        const lastInboundLower = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
+        const explicitHumanRequest = /\b(falar|atend|consult|pessoa|humano|gerente|respons[aá]vel)\b/.test(lastInboundLower) && /\b(humano|pessoa|gente|consultor|atendente|gerente)\b/.test(lastInboundLower);
+        const freshComplaint = /\b(reclama[cç][aã]o|p[eé]ssimo|horr[ií]vel|absurdo|cancelar|nunca mais|processar|procon)\b/.test(lastInboundLower);
+        if (isDevolucaoHumanoIA && !explicitHumanRequest && !freshComplaint) {
+          console.log(`[DEVOLUCAO] Blocking inherited escalation (motivo="${motivoStr}") — forcing continuity`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId, tipo: "ia_escalada_bloqueada_pos_devolucao",
+            descricao: `IA tentou escalar pós-devolução com motivo: ${args.motivo}`,
+            metadata: { motivo: args.motivo, setor: args.setor, pending_intent: pendingIntent?.intent || null },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          // Skip this tool call — let other tools (or fallback) take over.
+          // If this was the only tool call, force a deterministic continuity reply below.
+          if (toolCalls.length === 1) {
+            const intentText = pendingIntent
+              ? (pendingIntent.intent === "scheduling" ? "Voltei pra continuar com você. Quer marcar pra qual loja e qual horário fica melhor?"
+                : pendingIntent.intent === "quote" ? "Voltei aqui pra te ajudar com o orçamento. Já tenho sua receita? Se sim, me confirma o que prefere (marca, antirreflexo, fotossensível) que já te passo as opções."
+                : pendingIntent.intent === "location" ? "Voltei pra te ajudar! Me diz qual loja você quer saber o endereço que eu te passo."
+                : pendingIntent.intent === "prescription_pending" ? "Voltei aqui — vou olhar a receita que você mandou e já te respondo."
+                : "Voltei pra te ajudar — em que posso continuar?")
+              : "Voltei pra te ajudar — em que posso continuar?";
+            resposta = intentText;
+            intencao = pendingIntent?.intent || "outro";
+            pipeline_coluna = "Novo Contato";
+            precisa_humano = false;
+            validatorFlags.push("blocked_inherited_escalation");
+          }
+          continue;
+        }
+
         resposta = args.resposta;
         precisa_humano = true;
         // Keep contact in current column — human intervention is managed via modo='humano' flag
@@ -1537,7 +1644,7 @@ serve(async (req) => {
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId, tipo: "escalonamento_humano",
           descricao: `IA escalou: ${args.motivo}`,
-          metadata: { motivo: args.motivo, setor: args.setor },
+          metadata: { motivo: args.motivo, setor: args.setor, pos_devolucao: isDevolucaoHumanoIA },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
