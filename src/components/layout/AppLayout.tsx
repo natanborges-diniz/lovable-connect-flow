@@ -22,17 +22,14 @@ export const moduleFromPath = (pathname: string): ModuleKey => {
 export function AppLayout() {
   const location = useLocation();
   const activeModule = useMemo(() => moduleFromPath(location.pathname), [location.pathname]);
-  const { isAdmin, isOperador, roles } = useAuth();
+  const { isAdmin, isOperador, roles, loading } = useAuth();
 
-  const isSetorOnly = roles.length > 0 && !isAdmin && !isOperador;
+  const isSetorOnly = !loading && roles.length > 0 && !isAdmin && !isOperador;
+  const isAllowedSetorRoute = ["/interno", "/mensagens", "/tarefas"].some(
+    (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
+  );
 
-  // Redirect configuracoes to / if not admin
-  if (location.pathname.startsWith("/configuracoes") && !isAdmin && roles.length > 0) {
-    return <Navigate to="/mensagens" replace />;
-  }
-
-  // Setor users não têm acesso ao Dashboard — redireciona para Interno (pipeline do setor)
-  if (isSetorOnly && location.pathname === "/") {
+  if (isSetorOnly && !isAllowedSetorRoute) {
     return <Navigate to="/interno" replace />;
   }
 
