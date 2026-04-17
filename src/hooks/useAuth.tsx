@@ -77,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: r.role as AppRole,
       setor_id: r.setor_id,
       loja_nome: r.loja_nome || null,
-    })));
+    }));
   }, []);
 
   const hydrateAuthState = useCallback(async (nextSession: Session | null) => {
