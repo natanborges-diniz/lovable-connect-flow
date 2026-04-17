@@ -933,10 +933,12 @@ serve(async (req) => {
   let atendimentoIdForCleanup: string | null = null;
 
   try {
-    const { atendimento_id, mensagem_texto, contato_id, media } = await req.json();
+    const { atendimento_id, mensagem_texto, contato_id, media, forcar_processamento } = await req.json();
     const isTranscribedAudio = media?.is_transcribed_audio === true;
+    const forceMode = forcar_processamento === true;
     atendimentoIdForCleanup = atendimento_id;
     if (!atendimento_id) throw new Error("atendimento_id is required");
+    if (forceMode) console.log("[FORCE] forcar_processamento=true — bypassing debounce/locks");
 
     // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
@@ -957,7 +959,7 @@ serve(async (req) => {
     const LOCK_TTL_MS = 15_000; // 15 second lock
     const DEBOUNCE_WAIT_MS = 5_000; // wait 5 seconds for more messages
 
-    if (iaLock && (now - iaLock) < LOCK_TTL_MS) {
+    if (!forceMode && iaLock && (now - iaLock) < LOCK_TTL_MS) {
       // Another instance is processing — wait then check if it handled our message
       console.log(`[DEBOUNCE] Lock active (${Math.round((now - iaLock) / 1000)}s ago), waiting ${DEBOUNCE_WAIT_MS}ms...`);
       await new Promise((r) => setTimeout(r, DEBOUNCE_WAIT_MS));
@@ -988,7 +990,7 @@ serve(async (req) => {
       .gte("created_at", new Date(now - 10_000).toISOString())
       .limit(1);
 
-    if (veryRecentOut?.length) {
+    if (!forceMode && veryRecentOut?.length) {
       console.log("[DEBOUNCE] Outbound sent <10s ago, skipping to prevent duplicate");
       return jsonResponse({ status: "skipped", reason: "debounce — recent outbound <10s" });
     }
