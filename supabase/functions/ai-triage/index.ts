@@ -2097,10 +2097,19 @@ async function handleEscalation(
 
   await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, resposta);
 
-  // Human escalation: keep contact in current column, only change modo
-  await supabase.from("atendimentos").update({ modo: "hibrido" }).eq("id", atendimentoId);
+  // Hard handoff: pause IA completely until operator re-enables it.
+  await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimentoId);
 
   await supabase.from("contatos").update({ ultimo_contato_at: new Date().toISOString() }).eq("id", contatoId);
+
+  // Auto-generate summary for the human operator
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/summarize-atendimento`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id: atendimentoId }),
+    });
+  } catch (_) { /* best effort */ }
 
   await supabase.from("eventos_crm").insert({
     contato_id: contatoId, tipo: "escalonamento_humano",
@@ -2112,7 +2121,7 @@ async function handleEscalation(
   return jsonResponse({
     status: "ok", tools_used: [`escalar_consultor_${trigger}`],
     intencao: "escalonamento", precisa_humano: true,
-    pipeline_coluna_sugerida: null, setor_sugerido: "", modo: "hibrido",
+    pipeline_coluna_sugerida: null, setor_sugerido: "", modo: "humano",
   });
 }
 
