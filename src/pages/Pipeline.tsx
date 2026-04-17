@@ -111,7 +111,7 @@ export default function Pipeline() {
   const [newColunaNome, setNewColunaNome] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const isLoading = loadingContatos || loadingColunasVendas || loadingColunasInternas;
+  const isLoading = loadingContatos || loadingColunasVendas;
 
   const filteredContatos = (contatos ?? []).filter((c) => {
     // Cycle filter
@@ -141,8 +141,6 @@ export default function Pipeline() {
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
   });
 
-  const colunasInternasIds = new Set((colunasInternas ?? []).map(c => c.id));
-
   // Filter columns by active segment
   const filteredColunas = activeSegment === "todos"
     ? colunas
@@ -150,7 +148,7 @@ export default function Pipeline() {
 
   const contatosByColuna = (filteredColunas ?? []).map((col) => ({
     ...col,
-    isInternal: colunasInternasIds.has(col.id),
+    isInternal: false,
     contatos: filteredContatos.filter((c) => c.pipeline_coluna_id === col.id),
   }));
 
