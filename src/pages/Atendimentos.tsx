@@ -246,10 +246,38 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                   : "border-warning/50 text-warning hover:bg-warning/10"
               )}
               onClick={async () => {
-                const newModo = (atendimento as any).modo === "ia" ? "humano" : "ia";
+                const previousModo = (atendimento as any).modo;
+                const newModo = previousModo === "ia" ? "humano" : "ia";
                 const { error } = await supabase.from("atendimentos").update({ modo: newModo } as any).eq("id", id);
                 if (error) { toast.error("Erro: " + error.message); return; }
-                toast.success(newModo === "ia" ? "Modo IA reativado" : "Modo humano ativado");
+
+                // Devolução humano→IA: dispara continuidade contextual
+                if (newModo === "ia" && (previousModo === "humano" || previousModo === "hibrido")) {
+                  const meta = ((atendimento as any).metadata as Record<string, any>) || {};
+                  const lastTrigger = meta.last_devolucao_trigger_at ? new Date(meta.last_devolucao_trigger_at).getTime() : 0;
+                  if (Date.now() - lastTrigger < 30_000) {
+                    toast.success("Modo IA reativado");
+                  } else {
+                    await supabase.from("atendimentos")
+                      .update({ metadata: { ...meta, last_devolucao_trigger_at: new Date().toISOString() } } as any)
+                      .eq("id", id);
+                    const { error: invokeError } = await supabase.functions.invoke("ai-triage", {
+                      body: {
+                        atendimento_id: id,
+                        mensagem_texto: "[continuidade pós-devolução humano→ia]",
+                        forcar_processamento: true,
+                        motivo_disparo: "devolucao_humano_ia",
+                      },
+                    });
+                    if (invokeError) {
+                      toast.error("IA reativada, mas falhou ao disparar continuidade: " + invokeError.message);
+                    } else {
+                      toast.success("IA assumiu a continuidade");
+                    }
+                  }
+                } else {
+                  toast.success(newModo === "ia" ? "Modo IA reativado" : "Modo humano ativado");
+                }
               }}
             >
               {(atendimento as any).modo === "ia" ? "🤖 IA" : "👤 Humano"}
