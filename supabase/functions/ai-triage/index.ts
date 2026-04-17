@@ -867,17 +867,25 @@ function buildSystemPromptFromCompiled(opts: {
   isHibrido: boolean;
   hasKnowledge: boolean;
   escalatedSubject?: string | null;
+  nomeWhatsapp?: string;
+  nomeAtual?: string;
+  nomeConfirmado?: boolean;
 }): string {
   const s: string[] = [];
 
   s.push(buildDateContext());
 
-  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount, {
+    nomeWhatsapp: opts.nomeWhatsapp,
+    nomeAtual: opts.nomeAtual,
+    nomeConfirmado: opts.nomeConfirmado,
+  });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
+  s.push(buildLentesContatoKnowledgeBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
