@@ -1360,6 +1360,21 @@ serve(async (req) => {
 
     // ── 6. BUILD MESSAGES — use last 20 from the 60 loaded ──
     const contextWindow = allMsgs.slice(-20);
+
+    // Detect pending intent (used for devolução humano→ia, but informative in any case)
+    const recentInboundTexts = allMsgs
+      .filter((m: any) => m.direcao === "inbound")
+      .slice(-5)
+      .map((m: any) => String(m.conteudo || ""));
+    const pendingIntent = detectPendingIntent(
+      recentInboundTexts,
+      hasRecentUnparsedPrescriptionImage,
+      receitas.length > 0,
+    );
+    if (isDevolucaoHumanoIA) {
+      console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"}`);
+    }
+
     const messages: any[] = [
       { role: "system", content: systemPrompt },
       {
@@ -1367,6 +1382,18 @@ serve(async (req) => {
         content:
           "INTERPRETAÇÃO DO HISTÓRICO: mensagens com prefixo [HUMANO - Nome] foram enviadas pela equipe humana; [IA], [SISTEMA], [RECUPERAÇÃO] e [BOT LOJAS] são saídas automáticas/assistidas já enviadas ao cliente; mensagens com role user são do cliente. Use isso para continuidade e nunca confunda mensagem humana com mensagem do cliente.",
       },
+      ...(isDevolucaoHumanoIA
+        ? [{
+            role: "system",
+            content: `[CONTEXTO: DEVOLUÇÃO HUMANO→IA] O operador humano acabou de devolver esta conversa para você continuar.
+- Analise as últimas 10 mensagens e identifique a INTENÇÃO PENDENTE do cliente (ex: agendar, pedir preço, endereço, confirmar horário, dúvida sobre receita).
+- Continue NATURALMENTE de onde a conversa parou. NÃO se reapresente. NÃO diga "Quer que eu retome?" nem mensagens genéricas tipo "Sobre o que estávamos falando".
+- Aja sobre a intenção pendente: use a tool correta (responder, agendar_cliente, consultar_lentes, interpretar_receita) com base no que o cliente pediu por último.
+- Se houver imagem inbound não interpretada nas últimas 5 mensagens, PRIORIZE interpretar_receita.
+- NÃO escale para humano novamente, exceto se: (a) surgir reclamação grave NOVA após a devolução, (b) cliente pedir explicitamente "falar com humano" agora, ou (c) bloqueio técnico real (ex: receita ilegível após tentativa). NÃO escale pelo MESMO motivo já tratado pela equipe humana.
+- Se as últimas mensagens forem vagas e nenhuma intenção for clara, responda CURTO e contextual ("Voltei pra te ajudar — em que posso continuar?") em vez de escalar.${pendingIntent ? `\n\nINTENÇÃO PENDENTE DETECTADA: ${pendingIntent.intent.toUpperCase()} — ${pendingIntent.hint}` : ""}`,
+          }]
+        : []),
       ...(hasRecentUnparsedPrescriptionImage && receitas.length === 0
         ? [{
             role: "system",
