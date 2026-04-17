@@ -1,0 +1,1 @@
+UPDATE public.configuracoes_ia SET valor = '' WHERE chave = 'prompt_compilado';
