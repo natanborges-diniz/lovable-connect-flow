@@ -16,17 +16,29 @@ export interface OrfaoRow {
   minutos_pendente: number;
 }
 
-export function useAtendimentosOrfaos(filtros: { idade_min: number; setor_id?: string; modo?: string }) {
+export type PublicoFiltro = "clientes" | "internos" | "todos";
+
+export function useAtendimentosOrfaos(filtros: {
+  idade_min: number;
+  setor_id?: string;
+  modo?: string;
+  publico?: PublicoFiltro;
+}) {
   return useQuery({
     queryKey: ["atendimentos-orfaos", filtros],
     refetchInterval: 30_000,
-    queryFn: async (): Promise<{ total: number; orfaos: OrfaoRow[] }> => {
+    queryFn: async (): Promise<{
+      total: number;
+      orfaos: OrfaoRow[];
+      por_publico: { clientes: number; internos: number };
+    }> => {
       const params = new URLSearchParams({
         action: "list",
         idade_min: String(filtros.idade_min),
       });
       if (filtros.setor_id) params.set("setor_id", filtros.setor_id);
       if (filtros.modo) params.set("modo", filtros.modo);
+      if (filtros.publico) params.set("publico", filtros.publico);
 
       const { data, error } = await supabase.functions.invoke(
         `recuperar-atendimentos?${params.toString()}`,
