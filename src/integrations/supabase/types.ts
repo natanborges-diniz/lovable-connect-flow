@@ -1230,6 +1230,84 @@ export type Database = {
           },
         ]
       }
+      pricing_lentes_contato: {
+        Row: {
+          active: boolean
+          combo_3mais1: boolean
+          created_at: string
+          cylinder_axes_disponiveis: string | null
+          cylinder_max: number | null
+          cylinder_min: number | null
+          descarte: string
+          dias_por_unidade: number
+          dk: number | null
+          fornecedor: string
+          id: number
+          is_color: boolean
+          is_dnz: boolean
+          is_toric: boolean
+          material: string | null
+          observacoes: string | null
+          price_brl: number
+          priority: number
+          produto: string
+          sphere_max: number | null
+          sphere_min: number | null
+          unidades_por_caixa: number
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          combo_3mais1?: boolean
+          created_at?: string
+          cylinder_axes_disponiveis?: string | null
+          cylinder_max?: number | null
+          cylinder_min?: number | null
+          descarte: string
+          dias_por_unidade?: number
+          dk?: number | null
+          fornecedor: string
+          id?: number
+          is_color?: boolean
+          is_dnz?: boolean
+          is_toric?: boolean
+          material?: string | null
+          observacoes?: string | null
+          price_brl: number
+          priority?: number
+          produto: string
+          sphere_max?: number | null
+          sphere_min?: number | null
+          unidades_por_caixa?: number
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          combo_3mais1?: boolean
+          created_at?: string
+          cylinder_axes_disponiveis?: string | null
+          cylinder_max?: number | null
+          cylinder_min?: number | null
+          descarte?: string
+          dias_por_unidade?: number
+          dk?: number | null
+          fornecedor?: string
+          id?: number
+          is_color?: boolean
+          is_dnz?: boolean
+          is_toric?: boolean
+          material?: string | null
+          observacoes?: string | null
+          price_brl?: number
+          priority?: number
+          produto?: string
+          sphere_max?: number | null
+          sphere_min?: number | null
+          unidades_por_caixa?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       pricing_table_lentes: {
         Row: {
           active: boolean | null
