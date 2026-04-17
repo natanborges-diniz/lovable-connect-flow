@@ -2531,14 +2531,16 @@ serve(async (req) => {
           }
         }
 
-        await supabase.from("eventos_crm").insert({
-          contato_id: contatoId,
-          tipo: "consulta_lentes_contato",
-          descricao: `Orçamento LC — toric=${cylAbsMaxFromArgs(args)}`,
-          metadata: { args },
-          referencia_tipo: "atendimento",
-          referencia_id: atendimento_id,
-        });
+        try {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "consulta_lentes_contato",
+            descricao: `Orçamento LC consultado`,
+            metadata: { args },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+        } catch (_) { /* noop */ }
       }
     }
 
