@@ -1631,6 +1631,82 @@ serve(async (req) => {
 
     console.log(`[CONTEXT] Prompt:${systemPrompt.length}ch | KB:${conhecimentos.length} | Ex:${exemplos.length} | Anti:${antiFeedbacks.length} | Regras:${regrasProibidas.length} | Modo:${atendimento.modo} | Window:${contextWindow.length}/${allMsgs.length} | Range:${historyRange} | Topics:${sentTopics.join(",") || "none"}`);
 
+    // ── 6.4. PRESCRIPTION CORRECTION DETECTOR ──
+    // If the customer types prescription values directly (typically to correct
+    // an OCR mistake), parse it, replace the latest receita in metadata, and
+    // force consultar_lentes with the corrected values. The AI must not ignore
+    // a textual correction just because a prior receita exists.
+    let correctionApplied = false;
+    if (receitas.length > 0) {
+      const correction = detectPrescriptionCorrection(lastInboundText);
+      if (correction) {
+        const idx = receitas.length - 1;
+        const old = receitas[idx] || {};
+        const merged = {
+          ...old,
+          eyes: {
+            od: { ...(old.eyes?.od || {}), ...Object.fromEntries(Object.entries(correction.od).filter(([_, v]) => v != null)) },
+            oe: { ...(old.eyes?.oe || {}), ...Object.fromEntries(Object.entries(correction.oe).filter(([_, v]) => v != null)) },
+          },
+          rx_type: correction.rx_type,
+          summary: {
+            ...(old.summary || {}),
+            has_addition: correction.has_addition,
+            needs_progressive: correction.has_addition,
+            suggested_category: correction.rx_type,
+          },
+          confidence: 0.99,
+          data_leitura: new Date().toISOString(),
+          source: "client_correction",
+          raw_correction: correction.raw,
+          needs_human_review: false,
+        };
+        receitas[idx] = merged;
+
+        // Persist back to contact metadata
+        await supabase.from("contatos").update({
+          metadata: { ...contatoMeta, receitas },
+        }).eq("id", contatoId);
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId, tipo: "receita_corrigida_pelo_cliente",
+          descricao: `Cliente corrigiu receita por texto. Tipo recalculado: ${correction.rx_type}`,
+          metadata: {
+            od: correction.od, oe: correction.oe, rx_type: correction.rx_type,
+            raw: correction.raw,
+          },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+
+        // Rebuild receitaCtx so the prompt below sees the corrected values
+        // (mutate by re-running the formatter inline)
+        receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
+        for (let i = 0; i < receitas.length; i++) {
+          const rx = receitas[i];
+          const label = rx.label || `receita ${i + 1}`;
+          const dataLeitura = rx.data_leitura ? new Date(rx.data_leitura).toLocaleDateString("pt-BR") : "—";
+          const rxTypeLabel = rx.rx_type === "progressive" ? "Progressiva" : rx.rx_type === "single_vision" ? "Visão simples" : rx.rx_type || "—";
+          const conf = typeof rx.confidence === "number" ? `${(rx.confidence * 100).toFixed(0)}%` : "—";
+          const od = rx.eyes?.od || {};
+          const oe = rx.eyes?.oe || {};
+          const formatEye = (eye: any, name: string) => {
+            const parts = [`${name}: esf ${eye.sphere ?? "?"} cil ${eye.cylinder ?? "?"} eixo ${eye.axis ?? "?"}`];
+            if (typeof eye.add === "number") parts.push(`add +${eye.add}`);
+            return parts.join(" ");
+          };
+          const sourceTag = rx.source === "client_correction" ? " ⚠️ CORRIGIDA PELO CLIENTE" : "";
+          receitaCtx += `\n## Receita ${i + 1} (${label}) — lida em ${dataLeitura}${sourceTag}\n`;
+          receitaCtx += `Tipo: ${rxTypeLabel} | Confiança: ${conf}\n`;
+          receitaCtx += `${formatEye(od, "OD")}\n`;
+          receitaCtx += `${formatEye(oe, "OE")}\n`;
+        }
+        receitaCtx += `\n⚠️ A última receita foi CORRIGIDA pelo cliente nesta mensagem. Use estes valores como verdade — NÃO mencione os valores antigos.`;
+
+        correctionApplied = true;
+        console.log(`[RX-CORRECTION] Applied client correction. New rx_type=${correction.rx_type}, OD.sph=${correction.od.sphere}, OE.sph=${correction.oe.sphere}`);
+      }
+    }
+
     // ── 6.5. PRE-LLM LOOP DETECTOR + FORCED INTENT MAPPING ──
     // Runs BEFORE the LLM call so it can override the prompt and prevent the
     // model from generating yet another semantically-identical response.
@@ -1640,6 +1716,16 @@ serve(async (req) => {
       receitas.length > 0,
       hasRecentUnparsedPrescriptionImage && receitas.length === 0,
     );
+
+    // If a correction was applied, force consultar_lentes regardless of loop state
+    if (correctionApplied) {
+      messages.push({
+        role: "system",
+        content: "[SISTEMA: RECEITA CORRIGIDA PELO CLIENTE] O cliente acabou de corrigir os valores da receita por texto. Os novos valores estão na seção RECEITAS (marcada como ⚠️ CORRIGIDA PELO CLIENTE). AÇÃO OBRIGATÓRIA: 1) reconheça brevemente a correção (ex: 'Perfeito, anotado!'); 2) chame consultar_lentes AGORA com os valores novos para refazer o orçamento. NÃO repita valores antigos. NÃO peça nova foto. NÃO peça confirmação adicional — confie no que ele digitou.",
+      });
+      console.log(`[RX-CORRECTION] Forcing consultar_lentes with corrected prescription`);
+    }
+
 
     if (loopCheck.detected) {
       console.log(`[LOOP-DETECTOR] Loop detected — similarity=${(loopCheck.similarity * 100).toFixed(0)}%`);
