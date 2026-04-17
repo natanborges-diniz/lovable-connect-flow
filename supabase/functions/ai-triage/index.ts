@@ -1142,13 +1142,19 @@ serve(async (req) => {
     const inboundMsgs = allMsgs.filter((m: any) => m.direcao === "inbound");
     const lastInbound = inboundMsgs.slice(-1)[0];
     const lastInboundText = String(lastInbound?.conteudo || currentMsg || "");
-    const hasRecentUnparsedPrescriptionImage = [...allMsgs]
-      .reverse()
-      .some((m: any) => m.direcao === "inbound" && (m.tipo_conteudo || "text") === "image");
-    const customerInsistsAlreadySent = /\bj[aá]\s*mandei\b|\bj[aá]\s*enviei\b|\bja foi\b|\bmande[iy]\b.*\breceita\b/i.test(lastInboundText);
-    const isImageContext = (lastInbound?.tipo_conteudo || "text") === "image"
+    // Check if there's an inbound image among the LAST 5 inbound messages (not just the very last)
+    // This catches cases where customer sent prescription, then a short text like "Ok" / "ué" / "?"
+    const last5Inbound = inboundMsgs.slice(-5);
+    const hasRecentUnparsedPrescriptionImage = last5Inbound.some(
+      (m: any) => (m.tipo_conteudo || "text") === "image"
+    );
+    const customerInsistsAlreadySent = /\bj[aá]\s*mandei\b|\bj[aá]\s*enviei\b|\bja foi\b|\bmande[iy]\b.*\breceita\b|\bcad[eê]\b|\bcad[eê].*receita\b/i.test(lastInboundText);
+    // Image context = last msg is image OR there's a pending unparsed image in recent history with no interpretation yet
+    const lastIsImage = (lastInbound?.tipo_conteudo || "text") === "image"
       || /\[image\]|\[document\]/.test(currentMsg)
       || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+    const isImageContext = lastIsImage
+      || (hasRecentUnparsedPrescriptionImage && receitas.length === 0);
 
     // ── 5. BUILD CONTEXT ──
     const sentTopics = extractSentTopics(recentOutbound);
