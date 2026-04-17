@@ -662,7 +662,7 @@ export default function Pipeline() {
 
       {/* Conversation Dialog */}
       <Dialog open={!!selectedContatoId} onOpenChange={(open) => !open && setSelectedContatoId(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+        <DialogContent className="max-w-2xl w-[calc(100vw-2rem)] h-[90vh] sm:h-[85vh] flex flex-col overflow-hidden p-0 gap-0">
           {selectedContatoId && (
             <ConversationPanel
               contatoId={selectedContatoId}
