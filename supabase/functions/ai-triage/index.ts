@@ -1688,6 +1688,34 @@ serve(async (req) => {
         // Find loja telephone
         const lojaMatch = lojas.find((l: any) => l.nome_loja.toLowerCase() === (args.loja_nome || "").toLowerCase());
 
+        // ── Build standardized appointment confirmation block (tabulated) ──
+        // Strip any raw URLs the LLM may have inserted, then append a clean address block.
+        try {
+          // Remove URLs and "perfil da loja" trailers from the LLM response
+          let cleaned = (resposta || "")
+            .replace(/https?:\/\/\S+/gi, "")
+            .replace(/aqui está[^.]*?(perfil|localiza[cç][aã]o|link)[^.]*\.?/gi, "")
+            .replace(/segue[^.]*?(perfil|link)[^.]*\.?/gi, "")
+            .replace(/\s{2,}/g, " ")
+            .trim();
+
+          const dt = new Date(args.data_horario);
+          const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
+          const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+          let bloco = `\n\n📍 *Agendamento confirmado*\n`;
+          bloco += `🏬 Loja: ${args.loja_nome}\n`;
+          bloco += `📅 Data: ${dataFmt}\n`;
+          bloco += `⏰ Horário: ${horaFmt}h`;
+          if (lojaMatch?.endereco) {
+            bloco += `\n🗺️ Endereço: ${lojaMatch.endereco}`;
+          }
+
+          resposta = `${cleaned}${bloco}`;
+        } catch (e) {
+          console.error("[TOOL] failed to format appointment block:", e);
+        }
+
         // If reagendar, mark old agendamento as reagendado
         if (fn === "reagendar_visita") {
           const oldNoShow = agendamentosAtivos.find((a: any) => a.status === "no_show" || a.status === "recuperacao");
