@@ -2334,6 +2334,211 @@ serve(async (req) => {
         } catch (e) {
           console.error("[TOOL] agendar_lembrete failed:", e);
         }
+      } else if (fn === "registrar_nome_cliente") {
+        resposta = args.resposta;
+        intencao = "registro_nome";
+        const novoNome = String(args.nome || "").trim();
+        if (novoNome.length >= 2) {
+          try {
+            // Reload current metadata to merge flag without overwriting other fields
+            const { data: ctNome } = await supabase
+              .from("contatos")
+              .select("metadata")
+              .eq("id", contatoId)
+              .single();
+            const ctMeta = (ctNome?.metadata as Record<string, any>) || {};
+            await supabase
+              .from("contatos")
+              .update({
+                nome: novoNome,
+                metadata: { ...ctMeta, nome_confirmado: true, nome_origem: "ia_confirmado", nome_atualizado_at: new Date().toISOString() },
+              })
+              .eq("id", contatoId);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "nome_confirmado",
+              descricao: `Nome confirmado: "${novoNome}"`,
+              metadata: { nome: novoNome, nome_anterior: contatoNomeAtual || null },
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+            });
+            console.log(`[TOOL] registrar_nome_cliente: ${novoNome}`);
+          } catch (e) {
+            console.error("[TOOL] registrar_nome_cliente failed:", e);
+          }
+        }
+      } else if (fn === "consultar_lentes_contato") {
+        intencao = "orcamento_lentes_contato";
+        pipeline_coluna = "Orçamento";
+
+        // Load saved prescriptions
+        const { data: ctRx } = await supabase
+          .from("contatos")
+          .select("metadata")
+          .eq("id", contatoId)
+          .single();
+        const ctRxMeta = (ctRx?.metadata as Record<string, any>) || {};
+
+        let allRx: any[] = [];
+        if (Array.isArray(ctRxMeta.receitas) && ctRxMeta.receitas.length > 0) {
+          allRx = ctRxMeta.receitas;
+        } else if (ctRxMeta.ultima_receita?.eyes) {
+          allRx = [{ ...ctRxMeta.ultima_receita, label: "cliente" }];
+        }
+
+        let rxMeta: any = null;
+        if (allRx.length > 0) {
+          rxMeta = args.receita_label
+            ? allRx.find((r: any) => norm(r.label || "") === norm(args.receita_label)) || allRx[allRx.length - 1]
+            : allRx[allRx.length - 1];
+        }
+
+        if (!rxMeta?.eyes) {
+          resposta = args.resposta_fallback || "Pra te passar as opções de lentes de contato, preciso da sua receita. Pode me enviar uma foto? 📸";
+          console.log("[QUOTE-LC] No prescription found");
+        } else {
+          const od = rxMeta.eyes.od || {};
+          const oe = rxMeta.eyes.oe || {};
+          const sphODn = typeof od.sphere === "number" ? od.sphere : null;
+          const sphOEn = typeof oe.sphere === "number" ? oe.sphere : null;
+          const cylODn = typeof od.cylinder === "number" ? od.cylinder : 0;
+          const cylOEn = typeof oe.cylinder === "number" ? oe.cylinder : 0;
+
+          const cylAbsMax = Math.max(Math.abs(cylODn || 0), Math.abs(cylOEn || 0));
+          const needsToric = cylAbsMax >= 0.75;
+          const sphereValues = [sphODn, sphOEn].filter((v) => typeof v === "number") as number[];
+          if (sphereValues.length === 0) {
+            resposta = args.resposta_fallback || "Não consegui ler o grau esférico da sua receita. Pode me enviar uma foto mais nítida?";
+          } else {
+            const worstSphere = sphereValues.reduce((a, b) => (Math.abs(a) > Math.abs(b) ? a : b), 0);
+            const worstCyl = cylAbsMax > 0 ? (Math.abs(cylODn) > Math.abs(cylOEn) ? cylODn : cylOEn) : 0;
+
+            // Same prescription both eyes?
+            const mesmaDioptria =
+              sphODn !== null && sphOEn !== null && sphODn === sphOEn && (cylODn || 0) === (cylOEn || 0);
+
+            let q = supabase
+              .from("pricing_lentes_contato")
+              .select("*")
+              .eq("active", true)
+              .gt("price_brl", 0)
+              .lte("sphere_min", worstSphere)
+              .gte("sphere_max", worstSphere);
+
+            if (needsToric) {
+              q = q.eq("is_toric", true).lte("cylinder_min", worstCyl).gte("cylinder_max", worstCyl);
+            } else {
+              q = q.eq("is_toric", false);
+            }
+
+            // Discard preference filter (allow any if "qualquer" or undefined)
+            const descPref = String(args.descarte_preferido || "qualquer").toLowerCase();
+            if (descPref === "diario" || descPref === "diaria") q = q.eq("descarte", "diario");
+            else if (descPref === "quinzenal") q = q.eq("descarte", "quinzenal");
+            else if (descPref === "mensal") q = q.eq("descarte", "mensal");
+
+            if (args.marca_preferida) {
+              q = q.or(`fornecedor.ilike.%${args.marca_preferida}%,produto.ilike.%${args.marca_preferida}%`);
+            }
+
+            // Order: DNZ first, then priority, then price
+            const { data: lentes } = await q
+              .order("is_dnz", { ascending: false })
+              .order("priority", { ascending: true })
+              .order("price_brl", { ascending: true })
+              .limit(15);
+
+            if (!lentes || lentes.length === 0) {
+              resposta =
+                args.resposta_fallback ||
+                (needsToric
+                  ? "Pelo seu grau, você precisa de lente TÓRICA (com correção de astigmatismo) — esse modelo é sob encomenda. Vou pedir pra um Consultor te apresentar as opções específicas, tudo bem?"
+                  : "Não encontrei lentes de contato compatíveis no nosso estoque. Posso pedir pra um Consultor te ajudar a buscar uma opção sob encomenda?");
+              console.log(`[QUOTE-LC] No matches sph=${worstSphere} cyl=${worstCyl} toric=${needsToric}`);
+            } else {
+              // Pick up to 3: prioritize DNZ + diversify discard
+              const pick: any[] = [];
+              const seen = new Set<string>();
+              for (const l of lentes) {
+                const key = `${l.fornecedor}|${l.descarte}`;
+                if (!seen.has(key)) {
+                  pick.push(l);
+                  seen.add(key);
+                }
+                if (pick.length === 3) break;
+              }
+              if (pick.length < 3 && lentes.length > pick.length) {
+                for (const l of lentes) {
+                  if (!pick.includes(l)) pick.push(l);
+                  if (pick.length === 3) break;
+                }
+              }
+
+              const fmtBRL = (n: number) =>
+                Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+              let msg = `🔎 *Lentes de contato compatíveis com sua receita:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"}${od.axis ? `x${od.axis}` : ""} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${oe.axis ? `x${oe.axis}` : ""}\n`;
+              if (needsToric) {
+                msg += `\n⚠️ *Lente TÓRICA* (astigmatismo ≥ 0.75) — sob encomenda. Pagamento confirma o pedido.\n`;
+              }
+
+              for (const l of pick) {
+                const unidades = Number(l.unidades_por_caixa) || 6;
+                const dias = Number(l.dias_por_unidade) || 30;
+                const desc =
+                  l.descarte === "diario"
+                    ? "diária"
+                    : l.descarte === "quinzenal"
+                    ? "quinzenal"
+                    : l.descarte === "mensal"
+                    ? "mensal"
+                    : l.descarte;
+                const preco = fmtBRL(Number(l.price_brl));
+
+                let plano = "";
+                if (l.descarte === "diario") {
+                  // diárias: 1 cx por olho geralmente; sem combo
+                  const dias_cx_um_olho = unidades; // 1 lente/dia
+                  if (mesmaDioptria) {
+                    plano = `Plano: 1 caixa atende os 2 olhos por ~${Math.floor(dias_cx_um_olho / 2)} dias.`;
+                  } else {
+                    plano = `Plano: 1 caixa por olho — ~${dias_cx_um_olho} dias por olho. Combo 3+1 não se aplica a diárias.`;
+                  }
+                } else {
+                  // mensais/quinzenais
+                  const dias_por_olho_1cx = unidades * dias; // ex 6*30 = 180 dias = 6 meses
+                  const meses_por_olho_1cx = Math.round(dias_por_olho_1cx / 30);
+                  if (mesmaDioptria) {
+                    const meses1cx = Math.round(meses_por_olho_1cx / 2);
+                    const meses4cx = Math.round((4 * unidades * dias) / 30 / 2);
+                    plano = `Plano (mesma dioptria): 1 caixa atende os 2 olhos por ~${meses1cx} meses. 🎁 *Combo 3+1*: 4 caixas = ~${meses4cx} meses (1 ano completo!).`;
+                  } else {
+                    const meses2cx = meses_por_olho_1cx;
+                    const meses4cx = Math.round((4 * unidades * dias) / 30 / 2);
+                    plano = `Plano (dioptrias diferentes): mín. 2 caixas (1 por olho) = ~${meses2cx} meses. 🎁 *Combo 3+1*: 4 caixas = ~${meses4cx} meses (1 ano completo!).`;
+                  }
+                }
+
+                msg += `\n${l.is_dnz ? "🌟 " : "👁️ "}*${l.produto}* (${l.fornecedor}) — ${desc}\n💰 R$ ${preco}/caixa\n${plano}`;
+              }
+
+              msg += `\n\nQuer que eu reserve a opção que você preferir? Posso te encaminhar pra loja mais próxima fechar o pedido.`;
+              resposta = msg;
+              console.log(
+                `[QUOTE-LC] ${pick.length} options sph=${worstSphere} cyl=${worstCyl} toric=${needsToric} mesma=${mesmaDioptria}`,
+              );
+            }
+          }
+        }
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consulta_lentes_contato",
+          descricao: `Orçamento LC — toric=${cylAbsMaxFromArgs(args)}`,
+          metadata: { args },
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+        });
       }
     }
 
