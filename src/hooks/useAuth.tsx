@@ -46,6 +46,7 @@ const AuthContext = createContext<AuthContextType>({
   isOperador: false,
   hasRole: () => false,
   getUserSetorIds: () => [],
+  getEffectiveSetorIds: () => [],
   getUserLojaNames: () => [],
   signOut: async () => {},
 });
