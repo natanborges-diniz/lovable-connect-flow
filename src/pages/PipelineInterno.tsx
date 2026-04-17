@@ -39,14 +39,23 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 const ATENDIMENTO_CORPORATIVO_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
 
 export default function PipelineInterno() {
   const [search, setSearch] = useState("");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
+  const { isAdmin, isOperador, getUserSetorIds } = useAuth();
+
+  // Setor users veem o pipeline do PRÓPRIO setor; admin/operador veem o Atendimento Corporativo
+  const userSetorIds = getUserSetorIds();
+  const activeSetorId = (isAdmin || isOperador)
+    ? ATENDIMENTO_CORPORATIVO_SETOR_ID
+    : (userSetorIds[0] ?? ATENDIMENTO_CORPORATIVO_SETOR_ID);
+
   const { data: contatos, isLoading: loadingContatos } = useContatos();
-  const { data: colunas, isLoading: loadingColunas } = usePipelineColunas(ATENDIMENTO_CORPORATIVO_SETOR_ID);
+  const { data: colunas, isLoading: loadingColunas } = usePipelineColunas(activeSetorId);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
