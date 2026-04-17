@@ -156,11 +156,17 @@ export function GestaoUsuariosCard() {
       const { data: updatedRoles } = await supabase.from("user_roles").select("*").eq("user_id", userId);
       if (updatedRoles) await syncProfileSetor(userId, updatedRoles as UserRoleRow[]);
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       invalidateAll();
       setAddingAreaFor(null);
       setNewSetorId("");
       setNewLojaNome("");
+      // Once first area is added, clear pending intent (real role now exists)
+      setPendingSetorIntent((prev) => {
+        const next = new Set(prev);
+        next.delete(vars.userId);
+        return next;
+      });
       toast.success("Área adicionada");
     },
     onError: (e: any) => toast.error(e.message),
