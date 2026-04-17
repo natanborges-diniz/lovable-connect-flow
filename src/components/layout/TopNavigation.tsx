@@ -60,13 +60,13 @@ function useSetorNames(setorIds: string[]) {
 
 export function TopNavigation({ activeModule }: TopNavigationProps) {
   const navigate = useNavigate();
-  const { profile, signOut, isAdmin, isOperador, getUserSetorIds, roles } = useAuth();
+  const { profile, signOut, isAdmin, isOperador, getEffectiveSetorIds, roles } = useAuth();
   const { data: notificacoes, naoLidas, marcarLida, marcarTodasLidas } = useNotificacoes();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const { totalNaoLidas } = useMensagensInternas();
   const msgNaoLidas = totalNaoLidas.data || 0;
 
-  const setorIds = getUserSetorIds();
+  const setorIds = getEffectiveSetorIds();
   const { data: setorNames } = useSetorNames(setorIds);
 
   const visibleModules = (() => {
