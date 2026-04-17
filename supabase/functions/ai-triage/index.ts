@@ -1285,6 +1285,9 @@ serve(async (req) => {
     const agendamentosAtivos = agendRes.data || [];
     const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
+    const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
+    const nomeConfirmado = contatoMeta.nome_confirmado === true;
+    const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
 
     // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
     let receitas: any[] = [];
