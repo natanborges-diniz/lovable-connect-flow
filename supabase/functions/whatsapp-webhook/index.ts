@@ -888,12 +888,13 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
   if (body.data?.key?.remoteJid) {
     const phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
     const msgData = body.data.message;
+    const safePushName = sanitizePushName(body.data.pushName, phone);
 
     // Image message
     if (msgData?.imageMessage) {
       return {
         phone,
-        senderName: body.data.pushName || phone,
+        senderName: safePushName,
         text: msgData.imageMessage.caption || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",

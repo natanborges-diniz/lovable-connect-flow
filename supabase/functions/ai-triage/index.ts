@@ -1921,9 +1921,10 @@ serve(async (req) => {
     }
 
     let newModo: string | null = null;
-    if (precisa_humano && !isHibrido) {
-      newModo = "hibrido";
-      console.log("[MODE] IA → Híbrido");
+    if (precisa_humano) {
+      // Hard handoff: stop AI completely until a human re-enables IA mode.
+      newModo = "humano";
+      console.log("[MODE] IA → Humano (hard handoff, IA paused)");
     }
 
     if (newModo) {
