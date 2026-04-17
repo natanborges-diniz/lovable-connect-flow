@@ -638,6 +638,40 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "consultar_lentes_contato",
+      description: "Busca opções de LENTES DE CONTATO compatíveis com a receita do cliente e calcula o plano (caixas necessárias, duração, combo 3+1). Use quando o cliente pedir orçamento/preço de LENTES DE CONTATO. Se o cilíndrico for ≥ 0.75 em qualquer olho, filtra automaticamente lentes TÓRICAS (que são SOB ENCOMENDA). Prioriza marca DNZ quando compatível. NÃO use para óculos (use consultar_lentes para óculos).",
+      parameters: {
+        type: "object",
+        properties: {
+          receita_label: { type: "string", description: "Label da receita a usar (ex: 'cliente', 'filho'). Default: mais recente." },
+          descarte_preferido: { type: "string", enum: ["diario", "quinzenal", "mensal", "qualquer"], description: "Tipo de descarte que o cliente prefere. Default: 'qualquer' (mostra mensais/quinzenais com prioridade)." },
+          marca_preferida: { type: "string", description: "Marca preferida se mencionada (DNZ, Acuvue, Biofinity, Air Optix, Solótica, etc)." },
+          resposta_fallback: { type: "string", description: "Mensagem caso nenhuma lente compatível seja encontrada." },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "registrar_nome_cliente",
+      description: "Registra/atualiza o nome do cliente no cadastro APÓS confirmação. Use SEMPRE que o cliente: (a) confirmar que o nome do perfil está correto ('sim, sou eu', 'isso mesmo'), OU (b) informar/corrigir seu nome ('na verdade é Maria', 'meu nome é João'). NÃO use sem confirmação explícita do cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          nome: { type: "string", description: "Nome confirmado do cliente (ex: 'Maria Silva', 'João'). Use o nome que o cliente confirmou ou informou." },
+          resposta: { type: "string", description: "Mensagem natural confirmando o registro e dando continuidade (ex: 'Perfeito, Maria! Em que posso te ajudar hoje? 😊')." },
+        },
+        required: ["nome", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "agendar_lembrete",
       description: "Registra um lembrete futuro para enviar ao cliente. Use quando o cliente pedir para ser lembrado ou quando combinar um retorno em data específica. OBRIGATÓRIO usar esta tool antes de prometer qualquer ação futura.",
       parameters: {
