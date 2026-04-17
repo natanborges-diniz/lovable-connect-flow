@@ -1336,31 +1336,40 @@ serve(async (req) => {
           }
 
           if (!imageContent && mediaUrl) {
-            try {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 5000);
-              const imgResp = await fetch(mediaUrl, { signal: controller.signal });
-              clearTimeout(timeoutId);
-              if (imgResp.ok) {
-                const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
-                const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
-                  .split(";")[0]
-                  .trim()
-                  .toLowerCase();
-                const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+            // Retry up to 3x with growing timeout (handles old/orphan images and slow CDN)
+            const attempts = [6000, 8000, 10000];
+            for (let attempt = 0; attempt < attempts.length && !imageContent; attempt++) {
+              try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), attempts[attempt]);
+                const imgResp = await fetch(mediaUrl, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (imgResp.ok) {
+                  const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
+                  const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
+                    .split(";")[0]
+                    .trim()
+                    .toLowerCase();
+                  const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
 
-                if (hasSupportedImageSignature(imgBuffer)) {
-                  let binary = "";
-                  const chunkSize = 8192;
-                  for (let j = 0; j < imgBuffer.length; j += chunkSize) {
-                    binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                  if (hasSupportedImageSignature(imgBuffer)) {
+                    let binary = "";
+                    const chunkSize = 8192;
+                    for (let j = 0; j < imgBuffer.length; j += chunkSize) {
+                      binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                    }
+                    imageContent = imageContentFromBase64(btoa(binary), mimeType);
+                    if (imageContent) console.log(`[MEDIA] Image delivered via media_url download (ctx index ${i}, attempt ${attempt + 1})`);
+                  } else {
+                    console.warn(`[MEDIA] Unsupported image signature (ctx index ${i}, attempt ${attempt + 1})`);
+                    break; // signature won't change between retries
                   }
-                  imageContent = imageContentFromBase64(btoa(binary), mimeType);
-                  if (imageContent) console.log(`[MEDIA] Image delivered via media_url download (ctx index ${i})`);
+                } else {
+                  console.warn(`[MEDIA] media_url returned ${imgResp.status} (ctx index ${i}, attempt ${attempt + 1})`);
                 }
+              } catch (dlErr) {
+                console.warn(`[MEDIA] Download attempt ${attempt + 1} failed for media_url (timeout/error):`, dlErr);
               }
-            } catch (dlErr) {
-              console.warn(`[MEDIA] Download failed for media_url (timeout/error):`, dlErr);
             }
           }
 
