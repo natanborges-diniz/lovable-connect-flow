@@ -956,7 +956,7 @@ function ConversationPanel({
   );
 }
 
-function ChatView({ atendimentoId, contatoNome }: { atendimentoId: string; contatoNome: string }) {
+function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId: string; contatoNome: string }) {
   const { data: mensagens, refetch } = useMensagens(atendimentoId);
   const createMensagem = useCreateMensagem();
   const queryClient = useQueryClient();
