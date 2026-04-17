@@ -114,6 +114,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
+        // Sincronamente sinaliza loading para evitar flash de "roles vazias"
+        // entre o evento SIGNED_IN e a hidratação do profile/roles.
+        if (nextSession?.user) setLoading(true);
         setTimeout(() => {
           void hydrateAuthState(nextSession);
         }, 0);

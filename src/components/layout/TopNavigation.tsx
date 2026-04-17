@@ -70,10 +70,10 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
   const { data: setorNames } = useSetorNames(setorIds);
 
   const visibleModules = (() => {
-    if (roles.length === 0) return allModules;
     if (isAdmin || isOperador) return allModules;
 
-    // Setor users: NO dashboard. Start com tarefas+mensagens como base universal.
+    // Fallback seguro: usuário sem roles provisionadas → mínimo (mensagens + tarefas).
+    // Nunca devolver allModules para evitar exposição de menus administrativos.
     const allowedKeys = new Set<ModuleKey>(["tarefas", "mensagens"]);
     if (setorNames && setorNames.length > 0) {
       for (const s of setorNames) {
