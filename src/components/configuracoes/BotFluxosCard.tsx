@@ -247,7 +247,7 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
     if (!nome.trim()) { toast.error("Nome é obrigatório"); return; }
     setLoading(true);
     try {
-      const payload = { chave, nome, tipo_bot: tipoBot, descricao: descricao || null, etapas, acao_final: acaoFinal, setor_destino_id: setorDestinoId || null };
+      const payload = { chave, nome, tipo_bot: tipoBot, descricao: descricao || null, etapas, acao_final: acaoFinal, setor_destino_id: setorDestinoId && setorDestinoId !== "__none__" ? setorDestinoId : null };
       if (initial) {
         const { error } = await (supabase as any).from("bot_fluxos").update(payload).eq("id", initial.id);
         if (error) throw error;
@@ -295,10 +295,10 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
 
       <div className="space-y-1.5">
         <Label>Setor Destino</Label>
-        <Select value={setorDestinoId} onValueChange={setSetorDestinoId}>
+        <Select value={setorDestinoId || "__none__"} onValueChange={(v) => setSetorDestinoId(v === "__none__" ? "" : v)}>
           <SelectTrigger><SelectValue placeholder="Selecione o setor que recebe a demanda" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Nenhum (usar lógica padrão)</SelectItem>
+            <SelectItem value="__none__">Nenhum (usar lógica padrão)</SelectItem>
             {setores?.map((s) => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}
           </SelectContent>
         </Select>
