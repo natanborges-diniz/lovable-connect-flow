@@ -753,14 +753,28 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
   return block;
 }
 
-function buildFirstContactBlock(inboundCount: number): string {
+function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: string; nomeAtual?: string; nomeConfirmado?: boolean }): string {
   if (inboundCount > 1) return "";
-  return `# PRIMEIRA INTERAÇÃO
-- Cumprimente o cliente de forma calorosa e natural (ex: "Oi! Tudo bem? 😊").
-- Pergunte como pode ajudá-lo. NÃO assuma o que ele precisa.
-- NÃO mencione receita, lentes, agendamento ou qualquer serviço na primeira mensagem.
-- Deixe o CLIENTE dizer o que deseja antes de fazer qualquer triagem.
-- Exemplo: "Oi! Aqui é o Gael das Óticas Diniz Osasco 😊 Como posso te ajudar hoje?"
+  const nomeWa = (opts?.nomeWhatsapp || "").trim();
+  const nomeAtual = (opts?.nomeAtual || "").trim();
+  const candidato = nomeWa || nomeAtual;
+  const looksReal = !!candidato && /[A-Za-zÀ-ÿ]{2,}/.test(candidato) && !/^\d+$/.test(candidato);
+
+  if (looksReal && !opts?.nomeConfirmado) {
+    const primeiroNome = candidato.split(/\s+/)[0];
+    return `# PRIMEIRA INTERAÇÃO — CONFIRME O NOME
+- Cumprimente caloroso confirmando o nome capturado: "Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+- Se o cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
+- Se o cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto informado.
+- Depois de confirmar/registrar o nome, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.
+- Mantenha curto (máx. 2 frases).`;
+  }
+
+  return `# PRIMEIRA INTERAÇÃO — PEÇA O NOME
+- Cumprimente e PEÇA o nome do cliente: "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+- Quando o cliente responder o nome → chame a tool registrar_nome_cliente com o nome informado.
+- NÃO mencione receita, lentes, agendamento ou qualquer serviço antes de ter o nome.
+- Deixe o cliente dizer o que deseja DEPOIS de se apresentar.
 - Mantenha a mensagem curta e acolhedora — máximo 2 frases.`;
 }
 
