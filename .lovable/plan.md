@@ -1,60 +1,58 @@
 
 
-## Saneamento corporativo — cobertura atual e futura
+## Como fazer o role da Marilene chegar vindo do Em Foco
 
-### Resposta direta
-Sim — o plano cobre o caso atual (Natan) **e** previne para qualquer número futuro. Mas preciso ajustar 2 pontos do plano original para ficar 100%.
+### O fluxo atual (resumido)
+1. Marilene loga no **Em Foco** (`@project:e140a688...`).
+2. Em Foco chama sua própria EF `cross-login`, que pega `email` + `nome` do profile dela **(no banco do Em Foco)** e chama a EF `sso-login` daqui.
+3. `sso-login` (deste projeto) gera um magic link, abre `https://atrium-link.lovable.app` e o navegador autentica como Marilene.
+4. O `useAuth` busca `profiles` + `user_roles` **deste projeto** (Atrium) — não do Em Foco.
 
-### O que o webhook já faz (linha 121-150)
-- Detecta `lojaMatch` em `telefones_lojas` toda mensagem inbound.
-- Atualiza `contato.tipo` para `loja`/`colaborador` se diferente.
-- Preserva nome da marca/loja.
+### Por que o setor "some"
+- O `cross-login` do Em Foco **só envia `email` e `nome`** — não envia `setor_id` nem `role`.
+- O `sso-login` daqui só provisiona `user_roles` se receber `setor_id`/`role` no body (linha 71). Como vem vazio, **não cria nada**.
+- Para a Marilene "funcionar" hoje, alguém criou manualmente o `user_roles` (existe `setor_id` Dpto Armações). Mas se um colega novo do mesmo departamento entrar pelo Em Foco, ele entra sem role nenhum → cai no fallback `roles.length === 0` → `TopNavigation` mostra **todos os menus** (bug).
 
-### O que falta (gap que pegou o Natan)
-O webhook **não trata** contatos pré-existentes que:
-1. Têm `pipeline_coluna_id` apontando pro CRM Vendas (legado de quando eram "cliente").
-2. Têm atendimento aberto em `modo='humano'` órfão (escalonado antes do cadastro corporativo).
-3. Não têm `setor_destino` apontando pro setor corporativo.
+### Decisão arquitetural
+Os bancos são **independentes**. O Em Foco tem o cadastro corporativo (cargo, departamento, perfil), o Atrium tem os setores operacionais. Precisa haver um **mapeamento explícito** entre os dois.
 
-### Plano ajustado (cobre presente e futuro)
+**Opção escolhida (mais simples e robusta): o Em Foco passa a enviar o setor já resolvido.**
 
-**1. Saneamento one-shot via SQL (resolve todos os corporativos hoje)**
-Não só o Natan — varre TODOS os contatos cujo telefone está em `telefones_lojas` ativo e:
-- Limpa `pipeline_coluna_id` se aponta para coluna do setor CRM Vendas.
-- Define `setor_destino` para o setor "Atendimento Corporativo" (Interno).
-- Garante `tipo` = `loja` ou `colaborador`.
-- Encerra atendimentos abertos em `modo='humano'` SEM atendente humano atribuído (são órfãos do bot-lojas).
-- Loga em `eventos_crm` como `saneamento_corporativo_lote`.
+### Plano
 
-**2. Saneamento contínuo no webhook (cobre números futuros)**
-Estende o bloco `if (isCorporate)` (linha 139-150) para, além de atualizar `tipo`/`nome`:
-- Se `contato.pipeline_coluna_id` pertence a coluna de setor CRM Vendas → setar `pipeline_coluna_id = null`.
-- Se `contato.setor_destino` está vazio ou aponta pra setor não-corporativo → setar para setor corporativo (id buscado uma vez via cache em memória ou query rápida).
-- Se há atendimento aberto em `modo='humano'` SEM `atendente_nome` (= órfão, ninguém pegou) → reverter para `modo='ia'` ou encerrar (decisão: encerrar, pois `bot-lojas` cria sessão própria).
-- Logar evento `reclassificacao_corporativa`.
+**1. No projeto Em Foco — `cross-login`**
+- Após buscar `profiles` (já busca `nome`), buscar também o `user_roles` da Marilene **no banco do Em Foco** para descobrir o departamento dela (campo `setor_id` ou similar) **OU** ter uma tabela de mapeamento `departamento_em_foco → setor_id_atrium`.
+- Como os UUIDs de setor são diferentes entre os bancos, a forma mais limpa é: o Em Foco envia `{ email, nome, departamento: "dpto_armacoes" }` (string canônica), e o Atrium resolve o `setor_id` localmente.
+- Alterar o body do `fetch(sso-login)` para incluir `departamento` (string) e opcionalmente `role` (default `setor_usuario`).
 
-Resultado: **qualquer número** que entrar em `telefones_lojas` (agora ou no futuro) será saneado automaticamente na próxima mensagem que enviar.
+**2. Neste projeto — `sso-login`**
+- Aceitar novo campo `departamento` (string) no body.
+- Se vier `departamento`, fazer `SELECT id FROM setores WHERE lower(nome) = lower(_departamento) LIMIT 1` para resolver o `setor_id` local.
+- Provisionar `user_roles` **sempre que tiver setor resolvido**, mesmo se o body não trouxer `role` explícito (default `setor_usuario`).
+- Continuar aceitando `setor_id` direto (compatibilidade) caso algum dia o Em Foco envie o UUID já mapeado.
 
-**3. Trigger opcional (defesa em profundidade)**
-Adicionar trigger `AFTER INSERT OR UPDATE ON telefones_lojas` que:
-- Quando um número é cadastrado/ativado, busca contato existente por telefone e roda o mesmo saneamento (limpa CRM, ajusta tipo/setor, encerra humano órfão).
-- Garante saneamento **imediato** ao cadastrar, sem precisar esperar nova mensagem.
+**3. Defesa em profundidade — `TopNavigation` (este projeto)**
+- Trocar `if (roles.length === 0) return allModules` (linha 73) por: enquanto `loading` ou `roles.length === 0` E não admin/operador, mostrar **apenas** `["mensagens", "tarefas"]` (mínimo seguro). Nunca mostrar todos.
+- Garante que mesmo se o provisionamento falhar, ninguém vê módulos administrativos.
 
-**4. Filtro visual da Fila Humana (já estava no plano)**
-Em `useAtendimentos`/`Pipeline.tsx`, excluir da fila humana cards onde `contato.tipo` ∈ {`loja`, `colaborador`, `fornecedor`}. Defesa de UI.
+**4. Defesa adicional — `useAuth.tsx` (este projeto)**
+- Manter `setLoading(true)` síncrono dentro do callback `onAuthStateChange` antes do `setTimeout(0)`, evitando o flash de "roles vazias".
 
-### Arquivos a alterar
+**5. Saneamento da Marilene**
+- Como ela já tem `user_roles` correto, basta validar que após o login os menus aparecem (com a correção #3 cravada).
+- Logar `roles` em `useAuth` temporariamente em produção para confirmar.
 
-| Arquivo | Mudança |
-|---|---|
-| Migration `<ts>_saneamento_corporativo.sql` | (a) saneamento one-shot em todos os corporativos hoje; (b) trigger `on_telefone_loja_change` chamando função `sanitize_corporate_contact(telefone)` |
-| `supabase/functions/whatsapp-webhook/index.ts` (linha 139-150) | Estender bloco `isCorporate`: limpar `pipeline_coluna_id` se for de setor Vendas, setar `setor_destino` corporativo, encerrar atendimento humano órfão |
-| `src/hooks/useAtendimentos.ts` (a confirmar) | Filtrar fila humana por `contato.tipo === 'cliente'` |
-| `mem://crm/fila-prioridade-humana.md` | Documentar exclusão de corporativos + saneamento automático |
+### Arquivos alterados
 
-### Pendência mínima de descoberta
-- Confirmar UUID do setor "Atendimento Corporativo" (Interno) e do setor CRM Vendas (consulta em `setores`/`pipeline_colunas`).
-- Confirmar arquivo exato que monta a fila humana (provável `useAtendimentos.ts`).
+| Projeto | Arquivo | Mudança |
+|---|---|---|
+| Em Foco | `supabase/functions/cross-login/index.ts` | Buscar departamento do usuário no banco do Em Foco e enviar como string canônica em `body.departamento` ao chamar `sso-login` |
+| Atrium | `supabase/functions/sso-login/index.ts` | Aceitar `departamento`; resolver `setor_id` via `SELECT` em `setores`; auto-provisionar `user_roles setor_usuario` quando setor resolvido |
+| Atrium | `src/components/layout/TopNavigation.tsx` | Linha 73: nunca devolver `allModules` quando `roles.length === 0`; sempre fallback seguro `["mensagens","tarefas"]` |
+| Atrium | `src/hooks/useAuth.tsx` | `setLoading(true)` síncrono no `onAuthStateChange` antes do `setTimeout` |
 
-Posso prosseguir com essa versão ajustada?
+### Pendências de descoberta antes de implementar
+
+- Como o **Em Foco** representa o departamento do usuário (campo? tabela? enum?). Preciso confirmar para escrever a lógica de leitura no `cross-login` lá.
+- Definir as strings canônicas que o Em Foco enviará (`"dpto_armacoes"`, `"financeiro"`, `"ti"`, etc.) e garantir que existam linhas equivalentes em `setores` deste projeto (já existem: confirmei "Dpto Armações", "Atendimento Corporativo", "Financeiro", "TI").
 
