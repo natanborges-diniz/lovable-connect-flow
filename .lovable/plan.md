@@ -1,58 +1,102 @@
 
+## O que isso significa, em português claro
 
-## Como fazer o role da Marilene chegar vindo do Em Foco
+Hoje o sistema só mostra os menus “certos” quando a sessão da Marilene chega aqui com o setor/perfil reconhecido.
 
-### O fluxo atual (resumido)
-1. Marilene loga no **Em Foco** (`@project:e140a688...`).
-2. Em Foco chama sua própria EF `cross-login`, que pega `email` + `nome` do profile dela **(no banco do Em Foco)** e chama a EF `sso-login` daqui.
-3. `sso-login` (deste projeto) gera um magic link, abre `https://atrium-link.lovable.app` e o navegador autentica como Marilene.
-4. O `useAuth` busca `profiles` + `user_roles` **deste projeto** (Atrium) — não do Em Foco.
+O código do menu já está preparado para mostrar:
+- Interno
+- Mensagens
+- Tarefas
 
-### Por que o setor "some"
-- O `cross-login` do Em Foco **só envia `email` e `nome`** — não envia `setor_id` nem `role`.
-- O `sso-login` daqui só provisiona `user_roles` se receber `setor_id`/`role` no body (linha 71). Como vem vazio, **não cria nada**.
-- Para a Marilene "funcionar" hoje, alguém criou manualmente o `user_roles` (existe `setor_id` Dpto Armações). Mas se um colega novo do mesmo departamento entrar pelo Em Foco, ele entra sem role nenhum → cai no fallback `roles.length === 0` → `TopNavigation` mostra **todos os menus** (bug).
+para quem é de **Dpto Armações**.
 
-### Decisão arquitetural
-Os bancos são **independentes**. O Em Foco tem o cadastro corporativo (cargo, departamento, perfil), o Atrium tem os setores operacionais. Precisa haver um **mapeamento explícito** entre os dois.
+Então, se isso ainda não aparece, o problema restante não é “o menu em si”. O problema está na forma como a sessão da Marilene está sendo hidratada aqui após o login vindo do Em Foco.
 
-**Opção escolhida (mais simples e robusta): o Em Foco passa a enviar o setor já resolvido.**
+## Diagnóstico mais provável
 
-### Plano
+Há um ponto frágil no fluxo atual:
 
-**1. No projeto Em Foco — `cross-login`**
-- Após buscar `profiles` (já busca `nome`), buscar também o `user_roles` da Marilene **no banco do Em Foco** para descobrir o departamento dela (campo `setor_id` ou similar) **OU** ter uma tabela de mapeamento `departamento_em_foco → setor_id_atrium`.
-- Como os UUIDs de setor são diferentes entre os bancos, a forma mais limpa é: o Em Foco envia `{ email, nome, departamento: "dpto_armacoes" }` (string canônica), e o Atrium resolve o `setor_id` localmente.
-- Alterar o body do `fetch(sso-login)` para incluir `departamento` (string) e opcionalmente `role` (default `setor_usuario`).
+1. O Em Foco já envia `departamento`.
+2. O `sso-login` daqui tenta transformar isso em `setor_id` e criar/garantir `user_roles`.
+3. Mas a UI ainda depende demais de `user_roles` já estar carregado perfeitamente no primeiro momento da sessão.
 
-**2. Neste projeto — `sso-login`**
-- Aceitar novo campo `departamento` (string) no body.
-- Se vier `departamento`, fazer `SELECT id FROM setores WHERE lower(nome) = lower(_departamento) LIMIT 1` para resolver o `setor_id` local.
-- Provisionar `user_roles` **sempre que tiver setor resolvido**, mesmo se o body não trouxer `role` explícito (default `setor_usuario`).
-- Continuar aceitando `setor_id` direto (compatibilidade) caso algum dia o Em Foco envie o UUID já mapeado.
+Se isso falhar, atrasar, ou o `departamento` não casar exatamente com o setor local naquele login:
+- a Marilene entra,
+- mas a navegação não entende corretamente que ela é do setor,
+- e os menus esperados não aparecem.
 
-**3. Defesa em profundidade — `TopNavigation` (este projeto)**
-- Trocar `if (roles.length === 0) return allModules` (linha 73) por: enquanto `loading` ou `roles.length === 0` E não admin/operador, mostrar **apenas** `["mensagens", "tarefas"]` (mínimo seguro). Nunca mostrar todos.
-- Garante que mesmo se o provisionamento falhar, ninguém vê módulos administrativos.
+## Plano de correção
 
-**4. Defesa adicional — `useAuth.tsx` (este projeto)**
-- Manter `setLoading(true)` síncrono dentro do callback `onAuthStateChange` antes do `setTimeout(0)`, evitando o flash de "roles vazias".
+### 1. Parar de depender só de `user_roles` no front
+Ajustar a autenticação para que o app considere também o `profile.setor_id` como fallback de setor.
 
-**5. Saneamento da Marilene**
-- Como ela já tem `user_roles` correto, basta validar que após o login os menus aparecem (com a correção #3 cravada).
-- Logar `roles` em `useAuth` temporariamente em produção para confirmar.
+Arquivos:
+- `src/hooks/useAuth.tsx`
+- `src/components/layout/TopNavigation.tsx`
+- `src/components/layout/AppLayout.tsx`
 
-### Arquivos alterados
+Resultado:
+- mesmo se `user_roles` atrasar ou não vier no primeiro ciclo,
+- a Marilene ainda verá o menu do setor dela.
 
-| Projeto | Arquivo | Mudança |
-|---|---|---|
-| Em Foco | `supabase/functions/cross-login/index.ts` | Buscar departamento do usuário no banco do Em Foco e enviar como string canônica em `body.departamento` ao chamar `sso-login` |
-| Atrium | `supabase/functions/sso-login/index.ts` | Aceitar `departamento`; resolver `setor_id` via `SELECT` em `setores`; auto-provisionar `user_roles setor_usuario` quando setor resolvido |
-| Atrium | `src/components/layout/TopNavigation.tsx` | Linha 73: nunca devolver `allModules` quando `roles.length === 0`; sempre fallback seguro `["mensagens","tarefas"]` |
-| Atrium | `src/hooks/useAuth.tsx` | `setLoading(true)` síncrono no `onAuthStateChange` antes do `setTimeout` |
+### 2. Endurecer o `sso-login`
+Melhorar a resolução de `departamento -> setor_id` para ficar mais robusta com:
+- acentos
+- maiúsculas/minúsculas
+- variações como `dpto_armacoes`, `Dpto Armações`, `dpto armacoes`
 
-### Pendências de descoberta antes de implementar
+Arquivo:
+- `supabase/functions/sso-login/index.ts`
 
-- Como o **Em Foco** representa o departamento do usuário (campo? tabela? enum?). Preciso confirmar para escrever a lógica de leitura no `cross-login` lá.
-- Definir as strings canônicas que o Em Foco enviará (`"dpto_armacoes"`, `"financeiro"`, `"ti"`, etc.) e garantir que existam linhas equivalentes em `setores` deste projeto (já existem: confirmei "Dpto Armações", "Atendimento Corporativo", "Financeiro", "TI").
+Resultado:
+- o login vindo do Em Foco deixa de depender de casamento “sensível” do nome do departamento.
 
+### 3. Garantir provisionamento de role sempre
+No `sso-login`, além de atualizar `profiles.setor_id`, garantir de forma mais defensiva que exista o `user_roles` compatível para aquele usuário.
+
+Arquivo:
+- `supabase/functions/sso-login/index.ts`
+
+Resultado:
+- a sessão fica consistente para navegação, permissões e telas setoriais.
+
+### 4. Adicionar rastreio temporário de diagnóstico
+Adicionar logs temporários no fluxo de autenticação para verificar, no login da Marilene:
+- qual `departamento` chegou
+- qual `setor_id` foi resolvido
+- quais roles foram carregadas no front
+
+Arquivos:
+- `supabase/functions/sso-login/index.ts`
+- `src/hooks/useAuth.tsx`
+
+Resultado:
+- se ainda falhar, fica visível exatamente em qual etapa quebrou.
+
+### 5. Validar com teste real da Marilene
+Depois da correção, testar especificamente:
+1. logout completo
+2. login no Em Foco
+3. entrada aqui via SSO
+4. confirmar que aparecem:
+   - `Interno`
+   - `Mensagens`
+   - `Tarefas`
+5. confirmar que ela cai em rota compatível com o setor
+
+## Arquivos que pretendo ajustar
+- `src/hooks/useAuth.tsx`
+- `src/components/layout/TopNavigation.tsx`
+- `src/components/layout/AppLayout.tsx`
+- `supabase/functions/sso-login/index.ts`
+
+## Resultado esperado
+Depois disso, a Marilene deve entrar e ver imediatamente as opções compatíveis com o setor dela, sem depender de um carregamento “perfeito” de role logo no primeiro instante do login.
+
+## Detalhes técnicos
+- Hoje o menu usa `getUserSetorIds()`, que depende de `roles`.
+- O setor da Marilene também precisa poder ser inferido por `profile.setor_id`.
+- O `sso-login` já tenta resolver `departamento`, mas a resolução ainda pode ser frágil.
+- A correção será feita em duas camadas:
+  - backend: garantir setor/role no login
+  - frontend: usar fallback seguro para o setor durante a hidratação da sessão
