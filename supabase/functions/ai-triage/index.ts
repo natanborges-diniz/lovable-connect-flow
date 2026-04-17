@@ -1336,31 +1336,40 @@ serve(async (req) => {
           }
 
           if (!imageContent && mediaUrl) {
-            try {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 5000);
-              const imgResp = await fetch(mediaUrl, { signal: controller.signal });
-              clearTimeout(timeoutId);
-              if (imgResp.ok) {
-                const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
-                const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
-                  .split(";")[0]
-                  .trim()
-                  .toLowerCase();
-                const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+            // Retry up to 3x with growing timeout (handles old/orphan images and slow CDN)
+            const attempts = [6000, 8000, 10000];
+            for (let attempt = 0; attempt < attempts.length && !imageContent; attempt++) {
+              try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), attempts[attempt]);
+                const imgResp = await fetch(mediaUrl, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (imgResp.ok) {
+                  const imgBuffer = new Uint8Array(await imgResp.arrayBuffer());
+                  const rawMime = String((m.metadata as any)?.mime_type || imgResp.headers.get("content-type") || "image/jpeg")
+                    .split(";")[0]
+                    .trim()
+                    .toLowerCase();
+                  const mimeType = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
 
-                if (hasSupportedImageSignature(imgBuffer)) {
-                  let binary = "";
-                  const chunkSize = 8192;
-                  for (let j = 0; j < imgBuffer.length; j += chunkSize) {
-                    binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                  if (hasSupportedImageSignature(imgBuffer)) {
+                    let binary = "";
+                    const chunkSize = 8192;
+                    for (let j = 0; j < imgBuffer.length; j += chunkSize) {
+                      binary += String.fromCharCode(...imgBuffer.subarray(j, j + chunkSize));
+                    }
+                    imageContent = imageContentFromBase64(btoa(binary), mimeType);
+                    if (imageContent) console.log(`[MEDIA] Image delivered via media_url download (ctx index ${i}, attempt ${attempt + 1})`);
+                  } else {
+                    console.warn(`[MEDIA] Unsupported image signature (ctx index ${i}, attempt ${attempt + 1})`);
+                    break; // signature won't change between retries
                   }
-                  imageContent = imageContentFromBase64(btoa(binary), mimeType);
-                  if (imageContent) console.log(`[MEDIA] Image delivered via media_url download (ctx index ${i})`);
+                } else {
+                  console.warn(`[MEDIA] media_url returned ${imgResp.status} (ctx index ${i}, attempt ${attempt + 1})`);
                 }
+              } catch (dlErr) {
+                console.warn(`[MEDIA] Download attempt ${attempt + 1} failed for media_url (timeout/error):`, dlErr);
               }
-            } catch (dlErr) {
-              console.warn(`[MEDIA] Download failed for media_url (timeout/error):`, dlErr);
             }
           }
 
@@ -1377,13 +1386,12 @@ serve(async (req) => {
           if (m.conteudo && m.conteudo !== "[image]") content.push({ type: "text", text: m.conteudo });
           messages.push({ role, content });
         } else {
-          // If this is the CURRENT message and image failed, inject system hint
-          if (latestImageCtxIndex === i) {
-            messages.push({ role, content: imageCaption });
-            messages.push({ role: "system", content: "[SISTEMA: O cliente enviou uma imagem mas não foi possível processá-la visualmente. Reconheça o recebimento, pergunte se é uma receita e peça reenvio com boa iluminação se necessário.]" });
-          } else {
-            messages.push({ role, content: imageCaption });
-          }
+          // Image could not be delivered to the model. NEVER pretend we read it.
+          messages.push({ role, content: imageCaption });
+          messages.push({
+            role: "system",
+            content: "[SISTEMA: ⚠️ Há uma imagem do cliente no histórico que NÃO foi entregue ao modelo (falha de download). NUNCA diga 'recebi sua receita', 'parece ser uma receita' ou similar. NÃO chame interpretar_receita. Peça ao cliente que reenvie a foto da receita com boa iluminação, sem reflexos, segurando firme. Se ele já reclamou que enviou ('já mandei'), peça desculpa pelo problema técnico e oriente o reenvio uma única vez.]",
+          });
         }
       } else {
         const sender = String(m.remetente_nome || "").trim();
