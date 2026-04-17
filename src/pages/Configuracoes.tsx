@@ -153,6 +153,13 @@ export default function Configuracoes() {
             <CronJobsCard />
           </div>
         </TabsContent>
+
+        {/* ─── Recuperação ─── */}
+        <TabsContent value="recuperacao">
+          <div className="grid gap-6">
+            <RecuperacaoCard />
+          </div>
+        </TabsContent>
       </Tabs>
     </>
   );
