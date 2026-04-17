@@ -1,78 +1,65 @@
 
 
-O usuário esclareceu: a "varredura" não é pra rodar continuamente substituindo a IA. É pra **casos de recuperação** — quando o sistema fica fora do ar (desligado, falha de webhook, problema de chegada) e mensagens ficam acumuladas sem resposta. Quando voltar, precisa recuperar essas mensagens órfãs.
+User picked Opção B: separar Atendimento Corporativo do CRM, criando novo módulo.
 
-# Plano: Recuperação de Mensagens Órfãs (Pós-Downtime)
+# Plano: Mover Atendimento Corporativo para módulo próprio
 
-## Cenário
+## Objetivo
+Tirar as 4 colunas (Novo, Em Atendimento, Aguardando, Resolvido) do CRM e criar um módulo dedicado **"Atendimento Interno"** no menu superior, deixando o CRM 100% comercial (vendas).
 
-Sistema fica fora do ar (manutenção, queda de webhook, IA desligada). Cliente manda mensagem, ninguém responde. Quando o sistema volta, essas mensagens ficam "órfãs" — passaram do tempo normal de resposta e a IA não vai mais reagir naturalmente porque o debounce/contexto já passou.
+## Mudanças
 
-## Solução: Botão "Recuperar Conversas Pendentes"
+### 1. Renomear setor (clareza)
+- Migration: `UPDATE setores SET nome='Atendimento Corporativo' WHERE id='32cbd99c-4b20-4c8b-b7b2-901904d0aff6'`
+- Gael continua sendo a IA — o setor agora reflete a função real
 
-Tela em **Configurações → Recuperação de Atendimentos** com:
+### 2. Novo módulo "Interno" no menu
+- Adicionar em `TopNavigation.tsx` ao lado de TI/Tarefas:
+  - Ícone: `Headset` ou `MessagesSquare`
+  - Label: **"Interno"**
+  - Path: `/interno`
+- Adicionar `ModuleKey = "interno"` em `AppLayout.tsx` + `moduleFromPath`
+- Adicionar entrada em `AppSidebar` com mesmo padrão dos outros pipelines
+- Permissões: visível para admin, operador e usuários com setor = "Atendimento Corporativo"
+- Atualizar `SETOR_MODULE_MAP` para mapear setor corporativo → módulo `interno`
 
-1. **Detecção automática**: lista atendimentos onde a última mensagem é `inbound` SEM resposta `outbound` posterior, ordenados por idade.
-2. **Filtros**: idade da mensagem (>15min, >1h, >6h, >24h), setor, modo (IA/humano).
-3. **Ações por atendimento** (ou em lote):
-   - **▶️ Acionar IA agora** — força `ai-triage` a processar a última mensagem ignorando debounce
-   - **👤 Escalar para humano** — muda modo pra `humano`, vai pra fila prioritária
-   - **✉️ Enviar mensagem de desculpas** — template "Desculpe a demora, voltamos agora"
-4. **Modo "Recuperação em massa"**: botão único que processa todas pendentes seguindo regra:
-   - < 1h → aciona IA
-   - 1h–6h → aciona IA com prefixo "Desculpe a demora!"
-   - \> 6h → escala humano direto + manda template de desculpas
+### 3. Nova página `PipelineInterno.tsx`
+- Clone simplificado de `Pipeline.tsx`, mas filtrando **apenas** colunas com `setor_id = '32cbd99c...'`
+- Reusa hooks existentes (`usePipelineColunas`, kanban DnD, `pipeline-automations`)
+- Sem aba "Esteira Completa" (essa é específica de vendas → lojas)
+- Rota `/interno` no `App.tsx`
 
-## Componentes
+### 4. Limpar Pipeline CRM
+- Em `Pipeline.tsx`, filtrar colunas para mostrar **apenas `setor_id IS NULL`** (vendas puras)
+- Remover qualquer lógica que misturava colunas corporativas
+- "Fila Humana" e "Esteira Completa" continuam funcionando normalmente (só com leads de venda)
 
-| Arquivo | Função |
-|---------|--------|
-| `src/pages/Configuracoes.tsx` (ajuste) | Nova aba "Recuperação" |
-| `src/components/configuracoes/RecuperacaoCard.tsx` (novo) | UI: lista + filtros + ações em lote |
-| `supabase/functions/recuperar-atendimentos/index.ts` (novo) | Detecta órfãos + executa ação (acionar IA / escalar / mensagem) |
-| `useAtendimentosOrfaos.ts` (hook novo) | Query + invalidação realtime |
+### 5. Roteamento permanece intacto
+- `whatsapp-webhook` e `ai-triage` continuam direcionando contatos `loja`/`departamento` para o setor corporativo — só muda **onde o operador vê**, não a lógica de roteamento
+- Renomear constantes `ATENDIMENTO_GAEL_SETOR_ID` → `ATENDIMENTO_CORPORATIVO_SETOR_ID` (mesmo UUID, só clareza)
 
-## Lógica de detecção (SQL no edge function)
+### 6. Memória
+- Atualizar `mem://ia/classificacao-setorial-blindada` com novo nome
+- Atualizar `mem://arquitetura/navegacao-setorial-integrada` (agora 9 módulos)
+- Nova memória `mem://setor/interno-pipeline-corporativo` documentando o módulo
 
-```sql
--- Atendimentos com última msg inbound sem resposta posterior
-SELECT a.*, contato.nome, contato.telefone,
-       ultima.created_at as ultima_msg_at,
-       NOW() - ultima.created_at as tempo_pendente
-FROM atendimentos a
-JOIN LATERAL (
-  SELECT * FROM mensagens 
-  WHERE atendimento_id = a.id 
-  ORDER BY created_at DESC LIMIT 1
-) ultima ON true
-JOIN contatos contato ON contato.id = a.contato_id
-WHERE a.status != 'encerrado'
-  AND ultima.direcao = 'inbound'
-  AND NOW() - ultima.created_at > interval '15 minutes';
-```
+## Arquivos afetados
 
-## Ação "Acionar IA agora"
+| Arquivo | Mudança |
+|---------|---------|
+| Migration | Renomear setor |
+| `src/pages/PipelineInterno.tsx` | **Novo** — pipeline filtrado pelo setor |
+| `src/App.tsx` | Nova rota `/interno` |
+| `src/components/layout/TopNavigation.tsx` | Novo módulo "Interno" + permissão |
+| `src/components/layout/AppLayout.tsx` | `ModuleKey` + `moduleFromPath` |
+| `src/components/layout/AppSidebar.tsx` | Seção do novo módulo |
+| `src/pages/Pipeline.tsx` | Filtrar `setor_id IS NULL` |
+| `supabase/functions/ai-triage/index.ts` | Renomear constante |
+| `supabase/functions/whatsapp-webhook/index.ts` | Renomear constante |
+| `mem://*` | 3 atualizações |
 
-Chama `ai-triage` com flag `forcar_processamento: true` que:
-- Ignora debounce de 5s
-- Ignora trava de "última outbound < 10s"
-- Processa última mensagem inbound como se tivesse acabado de chegar
-
-## Ação "Escalar humano + desculpas"
-
-1. Atualiza `atendimento.modo = 'humano'`, `prioridade = 'alta'`
-2. Envia mensagem WhatsApp: *"Olá! Desculpe a demora em responder, estamos retomando seu atendimento agora. Em instantes nossa equipe vai te atender."*
-3. Notifica setor responsável (badge 🔥 na fila humana)
-
-## Onde fica na UI
-
-- **Configurações → Recuperação de Atendimentos** (aba principal pro admin acionar manualmente após downtime)
-- **Atalho no Dashboard**: card "⚠️ X conversas pendentes há mais de 1h" com link direto
-
-## Decisões já tomadas
-
-- ✅ Manual (admin clica), não automático — evita IA disparar em massa por engano
-- ✅ Mensagem de desculpas configurável (texto editável antes de enviar em lote)
-- ✅ Preview da lista antes de executar ação em massa (operador vê quem será impactado)
-- ✅ Log de auditoria: registra qual ação foi tomada em cada atendimento recuperado
+## O que NÃO muda
+- Lógica da IA, roteamento, modos (humano/IA/híbrido), demandas à loja, bot-lojas
+- Permissões e RBAC existentes (apenas adicionamos visibilidade do novo módulo)
+- Conversas em andamento — ficam no mesmo lugar, só muda o "envelope" visual
 
