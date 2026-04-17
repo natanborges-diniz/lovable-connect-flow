@@ -443,6 +443,17 @@ serve(async (req) => {
           (e) => console.error("Bot lojas trigger failed:", e)
         )
       );
+    } else if (atendimentoModo === "ponte") {
+      // Modo PONTE: contato é operado por usuário interno via mensageria. Espelha pra mensagem interna.
+      runInBackground(
+        triggerBridgeMensageria(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+          contato_id: contato.id,
+          atendimento_id: atendimentoId,
+          conteudo: text,
+          tipo_conteudo: tipoConteudo,
+          media_url: storedMediaUrl,
+        }).catch((e) => console.error("Bridge mensageria failed:", e))
+      );
     } else if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
       runInBackground(
         triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, {
