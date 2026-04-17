@@ -1139,7 +1139,13 @@ serve(async (req) => {
       : -1;
 
     // Detect if the CURRENT message (last inbound) is an image
-    const lastInbound = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
+    const inboundMsgs = allMsgs.filter((m: any) => m.direcao === "inbound");
+    const lastInbound = inboundMsgs.slice(-1)[0];
+    const lastInboundText = String(lastInbound?.conteudo || currentMsg || "");
+    const hasRecentUnparsedPrescriptionImage = [...allMsgs]
+      .reverse()
+      .some((m: any) => m.direcao === "inbound" && (m.tipo_conteudo || "text") === "image");
+    const customerInsistsAlreadySent = /\bj[aá]\s*mandei\b|\bj[aá]\s*enviei\b|\bja foi\b|\bmande[iy]\b.*\breceita\b/i.test(lastInboundText);
     const isImageContext = (lastInbound?.tipo_conteudo || "text") === "image"
       || /\[image\]|\[document\]/.test(currentMsg)
       || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
@@ -1309,6 +1315,12 @@ serve(async (req) => {
         content:
           "INTERPRETAÇÃO DO HISTÓRICO: mensagens com prefixo [HUMANO - Nome] foram enviadas pela equipe humana; [IA], [SISTEMA], [RECUPERAÇÃO] e [BOT LOJAS] são saídas automáticas/assistidas já enviadas ao cliente; mensagens com role user são do cliente. Use isso para continuidade e nunca confunda mensagem humana com mensagem do cliente.",
       },
+      ...(hasRecentUnparsedPrescriptionImage && (isImageContext || customerInsistsAlreadySent) && receitas.length === 0
+        ? [{
+            role: "system",
+            content: "[SISTEMA: PRIORIDADE MÁXIMA] O cliente já enviou receita/imagem e ainda não há nenhuma receita interpretada em RECEITAS JÁ INTERPRETADAS. Antes de considerar escalar_consultor ou pedir para reenviar, você DEVE tentar usar a tool interpretar_receita com a imagem mais recente disponível no contexto, se a imagem tiver sido entregue ao modelo. Só escale se a imagem estiver ilegível OU se a tool retornar baixa confiança crítica/impossibilidade de leitura.]",
+          }]
+        : []),
     ];
 
     for (const [i, m] of contextWindow.entries()) {
