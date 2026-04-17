@@ -1321,10 +1321,10 @@ serve(async (req) => {
         content:
           "INTERPRETAÇÃO DO HISTÓRICO: mensagens com prefixo [HUMANO - Nome] foram enviadas pela equipe humana; [IA], [SISTEMA], [RECUPERAÇÃO] e [BOT LOJAS] são saídas automáticas/assistidas já enviadas ao cliente; mensagens com role user são do cliente. Use isso para continuidade e nunca confunda mensagem humana com mensagem do cliente.",
       },
-      ...(hasRecentUnparsedPrescriptionImage && (isImageContext || customerInsistsAlreadySent) && receitas.length === 0
+      ...(hasRecentUnparsedPrescriptionImage && receitas.length === 0
         ? [{
             role: "system",
-            content: "[SISTEMA: PRIORIDADE MÁXIMA] O cliente já enviou receita/imagem e ainda não há nenhuma receita interpretada em RECEITAS JÁ INTERPRETADAS. Antes de considerar escalar_consultor ou pedir para reenviar, você DEVE tentar usar a tool interpretar_receita com a imagem mais recente disponível no contexto, se a imagem tiver sido entregue ao modelo. Só escale se a imagem estiver ilegível OU se a tool retornar baixa confiança crítica/impossibilidade de leitura.]",
+            content: "[SISTEMA: PRIORIDADE MÁXIMA — RECEITA PENDENTE] O cliente enviou uma imagem (provável receita) nas últimas mensagens e ela AINDA NÃO foi interpretada (RECEITAS JÁ INTERPRETADAS está vazio). REGRAS: 1) Você DEVE chamar a tool interpretar_receita usando a imagem mais recente entregue no histórico, ANTES de qualquer outra ação (não escale, não peça reenvio, não responda genericamente). 2) Se a imagem foi entregue ao modelo, use-a — mesmo que a última mensagem do cliente seja curta ('ok', 'então?', 'cadê'). 3) Só peça reenvio se o sistema avisar explicitamente que a imagem NÃO foi entregue. 4) Só escale para humano se a imagem estiver claramente ilegível APÓS a tentativa de interpretação.]",
           }]
         : []),
     ];
