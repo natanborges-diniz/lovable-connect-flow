@@ -949,18 +949,26 @@ function buildSystemPrompt(opts: {
   isHibrido: boolean;
   hasKnowledge: boolean;
   escalatedSubject?: string | null;
+  nomeWhatsapp?: string;
+  nomeAtual?: string;
+  nomeConfirmado?: boolean;
 }): string {
   const s: string[] = [];
 
   // Date/time context FIRST — so the model always knows the current date
   s.push(buildDateContext());
 
-  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount, {
+    nomeWhatsapp: opts.nomeWhatsapp,
+    nomeAtual: opts.nomeAtual,
+    nomeConfirmado: opts.nomeConfirmado,
+  });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
+  s.push(buildLentesContatoKnowledgeBlock());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
