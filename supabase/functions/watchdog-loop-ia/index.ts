@@ -1,0 +1,139 @@
+// Watchdog: detects atendimentos stuck in IA loop and escalates to human.
+// Triggered every 2 minutes by pg_cron.
+//
+// Criteria for escalation:
+//   - atendimento.modo = 'ia'
+//   - last message is outbound (from IA), older than 5 minutes
+//   - there is at least one inbound BEFORE that outbound (client replied)
+//   - last 2 outbound messages have similarity > 70%
+//
+// Action:
+//   - flip atendimento.modo to 'humano'
+//   - create eventos_crm entry: 'loop_ia_escalado_watchdog'
+//   - create notificacao for visibility
+//   - send a discreet message to the client
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function norm(t: string): string {
+  return String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+function similarity(a: string, b: string): number {
+  const wa = new Set(norm(a).split(/\s+/).filter((w) => w.length > 3));
+  const wb = new Set(norm(b).split(/\s+/).filter((w) => w.length > 3));
+  if (wa.size === 0 || wb.size === 0) return 0;
+  let overlap = 0;
+  for (const w of wa) if (wb.has(w)) overlap++;
+  return overlap / Math.max(wa.size, wb.size);
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  try {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    // Fetch open atendimentos in IA mode
+    const { data: atendimentos, error: atErr } = await supabase
+      .from("atendimentos")
+      .select("id, contato_id, modo, status, updated_at")
+      .eq("modo", "ia")
+      .neq("status", "encerrado")
+      .lt("updated_at", fiveMinAgo)
+      .limit(200);
+
+    if (atErr) throw atErr;
+    if (!atendimentos || atendimentos.length === 0) {
+      return new Response(JSON.stringify({ status: "ok", checked: 0, escalated: 0 }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let escalated = 0;
+    const details: any[] = [];
+
+    for (const at of atendimentos) {
+      // Pull last 5 messages
+      const { data: msgs } = await supabase
+        .from("mensagens")
+        .select("id, direcao, conteudo, created_at, remetente_nome")
+        .eq("atendimento_id", at.id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (!msgs || msgs.length < 2) continue;
+      const ordered = [...msgs].reverse();
+      const last = ordered[ordered.length - 1];
+
+      // Last must be outbound
+      if (last.direcao !== "outbound") continue;
+      // Older than 5 min
+      const lastMs = new Date(last.created_at).getTime();
+      if (Date.now() - lastMs < 5 * 60 * 1000) continue;
+      // Skip if message is from a human operator (only loop on IA-generated outbound)
+      const sender = String(last.remetente_nome || "").toLowerCase();
+      if (sender && !["assistente ia", "sistema", "recuperação", "bot lojas"].includes(sender.trim())) {
+        continue;
+      }
+
+      // There must be an inbound earlier in the window (client replied)
+      const hasPriorInbound = ordered.slice(0, -1).some((m) => m.direcao === "inbound");
+      if (!hasPriorInbound) continue;
+
+      // Last 2 outbound must be highly similar
+      const outbounds = ordered.filter((m) => m.direcao === "outbound");
+      if (outbounds.length < 2) continue;
+      const sim = similarity(outbounds[outbounds.length - 1].conteudo, outbounds[outbounds.length - 2].conteudo);
+      if (sim <= 0.7) continue;
+
+      // ── ESCALATE ──
+      console.log(`[WATCHDOG] Escalating atendimento ${at.id} — similarity=${(sim * 100).toFixed(0)}%`);
+
+      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", at.id);
+
+      await supabase.from("eventos_crm").insert({
+        contato_id: at.contato_id,
+        tipo: "loop_ia_escalado_watchdog",
+        descricao: `Watchdog escalou atendimento em loop (similaridade ${(sim * 100).toFixed(0)}%)`,
+        metadata: {
+          similarity: sim,
+          last_outbound: String(outbounds[outbounds.length - 1].conteudo).substring(0, 200),
+          minutes_inactive: Math.round((Date.now() - lastMs) / 60000),
+        },
+        referencia_tipo: "atendimento",
+        referencia_id: at.id,
+      });
+
+      await supabase.from("notificacoes").insert({
+        tipo: "loop_ia",
+        titulo: "Card em loop — requer atenção",
+        mensagem: `Atendimento em modo IA repetiu a mesma resposta sem avançar. Foi movido para Humano.`,
+        referencia_id: at.id,
+      });
+
+      escalated++;
+      details.push({ atendimento_id: at.id, similarity: sim });
+    }
+
+    console.log(`[WATCHDOG] checked=${atendimentos.length} escalated=${escalated}`);
+    return new Response(JSON.stringify({ status: "ok", checked: atendimentos.length, escalated, details }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    console.error("[WATCHDOG] error:", e);
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "unknown" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
