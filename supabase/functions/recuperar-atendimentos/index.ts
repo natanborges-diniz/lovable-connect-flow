@@ -270,13 +270,21 @@ serve(async (req) => {
       });
     }
 
-    const body = await req.json();
+    const rawBody = await req.text();
+    console.log(`[recuperar] POST raw body (${rawBody.length} chars):`, rawBody.slice(0, 500));
+    let body: any = {};
+    try { body = rawBody ? JSON.parse(rawBody) : {}; } catch (e) {
+      console.error("[recuperar] falha parse body:", e);
+    }
     const acao = body.acao as "acionar_ia" | "escalar_humano" | "mensagem_desculpas" | "lote_inteligente";
     const atendimentoIds: string[] = Array.isArray(body.atendimento_ids) ? body.atendimento_ids : [];
     const mensagem: string = body.mensagem || "Olá! Desculpe a demora em responder, estamos retomando seu atendimento agora. Em instantes nossa equipe vai te atender. 🙏";
 
+    console.log(`[recuperar] acao=${acao} ids_recebidos=${atendimentoIds.length}`);
+
     if (!atendimentoIds.length) {
       return new Response(JSON.stringify({ processados: 0, results: [], error: "Nenhum atendimento selecionado" }), {
+        status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
