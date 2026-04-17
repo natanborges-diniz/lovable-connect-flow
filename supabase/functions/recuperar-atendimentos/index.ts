@@ -85,6 +85,15 @@ async function detectarOrfaos(
     if (filters.setor_id && setorId !== filters.setor_id) continue;
     if (filters.modo && a.modo !== filters.modo) continue;
 
+    // Filtro de público (clientes vs internos)
+    if (filters.publico === "clientes") {
+      // Cliente final = sem setor associado (CRM vendas)
+      if (setorId !== null) continue;
+    } else if (filters.publico === "internos") {
+      // Interno = qualquer setor cadastrado (Corporativo, Lojas, Financeiro, TI…)
+      if (setorId === null) continue;
+    }
+
     out.push({
       atendimento_id: a.id,
       contato_id: a.contato_id,
