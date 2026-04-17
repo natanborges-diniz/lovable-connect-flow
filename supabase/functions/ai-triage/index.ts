@@ -1590,6 +1590,9 @@ serve(async (req) => {
         isHibrido,
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
         escalatedSubject,
+        nomeWhatsapp: nomePerfilWhatsapp,
+        nomeAtual: contatoNomeAtual,
+        nomeConfirmado,
       });
     }
 
