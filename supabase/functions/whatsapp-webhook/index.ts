@@ -215,12 +215,12 @@ serve(async (req) => {
         const salesColunas = allColunas
           .filter((c: any) => c.setor_id === null)
           .sort((a: any, b: any) => a.ordem - b.ordem);
-        // Filter internal columns by "Atendimento Gael" sector to avoid mixing with Financeiro/Agendamentos
-        const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+        // Filter internal columns by "Atendimento Corporativo" sector to avoid mixing with Financeiro/Agendamentos
+        const ATENDIMENTO_CORPORATIVO_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
         const internalColunas = allColunas
-          .filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+          .filter((c: any) => c.setor_id === ATENDIMENTO_CORPORATIVO_SETOR_ID)
           .sort((a: any, b: any) => a.ordem - b.ordem);
-        // Fallback: if Atendimento Gael has no columns, use any internal columns
+        // Fallback: if Atendimento Corporativo has no columns, use any internal columns
         const internalColunasFallback = internalColunas.length > 0
           ? internalColunas
           : allColunas.filter((c: any) => c.setor_id !== null).sort((a: any, b: any) => a.ordem - b.ordem);
