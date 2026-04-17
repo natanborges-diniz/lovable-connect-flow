@@ -31,6 +31,7 @@ interface AuthContextType {
   isOperador: boolean;
   hasRole: (role: AppRole) => boolean;
   getUserSetorIds: () => string[];
+  getEffectiveSetorIds: () => string[];
   getUserLojaNames: () => string[];
   signOut: () => Promise<void>;
 }
