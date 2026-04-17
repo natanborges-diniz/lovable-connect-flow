@@ -836,58 +836,66 @@ function ConversationPanel({
   if (!atendimentoId) {
     return (
       <>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5" />
-            {contato?.nome ?? "Contato"}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-12">
+        <div className="px-4 pt-4 pb-3 border-b shrink-0">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base pr-8">
+              <MessageSquare className="h-4 w-4 shrink-0" />
+              <span className="truncate">{contato?.nome ?? "Contato"}</span>
+            </DialogTitle>
+          </DialogHeader>
+        </div>
+        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-12 px-4">
           Nenhum atendimento ativo para este contato.
         </div>
       </>
     );
   }
 
-  
-
   return (
     <>
-      {/* Column selector + close controls */}
-      <div className="flex items-center gap-2 flex-wrap border-b pb-2 mb-2">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          <span className="text-xs text-muted-foreground shrink-0">Etapa:</span>
-          <Select
-            value={contato?.pipeline_coluna_id || ""}
-            onValueChange={handleMoveToColumn}
+      {/* Header fixo: título + ações */}
+      <div className="px-4 pt-4 pb-3 border-b shrink-0 space-y-2">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base pr-8">
+            <MessageSquare className="h-4 w-4 shrink-0" />
+            <span className="truncate">{contato?.nome ?? "Contato"}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <span className="text-xs text-muted-foreground shrink-0">Etapa:</span>
+            <Select
+              value={contato?.pipeline_coluna_id || ""}
+              onValueChange={handleMoveToColumn}
+            >
+              <SelectTrigger className="h-7 text-xs w-52">
+                <SelectValue placeholder="Selecionar coluna" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(colunasGrouped).map(([setor, cols]) => (
+                  <div key={setor}>
+                    <p className="text-[10px] font-bold text-muted-foreground px-2 pt-2 pb-0.5 uppercase tracking-wider border-t first:border-t-0">
+                      ── {setor} ──
+                    </p>
+                    {(cols as any[]).sort((a, b) => a.ordem - b.ordem).map((col) => (
+                      <SelectItem key={col.id} value={col.id} className="text-xs">
+                        {col.nome}
+                      </SelectItem>
+                    ))}
+                  </div>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={handleEncerrarAtendimento}
           >
-            <SelectTrigger className="h-7 text-xs w-52">
-              <SelectValue placeholder="Selecionar coluna" />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(colunasGrouped).map(([setor, cols]) => (
-                <div key={setor}>
-                  <p className="text-[10px] font-bold text-muted-foreground px-2 pt-2 pb-0.5 uppercase tracking-wider border-t first:border-t-0">
-                    ── {setor} ──
-                  </p>
-                  {(cols as any[]).sort((a, b) => a.ordem - b.ordem).map((col) => (
-                    <SelectItem key={col.id} value={col.id} className="text-xs">
-                      {col.nome}
-                    </SelectItem>
-                  ))}
-                </div>
-              ))}
-            </SelectContent>
-          </Select>
+            <X className="h-3 w-3 mr-1" /> Encerrar
+          </Button>
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={handleEncerrarAtendimento}
-        >
-          <X className="h-3 w-3 mr-1" /> Encerrar Atendimento
-        </Button>
       </div>
 
       <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />
