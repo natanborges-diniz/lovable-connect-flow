@@ -906,6 +906,8 @@ function looksLikeRealName(rawName: string | null | undefined, phone: string): b
   if (letters.length < 3) return false;
   return true;
 }
+
+function shouldKeepBrandName(rawName: string | null | undefined, text: string | null | undefined): boolean {
   const name = (rawName || "").trim();
   const msg = (text || "").toLowerCase();
   if (!name || !BRAND_NAME_PATTERNS.some((re) => re.test(name))) return false;
