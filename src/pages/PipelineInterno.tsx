@@ -46,10 +46,10 @@ const ATENDIMENTO_CORPORATIVO_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
 export default function PipelineInterno() {
   const [search, setSearch] = useState("");
   const [selectedContatoId, setSelectedContatoId] = useState<string | null>(null);
-  const { isAdmin, isOperador, getUserSetorIds } = useAuth();
+  const { isAdmin, isOperador, getEffectiveSetorIds } = useAuth();
 
   // Setor users veem o pipeline do PRÓPRIO setor; admin/operador veem o Atendimento Corporativo
-  const userSetorIds = getUserSetorIds();
+  const userSetorIds = getEffectiveSetorIds();
   const activeSetorId = (isAdmin || isOperador)
     ? ATENDIMENTO_CORPORATIVO_SETOR_ID
     : (userSetorIds[0] ?? ATENDIMENTO_CORPORATIVO_SETOR_ID);
