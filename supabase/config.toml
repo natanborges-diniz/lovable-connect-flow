@@ -41,3 +41,6 @@ verify_jwt = false
 
 [functions.responder-solicitacao]
 verify_jwt = false
+
+[functions.recuperar-atendimentos]
+verify_jwt = false
