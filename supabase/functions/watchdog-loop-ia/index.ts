@@ -127,6 +127,7 @@ serve(async (req) => {
     }
 
     console.log(`[WATCHDOG] checked=${atendimentos.length} escalated=${escalated}`);
+    await supabase.from("cron_jobs").update({ ultimo_disparo: new Date().toISOString() }).eq("funcao_alvo", "watchdog-loop-ia");
     return new Response(JSON.stringify({ status: "ok", checked: atendimentos.length, escalated, details }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
