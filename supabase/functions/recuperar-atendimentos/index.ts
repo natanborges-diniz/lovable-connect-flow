@@ -235,12 +235,37 @@ serve(async (req) => {
       const idade = parseInt(url.searchParams.get("idade_min") || "15", 10);
       const setorId = url.searchParams.get("setor_id");
       const modo = url.searchParams.get("modo");
+      const publicoParam = url.searchParams.get("publico") as "clientes" | "internos" | "todos" | null;
+
       const orfaos = await detectarOrfaos(supabase, {
         idade_min_min: idade,
         setor_id: setorId === "all" || !setorId ? null : setorId,
         modo: modo === "all" || !modo ? null : modo,
+        publico: publicoParam || "todos",
       });
-      return new Response(JSON.stringify({ total: orfaos.length, orfaos }), {
+
+      // Contagem segmentada — recalcula sem filtro de público para mostrar quantos há em cada grupo
+      let porPublico = { clientes: 0, internos: 0 };
+      if (!publicoParam || publicoParam === "todos") {
+        for (const o of orfaos) {
+          if (o.setor_id === null) porPublico.clientes++;
+          else porPublico.internos++;
+        }
+      } else {
+        // Quando filtrado, refaz uma busca leve só pra contar o outro grupo
+        const todos = await detectarOrfaos(supabase, {
+          idade_min_min: idade,
+          setor_id: setorId === "all" || !setorId ? null : setorId,
+          modo: modo === "all" || !modo ? null : modo,
+          publico: "todos",
+        });
+        for (const o of todos) {
+          if (o.setor_id === null) porPublico.clientes++;
+          else porPublico.internos++;
+        }
+      }
+
+      return new Response(JSON.stringify({ total: orfaos.length, orfaos, por_publico: porPublico }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
