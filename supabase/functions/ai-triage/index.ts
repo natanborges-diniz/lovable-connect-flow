@@ -638,6 +638,40 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "consultar_lentes_contato",
+      description: "Busca opções de LENTES DE CONTATO compatíveis com a receita do cliente e calcula o plano (caixas necessárias, duração, combo 3+1). Use quando o cliente pedir orçamento/preço de LENTES DE CONTATO. Se o cilíndrico for ≥ 0.75 em qualquer olho, filtra automaticamente lentes TÓRICAS (que são SOB ENCOMENDA). Prioriza marca DNZ quando compatível. NÃO use para óculos (use consultar_lentes para óculos).",
+      parameters: {
+        type: "object",
+        properties: {
+          receita_label: { type: "string", description: "Label da receita a usar (ex: 'cliente', 'filho'). Default: mais recente." },
+          descarte_preferido: { type: "string", enum: ["diario", "quinzenal", "mensal", "qualquer"], description: "Tipo de descarte que o cliente prefere. Default: 'qualquer' (mostra mensais/quinzenais com prioridade)." },
+          marca_preferida: { type: "string", description: "Marca preferida se mencionada (DNZ, Acuvue, Biofinity, Air Optix, Solótica, etc)." },
+          resposta_fallback: { type: "string", description: "Mensagem caso nenhuma lente compatível seja encontrada." },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "registrar_nome_cliente",
+      description: "Registra/atualiza o nome do cliente no cadastro APÓS confirmação. Use SEMPRE que o cliente: (a) confirmar que o nome do perfil está correto ('sim, sou eu', 'isso mesmo'), OU (b) informar/corrigir seu nome ('na verdade é Maria', 'meu nome é João'). NÃO use sem confirmação explícita do cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          nome: { type: "string", description: "Nome confirmado do cliente (ex: 'Maria Silva', 'João'). Use o nome que o cliente confirmou ou informou." },
+          resposta: { type: "string", description: "Mensagem natural confirmando o registro e dando continuidade (ex: 'Perfeito, Maria! Em que posso te ajudar hoje? 😊')." },
+        },
+        required: ["nome", "resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "agendar_lembrete",
       description: "Registra um lembrete futuro para enviar ao cliente. Use quando o cliente pedir para ser lembrado ou quando combinar um retorno em data específica. OBRIGATÓRIO usar esta tool antes de prometer qualquer ação futura.",
       parameters: {
@@ -719,14 +753,28 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
   return block;
 }
 
-function buildFirstContactBlock(inboundCount: number): string {
+function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: string; nomeAtual?: string; nomeConfirmado?: boolean }): string {
   if (inboundCount > 1) return "";
-  return `# PRIMEIRA INTERAÇÃO
-- Cumprimente o cliente de forma calorosa e natural (ex: "Oi! Tudo bem? 😊").
-- Pergunte como pode ajudá-lo. NÃO assuma o que ele precisa.
-- NÃO mencione receita, lentes, agendamento ou qualquer serviço na primeira mensagem.
-- Deixe o CLIENTE dizer o que deseja antes de fazer qualquer triagem.
-- Exemplo: "Oi! Aqui é o Gael das Óticas Diniz Osasco 😊 Como posso te ajudar hoje?"
+  const nomeWa = (opts?.nomeWhatsapp || "").trim();
+  const nomeAtual = (opts?.nomeAtual || "").trim();
+  const candidato = nomeWa || nomeAtual;
+  const looksReal = !!candidato && /[A-Za-zÀ-ÿ]{2,}/.test(candidato) && !/^\d+$/.test(candidato);
+
+  if (looksReal && !opts?.nomeConfirmado) {
+    const primeiroNome = candidato.split(/\s+/)[0];
+    return `# PRIMEIRA INTERAÇÃO — CONFIRME O NOME
+- Cumprimente caloroso confirmando o nome capturado: "Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+- Se o cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
+- Se o cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto informado.
+- Depois de confirmar/registrar o nome, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.
+- Mantenha curto (máx. 2 frases).`;
+  }
+
+  return `# PRIMEIRA INTERAÇÃO — PEÇA O NOME
+- Cumprimente e PEÇA o nome do cliente: "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+- Quando o cliente responder o nome → chame a tool registrar_nome_cliente com o nome informado.
+- NÃO mencione receita, lentes, agendamento ou qualquer serviço antes de ter o nome.
+- Deixe o cliente dizer o que deseja DEPOIS de se apresentar.
 - Mantenha a mensagem curta e acolhedora — máximo 2 frases.`;
 }
 
@@ -765,6 +813,46 @@ Se a pessoa se identificar como:
 → NUNCA tente vender ou fazer triagem de produto para essas pessoas.`;
 }
 
+function buildLentesContatoKnowledgeBlock(): string {
+  return `# 👁️ LENTES DE CONTATO — CONHECIMENTO E REGRAS
+
+## Quando usar a tool consultar_lentes_contato
+- Cliente pede orçamento/preço de LENTES DE CONTATO (não óculos).
+- Para óculos, continue usando consultar_lentes.
+- Precisa de receita salva. Se não houver, peça foto da receita uma única vez.
+
+## Tipos de descarte (usar para explicar)
+- DIÁRIA: descarta após 1 uso. Caixas de 30/90 unidades. Mais higiênica, sem precisar de soluções/estojo. Combo 3+1 NÃO se aplica.
+- QUINZENAL: cada lente dura 15 dias por olho. Caixas geralmente de 6 unidades. Requer solução multiuso e estojo.
+- MENSAL: cada lente dura 30 dias por olho. Caixas geralmente de 6 unidades. Requer solução multiuso e estojo.
+
+## COMBO 3+1 (mensais e quinzenais)
+- Cada caixa contém N unidades (campo unidades_por_caixa).
+- 1 unidade = 1 mês (mensal) ou 15 dias (quinzenal) — POR OLHO.
+- MESMA dioptria nos 2 olhos (sph + cyl iguais OD/OE): 1 caixa atende AMBOS os olhos → divide a duração por 2.
+  - Ex.: caixa de 6 unidades mensal, mesma dioptria → 1 cx = 3 meses.
+- DIOPTRIA DIFERENTE entre OD/OE: 1 caixa por olho (mínimo 2 caixas iniciais).
+  - Ex.: caixa de 6 unidades mensal, dioptrias diferentes → 2 cx = 6 meses.
+- Comprando 3 caixas, a 4ª vai de cortesia (combo 3+1).
+  - Mesma dioptria + 6un/cx mensal: 4 cx = 12 meses (1 ano completo).
+  - Dioptria diferente + 6un/cx mensal: 4 cx = 12 meses (1 ano completo).
+- DIÁRIAS: combo 3+1 NÃO se aplica.
+
+## TÓRICAS (astigmatismo)
+- Cilíndrico ≥ |0.75| em qualquer olho ⇒ OBRIGATORIAMENTE lente TÓRICA (com correção de astigmatismo).
+- Tóricas são SEMPRE SOB ENCOMENDA — pagamento confirma o pedido.
+- Sempre informe que o prazo de entrega depende da fabricante e que o pagamento garante a reserva.
+
+## Marcas — prioridade comercial
+- 1º) DNZ (marca própria, melhor custo-benefício) — sempre que a receita for compatível.
+- 2º) Demais marcas conforme compatibilidade técnica e preferência do cliente.
+
+## Apresentação de orçamento
+- Sempre apresente: produto, descarte, valor por caixa, plano sugerido (caixas + duração) e o combo 3+1 quando aplicável.
+- Para tóricas, deixe claro o aviso de encomenda.
+- Termine convidando à visita à loja para concluir o pedido (presencial fecha melhor).`;
+}
+
 function buildSystemPromptFromCompiled(opts: {
   compiledPrompt: string;
   regrasProibidas: { regra: string; categoria: string }[];
@@ -779,17 +867,25 @@ function buildSystemPromptFromCompiled(opts: {
   isHibrido: boolean;
   hasKnowledge: boolean;
   escalatedSubject?: string | null;
+  nomeWhatsapp?: string;
+  nomeAtual?: string;
+  nomeConfirmado?: boolean;
 }): string {
   const s: string[] = [];
 
   s.push(buildDateContext());
 
-  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount, {
+    nomeWhatsapp: opts.nomeWhatsapp,
+    nomeAtual: opts.nomeAtual,
+    nomeConfirmado: opts.nomeConfirmado,
+  });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
+  s.push(buildLentesContatoKnowledgeBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
@@ -853,18 +949,26 @@ function buildSystemPrompt(opts: {
   isHibrido: boolean;
   hasKnowledge: boolean;
   escalatedSubject?: string | null;
+  nomeWhatsapp?: string;
+  nomeAtual?: string;
+  nomeConfirmado?: boolean;
 }): string {
   const s: string[] = [];
 
   // Date/time context FIRST — so the model always knows the current date
   s.push(buildDateContext());
 
-  const firstContactBlock = buildFirstContactBlock(opts.inboundCount);
+  const firstContactBlock = buildFirstContactBlock(opts.inboundCount, {
+    nomeWhatsapp: opts.nomeWhatsapp,
+    nomeAtual: opts.nomeAtual,
+    nomeConfirmado: opts.nomeConfirmado,
+  });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
   if (continuityBlock) s.push(continuityBlock);
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
+  s.push(buildLentesContatoKnowledgeBlock());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
@@ -1268,7 +1372,7 @@ serve(async (req) => {
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
       supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
-      supabase.from("contatos").select("metadata, tipo").eq("id", contatoId).single(),
+      supabase.from("contatos").select("metadata, tipo, nome").eq("id", contatoId).single(),
     ]);
 
     const businessRules = promptRes.data?.valor || "Você é um assistente de atendimento.";
@@ -1285,6 +1389,9 @@ serve(async (req) => {
     const agendamentosAtivos = agendRes.data || [];
     const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
+    const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
+    const nomeConfirmado = contatoMeta.nome_confirmado === true;
+    const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
 
     // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
     let receitas: any[] = [];
@@ -1439,6 +1546,9 @@ serve(async (req) => {
         isHibrido,
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
         escalatedSubject,
+        nomeWhatsapp: nomePerfilWhatsapp,
+        nomeAtual: contatoNomeAtual,
+        nomeConfirmado,
       });
 
       console.log(`[CONTEXT] Using COMPILED prompt (${compiledPrompt.length}ch) with slot replacement`);
@@ -1480,6 +1590,9 @@ serve(async (req) => {
         isHibrido,
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
         escalatedSubject,
+        nomeWhatsapp: nomePerfilWhatsapp,
+        nomeAtual: contatoNomeAtual,
+        nomeConfirmado,
       });
     }
 
@@ -2221,6 +2334,213 @@ serve(async (req) => {
         } catch (e) {
           console.error("[TOOL] agendar_lembrete failed:", e);
         }
+      } else if (fn === "registrar_nome_cliente") {
+        resposta = args.resposta;
+        intencao = "registro_nome";
+        const novoNome = String(args.nome || "").trim();
+        if (novoNome.length >= 2) {
+          try {
+            // Reload current metadata to merge flag without overwriting other fields
+            const { data: ctNome } = await supabase
+              .from("contatos")
+              .select("metadata")
+              .eq("id", contatoId)
+              .single();
+            const ctMeta = (ctNome?.metadata as Record<string, any>) || {};
+            await supabase
+              .from("contatos")
+              .update({
+                nome: novoNome,
+                metadata: { ...ctMeta, nome_confirmado: true, nome_origem: "ia_confirmado", nome_atualizado_at: new Date().toISOString() },
+              })
+              .eq("id", contatoId);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "nome_confirmado",
+              descricao: `Nome confirmado: "${novoNome}"`,
+              metadata: { nome: novoNome, nome_anterior: contatoNomeAtual || null },
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+            });
+            console.log(`[TOOL] registrar_nome_cliente: ${novoNome}`);
+          } catch (e) {
+            console.error("[TOOL] registrar_nome_cliente failed:", e);
+          }
+        }
+      } else if (fn === "consultar_lentes_contato") {
+        intencao = "orcamento_lentes_contato";
+        pipeline_coluna = "Orçamento";
+
+        // Load saved prescriptions
+        const { data: ctRx } = await supabase
+          .from("contatos")
+          .select("metadata")
+          .eq("id", contatoId)
+          .single();
+        const ctRxMeta = (ctRx?.metadata as Record<string, any>) || {};
+
+        let allRx: any[] = [];
+        if (Array.isArray(ctRxMeta.receitas) && ctRxMeta.receitas.length > 0) {
+          allRx = ctRxMeta.receitas;
+        } else if (ctRxMeta.ultima_receita?.eyes) {
+          allRx = [{ ...ctRxMeta.ultima_receita, label: "cliente" }];
+        }
+
+        let rxMeta: any = null;
+        if (allRx.length > 0) {
+          rxMeta = args.receita_label
+            ? allRx.find((r: any) => norm(r.label || "") === norm(args.receita_label)) || allRx[allRx.length - 1]
+            : allRx[allRx.length - 1];
+        }
+
+        if (!rxMeta?.eyes) {
+          resposta = args.resposta_fallback || "Pra te passar as opções de lentes de contato, preciso da sua receita. Pode me enviar uma foto? 📸";
+          console.log("[QUOTE-LC] No prescription found");
+        } else {
+          const od = rxMeta.eyes.od || {};
+          const oe = rxMeta.eyes.oe || {};
+          const sphODn = typeof od.sphere === "number" ? od.sphere : null;
+          const sphOEn = typeof oe.sphere === "number" ? oe.sphere : null;
+          const cylODn = typeof od.cylinder === "number" ? od.cylinder : 0;
+          const cylOEn = typeof oe.cylinder === "number" ? oe.cylinder : 0;
+
+          const cylAbsMax = Math.max(Math.abs(cylODn || 0), Math.abs(cylOEn || 0));
+          const needsToric = cylAbsMax >= 0.75;
+          const sphereValues = [sphODn, sphOEn].filter((v) => typeof v === "number") as number[];
+          if (sphereValues.length === 0) {
+            resposta = args.resposta_fallback || "Não consegui ler o grau esférico da sua receita. Pode me enviar uma foto mais nítida?";
+          } else {
+            const worstSphere = sphereValues.reduce((a, b) => (Math.abs(a) > Math.abs(b) ? a : b), 0);
+            const worstCyl = cylAbsMax > 0 ? (Math.abs(cylODn) > Math.abs(cylOEn) ? cylODn : cylOEn) : 0;
+
+            // Same prescription both eyes?
+            const mesmaDioptria =
+              sphODn !== null && sphOEn !== null && sphODn === sphOEn && (cylODn || 0) === (cylOEn || 0);
+
+            let q = supabase
+              .from("pricing_lentes_contato")
+              .select("*")
+              .eq("active", true)
+              .gt("price_brl", 0)
+              .lte("sphere_min", worstSphere)
+              .gte("sphere_max", worstSphere);
+
+            if (needsToric) {
+              q = q.eq("is_toric", true).lte("cylinder_min", worstCyl).gte("cylinder_max", worstCyl);
+            } else {
+              q = q.eq("is_toric", false);
+            }
+
+            // Discard preference filter (allow any if "qualquer" or undefined)
+            const descPref = String(args.descarte_preferido || "qualquer").toLowerCase();
+            if (descPref === "diario" || descPref === "diaria") q = q.eq("descarte", "diario");
+            else if (descPref === "quinzenal") q = q.eq("descarte", "quinzenal");
+            else if (descPref === "mensal") q = q.eq("descarte", "mensal");
+
+            if (args.marca_preferida) {
+              q = q.or(`fornecedor.ilike.%${args.marca_preferida}%,produto.ilike.%${args.marca_preferida}%`);
+            }
+
+            // Order: DNZ first, then priority, then price
+            const { data: lentes } = await q
+              .order("is_dnz", { ascending: false })
+              .order("priority", { ascending: true })
+              .order("price_brl", { ascending: true })
+              .limit(15);
+
+            if (!lentes || lentes.length === 0) {
+              resposta =
+                args.resposta_fallback ||
+                (needsToric
+                  ? "Pelo seu grau, você precisa de lente TÓRICA (com correção de astigmatismo) — esse modelo é sob encomenda. Vou pedir pra um Consultor te apresentar as opções específicas, tudo bem?"
+                  : "Não encontrei lentes de contato compatíveis no nosso estoque. Posso pedir pra um Consultor te ajudar a buscar uma opção sob encomenda?");
+              console.log(`[QUOTE-LC] No matches sph=${worstSphere} cyl=${worstCyl} toric=${needsToric}`);
+            } else {
+              // Pick up to 3: prioritize DNZ + diversify discard
+              const pick: any[] = [];
+              const seen = new Set<string>();
+              for (const l of lentes) {
+                const key = `${l.fornecedor}|${l.descarte}`;
+                if (!seen.has(key)) {
+                  pick.push(l);
+                  seen.add(key);
+                }
+                if (pick.length === 3) break;
+              }
+              if (pick.length < 3 && lentes.length > pick.length) {
+                for (const l of lentes) {
+                  if (!pick.includes(l)) pick.push(l);
+                  if (pick.length === 3) break;
+                }
+              }
+
+              const fmtBRL = (n: number) =>
+                Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+              let msg = `🔎 *Lentes de contato compatíveis com sua receita:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"}${od.axis ? `x${od.axis}` : ""} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${oe.axis ? `x${oe.axis}` : ""}\n`;
+              if (needsToric) {
+                msg += `\n⚠️ *Lente TÓRICA* (astigmatismo ≥ 0.75) — sob encomenda. Pagamento confirma o pedido.\n`;
+              }
+
+              for (const l of pick) {
+                const unidades = Number(l.unidades_por_caixa) || 6;
+                const dias = Number(l.dias_por_unidade) || 30;
+                const desc =
+                  l.descarte === "diario"
+                    ? "diária"
+                    : l.descarte === "quinzenal"
+                    ? "quinzenal"
+                    : l.descarte === "mensal"
+                    ? "mensal"
+                    : l.descarte;
+                const preco = fmtBRL(Number(l.price_brl));
+
+                let plano = "";
+                if (l.descarte === "diario") {
+                  // diárias: 1 cx por olho geralmente; sem combo
+                  const dias_cx_um_olho = unidades; // 1 lente/dia
+                  if (mesmaDioptria) {
+                    plano = `Plano: 1 caixa atende os 2 olhos por ~${Math.floor(dias_cx_um_olho / 2)} dias.`;
+                  } else {
+                    plano = `Plano: 1 caixa por olho — ~${dias_cx_um_olho} dias por olho. Combo 3+1 não se aplica a diárias.`;
+                  }
+                } else {
+                  // mensais/quinzenais
+                  const dias_por_olho_1cx = unidades * dias; // ex 6*30 = 180 dias = 6 meses
+                  const meses_por_olho_1cx = Math.round(dias_por_olho_1cx / 30);
+                  if (mesmaDioptria) {
+                    const meses1cx = Math.round(meses_por_olho_1cx / 2);
+                    const meses4cx = Math.round((4 * unidades * dias) / 30 / 2);
+                    plano = `Plano (mesma dioptria): 1 caixa atende os 2 olhos por ~${meses1cx} meses. 🎁 *Combo 3+1*: 4 caixas = ~${meses4cx} meses (1 ano completo!).`;
+                  } else {
+                    const meses2cx = meses_por_olho_1cx;
+                    const meses4cx = Math.round((4 * unidades * dias) / 30 / 2);
+                    plano = `Plano (dioptrias diferentes): mín. 2 caixas (1 por olho) = ~${meses2cx} meses. 🎁 *Combo 3+1*: 4 caixas = ~${meses4cx} meses (1 ano completo!).`;
+                  }
+                }
+
+                msg += `\n${l.is_dnz ? "🌟 " : "👁️ "}*${l.produto}* (${l.fornecedor}) — ${desc}\n💰 R$ ${preco}/caixa\n${plano}`;
+              }
+
+              msg += `\n\nQuer que eu reserve a opção que você preferir? Posso te encaminhar pra loja mais próxima fechar o pedido.`;
+              resposta = msg;
+              console.log(
+                `[QUOTE-LC] ${pick.length} options sph=${worstSphere} cyl=${worstCyl} toric=${needsToric} mesma=${mesmaDioptria}`,
+              );
+            }
+          }
+        }
+
+        try {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "consulta_lentes_contato",
+            descricao: `Orçamento LC consultado`,
+            metadata: { args },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+        } catch (_) { /* noop */ }
       }
     }
 
