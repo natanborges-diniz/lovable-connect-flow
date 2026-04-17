@@ -225,6 +225,91 @@ function detectForcedToolIntent(
   return null;
 }
 
+// ── Prescription correction detector ──
+// Detects when the customer is correcting a previously-interpreted prescription
+// by typing values directly (OD/OE, longe/perto, esf/cil/eixo/adição).
+// Returns parsed prescription data if detected, otherwise null.
+function detectPrescriptionCorrection(text: string): {
+  od: { sphere: number | null; cylinder: number | null; axis: number | null; add: number | null };
+  oe: { sphere: number | null; cylinder: number | null; axis: number | null; add: number | null };
+  has_addition: boolean;
+  rx_type: "single_vision" | "progressive";
+  raw: string;
+} | null {
+  if (!text || text.length < 8) return null;
+  const t = text.toLowerCase();
+
+  // Strong signals: must contain at least 2 of these markers
+  const markers = [
+    /\bod\b/, /\boe\b/, /\bos\b/,
+    /\blonge\b/, /\bperto\b/,
+    /\besf[eé]rico\b|\besf\b/,
+    /\bcil[ií]ndrico\b|\bcil\b/,
+    /\beixo\b/,
+    /\badi[cç][aã]o\b|\badd?\b/,
+  ];
+  const numericPairs = (t.match(/[+-]?\d+[.,]?\d*/g) || []).length;
+  const markerHits = markers.filter((r) => r.test(t)).length;
+  if (markerHits < 2 || numericPairs < 2) return null;
+
+  // Helper: parse a number like "-9,25" / "+0.50" / "0.00"
+  const parseNum = (s: string | undefined): number | null => {
+    if (!s) return null;
+    const n = parseFloat(s.replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Try to extract values per eye. Patterns supported:
+  //   "OD 0.00 com -2,25 eixo 180"
+  //   "OD: esf -9 cil -2,75 eixo 180 add +2,00"
+  //   "LONGE: OD 0.00 com -2,25"  /  "PERTO: -0,25 com -2,00"
+  const num = "([+-]?\\d+[.,]?\\d*)";
+  const buildEye = () => ({ sphere: null as number | null, cylinder: null as number | null, axis: null as number | null, add: null as number | null });
+  const od = buildEye();
+  const oe = buildEye();
+
+  // Pattern A: "OD <esf> com <cil> [eixo <axis>] [add <add>]"
+  const reA = new RegExp(`(od|oe|os)[^\\d+\\-]{0,15}${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?(?:[^\\d]*(?:add?|adi[cç][aã]o)\\s*${num})?`, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = reA.exec(t)) !== null) {
+    const eye = m[1].toLowerCase() === "od" ? od : oe;
+    if (eye.sphere == null) eye.sphere = parseNum(m[2]);
+    if (eye.cylinder == null) eye.cylinder = parseNum(m[3]);
+    if (eye.axis == null) eye.axis = parseNum(m[4]);
+    if (eye.add == null) eye.add = parseNum(m[5]);
+  }
+
+  // Pattern B: longe/perto blocks (when client splits longe/perto with single eye line each)
+  // "LONGE: OD <s> com <c>" / "PERTO: <s> com <c> eixo <ax>"
+  const longeMatch = t.match(/longe[^a-z]*([\s\S]*?)(?=perto|$)/i);
+  const pertoMatch = t.match(/perto[^a-z]*([\s\S]*?)$/i);
+  const eyeFromBlock = (block: string, eye: any) => {
+    const r = new RegExp(`(?:od|oe|os)?\\s*${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?`, "i");
+    const mm = block.match(r);
+    if (mm) {
+      if (eye.sphere == null) eye.sphere = parseNum(mm[1]);
+      if (eye.cylinder == null) eye.cylinder = parseNum(mm[2]);
+      if (eye.axis == null) eye.axis = parseNum(mm[3]);
+    }
+  };
+  if (longeMatch && od.sphere == null) eyeFromBlock(longeMatch[1], od);
+  if (pertoMatch) {
+    // "perto" line implies addition exists → progressive
+    const pBlock = pertoMatch[1];
+    // If the client only gives ONE pair under "perto", treat it as the additional set for OE if OE empty, else as add reference for OD
+    eyeFromBlock(pBlock, oe.sphere == null ? oe : od);
+  }
+
+  // Need at least one eye with sphere defined to be valid
+  if (od.sphere == null && oe.sphere == null) return null;
+
+  // Mirror values when only one eye provided (best-effort: keep nulls — let LLM ask)
+  const has_addition = (od.add != null && od.add !== 0) || (oe.add != null && oe.add !== 0) || /\bperto\b|\badi[cç][aã]o\b|\badd?\b/.test(t);
+  const rx_type: "single_vision" | "progressive" = has_addition ? "progressive" : "single_vision";
+
+  return { od, oe, has_addition, rx_type, raw: text.slice(0, 400) };
+}
+
 function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
   resposta: string;
   intencao: string;
