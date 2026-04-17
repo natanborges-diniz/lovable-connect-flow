@@ -184,6 +184,47 @@ function detectPendingIntent(
   return null;
 }
 
+// ── Loop detector: scans last 3 outbound for >70% similarity between any 2 ──
+// Returns: { detected: boolean, similarity: number }
+function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: number } {
+  const last3 = recentOutbound.slice(-3).map(norm).filter((s) => s.length > 0);
+  if (last3.length < 2) return { detected: false, similarity: 0 };
+  let maxSim = 0;
+  for (let i = 0; i < last3.length; i++) {
+    for (let j = i + 1; j < last3.length; j++) {
+      const sim = computeSimilarity(last3[i], last3[j]);
+      if (sim > maxSim) maxSim = sim;
+    }
+  }
+  return { detected: maxSim > 0.7, similarity: maxSim };
+}
+
+// ── Forced intent → tool mapping ──
+// When the customer responds with clear keywords to a previous AI question,
+// forces the corresponding tool execution to break out of repetitive prompts.
+function detectForcedToolIntent(
+  lastInboundText: string,
+  hasReceitas: boolean,
+  hasUnparsedImage: boolean,
+): { tool: string; reason: string } | null {
+  const t = norm(lastInboundText);
+  if (!t) return null;
+
+  // Quote / pricing keywords
+  if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
+    if (hasReceitas) return { tool: "consultar_lentes", reason: "cliente pediu orçamento e há receita salva" };
+    if (hasUnparsedImage) return { tool: "interpretar_receita", reason: "cliente pediu orçamento e há imagem pendente" };
+    return { tool: "responder_pedindo_receita", reason: "cliente pediu orçamento mas não há receita" };
+  }
+
+  // Scheduling keywords
+  if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|essa semana|pode marcar|pode agendar|reservar)\b/.test(t)) {
+    return { tool: "agendar_cliente_intent", reason: "cliente quer agendar" };
+  }
+
+  return null;
+}
+
 function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
   resposta: string;
   intencao: string;
@@ -1504,6 +1545,63 @@ serve(async (req) => {
       : "empty";
 
     console.log(`[CONTEXT] Prompt:${systemPrompt.length}ch | KB:${conhecimentos.length} | Ex:${exemplos.length} | Anti:${antiFeedbacks.length} | Regras:${regrasProibidas.length} | Modo:${atendimento.modo} | Window:${contextWindow.length}/${allMsgs.length} | Range:${historyRange} | Topics:${sentTopics.join(",") || "none"}`);
+
+    // ── 6.5. PRE-LLM LOOP DETECTOR + FORCED INTENT MAPPING ──
+    // Runs BEFORE the LLM call so it can override the prompt and prevent the
+    // model from generating yet another semantically-identical response.
+    const loopCheck = detectLoop(recentOutbound);
+    const forcedIntent = detectForcedToolIntent(
+      lastInboundText,
+      receitas.length > 0,
+      hasRecentUnparsedPrescriptionImage && receitas.length === 0,
+    );
+
+    if (loopCheck.detected) {
+      console.log(`[LOOP-DETECTOR] Loop detected — similarity=${(loopCheck.similarity * 100).toFixed(0)}%`);
+      await supabase.from("eventos_crm").insert({
+        contato_id: contatoId, tipo: "loop_ia_detectado_pre_llm",
+        descricao: `Loop detectado pré-LLM (similaridade ${(loopCheck.similarity * 100).toFixed(0)}%)`,
+        metadata: {
+          similarity: loopCheck.similarity,
+          forced_intent: forcedIntent?.tool || null,
+          last_inbound: lastInboundText.substring(0, 200),
+        },
+        referencia_tipo: "atendimento", referencia_id: atendimento_id,
+      });
+
+      if (forcedIntent) {
+        const forceMsg = forcedIntent.tool === "consultar_lentes"
+          ? "[SISTEMA: LOOP DETECTADO + INTENT CLARO] Você está repetindo a mesma pergunta. O cliente JÁ pediu orçamento e há receita salva. AÇÃO OBRIGATÓRIA: chame consultar_lentes AGORA com a receita mais recente. NÃO pergunte de novo o que ele quer."
+          : forcedIntent.tool === "interpretar_receita"
+          ? "[SISTEMA: LOOP DETECTADO + IMAGEM PENDENTE] Você está repetindo a mesma pergunta. O cliente já enviou uma imagem (provável receita) e pediu orçamento. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA usando a imagem do histórico. NÃO pergunte se pode analisar — analise."
+          : forcedIntent.tool === "agendar_cliente_intent"
+          ? "[SISTEMA: LOOP DETECTADO + INTENT AGENDAR] Você está repetindo a mesma pergunta. O cliente quer agendar. Se já tem loja+data+hora, chame agendar_visita. Caso contrário, faça UMA pergunta objetiva pedindo o que falta — sem repetir o prompt anterior."
+          : "[SISTEMA: LOOP DETECTADO] Você está repetindo a mesma pergunta. Mude a abordagem — faça uma pergunta diferente OU execute uma ação concreta. NÃO repita a frase anterior.";
+        messages.push({ role: "system", content: forceMsg });
+        console.log(`[LOOP-DETECTOR] Forcing tool=${forcedIntent.tool} (${forcedIntent.reason})`);
+      } else {
+        console.log(`[LOOP-DETECTOR] No clear intent — escalating to human`);
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId, tipo: "loop_ia_escalado",
+          descricao: `Loop sem intent claro — escalado para humano (similaridade ${(loopCheck.similarity * 100).toFixed(0)}%)`,
+          metadata: { similarity: loopCheck.similarity, last_inbound: lastInboundText.substring(0, 200) },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id,
+          "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊");
+        return jsonResponse({
+          status: "ok", tools_used: ["loop_escalation"], intencao: "outro",
+          precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: "humano",
+        });
+      }
+    } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "interpretar_receita")) {
+      const hint = forcedIntent.tool === "consultar_lentes"
+        ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere."
+        : "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há imagem pendente. Use interpretar_receita AGORA — não pergunte se pode analisar.";
+      messages.push({ role: "system", content: hint });
+      console.log(`[INTENT-FORCE] Hinting ${forcedIntent.tool} (no loop, but clear intent)`);
+    }
 
     // ── 7. CALL LOVABLE AI GATEWAY (gpt-5) ──
     const callAI = async (retryCorrection?: string) => {
