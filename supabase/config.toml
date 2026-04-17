@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.recuperar-atendimentos]
 verify_jwt = false
+
+[functions.watchdog-loop-ia]
+verify_jwt = false
