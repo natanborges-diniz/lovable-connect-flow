@@ -24,9 +24,28 @@ interface OrfaoRow {
   minutos_pendente: number;
 }
 
+// Setor "Atendimento Corporativo" — comunicação interna (lojas, colaboradores, departamentos)
+const ATENDIMENTO_CORPORATIVO_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+
+async function getSetoresInternos(supabase: any): Promise<string[]> {
+  // Setores considerados "internos": Atendimento Corporativo + qualquer setor configurado (Lojas, Financeiro, TI…)
+  // Heurística: todo setor com setor_id NÃO-NULO em pipeline_colunas é "interno". Vendas/CRM tem setor_id=NULL.
+  const { data } = await supabase.from("setores").select("id").eq("ativo", true);
+  const ids = (data || []).map((s: any) => s.id);
+  // Garante que o corporativo entra mesmo se inativo
+  if (!ids.includes(ATENDIMENTO_CORPORATIVO_SETOR_ID)) ids.push(ATENDIMENTO_CORPORATIVO_SETOR_ID);
+  return ids;
+}
+
 async function detectarOrfaos(
   supabase: any,
-  filters: { idade_min_min?: number; setor_id?: string | null; modo?: string | null }
+  filters: {
+    idade_min_min?: number;
+    setor_id?: string | null;
+    modo?: string | null;
+    publico?: "clientes" | "internos" | "todos" | null;
+    setores_internos?: string[];
+  }
 ): Promise<OrfaoRow[]> {
   const idadeMin = filters.idade_min_min ?? 15;
 
@@ -65,6 +84,15 @@ async function detectarOrfaos(
     const setorId = a.fila?.setor_id || null;
     if (filters.setor_id && setorId !== filters.setor_id) continue;
     if (filters.modo && a.modo !== filters.modo) continue;
+
+    // Filtro de público (clientes vs internos)
+    if (filters.publico === "clientes") {
+      // Cliente final = sem setor associado (CRM vendas)
+      if (setorId !== null) continue;
+    } else if (filters.publico === "internos") {
+      // Interno = qualquer setor cadastrado (Corporativo, Lojas, Financeiro, TI…)
+      if (setorId === null) continue;
+    }
 
     out.push({
       atendimento_id: a.id,
@@ -207,12 +235,37 @@ serve(async (req) => {
       const idade = parseInt(url.searchParams.get("idade_min") || "15", 10);
       const setorId = url.searchParams.get("setor_id");
       const modo = url.searchParams.get("modo");
+      const publicoParam = url.searchParams.get("publico") as "clientes" | "internos" | "todos" | null;
+
       const orfaos = await detectarOrfaos(supabase, {
         idade_min_min: idade,
         setor_id: setorId === "all" || !setorId ? null : setorId,
         modo: modo === "all" || !modo ? null : modo,
+        publico: publicoParam || "todos",
       });
-      return new Response(JSON.stringify({ total: orfaos.length, orfaos }), {
+
+      // Contagem segmentada — recalcula sem filtro de público para mostrar quantos há em cada grupo
+      let porPublico = { clientes: 0, internos: 0 };
+      if (!publicoParam || publicoParam === "todos") {
+        for (const o of orfaos) {
+          if (o.setor_id === null) porPublico.clientes++;
+          else porPublico.internos++;
+        }
+      } else {
+        // Quando filtrado, refaz uma busca leve só pra contar o outro grupo
+        const todos = await detectarOrfaos(supabase, {
+          idade_min_min: idade,
+          setor_id: setorId === "all" || !setorId ? null : setorId,
+          modo: modo === "all" || !modo ? null : modo,
+          publico: "todos",
+        });
+        for (const o of todos) {
+          if (o.setor_id === null) porPublico.clientes++;
+          else porPublico.internos++;
+        }
+      }
+
+      return new Response(JSON.stringify({ total: orfaos.length, orfaos, por_publico: porPublico }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
