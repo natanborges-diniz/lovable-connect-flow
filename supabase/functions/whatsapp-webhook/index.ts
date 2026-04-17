@@ -812,6 +812,26 @@ interface NormalizedMessage {
   evolutionMessageKey?: any; // Full key object for Evolution API media download
 }
 
+// ── Filter out brand/store names that come as pushName from customers
+// who saved our store contact in their phones (e.g., "Óticas Diniz", "Diniz", etc).
+// In these cases, fall back to the phone number so a human can rename the contact later.
+const BRAND_NAME_PATTERNS: RegExp[] = [
+  /[óo]ticas?\s*diniz/i,
+  /^diniz$/i,
+  /diniz\s*[oó]ticas?/i,
+  /^[oó]tica/i,
+  /franquia/i,
+  /franchising/i,
+];
+
+function sanitizePushName(rawName: string | null | undefined, phone: string): string {
+  const name = (rawName || "").trim();
+  if (!name) return phone;
+  // If the pushName matches a known brand pattern, ignore it (saved as our store in their phone).
+  if (BRAND_NAME_PATTERNS.some((re) => re.test(name))) return phone;
+  return name;
+}
+
 function normalizeWebhookPayload(body: any): NormalizedMessage | null {
   // ── Meta Official Cloud API ──
   if (body.object === "whatsapp_business_account" && body.entry) {
