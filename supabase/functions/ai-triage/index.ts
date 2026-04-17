@@ -1236,10 +1236,10 @@ serve(async (req) => {
       }
 
       // Filter columns by contact type — clients only see sales columns (setor_id = null)
-      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const ATENDIMENTO_CORPORATIVO_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
       const isCorporateContact = ["loja", "colaborador"].includes(contatoTipo);
       const promptColunas = isCorporateContact
-        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_CORPORATIVO_SETOR_ID)
         : colunas.filter((c: any) => c.setor_id === null);
 
       systemPrompt = buildSystemPromptFromCompiled({
@@ -1278,10 +1278,10 @@ serve(async (req) => {
       }
 
       // Filter columns by contact type for legacy path too
-      const ATENDIMENTO_GAEL_SETOR_ID_LEGACY = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const ATENDIMENTO_CORPORATIVO_SETOR_ID_LEGACY = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
       const isCorporateLegacy = ["loja", "colaborador"].includes(contatoTipo);
       const promptColunasLegacy = isCorporateLegacy
-        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID_LEGACY)
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_CORPORATIVO_SETOR_ID_LEGACY)
         : colunas.filter((c: any) => c.setor_id === null);
 
       systemPrompt = buildSystemPrompt({
@@ -1962,9 +1962,9 @@ serve(async (req) => {
     } else if (pipeline_coluna !== "Novo Contato") {
       // Filter columns by contact type to avoid cross-sector assignment
       const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
-      const ATENDIMENTO_GAEL_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+      const ATENDIMENTO_CORPORATIVO_SETOR_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
       const sectorFilteredCols = isCorporate
-        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_GAEL_SETOR_ID)
+        ? colunas.filter((c: any) => c.setor_id === ATENDIMENTO_CORPORATIVO_SETOR_ID)
         : colunas.filter((c: any) => c.setor_id === null);
       const col = sectorFilteredCols.find((c: any) => c.nome === pipeline_coluna)
         || colunas.find((c: any) => c.nome === pipeline_coluna && c.setor_id === null);

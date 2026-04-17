@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, Settings, LogOut, DollarSign, Bell, Mail, Store, Monitor, ListTodo } from "lucide-react";
+import { LayoutDashboard, Users, Settings, LogOut, DollarSign, Bell, Mail, Store, Monitor, ListTodo, Headset } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,6 +25,7 @@ const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defa
   { key: "lojas", label: "Lojas", icon: Store, defaultPath: "/lojas" },
   { key: "financeiro", label: "Financeiro", icon: DollarSign, defaultPath: "/financeiro" },
   { key: "ti", label: "TI", icon: Monitor, defaultPath: "/ti" },
+  { key: "interno", label: "Interno", icon: Headset, defaultPath: "/interno" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
   { key: "mensagens", label: "Mensagens", icon: Mail, defaultPath: "/mensagens" },
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
@@ -35,6 +36,7 @@ const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
   ti: ["dashboard", "ti", "tarefas", "mensagens"],
   atendimento: ["dashboard", "crm", "tarefas", "mensagens"],
   loja: ["dashboard", "lojas", "mensagens"],
+  "atendimento corporativo": ["dashboard", "interno", "mensagens"],
 };
 
 function useSetorNames(setorIds: string[]) {
