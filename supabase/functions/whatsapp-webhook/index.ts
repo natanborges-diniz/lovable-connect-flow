@@ -54,11 +54,19 @@ serve(async (req) => {
 
     let contato = contatoResult?.[0] || null;
 
+    // Detect if pushName looks like a real person name (vs a phone number, brand, etc.)
+    const realName = looksLikeRealName(senderName, phone) ? senderName : null;
+    const initialNome = realName || phone;
+
     if (!contato) {
       // Insert new contato; if race condition hits the partial unique index, fetch instead
+      const initialMetadata: Record<string, unknown> = {
+        nome_perfil_whatsapp: senderName || null,
+        nome_confirmado: false, // só vira true quando o cliente confirmar pela IA
+      };
       const { data: newContato, error: createErr } = await supabase
         .from("contatos")
-        .insert({ nome: senderName || phone, tipo: "cliente", telefone: phone })
+        .insert({ nome: initialNome, tipo: "cliente", telefone: phone, metadata: initialMetadata })
         .select()
         .single();
       if (createErr) {
@@ -73,10 +81,20 @@ serve(async (req) => {
       } else {
         contato = newContato;
       }
-    } else if (contato.nome !== senderName && contato.nome === phone) {
+    } else if (realName && contato.nome === phone) {
       // Upgrade placeholder phone-name to a better real person/store name when available.
-      await supabase.from("contatos").update({ nome: senderName }).eq("id", contato.id);
-      contato = { ...contato, nome: senderName };
+      const meta = (contato.metadata as Record<string, unknown>) || {};
+      await supabase.from("contatos").update({
+        nome: realName,
+        metadata: { ...meta, nome_perfil_whatsapp: senderName },
+      }).eq("id", contato.id);
+      contato = { ...contato, nome: realName };
+    } else if (senderName && (!(contato.metadata as any)?.nome_perfil_whatsapp)) {
+      // Save the WhatsApp profile name for later confirmation by IA
+      const meta = (contato.metadata as Record<string, unknown>) || {};
+      await supabase.from("contatos").update({
+        metadata: { ...meta, nome_perfil_whatsapp: senderName },
+      }).eq("id", contato.id);
     }
 
     // 2. Find or create canal (with provedor)
