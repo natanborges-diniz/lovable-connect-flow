@@ -163,9 +163,11 @@ async function enviarWhatsApp(atendimento_id: string, mensagem: string) {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
     },
-    body: JSON.stringify({ atendimento_id, conteudo: mensagem }),
+    body: JSON.stringify({ atendimento_id, texto: mensagem, remetente_nome: "Recuperação" }),
   });
-  return { ok: resp.ok, status: resp.status, body: await resp.text() };
+  const body = await resp.text();
+  console.log(`[recuperar] send-whatsapp atendimento=${atendimento_id} status=${resp.status} body=${body.slice(0, 300)}`);
+  return { ok: resp.ok, status: resp.status, body };
 }
 
 async function escalarHumano(
