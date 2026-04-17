@@ -295,10 +295,10 @@ function FluxoForm({ initial, onSuccess }: { initial: Fluxo | null; onSuccess: (
 
       <div className="space-y-1.5">
         <Label>Setor Destino</Label>
-        <Select value={setorDestinoId} onValueChange={setSetorDestinoId}>
+        <Select value={setorDestinoId || "__none__"} onValueChange={(v) => setSetorDestinoId(v === "__none__" ? "" : v)}>
           <SelectTrigger><SelectValue placeholder="Selecione o setor que recebe a demanda" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Nenhum (usar lógica padrão)</SelectItem>
+            <SelectItem value="__none__">Nenhum (usar lógica padrão)</SelectItem>
             {setores?.map((s) => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}
           </SelectContent>
         </Select>
