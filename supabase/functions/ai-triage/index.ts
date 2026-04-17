@@ -502,7 +502,7 @@ const TOOLS = [
           },
           coluna_pipeline: {
             type: "string",
-            description: "Coluna do pipeline para mover o contato.",
+            description: "Coluna do pipeline para mover o contato. PROIBIDO usar 'Agendamento' aqui — agendamento real exige a tool agendar_visita. Se faltar loja/data/hora, use 'Qualificado' e pergunte o que falta.",
           },
           setor: {
             type: "string",
@@ -584,12 +584,12 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "agendar_visita",
-      description: "Agenda uma visita do cliente a uma loja. Use quando o cliente quer visitar uma loja e já definiu loja, data e horário.",
+      description: "Agenda visita do cliente em uma loja. OBRIGATÓRIO usar SEMPRE que você for confirmar/marcar agendamento — nunca escreva 'agendamento confirmado' ou 'vou reservar' sem chamar esta tool. Requer loja_nome + data_horario completos. Se faltar qualquer um, use 'responder' e pergunte o que falta — NÃO chame esta tool com dados parciais.",
       parameters: {
         type: "object",
         properties: {
-          loja_nome: { type: "string", description: "Nome da loja escolhida." },
-          data_horario: { type: "string", description: "Data e hora no formato ISO 8601 (ex: 2026-03-25T14:00:00-03:00)." },
+          loja_nome: { type: "string", description: "Nome da loja escolhida (precisa estar na lista LOJAS DISPONÍVEIS)." },
+          data_horario: { type: "string", description: "Data e hora COMPLETAS no formato ISO 8601 (ex: 2026-03-25T14:00:00-03:00). Sem hora ou sem data, NÃO chame esta tool." },
           observacoes: { type: "string", description: "Observações adicionais sobre a visita." },
           resposta: { type: "string", description: "Mensagem confirmando o agendamento ao cliente." },
         },
