@@ -367,6 +367,8 @@ export default function Pipeline() {
       {!isLoading && (() => {
         const humanCards = (contatos ?? []).filter((c) => {
           const at = atendimentoByContato.get(c.id);
+          // Exclui contatos corporativos (loja/colaborador/fornecedor) — atendidos por bot-lojas
+          if (c.tipo && c.tipo !== "cliente") return false;
           return at?.modo === "humano";
         });
         const waitingReplyCount = humanCards.filter((c) => hasPendingCustomerReply(c.id)).length;

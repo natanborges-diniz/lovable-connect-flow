@@ -135,7 +135,8 @@ serve(async (req) => {
     const keepBrandName = isCorporate || shouldKeepBrandName(senderName, text);
     senderName = sanitizePushName(senderName, phone, keepBrandName);
 
-    // Update contato.tipo based on corporate phone type
+    // Update contato.tipo + saneamento corporativo (limpa coluna não-corporativa, define setor, encerra humano órfão)
+    const SETOR_CORPORATIVO_ID = "32cbd99c-4b20-4c8b-b7b2-901904d0aff6"; // Atendimento Corporativo
     if (isCorporate) {
       const tipoContato = corporateTipo === "colaborador" ? "colaborador" : "loja";
       const nextNome = senderName || contato.nome;
@@ -143,9 +144,50 @@ serve(async (req) => {
       const updates: Record<string, unknown> = {};
       if (contato.tipo !== tipoContato) updates.tipo = tipoContato;
       if (shouldUpdateNome) updates.nome = nextNome;
+
+      // Saneamento: limpa pipeline_coluna_id se NÃO for do setor corporativo
+      if (contato.pipeline_coluna_id) {
+        const { data: colunaAtual } = await supabase
+          .from("pipeline_colunas")
+          .select("setor_id")
+          .eq("id", contato.pipeline_coluna_id)
+          .single();
+        if (!colunaAtual || colunaAtual.setor_id !== SETOR_CORPORATIVO_ID) {
+          updates.pipeline_coluna_id = null;
+        }
+      }
+
+      // Saneamento: setor_destino corporativo
+      if (contato.setor_destino !== SETOR_CORPORATIVO_ID) {
+        updates.setor_destino = SETOR_CORPORATIVO_ID;
+      }
+
       if (Object.keys(updates).length > 0) {
         await supabase.from("contatos").update(updates).eq("id", contato.id);
         contato = { ...contato, ...updates };
+      }
+
+      // Saneamento: encerra atendimentos abertos em modo='humano' SEM atendente_nome (órfãos)
+      const { data: orfaos } = await supabase
+        .from("atendimentos")
+        .select("id")
+        .eq("contato_id", contato.id)
+        .eq("modo", "humano")
+        .is("atendente_nome", null)
+        .neq("status", "encerrado");
+      if (orfaos && orfaos.length > 0) {
+        const ids = orfaos.map((o) => o.id);
+        await supabase
+          .from("atendimentos")
+          .update({ modo: "ia", status: "encerrado", fim_at: new Date().toISOString() })
+          .in("id", ids);
+        await supabase.from("eventos_crm").insert({
+          contato_id: contato.id,
+          tipo: "reclassificacao_corporativa",
+          descricao: `Webhook: encerrados ${ids.length} atendimento(s) humano órfão(s) — número agora corporativo`,
+          metadata: { atendimentos_ids: ids, source: "whatsapp_webhook" },
+        });
+        console.log(`[CORPORATIVO] Encerrados ${ids.length} atend. humanos órfãos do contato ${contato.id}`);
       }
     }
     const isCorporateContact = isCorporate || contato.tipo === "colaborador";
