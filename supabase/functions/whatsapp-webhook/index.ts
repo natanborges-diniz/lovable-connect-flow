@@ -73,6 +73,10 @@ serve(async (req) => {
       } else {
         contato = newContato;
       }
+    } else if (contato.nome !== senderName && contato.nome === phone) {
+      // Upgrade placeholder phone-name to a better real person/store name when available.
+      await supabase.from("contatos").update({ nome: senderName }).eq("id", contato.id);
+      contato = { ...contato, nome: senderName };
     }
 
     // 2. Find or create canal (with provedor)
@@ -109,12 +113,21 @@ serve(async (req) => {
     const isCorporate = isLoja;
     const corporateTipo = lojaMatch?.tipo || "loja"; // loja, colaborador, departamento
 
+    // Preserve brand/store names only for known corporate numbers or explicit self-identification in the message.
+    const keepBrandName = isCorporate || shouldKeepBrandName(senderName, text);
+    senderName = sanitizePushName(senderName, phone, keepBrandName);
+
     // Update contato.tipo based on corporate phone type
     if (isCorporate) {
       const tipoContato = corporateTipo === "colaborador" ? "colaborador" : "loja";
-      if (contato.tipo !== tipoContato) {
-        await supabase.from("contatos").update({ tipo: tipoContato }).eq("id", contato.id);
-        contato = { ...contato, tipo: tipoContato };
+      const nextNome = senderName || contato.nome;
+      const shouldUpdateNome = nextNome && contato.nome !== nextNome;
+      const updates: Record<string, unknown> = {};
+      if (contato.tipo !== tipoContato) updates.tipo = tipoContato;
+      if (shouldUpdateNome) updates.nome = nextNome;
+      if (Object.keys(updates).length > 0) {
+        await supabase.from("contatos").update(updates).eq("id", contato.id);
+        contato = { ...contato, ...updates };
       }
     }
     const isCorporateContact = isCorporate || contato.tipo === "colaborador";
@@ -814,7 +827,7 @@ interface NormalizedMessage {
 
 // ── Filter out brand/store names that come as pushName from customers
 // who saved our store contact in their phones (e.g., "Óticas Diniz", "Diniz", etc).
-// In these cases, fall back to the phone number so a human can rename the contact later.
+// For real corporate/store numbers, keep the provided brand name.
 const BRAND_NAME_PATTERNS: RegExp[] = [
   /[óo]ticas?\s*diniz/i,
   /^diniz$/i,
@@ -824,12 +837,18 @@ const BRAND_NAME_PATTERNS: RegExp[] = [
   /franchising/i,
 ];
 
-function sanitizePushName(rawName: string | null | undefined, phone: string): string {
+function sanitizePushName(rawName: string | null | undefined, phone: string, keepBrandName = false): string {
   const name = (rawName || "").trim();
   if (!name) return phone;
-  // If the pushName matches a known brand pattern, ignore it (saved as our store in their phone).
-  if (BRAND_NAME_PATTERNS.some((re) => re.test(name))) return phone;
+  if (!keepBrandName && BRAND_NAME_PATTERNS.some((re) => re.test(name))) return phone;
   return name;
+}
+
+function shouldKeepBrandName(rawName: string | null | undefined, text: string | null | undefined): boolean {
+  const name = (rawName || "").trim();
+  const msg = (text || "").toLowerCase();
+  if (!name || !BRAND_NAME_PATTERNS.some((re) => re.test(name))) return false;
+  return ["aqui é", "sou da", "falo da", "é da", "represento", "loja", "unidade"].some((token) => msg.includes(token));
 }
 
 function normalizeWebhookPayload(body: any): NormalizedMessage | null {
@@ -908,13 +927,13 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
   if (body.data?.key?.remoteJid) {
     const phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
     const msgData = body.data.message;
-    const safePushName = sanitizePushName(body.data.pushName, phone);
+    const rawPushName = body.data.pushName || phone;
 
     // Image message
     if (msgData?.imageMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: msgData.imageMessage.caption || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -928,7 +947,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.documentMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: msgData.documentMessage.caption || msgData.documentMessage.fileName || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -942,7 +961,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.audioMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -956,7 +975,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     if (msgData?.videoMessage) {
       return {
         phone,
-        senderName: safePushName,
+        senderName: rawPushName,
         text: msgData.videoMessage.caption || "",
         messageId: body.data.key.id || "",
         source: "evolution_api",
@@ -969,7 +988,7 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     // Text message (fallback)
     return {
       phone,
-      senderName: safePushName,
+      senderName: rawPushName,
       text: msgData?.conversation || msgData?.extendedTextMessage?.text || "",
       messageId: body.data.key.id || "",
       source: "evolution_api",
