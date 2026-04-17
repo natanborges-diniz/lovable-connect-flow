@@ -22,9 +22,12 @@ export const moduleFromPath = (pathname: string): ModuleKey => {
 export function AppLayout() {
   const location = useLocation();
   const activeModule = useMemo(() => moduleFromPath(location.pathname), [location.pathname]);
-  const { isAdmin, isOperador, roles, loading } = useAuth();
+  const { isAdmin, isOperador, roles, profile, loading } = useAuth();
 
-  const isSetorOnly = !loading && roles.length > 0 && !isAdmin && !isOperador;
+  // Setor "efetivo": user_roles OU profile.setor_id (fallback p/ SSO/cross-login).
+  const hasEffectiveSetor =
+    roles.some((r) => r.setor_id) || Boolean(profile?.setor_id);
+  const isSetorOnly = !loading && !isAdmin && !isOperador && hasEffectiveSetor;
   const isAllowedSetorRoute = ["/interno", "/mensagens", "/tarefas"].some(
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
   );
