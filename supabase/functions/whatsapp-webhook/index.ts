@@ -113,8 +113,9 @@ serve(async (req) => {
     const isCorporate = isLoja;
     const corporateTipo = lojaMatch?.tipo || "loja"; // loja, colaborador, departamento
 
-    // Only preserve brand/store names for known corporate numbers.
-    senderName = sanitizePushName(senderName, phone, isCorporate);
+    // Preserve brand/store names only for known corporate numbers or explicit self-identification in the message.
+    const keepBrandName = isCorporate || shouldKeepBrandName(senderName, text);
+    senderName = sanitizePushName(senderName, phone, keepBrandName);
 
     // Update contato.tipo based on corporate phone type
     if (isCorporate) {
@@ -841,6 +842,13 @@ function sanitizePushName(rawName: string | null | undefined, phone: string, kee
   if (!name) return phone;
   if (!keepBrandName && BRAND_NAME_PATTERNS.some((re) => re.test(name))) return phone;
   return name;
+}
+
+function shouldKeepBrandName(rawName: string | null | undefined, text: string | null | undefined): boolean {
+  const name = (rawName || "").trim();
+  const msg = (text || "").toLowerCase();
+  if (!name || !BRAND_NAME_PATTERNS.some((re) => re.test(name))) return false;
+  return ["aqui é", "sou da", "falo da", "é da", "represento", "loja", "unidade"].some((token) => msg.includes(token));
 }
 
 function normalizeWebhookPayload(body: any): NormalizedMessage | null {
