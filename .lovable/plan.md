@@ -1,65 +1,45 @@
 
 
-User picked Opção B: separar Atendimento Corporativo do CRM, criando novo módulo.
+# Plano: Seletor de Público na Recuperação
 
-# Plano: Mover Atendimento Corporativo para módulo próprio
+## Problema
+Hoje, pra recuperar só clientes em massa, o admin precisa saber que "setor vazio/Vendas" = cliente e "Atendimento Corporativo" = loja. Não é óbvio.
 
-## Objetivo
-Tirar as 4 colunas (Novo, Em Atendimento, Aguardando, Resolvido) do CRM e criar um módulo dedicado **"Atendimento Interno"** no menu superior, deixando o CRM 100% comercial (vendas).
+## Solução
+Adicionar no topo do `RecuperacaoCard.tsx` 3 botões de público que pré-aplicam filtros:
 
-## Mudanças
+```text
+┌──────────────────────────────────────────────────────────┐
+│ Quem você quer recuperar?                                │
+│ [👥 Clientes (23)] [🏪 Lojas/Internos (4)] [🌐 Todos (27)]│
+└──────────────────────────────────────────────────────────┘
+```
 
-### 1. Renomear setor (clareza)
-- Migration: `UPDATE setores SET nome='Atendimento Corporativo' WHERE id='32cbd99c-4b20-4c8b-b7b2-901904d0aff6'`
-- Gael continua sendo a IA — o setor agora reflete a função real
+- **Clientes**: filtra `setor_id IS NULL` (CRM vendas) — é o caso "ligar produção pós-downtime"
+- **Lojas/Internos**: filtra setores `Atendimento Corporativo`, `Lojas`, `Financeiro`, `TI`
+- **Todos**: sem filtro
 
-### 2. Novo módulo "Interno" no menu
-- Adicionar em `TopNavigation.tsx` ao lado de TI/Tarefas:
-  - Ícone: `Headset` ou `MessagesSquare`
-  - Label: **"Interno"**
-  - Path: `/interno`
-- Adicionar `ModuleKey = "interno"` em `AppLayout.tsx` + `moduleFromPath`
-- Adicionar entrada em `AppSidebar` com mesmo padrão dos outros pipelines
-- Permissões: visível para admin, operador e usuários com setor = "Atendimento Corporativo"
-- Atualizar `SETOR_MODULE_MAP` para mapear setor corporativo → módulo `interno`
+Os filtros avançados (idade, setor manual, modo) ficam abaixo num accordion "Filtros avançados" pra não poluir.
 
-### 3. Nova página `PipelineInterno.tsx`
-- Clone simplificado de `Pipeline.tsx`, mas filtrando **apenas** colunas com `setor_id = '32cbd99c...'`
-- Reusa hooks existentes (`usePipelineColunas`, kanban DnD, `pipeline-automations`)
-- Sem aba "Esteira Completa" (essa é específica de vendas → lojas)
-- Rota `/interno` no `App.tsx`
+## Mudanças no Edge Function `recuperar-atendimentos`
+- Aceitar parâmetro `publico=clientes|internos|todos` que mapeia internamente pros setores corretos
+- Retornar contagem segmentada: `{ total, por_publico: { clientes: N, internos: M } }`
 
-### 4. Limpar Pipeline CRM
-- Em `Pipeline.tsx`, filtrar colunas para mostrar **apenas `setor_id IS NULL`** (vendas puras)
-- Remover qualquer lógica que misturava colunas corporativas
-- "Fila Humana" e "Esteira Completa" continuam funcionando normalmente (só com leads de venda)
+## Mudanças na UI `RecuperacaoCard.tsx`
+- 3 botões grandes no topo com badge de contagem
+- Tooltip explicativo em cada um
+- Pré-visualização do lote: "Vai recuperar 23 clientes — IA reage em 18, escala humano em 5"
+- Filtros atuais movidos pra accordion colapsado
 
-### 5. Roteamento permanece intacto
-- `whatsapp-webhook` e `ai-triage` continuam direcionando contatos `loja`/`departamento` para o setor corporativo — só muda **onde o operador vê**, não a lógica de roteamento
-- Renomear constantes `ATENDIMENTO_GAEL_SETOR_ID` → `ATENDIMENTO_CORPORATIVO_SETOR_ID` (mesmo UUID, só clareza)
-
-### 6. Memória
-- Atualizar `mem://ia/classificacao-setorial-blindada` com novo nome
-- Atualizar `mem://arquitetura/navegacao-setorial-integrada` (agora 9 módulos)
-- Nova memória `mem://setor/interno-pipeline-corporativo` documentando o módulo
-
-## Arquivos afetados
-
+## Arquivos
 | Arquivo | Mudança |
 |---------|---------|
-| Migration | Renomear setor |
-| `src/pages/PipelineInterno.tsx` | **Novo** — pipeline filtrado pelo setor |
-| `src/App.tsx` | Nova rota `/interno` |
-| `src/components/layout/TopNavigation.tsx` | Novo módulo "Interno" + permissão |
-| `src/components/layout/AppLayout.tsx` | `ModuleKey` + `moduleFromPath` |
-| `src/components/layout/AppSidebar.tsx` | Seção do novo módulo |
-| `src/pages/Pipeline.tsx` | Filtrar `setor_id IS NULL` |
-| `supabase/functions/ai-triage/index.ts` | Renomear constante |
-| `supabase/functions/whatsapp-webhook/index.ts` | Renomear constante |
-| `mem://*` | 3 atualizações |
+| `supabase/functions/recuperar-atendimentos/index.ts` | Adicionar param `publico`, retornar contagem segmentada |
+| `src/components/configuracoes/RecuperacaoCard.tsx` | Seletor de público + accordion filtros + preview lote |
+| `src/hooks/useAtendimentosOrfaos.ts` | Passar `publico` no payload |
 
 ## O que NÃO muda
-- Lógica da IA, roteamento, modos (humano/IA/híbrido), demandas à loja, bot-lojas
-- Permissões e RBAC existentes (apenas adicionamos visibilidade do novo módulo)
-- Conversas em andamento — ficam no mesmo lugar, só muda o "envelope" visual
+- Lógica de regra inteligente (<1h, 1-6h, >6h) permanece
+- Ações individuais por linha permanecem
+- Auditoria via `eventos_crm` permanece
 
