@@ -413,8 +413,8 @@ serve(async (req) => {
     const tipoBot = loja_info?.tipo_bot || "loja";
     
     // Determine current parent_id from session data for sub-menu navigation
-    const { fluxo, etapa, dados: dadosSessao } = sessao;
-    const currentParentId = (dadosSessao as any)?._menu_parent_id || null;
+    const { fluxo, etapa, dados } = sessao;
+    const currentParentId = (dados as any)?._menu_parent_id || null;
     const menuOpcoes = await loadMenuOpcoes(tipoBot, currentParentId);
 
     // ─── Global navigation ───
