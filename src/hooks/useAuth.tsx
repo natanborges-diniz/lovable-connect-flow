@@ -101,9 +101,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fetchRoles(nextSession.user.id),
       ]);
 
+      // Diagnóstico temporário SSO/cross-login
+      console.log("[useAuth] hydrated", {
+        userId: nextSession.user.id,
+        email: nextSession.user.email,
+        profile: nextProfile,
+        roles: nextRoles,
+      });
+
       setProfile(nextProfile);
       setRoles(nextRoles);
-    } catch {
+    } catch (err) {
+      console.error("[useAuth] hydrate error", err);
       setProfile(null);
       setRoles([]);
     } finally {
