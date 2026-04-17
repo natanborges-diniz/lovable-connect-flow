@@ -149,6 +149,7 @@ serve(async (req) => {
     }
 
     console.log(`[CRON] Processed: ${results.join(", ") || "nothing"}`);
+    await supabase.from("cron_jobs").update({ ultimo_disparo: new Date().toISOString() }).eq("funcao_alvo", "agendamentos-cron");
     return new Response(JSON.stringify({ status: "ok", processed: results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -17,8 +17,9 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const { atendimento_id } = await req.json();
+    const { atendimento_id, audience } = await req.json();
     if (!atendimento_id) throw new Error("atendimento_id is required");
+    const audienceMode: "interno" | "cliente" = audience === "cliente" ? "cliente" : "interno";
 
     // Fetch messages
     const { data: mensagens, error: msgErr } = await supabase
@@ -46,7 +47,7 @@ serve(async (req) => {
       return `${dir} (${m.remetente_nome || "—"}): ${m.conteudo}`;
     }).join("\n");
 
-    const prompt = `Resuma o atendimento abaixo em NO MÁXIMO 3 frases curtas. Texto corrido, sem markdown, sem títulos, sem listas, sem bullets.
+    const promptInterno = `Resuma o atendimento abaixo em NO MÁXIMO 3 frases curtas. Texto corrido, sem markdown, sem títulos, sem listas, sem bullets.
 
 Contexto:
 - Solicitação: ${atendimento?.solicitacao?.assunto || "N/A"}
@@ -60,6 +61,19 @@ Formato: "[Motivo do contato]. [O que foi feito]. [Pendência/próximo passo]."
 
 Exemplo: "Cliente quer status de óculos não retirado (CPF informado). IA escalou para consultor da loja. Aguardando retorno."`;
 
+    const promptCliente = `Você é a Gael, assistente das Óticas Diniz. Escreva um resumo CURTO e CALOROSO do atendimento PARA O PRÓPRIO CLIENTE ler no WhatsApp. Use 2ª pessoa ("você"), tom amigável, máximo 4 frases. Inclua: o que foi tratado, o que ficou combinado/agendado, e qual o próximo passo do cliente. Sem markdown pesado, sem listas grandes (1 ou 2 emojis sutis OK). NÃO repita "olá" nem "bom dia" — só o conteúdo do resumo.
+
+Cliente: ${atendimento?.contato?.nome || "Cliente"}
+Histórico do atendimento:
+${historico}
+
+Exemplo de tom: "Combinamos sua visita à loja Antônio Agú na quarta às 14h pra você experimentar as armações da linha Hoya. Levei seu orçamento já com a receita atualizada. Qualquer dúvida antes do dia, é só me chamar! 😊"`;
+
+    const prompt = audienceMode === "cliente" ? promptCliente : promptInterno;
+    const systemMsg = audienceMode === "cliente"
+      ? "Você é a Gael, assistente das Óticas Diniz. Gera resumos curtos e amigáveis para o CLIENTE, em tom caloroso e direto."
+      : "Você gera resumos ULTRA-CURTOS (máx 3 frases) de atendimentos. Sem markdown, sem listas, sem títulos. Apenas texto corrido objetivo.";
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -69,7 +83,7 @@ Exemplo: "Cliente quer status de óculos não retirado (CPF informado). IA escal
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: [
-          { role: "system", content: "Você gera resumos ULTRA-CURTOS (máx 3 frases) de atendimentos. Sem markdown, sem listas, sem títulos. Apenas texto corrido objetivo." },
+          { role: "system", content: systemMsg },
           { role: "user", content: prompt },
         ],
       }),
@@ -88,12 +102,18 @@ Exemplo: "Cliente quer status de óculos não retirado (CPF informado). IA escal
 
     // Save resumo in atendimento metadata
     const currentMeta = atendimento?.metadata || {};
+    const metaPatch = audienceMode === "cliente"
+      ? { resumo_cliente: resumo, resumo_cliente_em: new Date().toISOString() }
+      : { resumo_ia: resumo, resumo_gerado_em: new Date().toISOString() };
     await supabase
       .from("atendimentos")
-      .update({ metadata: { ...currentMeta, resumo_ia: resumo, resumo_gerado_em: new Date().toISOString() } })
+      .update({ metadata: { ...currentMeta, ...metaPatch } })
       .eq("id", atendimento_id);
 
-    return new Response(JSON.stringify({ success: true, resumo }), {
+    const responseBody = audienceMode === "cliente"
+      ? { success: true, resumo, resumo_cliente: resumo }
+      : { success: true, resumo };
+    return new Response(JSON.stringify(responseBody), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

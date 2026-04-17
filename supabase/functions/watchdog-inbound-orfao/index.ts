@@ -139,6 +139,7 @@ serve(async (req) => {
     console.log(
       `[ORFAO-WATCHDOG] checked=${ats.length} detectados=${orfaos.length} recovered=${recovered} elapsed=${elapsed}ms`
     );
+    await supabase.from("cron_jobs").update({ ultimo_disparo: new Date().toISOString() }).eq("funcao_alvo", "watchdog-inbound-orfao");
     return jsonOk({ checked: ats.length, detectados: orfaos.length, recovered });
   } catch (e) {
     console.error("[ORFAO-WATCHDOG] erro fatal:", e);

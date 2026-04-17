@@ -207,6 +207,44 @@ serve(async (req) => {
             break;
           }
 
+          case "enviar_resumo_cliente": {
+            // Generate AI summary and send WhatsApp recap to the client when atendimento closes.
+            if (!atendimento_id || !contato_id) break;
+            try {
+              // Generate summary via summarize-atendimento (AI condenses last messages)
+              const sumResp = await fetch(`${SUPABASE_URL}/functions/v1/summarize-atendimento`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ atendimento_id, audience: "cliente" }),
+              });
+              if (!sumResp.ok) {
+                console.error("[AUTOMATIONS] summarize-atendimento failed:", await sumResp.text());
+                results.push("error:enviar_resumo_cliente");
+                break;
+              }
+              const sumData = await sumResp.json();
+              const resumoTexto = sumData?.resumo_cliente || sumData?.resumo;
+              if (!resumoTexto) {
+                results.push("error:enviar_resumo_cliente:no_summary");
+                break;
+              }
+              const firstName = contato?.nome?.split(" ")[0] || "Cliente";
+              const corpo = config.template
+                ? resolveText(config.template, contato, agendamento, solicitacao).replace(/\{\{resumo\}\}/g, resumoTexto)
+                : `Olá ${firstName}! 😊 Aqui vai um resumo do nosso atendimento:\n\n${resumoTexto}\n\nQualquer dúvida, é só chamar por aqui. Obrigado pela conversa!`;
+              await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ atendimento_id, texto: corpo, remetente_nome: "Sistema" }),
+              });
+              results.push("resumo_cliente_enviado");
+            } catch (err) {
+              console.error("[AUTOMATIONS] enviar_resumo_cliente error:", err);
+              results.push("error:enviar_resumo_cliente");
+            }
+            break;
+          }
+
           default:
             console.warn(`[AUTOMATIONS] Unknown action type: ${auto.tipo_acao}`);
         }
