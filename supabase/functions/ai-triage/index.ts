@@ -1601,6 +1601,40 @@ serve(async (req) => {
         setor_sugerido = args.setor || "";
 
       } else if (fn === "escalar_consultor") {
+        // ── ANTI-REESCALATION on humano→ia handoff ──
+        // If we just got the conversation back from a human, block escalations that
+        // recycle a motive already handled (no new explicit human request, no fresh complaint).
+        const motivoStr = String(args.motivo || "").toLowerCase();
+        const lastInboundLower = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
+        const explicitHumanRequest = /\b(falar|atend|consult|pessoa|humano|gerente|respons[aá]vel)\b/.test(lastInboundLower) && /\b(humano|pessoa|gente|consultor|atendente|gerente)\b/.test(lastInboundLower);
+        const freshComplaint = /\b(reclama[cç][aã]o|p[eé]ssimo|horr[ií]vel|absurdo|cancelar|nunca mais|processar|procon)\b/.test(lastInboundLower);
+        if (isDevolucaoHumanoIA && !explicitHumanRequest && !freshComplaint) {
+          console.log(`[DEVOLUCAO] Blocking inherited escalation (motivo="${motivoStr}") — forcing continuity`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId, tipo: "ia_escalada_bloqueada_pos_devolucao",
+            descricao: `IA tentou escalar pós-devolução com motivo: ${args.motivo}`,
+            metadata: { motivo: args.motivo, setor: args.setor, pending_intent: pendingIntent?.intent || null },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          // Skip this tool call — let other tools (or fallback) take over.
+          // If this was the only tool call, force a deterministic continuity reply below.
+          if (toolCalls.length === 1) {
+            const intentText = pendingIntent
+              ? (pendingIntent.intent === "scheduling" ? "Voltei pra continuar com você. Quer marcar pra qual loja e qual horário fica melhor?"
+                : pendingIntent.intent === "quote" ? "Voltei aqui pra te ajudar com o orçamento. Já tenho sua receita? Se sim, me confirma o que prefere (marca, antirreflexo, fotossensível) que já te passo as opções."
+                : pendingIntent.intent === "location" ? "Voltei pra te ajudar! Me diz qual loja você quer saber o endereço que eu te passo."
+                : pendingIntent.intent === "prescription_pending" ? "Voltei aqui — vou olhar a receita que você mandou e já te respondo."
+                : "Voltei pra te ajudar — em que posso continuar?")
+              : "Voltei pra te ajudar — em que posso continuar?";
+            resposta = intentText;
+            intencao = pendingIntent?.intent || "outro";
+            pipeline_coluna = "Novo Contato";
+            precisa_humano = false;
+            validatorFlags.push("blocked_inherited_escalation");
+          }
+          continue;
+        }
+
         resposta = args.resposta;
         precisa_humano = true;
         // Keep contact in current column — human intervention is managed via modo='humano' flag
@@ -1610,7 +1644,7 @@ serve(async (req) => {
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId, tipo: "escalonamento_humano",
           descricao: `IA escalou: ${args.motivo}`,
-          metadata: { motivo: args.motivo, setor: args.setor },
+          metadata: { motivo: args.motivo, setor: args.setor, pos_devolucao: isDevolucaoHumanoIA },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
