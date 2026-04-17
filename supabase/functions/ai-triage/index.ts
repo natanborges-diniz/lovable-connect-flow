@@ -225,6 +225,91 @@ function detectForcedToolIntent(
   return null;
 }
 
+// ── Prescription correction detector ──
+// Detects when the customer is correcting a previously-interpreted prescription
+// by typing values directly (OD/OE, longe/perto, esf/cil/eixo/adição).
+// Returns parsed prescription data if detected, otherwise null.
+function detectPrescriptionCorrection(text: string): {
+  od: { sphere: number | null; cylinder: number | null; axis: number | null; add: number | null };
+  oe: { sphere: number | null; cylinder: number | null; axis: number | null; add: number | null };
+  has_addition: boolean;
+  rx_type: "single_vision" | "progressive";
+  raw: string;
+} | null {
+  if (!text || text.length < 8) return null;
+  const t = text.toLowerCase();
+
+  // Strong signals: must contain at least 2 of these markers
+  const markers = [
+    /\bod\b/, /\boe\b/, /\bos\b/,
+    /\blonge\b/, /\bperto\b/,
+    /\besf[eé]rico\b|\besf\b/,
+    /\bcil[ií]ndrico\b|\bcil\b/,
+    /\beixo\b/,
+    /\badi[cç][aã]o\b|\badd?\b/,
+  ];
+  const numericPairs = (t.match(/[+-]?\d+[.,]?\d*/g) || []).length;
+  const markerHits = markers.filter((r) => r.test(t)).length;
+  if (markerHits < 2 || numericPairs < 2) return null;
+
+  // Helper: parse a number like "-9,25" / "+0.50" / "0.00"
+  const parseNum = (s: string | undefined): number | null => {
+    if (!s) return null;
+    const n = parseFloat(s.replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Try to extract values per eye. Patterns supported:
+  //   "OD 0.00 com -2,25 eixo 180"
+  //   "OD: esf -9 cil -2,75 eixo 180 add +2,00"
+  //   "LONGE: OD 0.00 com -2,25"  /  "PERTO: -0,25 com -2,00"
+  const num = "([+-]?\\d+[.,]?\\d*)";
+  const buildEye = () => ({ sphere: null as number | null, cylinder: null as number | null, axis: null as number | null, add: null as number | null });
+  const od = buildEye();
+  const oe = buildEye();
+
+  // Pattern A: "OD <esf> com <cil> [eixo <axis>] [add <add>]"
+  const reA = new RegExp(`(od|oe|os)[^\\d+\\-]{0,15}${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?(?:[^\\d]*(?:add?|adi[cç][aã]o)\\s*${num})?`, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = reA.exec(t)) !== null) {
+    const eye = m[1].toLowerCase() === "od" ? od : oe;
+    if (eye.sphere == null) eye.sphere = parseNum(m[2]);
+    if (eye.cylinder == null) eye.cylinder = parseNum(m[3]);
+    if (eye.axis == null) eye.axis = parseNum(m[4]);
+    if (eye.add == null) eye.add = parseNum(m[5]);
+  }
+
+  // Pattern B: longe/perto blocks (when client splits longe/perto with single eye line each)
+  // "LONGE: OD <s> com <c>" / "PERTO: <s> com <c> eixo <ax>"
+  const longeMatch = t.match(/longe[^a-z]*([\s\S]*?)(?=perto|$)/i);
+  const pertoMatch = t.match(/perto[^a-z]*([\s\S]*?)$/i);
+  const eyeFromBlock = (block: string, eye: any) => {
+    const r = new RegExp(`(?:od|oe|os)?\\s*${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?`, "i");
+    const mm = block.match(r);
+    if (mm) {
+      if (eye.sphere == null) eye.sphere = parseNum(mm[1]);
+      if (eye.cylinder == null) eye.cylinder = parseNum(mm[2]);
+      if (eye.axis == null) eye.axis = parseNum(mm[3]);
+    }
+  };
+  if (longeMatch && od.sphere == null) eyeFromBlock(longeMatch[1], od);
+  if (pertoMatch) {
+    // "perto" line implies addition exists → progressive
+    const pBlock = pertoMatch[1];
+    // If the client only gives ONE pair under "perto", treat it as the additional set for OE if OE empty, else as add reference for OD
+    eyeFromBlock(pBlock, oe.sphere == null ? oe : od);
+  }
+
+  // Need at least one eye with sphere defined to be valid
+  if (od.sphere == null && oe.sphere == null) return null;
+
+  // Mirror values when only one eye provided (best-effort: keep nulls — let LLM ask)
+  const has_addition = (od.add != null && od.add !== 0) || (oe.add != null && oe.add !== 0) || /\bperto\b|\badi[cç][aã]o\b|\badd?\b/.test(t);
+  const rx_type: "single_vision" | "progressive" = has_addition ? "progressive" : "single_vision";
+
+  return { od, oe, has_addition, rx_type, raw: text.slice(0, 400) };
+}
+
 function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
   resposta: string;
   intencao: string;
@@ -1546,6 +1631,82 @@ serve(async (req) => {
 
     console.log(`[CONTEXT] Prompt:${systemPrompt.length}ch | KB:${conhecimentos.length} | Ex:${exemplos.length} | Anti:${antiFeedbacks.length} | Regras:${regrasProibidas.length} | Modo:${atendimento.modo} | Window:${contextWindow.length}/${allMsgs.length} | Range:${historyRange} | Topics:${sentTopics.join(",") || "none"}`);
 
+    // ── 6.4. PRESCRIPTION CORRECTION DETECTOR ──
+    // If the customer types prescription values directly (typically to correct
+    // an OCR mistake), parse it, replace the latest receita in metadata, and
+    // force consultar_lentes with the corrected values. The AI must not ignore
+    // a textual correction just because a prior receita exists.
+    let correctionApplied = false;
+    if (receitas.length > 0) {
+      const correction = detectPrescriptionCorrection(lastInboundText);
+      if (correction) {
+        const idx = receitas.length - 1;
+        const old = receitas[idx] || {};
+        const merged = {
+          ...old,
+          eyes: {
+            od: { ...(old.eyes?.od || {}), ...Object.fromEntries(Object.entries(correction.od).filter(([_, v]) => v != null)) },
+            oe: { ...(old.eyes?.oe || {}), ...Object.fromEntries(Object.entries(correction.oe).filter(([_, v]) => v != null)) },
+          },
+          rx_type: correction.rx_type,
+          summary: {
+            ...(old.summary || {}),
+            has_addition: correction.has_addition,
+            needs_progressive: correction.has_addition,
+            suggested_category: correction.rx_type,
+          },
+          confidence: 0.99,
+          data_leitura: new Date().toISOString(),
+          source: "client_correction",
+          raw_correction: correction.raw,
+          needs_human_review: false,
+        };
+        receitas[idx] = merged;
+
+        // Persist back to contact metadata
+        await supabase.from("contatos").update({
+          metadata: { ...contatoMeta, receitas },
+        }).eq("id", contatoId);
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId, tipo: "receita_corrigida_pelo_cliente",
+          descricao: `Cliente corrigiu receita por texto. Tipo recalculado: ${correction.rx_type}`,
+          metadata: {
+            od: correction.od, oe: correction.oe, rx_type: correction.rx_type,
+            raw: correction.raw,
+          },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+
+        // Rebuild receitaCtx so the prompt below sees the corrected values
+        // (mutate by re-running the formatter inline)
+        receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
+        for (let i = 0; i < receitas.length; i++) {
+          const rx = receitas[i];
+          const label = rx.label || `receita ${i + 1}`;
+          const dataLeitura = rx.data_leitura ? new Date(rx.data_leitura).toLocaleDateString("pt-BR") : "—";
+          const rxTypeLabel = rx.rx_type === "progressive" ? "Progressiva" : rx.rx_type === "single_vision" ? "Visão simples" : rx.rx_type || "—";
+          const conf = typeof rx.confidence === "number" ? `${(rx.confidence * 100).toFixed(0)}%` : "—";
+          const od = rx.eyes?.od || {};
+          const oe = rx.eyes?.oe || {};
+          const formatEye = (eye: any, name: string) => {
+            const parts = [`${name}: esf ${eye.sphere ?? "?"} cil ${eye.cylinder ?? "?"} eixo ${eye.axis ?? "?"}`];
+            if (typeof eye.add === "number") parts.push(`add +${eye.add}`);
+            return parts.join(" ");
+          };
+          const sourceTag = rx.source === "client_correction" ? " ⚠️ CORRIGIDA PELO CLIENTE" : "";
+          receitaCtx += `\n## Receita ${i + 1} (${label}) — lida em ${dataLeitura}${sourceTag}\n`;
+          receitaCtx += `Tipo: ${rxTypeLabel} | Confiança: ${conf}\n`;
+          receitaCtx += `${formatEye(od, "OD")}\n`;
+          receitaCtx += `${formatEye(oe, "OE")}\n`;
+        }
+        receitaCtx += `\n⚠️ A última receita foi CORRIGIDA pelo cliente nesta mensagem. Use estes valores como verdade — NÃO mencione os valores antigos.`;
+
+        correctionApplied = true;
+        console.log(`[RX-CORRECTION] Applied client correction. New rx_type=${correction.rx_type}, OD.sph=${correction.od.sphere}, OE.sph=${correction.oe.sphere}`);
+      }
+    }
+
     // ── 6.5. PRE-LLM LOOP DETECTOR + FORCED INTENT MAPPING ──
     // Runs BEFORE the LLM call so it can override the prompt and prevent the
     // model from generating yet another semantically-identical response.
@@ -1555,6 +1716,16 @@ serve(async (req) => {
       receitas.length > 0,
       hasRecentUnparsedPrescriptionImage && receitas.length === 0,
     );
+
+    // If a correction was applied, force consultar_lentes regardless of loop state
+    if (correctionApplied) {
+      messages.push({
+        role: "system",
+        content: "[SISTEMA: RECEITA CORRIGIDA PELO CLIENTE] O cliente acabou de corrigir os valores da receita por texto. Os novos valores estão na seção RECEITAS (marcada como ⚠️ CORRIGIDA PELO CLIENTE). AÇÃO OBRIGATÓRIA: 1) reconheça brevemente a correção (ex: 'Perfeito, anotado!'); 2) chame consultar_lentes AGORA com os valores novos para refazer o orçamento. NÃO repita valores antigos. NÃO peça nova foto. NÃO peça confirmação adicional — confie no que ele digitou.",
+      });
+      console.log(`[RX-CORRECTION] Forcing consultar_lentes with corrected prescription`);
+    }
+
 
     if (loopCheck.detected) {
       console.log(`[LOOP-DETECTOR] Loop detected — similarity=${(loopCheck.similarity * 100).toFixed(0)}%`);
