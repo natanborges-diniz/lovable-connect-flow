@@ -24,9 +24,16 @@ export function AppLayout() {
   const activeModule = useMemo(() => moduleFromPath(location.pathname), [location.pathname]);
   const { isAdmin, isOperador, roles } = useAuth();
 
+  const isSetorOnly = roles.length > 0 && !isAdmin && !isOperador;
+
   // Redirect configuracoes to / if not admin
   if (location.pathname.startsWith("/configuracoes") && !isAdmin && roles.length > 0) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/mensagens" replace />;
+  }
+
+  // Setor users não têm acesso ao Dashboard — redireciona para Mensagens
+  if (isSetorOnly && location.pathname === "/") {
+    return <Navigate to="/mensagens" replace />;
   }
 
   return (
