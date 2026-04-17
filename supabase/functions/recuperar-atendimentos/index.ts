@@ -206,6 +206,9 @@ async function escalarHumano(
   let waResult: any = null;
   if (mensagemDesculpas && mensagemDesculpas.trim()) {
     waResult = await enviarWhatsApp(row.atendimento_id, mensagemDesculpas.trim());
+    if (!waResult.ok) {
+      throw new Error(`Falha no WhatsApp (${waResult.status}): ${waResult.body?.slice?.(0, 200) || waResult.body || "sem resposta"}`);
+    }
   }
 
   await logRecuperacao(supabase, row.atendimento_id, row.contato_id, "escalar_humano", {
@@ -221,6 +224,9 @@ async function enviarMensagemDesculpas(supabase: any, row: { atendimento_id: str
   await logRecuperacao(supabase, row.atendimento_id, row.contato_id, "mensagem_desculpas", {
     wa_status: wa.status,
   });
+  if (!wa.ok) {
+    throw new Error(`Falha no WhatsApp (${wa.status}): ${wa.body?.slice?.(0, 200) || wa.body || "sem resposta"}`);
+  }
   return wa;
 }
 

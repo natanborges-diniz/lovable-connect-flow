@@ -73,6 +73,10 @@ serve(async (req) => {
       } else {
         contato = newContato;
       }
+    } else if (contato.nome !== senderName && contato.nome === phone) {
+      // Upgrade placeholder phone-name to a better real person/store name when available.
+      await supabase.from("contatos").update({ nome: senderName }).eq("id", contato.id);
+      contato = { ...contato, nome: senderName };
     }
 
     // 2. Find or create canal (with provedor)
@@ -115,9 +119,14 @@ serve(async (req) => {
     // Update contato.tipo based on corporate phone type
     if (isCorporate) {
       const tipoContato = corporateTipo === "colaborador" ? "colaborador" : "loja";
-      if (contato.tipo !== tipoContato) {
-        await supabase.from("contatos").update({ tipo: tipoContato }).eq("id", contato.id);
-        contato = { ...contato, tipo: tipoContato };
+      const nextNome = senderName || contato.nome;
+      const shouldUpdateNome = nextNome && contato.nome !== nextNome;
+      const updates: Record<string, unknown> = {};
+      if (contato.tipo !== tipoContato) updates.tipo = tipoContato;
+      if (shouldUpdateNome) updates.nome = nextNome;
+      if (Object.keys(updates).length > 0) {
+        await supabase.from("contatos").update(updates).eq("id", contato.id);
+        contato = { ...contato, ...updates };
       }
     }
     const isCorporateContact = isCorporate || contato.tipo === "colaborador";
