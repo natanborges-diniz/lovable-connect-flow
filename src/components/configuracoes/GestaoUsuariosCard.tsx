@@ -262,7 +262,10 @@ export function GestaoUsuariosCard() {
               <TableBody>
                 {profiles.map((p) => {
                   const userRoles = getRolesForUser(p.id);
-                  const currentLevel = getUserAccessLevel(userRoles);
+                  // Consider pending intent so UI reflects "Setor" choice even before first area is added
+                  const currentLevel = pendingSetorIntent.has(p.id)
+                    ? "setor_usuario"
+                    : getUserAccessLevel(userRoles);
                   const setorAreas = userRoles.filter((r) => r.role === "setor_usuario" && r.setor_id);
 
                   return (
