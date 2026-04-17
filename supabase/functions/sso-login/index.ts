@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { email, setor_id, role, nome } = await req.json();
+    const { email, setor_id, role, nome, departamento } = await req.json();
     if (!email || typeof email !== "string") {
       return new Response(JSON.stringify({ error: "email is required" }), {
         status: 400,
@@ -57,23 +57,52 @@ Deno.serve(async (req) => {
       if (nome) {
         await supabase
           .from("profiles")
-          .update({ nome, ...(setor_id ? { setor_id } : {}) })
+          .update({ nome })
           .eq("id", userId)
           .eq("nome", email); // Only overwrite if name is still the email fallback
-      } else if (setor_id) {
+      }
+
+      // Resolve setor_id: explicit > departamento (string) > profile.setor_id (auto-heal)
+      let resolvedSetorId: string | null = setor_id || null;
+
+      if (!resolvedSetorId && typeof departamento === "string" && departamento.trim()) {
+        const dep = departamento.trim();
+        const { data: setor } = await supabase
+          .from("setores")
+          .select("id")
+          .or(`nome.ilike.${dep},nome.ilike.${dep.replace(/_/g, " ")}`)
+          .eq("ativo", true)
+          .limit(1)
+          .maybeSingle();
+        if (setor?.id) resolvedSetorId = setor.id;
+        else console.warn(`[sso-login] departamento "${dep}" não encontrado em setores`);
+      }
+
+      // Auto-heal: if no setor came in body, use existing profile.setor_id
+      if (!resolvedSetorId) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("setor_id")
+          .eq("id", userId)
+          .maybeSingle();
+        if (profile?.setor_id) resolvedSetorId = profile.setor_id;
+      }
+
+      // Persist setor_id on profile when resolved
+      if (resolvedSetorId) {
         await supabase
           .from("profiles")
-          .update({ setor_id })
+          .update({ setor_id: resolvedSetorId })
           .eq("id", userId);
       }
 
-      // Provision user_role if setor_id and role provided
-      if (setor_id || role) {
+      // Provision user_role whenever we have a resolved setor (default = setor_usuario)
+      if (resolvedSetorId || role) {
         const assignedRole = role || "setor_usuario";
         await supabase
           .from("user_roles")
           .upsert(
-            { user_id: userId, role: assignedRole, setor_id: setor_id || null },
+            { user_id: userId, role: assignedRole, setor_id: resolvedSetorId },
             { onConflict: "user_id,role,setor_id" }
           );
       }
