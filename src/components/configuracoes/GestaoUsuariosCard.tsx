@@ -87,6 +87,9 @@ export function GestaoUsuariosCard() {
   const [addingAreaFor, setAddingAreaFor] = useState<string | null>(null);
   const [newSetorId, setNewSetorId] = useState("");
   const [newLojaNome, setNewLojaNome] = useState("");
+  // Pending "setor" intent: user picked Setor in dropdown but hasn't added any area yet.
+  // Without this, currentLevel falls back to null and the Áreas column hides the picker.
+  const [pendingSetorIntent, setPendingSetorIntent] = useState<Set<string>>(new Set());
 
   const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
   const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
@@ -119,8 +122,24 @@ export function GestaoUsuariosCard() {
       }
       // For setor_usuario, no role inserted yet — user must add areas
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       invalidateAll();
+      // Track intent so UI shows area picker until first area is added
+      setPendingSetorIntent((prev) => {
+        const next = new Set(prev);
+        if (vars.newLevel === "setor_usuario") {
+          next.add(vars.userId);
+        } else {
+          next.delete(vars.userId);
+        }
+        return next;
+      });
+      // Auto-open the area picker for setor users so they can add the first area immediately
+      if (vars.newLevel === "setor_usuario") {
+        setAddingAreaFor(vars.userId);
+        setNewSetorId("");
+        setNewLojaNome("");
+      }
       toast.success("Nível de acesso atualizado");
     },
     onError: (e: any) => toast.error(e.message),
@@ -137,11 +156,17 @@ export function GestaoUsuariosCard() {
       const { data: updatedRoles } = await supabase.from("user_roles").select("*").eq("user_id", userId);
       if (updatedRoles) await syncProfileSetor(userId, updatedRoles as UserRoleRow[]);
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       invalidateAll();
       setAddingAreaFor(null);
       setNewSetorId("");
       setNewLojaNome("");
+      // Once first area is added, clear pending intent (real role now exists)
+      setPendingSetorIntent((prev) => {
+        const next = new Set(prev);
+        next.delete(vars.userId);
+        return next;
+      });
       toast.success("Área adicionada");
     },
     onError: (e: any) => toast.error(e.message),
@@ -237,7 +262,10 @@ export function GestaoUsuariosCard() {
               <TableBody>
                 {profiles.map((p) => {
                   const userRoles = getRolesForUser(p.id);
-                  const currentLevel = getUserAccessLevel(userRoles);
+                  // Consider pending intent so UI reflects "Setor" choice even before first area is added
+                  const currentLevel = pendingSetorIntent.has(p.id)
+                    ? "setor_usuario"
+                    : getUserAccessLevel(userRoles);
                   const setorAreas = userRoles.filter((r) => r.role === "setor_usuario" && r.setor_id);
 
                   return (
