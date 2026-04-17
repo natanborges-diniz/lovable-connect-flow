@@ -275,9 +275,51 @@ serve(async (req) => {
     const atendimentoIds: string[] = Array.isArray(body.atendimento_ids) ? body.atendimento_ids : [];
     const mensagem: string = body.mensagem || "Olá! Desculpe a demora em responder, estamos retomando seu atendimento agora. Em instantes nossa equipe vai te atender. 🙏";
 
-    // Recarrega rows alvo
-    const orfaos = await detectarOrfaos(supabase, { idade_min_min: 0 });
-    const alvo = orfaos.filter((o) => atendimentoIds.includes(o.atendimento_id));
+    if (!atendimentoIds.length) {
+      return new Response(JSON.stringify({ processados: 0, results: [], error: "Nenhum atendimento selecionado" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Carrega rows alvo DIRETAMENTE pelos IDs (sem refiltragem por inbound/idade — o usuário já decidiu)
+    const { data: atsAlvo, error: atErr } = await supabase
+      .from("atendimentos")
+      .select("id, contato_id, modo, status, fila_id, fila:filas(setor_id), contato:contatos(nome, telefone)")
+      .in("id", atendimentoIds);
+    if (atErr) throw atErr;
+
+    // Pega última mensagem inbound de cada (necessário pra IA reagir ao texto certo)
+    const { data: msgsAlvo } = await supabase
+      .from("mensagens")
+      .select("atendimento_id, direcao, conteudo, created_at")
+      .in("atendimento_id", atendimentoIds)
+      .eq("direcao", "inbound")
+      .order("created_at", { ascending: false });
+
+    const lastInboundByAt = new Map<string, any>();
+    for (const m of msgsAlvo || []) {
+      if (!lastInboundByAt.has(m.atendimento_id)) lastInboundByAt.set(m.atendimento_id, m);
+    }
+
+    const alvo: OrfaoRow[] = (atsAlvo || []).map((a: any) => {
+      const last = lastInboundByAt.get(a.id);
+      const ts = last ? new Date(last.created_at).getTime() : Date.now();
+      return {
+        atendimento_id: a.id,
+        contato_id: a.contato_id,
+        contato_nome: a.contato?.nome ?? null,
+        contato_telefone: a.contato?.telefone ?? null,
+        modo: a.modo,
+        status: a.status,
+        ultima_mensagem_at: last?.created_at ?? new Date().toISOString(),
+        ultima_mensagem_conteudo: (last?.conteudo || "").slice(0, 280),
+        setor_id: a.fila?.setor_id ?? null,
+        setor_nome: null,
+        minutos_pendente: Math.round((Date.now() - ts) / 60_000),
+      };
+    });
+
+    console.log(`[recuperar] acao=${acao} ids=${atendimentoIds.length} alvo=${alvo.length}`);
 
     const results: any[] = [];
     for (const row of alvo) {
