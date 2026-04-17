@@ -1792,6 +1792,7 @@ export type Database = {
         Args: { _setor_id: string }
         Returns: string
       }
+      sanitize_corporate_contact: { Args: { _telefone: string }; Returns: Json }
       schedule_cron_job: {
         Args: { cron_expression: string; job_name: string; sql_command: string }
         Returns: number
