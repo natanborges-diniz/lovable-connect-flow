@@ -56,58 +56,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
+  const fetchProfile = useCallback(async (userId: string) => {
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
       .single();
-    setProfile(data as Profile | null);
-  };
+    if (error) throw error;
+    return data as Profile | null;
+  }, []);
 
-  const fetchRoles = async (userId: string) => {
-    const { data } = await supabase
+  const fetchRoles = useCallback(async (userId: string) => {
+    const { data, error } = await supabase
       .from("user_roles")
       .select("*")
       .eq("user_id", userId);
-    setRoles((data as any[] || []).map((r) => ({
+    if (error) throw error;
+    return ((data as any[] | null) || []).map((r) => ({
       id: r.id,
       role: r.role as AppRole,
       setor_id: r.setor_id,
       loja_nome: r.loja_nome || null,
-    })));
-  };
+    }));
+  }, []);
+
+  const hydrateAuthState = useCallback(async (nextSession: Session | null) => {
+    setSession(nextSession);
+    setUser(nextSession?.user ?? null);
+
+    if (!nextSession?.user) {
+      setProfile(null);
+      setRoles([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const [nextProfile, nextRoles] = await Promise.all([
+        fetchProfile(nextSession.user.id),
+        fetchRoles(nextSession.user.id),
+      ]);
+
+      setProfile(nextProfile);
+      setRoles(nextRoles);
+    } catch {
+      setProfile(null);
+      setRoles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchProfile, fetchRoles]);
 
   useEffect(() => {
+    setLoading(true);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          setTimeout(() => {
-            fetchProfile(session.user.id);
-            fetchRoles(session.user.id);
-          }, 0);
-        } else {
-          setProfile(null);
-          setRoles([]);
-        }
-        setLoading(false);
+      (_event, nextSession) => {
+        setTimeout(() => {
+          void hydrateAuthState(nextSession);
+        }, 0);
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-        fetchRoles(session.user.id);
-      }
-      setLoading(false);
-    });
+    void supabase.auth.getSession().then(({ data: { session } }) => hydrateAuthState(session));
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [hydrateAuthState]);
 
   const isAdmin = roles.some((r) => r.role === "admin");
   const isOperador = roles.some((r) => r.role === "operador");
