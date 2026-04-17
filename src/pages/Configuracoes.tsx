@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2, MessageSquare, Store, Brain, Zap, Users, Timer } from "lucide-react";
+import { Plus, Building2, GitBranch, Trash2, Bot, ShieldCheck, Loader2, MessageSquare, Store, Brain, Zap, Users, Timer, LifeBuoy } from "lucide-react";
 import { KnowledgeBaseCard } from "@/components/configuracoes/KnowledgeBaseCard";
 import { LearningCard } from "@/components/configuracoes/LearningCard";
 import { TelefonesLojasCard } from "@/components/configuracoes/TelefonesLojasCard";
@@ -22,6 +22,7 @@ import { WhatsAppTemplatesCard } from "@/components/configuracoes/WhatsAppTempla
 import { AutomacoesCard } from "@/components/configuracoes/AutomacoesCard";
 import { GestaoUsuariosCard } from "@/components/configuracoes/GestaoUsuariosCard";
 import { CronJobsCard } from "@/components/configuracoes/CronJobsCard";
+import { RecuperacaoCard } from "@/components/configuracoes/RecuperacaoCard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -150,6 +151,13 @@ export default function Configuracoes() {
         <TabsContent value="crons">
           <div className="grid gap-6">
             <CronJobsCard />
+          </div>
+        </TabsContent>
+
+        {/* ─── Recuperação ─── */}
+        <TabsContent value="recuperacao">
+          <div className="grid gap-6">
+            <RecuperacaoCard />
           </div>
         </TabsContent>
       </Tabs>

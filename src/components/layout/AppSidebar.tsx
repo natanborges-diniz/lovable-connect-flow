@@ -2,7 +2,7 @@ import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer
+  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -96,6 +96,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
         { title: "WhatsApp", url: "/configuracoes?tab=whatsapp", icon: MessageSquare },
         { title: "Automações", url: "/configuracoes?tab=automacoes", icon: Zap },
         { title: "Crons", url: "/configuracoes?tab=crons", icon: Timer },
+        { title: "Recuperação", url: "/configuracoes?tab=recuperacao", icon: LifeBuoy },
       ],
     },
   ],
