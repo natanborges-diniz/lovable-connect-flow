@@ -1302,7 +1302,14 @@ serve(async (req) => {
 
     // ── 6. BUILD MESSAGES — use last 20 from the 60 loaded ──
     const contextWindow = allMsgs.slice(-20);
-    const messages: any[] = [{ role: "system", content: systemPrompt }];
+    const messages: any[] = [
+      { role: "system", content: systemPrompt },
+      {
+        role: "system",
+        content:
+          "INTERPRETAÇÃO DO HISTÓRICO: mensagens com prefixo [HUMANO - Nome] foram enviadas pela equipe humana; [IA], [SISTEMA], [RECUPERAÇÃO] e [BOT LOJAS] são saídas automáticas/assistidas já enviadas ao cliente; mensagens com role user são do cliente. Use isso para continuidade e nunca confunda mensagem humana com mensagem do cliente.",
+      },
+    ];
 
     for (const [i, m] of contextWindow.entries()) {
       const role = m.direcao === "inbound" ? "user" : "assistant";
@@ -1379,7 +1386,16 @@ serve(async (req) => {
           }
         }
       } else {
-        const prefix = role === "assistant" && m.remetente_nome === "Operador" ? "[Operador] " : "";
+        const sender = String(m.remetente_nome || "").trim();
+        const prefixMap: Record<string, string> = {
+          "Assistente IA": "[IA] ",
+          "Sistema": "[SISTEMA] ",
+          "Recuperação": "[RECUPERAÇÃO] ",
+          "Bot Lojas": "[BOT LOJAS] ",
+        };
+        const prefix = role === "assistant"
+          ? (prefixMap[sender] ?? (sender ? `[HUMANO - ${sender}] ` : ""))
+          : "";
         messages.push({ role, content: prefix + m.conteudo });
       }
     }
