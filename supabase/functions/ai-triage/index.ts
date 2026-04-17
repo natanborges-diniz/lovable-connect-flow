@@ -1393,10 +1393,6 @@ serve(async (req) => {
             content: "[SISTEMA: ⚠️ Há uma imagem do cliente no histórico que NÃO foi entregue ao modelo (falha de download). NUNCA diga 'recebi sua receita', 'parece ser uma receita' ou similar. NÃO chame interpretar_receita. Peça ao cliente que reenvie a foto da receita com boa iluminação, sem reflexos, segurando firme. Se ele já reclamou que enviou ('já mandei'), peça desculpa pelo problema técnico e oriente o reenvio uma única vez.]",
           });
         }
-          } else {
-            messages.push({ role, content: imageCaption });
-          }
-        }
       } else {
         const sender = String(m.remetente_nome || "").trim();
         const prefixMap: Record<string, string> = {
