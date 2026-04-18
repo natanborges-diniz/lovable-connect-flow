@@ -1,66 +1,54 @@
 
 ## Objetivo
-Aplicar o mesmo fluxo correto de orçamento para lentes de contato com receita no caso da Kelly: sem repetir “dois caminhos”, sem escalar para humano, e sem travar após “Lentes de contato” / “Orçamento”.
+Responder ao Leandro com explicação técnica resumida (Optifog vs Crizal Sapphire HR vs Crizal Prevencia, intermediária/ocupacional vs multifocal ampla), reforçando que a diferença real se percebe presencialmente. Em seguida, oferecer as lojas e perguntar se ele quer agendar.
 
-## Diagnóstico encontrado
-O ajuste anterior ficou incompleto em `ai-triage`:
-1. O bloco global de pós-receita ainda força `consultar_lentes` (óculos), não `consultar_lentes_contato`.
-2. O `forcedIntent` reconhece LC, mas o hint “sem loop” só cobre `consultar_lentes` e `interpretar_receita`, deixando `consultar_lentes_contato` sem reforço.
-3. O fallback determinístico ainda devolve “Recebi sua receita aqui... dois caminhos...”, causando repetição mesmo com receita já salva.
-4. Se o modelo falhar em tool call, ainda pode cair em fallback genérico ou escalar indevidamente.
+Não há mudança estrutural pendente — o caso anterior (Kelly) já cobriu o fluxo pós-receita LC. Aqui é Kodak (óculos multifocal), que por regra de memória **escala manual obrigatória** (Kodak Precise não está em `pricing_table_lentes`). O Consultor já passou os valores às 16:31. Falta só responder às perguntas técnicas e empurrar agendamento.
 
-## Implementação proposta
+## Diagnóstico
+- IA travou em loop "dois caminhos" / "acionei consultor" sem responder dúvidas técnicas específicas (diferença entre lente R$ 1.554 vs R$ 2.045, o que é Optifog, Crizal Sapphire HR, intermediária/ocupacional).
+- Cliente quer comparativo conceitual antes de ir à loja.
+- Já foi escalado e respondido pelo Consultor, então o canal está em modo humano/híbrido — resposta deve ser manual via `send-whatsapp` no atendimento ativo, remetente "Consultor Diniz" (continuidade da última fala humana).
 
-### 1) Ajustar `supabase/functions/ai-triage/index.ts`
-Corrigir os pontos restantes do fluxo LC pós-receita:
+## Implementação
 
-- Tornar o bloco `[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO]` sensível a contexto LC:
-  - se contexto for lente de contato, forçar `consultar_lentes_contato`
-  - se não for LC, manter `consultar_lentes`
+### Frente única — Resposta operacional manual
+Enviar via `send-whatsapp` no atendimento do Leandro, mensagem única consolidando as respostas técnicas + lojas + CTA de agendamento:
 
-- Ampliar o branch de `forcedIntent` sem loop:
-  - incluir `consultar_lentes_contato`
-  - injetar hint explícito para:
-    - usar a tool agora
-    - apresentar 2-3 opções com descartes variados
-    - pedir região
-    - sugerir loja/agendamento
+> "Oi Leandro! Boa, vou te explicar rapidinho 👇
+>
+> *Diferença entre R$ 1.554 e R$ 2.045 (ambas Kodak multifocal + Transitions):*
+> • R$ 1.554 → traz o **Optifog** (antiembaçante ativado com paninho próprio — útil pra máscara, cozinha, mudança de temperatura).
+> • R$ 2.045 → traz o **Crizal Sapphire HR** (antirreflexo premium da Essilor, mais resistente a risco, repele água/gordura, visão mais nítida à noite e contra faróis). Não tem o Optifog incluso, mas o AR é bem superior.
+>
+> *Resumo dos termos:*
+> • **Optifog** = tratamento antiembaçante (precisa ativar com paninho).
+> • **Crizal Sapphire HR** = antirreflexo top de linha, mais durável e transparente.
+> • **AR Premium** = camada antirreflexo de alta performance (reduz reflexo de tela, farol, luz artificial).
+>
+> *Multifocal x Ocupacional (intermediária):*
+> A multifocal tem 3 campos (longe + intermediário + perto) — uso o dia todo. A ocupacional é otimizada pra perto e intermediário (computador, leitura) — não é pra dirigir. Pelo seu pedido de "campo amplo", a **multifocal** é o caminho.
+>
+> Mas olha, sinceramente: essas diferenças de antirreflexo e nitidez você sente de verdade **experimentando na loja** — a gente coloca lentes demo pra você comparar lado a lado. É bem rápido e tira a dúvida na hora 👍
+>
+> *Nossas lojas em Osasco:*
+> 📍 **Antônio Agú** (centro)
+> 📍 **União Osasco** (shopping, até 22h)
+> 📍 **SuperShopping** (até 22h)
+>
+> Quer que eu já deixe um horário reservado pra quando você vier? Me diz o dia e a unidade que prefere 😊"
 
-- Blindar o fallback determinístico:
-  - se já houver receita salva + contexto LC, nunca responder com “dois caminhos”
-  - em vez disso, responder com continuação curta orientada a orçamento, ou preferencialmente cair na tool correta
+(Valores e nomes batem com o que o Consultor já enviou às 16:31 — sem inventar.)
 
-- Revisar o caminho de baixa confiança da receita:
-  - manter pedido de confirmação textual só quando necessário
-  - mas sem travar o fluxo: já orientar a IA a mostrar opções genéricas de LC quando a leitura estiver incompleta, como definido na memória
-
-### 2) Reforçar saída da tool `consultar_lentes_contato`
-A tool já existe, mas o plano é deixar a resposta mais aderente ao fluxo recomendado:
-- 2-3 opções com categorias variadas quando houver compatibilidade
-- diária como dica consultiva para esporte, sem excluir quinzenal/mensal
-- finalizar com pergunta de região
-- evitar CTA genérico de “quer que eu reserve?” como única saída quando o objetivo ainda é orçamento/encaminhamento
-
-### 3) Atualizar aprendizado/memória
-Atualizar `.lovable/memory/ia/lentes-de-contato-orcamento.md` com o caso Kelly:
-- quando cliente já mandou receita e depois responde “Lentes de contato” ou “Orçamento”, isso deve ser tratado como intenção clara
-- nunca repetir “posso seguir por dois caminhos?”
-- nunca escalar para humano nesse cenário
-- fluxo obrigatório: tool LC → opções → região → loja/agendamento
-
-### 4) Resposta operacional imediata para Kelly
-Além do ajuste estrutural, enviar resposta manual no atendimento ativo com o fluxo correto:
-- reconhecer pedido de orçamento
-- usar a receita salva
-- trazer 2-3 opções compatíveis
-- pedir região para indicar a unidade
+### Sem mudanças de código
+- Nenhuma edição em `ai-triage` ou outras EFs.
+- Nenhuma migração.
+- Nenhuma alteração de memória — caso Kodak já documentado em `mem://ia/marca-kodak-escalada-manual` (escala manual mantida; aqui o humano já está no controle).
 
 ## Resultado esperado
-- Kelly não recebe mais repetição de “dois caminhos”.
-- “Lentes de contato” / “Orçamento” com receita salva passa a disparar o fluxo correto de LC.
-- A IA deixa de escalar injustamente para humano nesse cenário.
-- O comportamento fica consistente com o caso anterior já corrigido.
+- Leandro recebe resposta técnica clara e curta.
+- Reforça experiência presencial sem soar evasivo.
+- Próximo passo concreto: escolher loja e dia.
+- Sem novo loop da IA (atendimento permanece em modo humano/Consultor).
 
-## Arquivos a ajustar
-- `supabase/functions/ai-triage/index.ts`
-- `.lovable/memory/ia/lentes-de-contato-orcamento.md`
+## Arquivo/ação
+- Único: chamada `send-whatsapp` para o atendimento ativo do Leandro Laba, remetente "Consultor Diniz".
