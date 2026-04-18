@@ -493,8 +493,42 @@ serve(async (req) => {
     }
 
     // 8. Trigger appropriate bot (fire-and-forget)
+    // ── PONTE OVERRIDE: se contato tem ponte ativa, espelha pra mensageria interna
+    // antes de qualquer decisão (bot-lojas, ia, etc). Ponte vence tudo.
+    let ponteAtivaOverride = false;
+    try {
+      const { data: ponteAtiva } = await supabase
+        .from("contato_ponte")
+        .select("id")
+        .eq("contato_id", contato.id)
+        .eq("ativo", true)
+        .maybeSingle();
+      if (ponteAtiva) {
+        ponteAtivaOverride = true;
+        // Garante que o atendimento aberto está em modo='ponte' (caso tenha sido criado agora como 'ia')
+        if (atendimentoModo !== "ponte") {
+          await supabase.from("atendimentos").update({ modo: "ponte" }).eq("id", atendimentoId);
+          atendimentoModo = "ponte";
+        }
+      }
+    } catch (ponteErr) {
+      console.error("[PONTE CHECK] Error:", ponteErr);
+    }
+
     if (shouldSkipBot) {
       console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
+    } else if (ponteAtivaOverride) {
+      // PONTE: contato é operado por usuário interno via mensageria. Espelha pra mensagem interna.
+      console.log(`[PONTE] Routing inbound from ${phone} to bridge-mensageria (ponte ativa)`);
+      runInBackground(
+        triggerBridgeMensageria(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+          contato_id: contato.id,
+          atendimento_id: atendimentoId,
+          conteudo: text,
+          tipo_conteudo: tipoConteudo,
+          media_url: storedMediaUrl,
+        }).catch((e) => console.error("Bridge mensageria failed:", e))
+      );
     } else if (isCorporate) {
       // Pass tipo_bot from the registered phone type (loja, colaborador, departamento)
       const lojaInfoWithTipo = { ...lojaMatch, tipo_bot: corporateTipo };
