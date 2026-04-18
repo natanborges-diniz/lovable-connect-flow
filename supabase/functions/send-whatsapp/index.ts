@@ -38,6 +38,15 @@ serve(async (req) => {
     const provedor = force_provider || (atendimento as any).canal_provedor || "meta_official";
     const cleanPhone = phone.replace(/\D/g, "");
 
+    // Guard: reject obviously invalid / placeholder numbers (avoids 3x retry loop on Evolution)
+    const isRepeatedDigits = /^(\d)\1+$/.test(cleanPhone.slice(-9)); // e.g. 999999999
+    if (cleanPhone.length < 10 || cleanPhone.length > 15 || isRepeatedDigits) {
+      return new Response(
+        JSON.stringify({ error: "invalid_phone", phone: cleanPhone, reason: "placeholder_or_malformed" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     let apiResult: any;
 
     if (provedor === "evolution_api") {
@@ -164,6 +173,14 @@ async function sendViaEvolution(phone: string, text: string) {
         lastError = `status=${res.status} body=${bodyToString(result)}`;
         console.error(`[EVOLUTION] Send failed (attempt ${attempt}/${maxAttempts}): ${lastError}`);
 
+        // Number does not exist on WhatsApp — abort immediately, do not retry
+        const msgArr = (result as any)?.response?.message;
+        if (Array.isArray(msgArr) && msgArr.some((m: any) => m?.exists === false)) {
+          const err: any = new Error(`Evolution API: number ${phone} does not exist on WhatsApp`);
+          err.noRetry = true;
+          throw err;
+        }
+
         if (res.status >= 500 && attempt < maxAttempts) {
           await sleep(500 * attempt);
           continue;
@@ -177,6 +194,8 @@ async function sendViaEvolution(phone: string, text: string) {
       const message = e instanceof Error ? e.message : String(e);
       lastError = message;
       console.error(`[EVOLUTION] Send exception (attempt ${attempt}/${maxAttempts}): ${message}`);
+
+      if ((e as any)?.noRetry) throw e;
 
       if (attempt < maxAttempts) {
         await sleep(500 * attempt);
