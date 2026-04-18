@@ -199,6 +199,7 @@ export function TelefonesLojasCard() {
                 <TableHead>Tipo</TableHead>
                 <TableHead>Telefone</TableHead>
                 <TableHead>Nome</TableHead>
+                <TableHead>Setor de Destino</TableHead>
                 <TableHead>Info</TableHead>
                 <TableHead>Ativo</TableHead>
                 <TableHead className="w-20"></TableHead>
@@ -214,6 +215,13 @@ export function TelefonesLojasCard() {
                   </TableCell>
                   <TableCell className="font-mono text-sm">{t.telefone}</TableCell>
                   <TableCell className="font-medium">{getDisplayName(t)}</TableCell>
+                  <TableCell className="text-xs">
+                    {t.setor_destino_id ? (
+                      <Badge variant="secondary">{setorNome(t.setor_destino_id)}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">Atendimento Corporativo</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">{getSubInfo(t)}</TableCell>
                   <TableCell>
                     <Switch checked={t.ativo ?? true} onCheckedChange={(v) => toggleAtivo.mutate({ id: t.id, ativo: v })} />
@@ -240,6 +248,7 @@ export function TelefonesLojasCard() {
           <DialogHeader><DialogTitle>Editar Cadastro</DialogTitle></DialogHeader>
           {editingLoja && (
             <LojaForm
+              setores={setores ?? []}
               initialData={{
                 telefone: editingLoja.telefone,
                 nome_loja: editingLoja.nome_loja,
@@ -252,6 +261,7 @@ export function TelefonesLojasCard() {
                 google_profile_url: editingLoja.google_profile_url || "",
                 cargo: editingLoja.cargo || "",
                 nome_colaborador: editingLoja.nome_colaborador || "",
+                setor_destino_id: editingLoja.setor_destino_id || null,
               }}
               onSubmit={(data) => updateTelefone.mutate({ id: editingLoja.id, data })}
               loading={updateTelefone.isPending}
