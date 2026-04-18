@@ -28,6 +28,7 @@ interface LojaFormData {
   google_profile_url?: string;
   cargo?: string;
   nome_colaborador?: string;
+  setor_destino_id?: string | null;
 }
 
 const TIPO_LABELS: Record<TipoCorporativo, string> = {
