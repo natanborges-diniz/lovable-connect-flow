@@ -275,12 +275,13 @@ export function TelefonesLojasCard() {
 }
 
 function LojaForm({
-  onSubmit, loading, submitLabel, initialData,
+  onSubmit, loading, submitLabel, initialData, setores,
 }: {
   onSubmit: (data: LojaFormData) => void;
   loading: boolean;
   submitLabel: string;
   initialData?: Partial<LojaFormData> & { telefone: string; nome_loja: string };
+  setores: { id: string; nome: string }[];
 }) {
   const [form, setForm] = useState({
     telefone: initialData?.telefone || "",
@@ -294,6 +295,7 @@ function LojaForm({
     google_profile_url: initialData?.google_profile_url || "",
     cargo: initialData?.cargo || "",
     nome_colaborador: initialData?.nome_colaborador || "",
+    setor_destino_id: initialData?.setor_destino_id || "",
   });
 
   const isNameValid = form.tipo === "colaborador" ? !!form.nome_colaborador : !!form.nome_loja;
@@ -314,6 +316,7 @@ function LojaForm({
           google_profile_url: form.google_profile_url || undefined,
           cargo: form.cargo || undefined,
           nome_colaborador: form.nome_colaborador || undefined,
+          setor_destino_id: form.setor_destino_id || null,
         });
       }}
       className="space-y-4"
@@ -333,6 +336,25 @@ function LojaForm({
       <div className="space-y-2">
         <Label>Telefone *</Label>
         <Input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="5511999999999" className="font-mono" required />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Setor de Destino</Label>
+        <Select
+          value={form.setor_destino_id || "__default__"}
+          onValueChange={(v) => setForm({ ...form, setor_destino_id: v === "__default__" ? "" : v })}
+        >
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default__">Atendimento Corporativo (padrão)</SelectItem>
+            {setores.map((s) => (
+              <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Quando esse número entrar em contato, será direcionado direto a este setor. Se o setor tiver um único responsável ativo, a conversa cai como mensagem interna direto pra ele.
+        </p>
       </div>
 
       {form.tipo === "colaborador" && (
