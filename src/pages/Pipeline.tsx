@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -29,6 +31,7 @@ import {
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
   MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw, Image as ImageIcon, ExternalLink,
+  Pin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -1147,6 +1150,16 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
                 Devolver para IA
               </Button>
             )}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-7 text-xs" title="Demandas à loja">
+                  <Pin className="h-3 w-3 mr-1" /> Loja
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-96 p-3 max-h-[60vh] overflow-y-auto">
+                <DemandaLojaPanel atendimentoId={atendimento.id} modo={atendimento.modo} />
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       )}
