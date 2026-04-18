@@ -1,102 +1,103 @@
 
-## O que isso significa, em português claro
+## Diagnóstico atualizado
 
-Hoje o sistema só mostra os menus “certos” quando a sessão da Marilene chega aqui com o setor/perfil reconhecido.
+As correções anteriores já cobriram o óbvio:
+- fallback por `profile.setor_id`
+- `sso-login` mais robusto
+- `/interno` usando setor efetivo
 
-O código do menu já está preparado para mostrar:
-- Interno
-- Mensagens
-- Tarefas
+Se ainda falhou, o problema mais provável mudou:
 
-para quem é de **Dpto Armações**.
+1. **A sessão da Marilene não está chegando “pronta” quando o app começa a consultar dados**
+   - isso pode fazer queries autenticadas rodarem cedo demais
+   - resultado: menu e telas setoriais continuam sem reconhecer o setor na hora certa
 
-Então, se isso ainda não aparece, o problema restante não é “o menu em si”. O problema está na forma como a sessão da Marilene está sendo hidratada aqui após o login vindo do Em Foco.
+2. **O topo ainda depende de uma segunda consulta em `setores` para montar os módulos**
+   - mesmo com `profile.setor_id` resolvido, o menu ainda espera `useSetorNames()`
+   - se essa consulta falhar/atrasar no primeiro ciclo, a UI continua inconsistente
 
-## Diagnóstico mais provável
-
-Há um ponto frágil no fluxo atual:
-
-1. O Em Foco já envia `departamento`.
-2. O `sso-login` daqui tenta transformar isso em `setor_id` e criar/garantir `user_roles`.
-3. Mas a UI ainda depende demais de `user_roles` já estar carregado perfeitamente no primeiro momento da sessão.
-
-Se isso falhar, atrasar, ou o `departamento` não casar exatamente com o setor local naquele login:
-- a Marilene entra,
-- mas a navegação não entende corretamente que ela é do setor,
-- e os menus esperados não aparecem.
+3. **Ainda falta validar o dado real da Marilene no backend**
+   - hoje os logs disponíveis mostram só um admin
+   - então ainda não temos a prova do que aconteceu no login real dela
 
 ## Plano de correção
 
-### 1. Parar de depender só de `user_roles` no front
-Ajustar a autenticação para que o app considere também o `profile.setor_id` como fallback de setor.
+### 1. Auditar o login real da Marilene no backend
+Verificar no backend:
+- `profiles` da Marilene
+- `user_roles` da Marilene
+- logs reais da função `sso-login` no momento do login
+- se o `departamento` chegou
+- se virou `setor_id`
+- se o `user_roles` foi criado/achado
 
-Arquivos:
-- `src/hooks/useAuth.tsx`
-- `src/components/layout/TopNavigation.tsx`
-- `src/components/layout/AppLayout.tsx`
+Objetivo:
+- separar se o problema é **dados/provisionamento** ou **hidratação da sessão no front**
 
-Resultado:
-- mesmo se `user_roles` atrasar ou não vier no primeiro ciclo,
-- a Marilene ainda verá o menu do setor dela.
+### 2. Remover a dependência frágil do menu em uma query secundária
+Hoje o `TopNavigation` ainda busca nomes em `setores` para decidir os módulos.
 
-### 2. Endurecer o `sso-login`
-Melhorar a resolução de `departamento -> setor_id` para ficar mais robusta com:
-- acentos
-- maiúsculas/minúsculas
-- variações como `dpto_armacoes`, `Dpto Armações`, `dpto armacoes`
+Vou mudar para que a própria autenticação já entregue o setor efetivo pronto para uso no menu, sem depender de uma segunda consulta no primeiro render.
 
-Arquivo:
-- `supabase/functions/sso-login/index.ts`
+Objetivo:
+- o menu da Marilene aparecer imediatamente quando o setor já existir no perfil/roles
 
-Resultado:
-- o login vindo do Em Foco deixa de depender de casamento “sensível” do nome do departamento.
+### 3. Implementar “auth ready” de verdade
+Ajustar a camada de autenticação para separar:
+- sessão restaurada
+- usuário autenticado
+- perfil/roles hidratados
+- app pronto para consultar dados protegidos
 
-### 3. Garantir provisionamento de role sempre
-No `sso-login`, além de atualizar `profiles.setor_id`, garantir de forma mais defensiva que exista o `user_roles` compatível para aquele usuário.
+Depois disso, as queries e telas só rodam quando a autenticação estiver realmente pronta.
 
-Arquivo:
-- `supabase/functions/sso-login/index.ts`
+Objetivo:
+- eliminar corrida de inicialização após SSO/magic link
 
-Resultado:
-- a sessão fica consistente para navegação, permissões e telas setoriais.
+### 4. Travar queries dependentes de login até a autenticação estar pronta
+Aplicar `enabled` com estado de prontidão nas queries mais sensíveis, começando por:
+- navegação/topbar
+- mensagens internas
+- notificações
+- telas setoriais
 
-### 4. Adicionar rastreio temporário de diagnóstico
-Adicionar logs temporários no fluxo de autenticação para verificar, no login da Marilene:
-- qual `departamento` chegou
-- qual `setor_id` foi resolvido
-- quais roles foram carregadas no front
+Objetivo:
+- impedir que o app monte a UI com estado incompleto
 
-Arquivos:
-- `supabase/functions/sso-login/index.ts`
-- `src/hooks/useAuth.tsx`
-
-Resultado:
-- se ainda falhar, fica visível exatamente em qual etapa quebrou.
-
-### 5. Validar com teste real da Marilene
-Depois da correção, testar especificamente:
+### 5. Validar o fluxo real da Marilene
+Depois da correção:
 1. logout completo
-2. login no Em Foco
+2. login pelo Em Foco
 3. entrada aqui via SSO
 4. confirmar que aparecem:
-   - `Interno`
-   - `Mensagens`
-   - `Tarefas`
-5. confirmar que ela cai em rota compatível com o setor
+   - Interno
+   - Mensagens
+   - Tarefas
+5. confirmar que `/interno` abre no setor correto dela
 
-## Arquivos que pretendo ajustar
+## Arquivos previstos
+
 - `src/hooks/useAuth.tsx`
 - `src/components/layout/TopNavigation.tsx`
 - `src/components/layout/AppLayout.tsx`
-- `supabase/functions/sso-login/index.ts`
+- `src/hooks/useNotificacoes.ts`
+- `src/hooks/useMensagensInternas.ts`
+- possivelmente páginas com queries setoriais que dependam de auth pronta
+- `supabase/functions/sso-login/index.ts` apenas se os logs mostrarem falha de provisionamento
 
 ## Resultado esperado
-Depois disso, a Marilene deve entrar e ver imediatamente as opções compatíveis com o setor dela, sem depender de um carregamento “perfeito” de role logo no primeiro instante do login.
+
+Depois disso, a Marilene deve:
+- entrar pelo Em Foco
+- ter setor reconhecido sem corrida de inicialização
+- ver os menus corretos imediatamente
+- cair na área setorial esperada
 
 ## Detalhes técnicos
-- Hoje o menu usa `getUserSetorIds()`, que depende de `roles`.
-- O setor da Marilene também precisa poder ser inferido por `profile.setor_id`.
-- O `sso-login` já tenta resolver `departamento`, mas a resolução ainda pode ser frágil.
-- A correção será feita em duas camadas:
-  - backend: garantir setor/role no login
-  - frontend: usar fallback seguro para o setor durante a hidratação da sessão
+
+- Estratégia nova: parar de “remendar fallback” isolado e atacar a causa raiz:
+  - **auth readiness**
+  - **menu sem query extra desnecessária**
+  - **validação do login real no backend**
+- Se os logs mostrarem que `sso-login` já entrega `profile.setor_id` e `user_roles`, a correção será 100% no frontend
+- Se os logs mostrarem que o setor não está sendo persistido para a Marilene, a correção volta para o fluxo SSO/provisionamento
