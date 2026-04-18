@@ -227,6 +227,19 @@ export default function Pipeline() {
     if (destColunaId === "sem-coluna") return;
     if (destColunaId === sourceColunaId) return;
 
+    // Detect "Agendamento" column — requires loja + data/hora before persisting
+    const destCol = (colunas ?? []).find((c) => c.id === destColunaId);
+    const isAgendamento = destCol && /agendam/i.test(destCol.nome);
+    if (isAgendamento) {
+      const contato = (contatos ?? []).find((c) => c.id === contatoId);
+      setKanbanTransferContatoId(contatoId);
+      setKanbanTransferContatoNome(contato?.nome ?? "Contato");
+      setKanbanTransferColunaId(destColunaId);
+      setKanbanTransferColunaNome(destCol.nome);
+      setKanbanTransferOpen(true);
+      return; // do NOT move card yet — dialog will create agendamento + clear pipeline_coluna_id
+    }
+
     updateContato.mutate({ id: contatoId, pipeline_coluna_id: destColunaId } as any, {
       onSuccess: async () => {
         // Auto-reset modo from humano to ia on column move
