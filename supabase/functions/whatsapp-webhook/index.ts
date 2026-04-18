@@ -44,11 +44,24 @@ serve(async (req) => {
     let { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
     console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
-    // 1. Find or create contato
+    // ─── 0. CORPORATE EARLY-CHECK ───
+    // Lookup telefones_lojas usando variantes BR (com/sem 9) ANTES de criar contato.
+    // Garante que números corporativos NUNCA virem cliente novo no CRM.
+    const phoneVariants = brPhoneCandidates(phone);
+    const { data: lojaCandidates } = await supabase
+      .from("telefones_lojas")
+      .select("*")
+      .in("telefone", phoneVariants)
+      .eq("ativo", true)
+      .limit(1);
+    const lojaMatch = lojaCandidates?.[0] || null;
+    const isLojaEarly = !!lojaMatch;
+
+    // 1. Find or create contato (busca por TODAS as variantes do telefone)
     let { data: contatoResult } = await supabase
       .from("contatos")
       .select("*")
-      .eq("telefone", phone)
+      .in("telefone", phoneVariants)
       .order("created_at", { ascending: true })
       .limit(1);
 
@@ -56,25 +69,38 @@ serve(async (req) => {
 
     // Detect if pushName looks like a real person name (vs a phone number, brand, etc.)
     const realName = looksLikeRealName(senderName, phone) ? senderName : null;
-    const initialNome = realName || phone;
+    // Para corporativo, nome inicial = nome_loja cadastrado (nunca senderName).
+    const initialNome = isLojaEarly
+      ? (lojaMatch.nome_colaborador || lojaMatch.nome_loja)
+      : (realName || phone);
+    // Telefone canônico salvo: se é loja, usa o cadastrado em telefones_lojas (mantém formato consistente).
+    const canonicalPhone = isLojaEarly ? lojaMatch.telefone : phone;
 
     if (!contato) {
-      // Insert new contato; if race condition hits the partial unique index, fetch instead
       const initialMetadata: Record<string, unknown> = {
         nome_perfil_whatsapp: senderName || null,
-        nome_confirmado: false, // só vira true quando o cliente confirmar pela IA
+        nome_confirmado: isLojaEarly ? true : false,
       };
+      const insertPayload: Record<string, unknown> = {
+        nome: initialNome,
+        tipo: isLojaEarly ? (lojaMatch.tipo === "colaborador" ? "colaborador" : "loja") : "cliente",
+        telefone: canonicalPhone,
+        metadata: initialMetadata,
+      };
+      if (isLojaEarly) {
+        insertPayload.setor_destino = lojaMatch.setor_destino_id || "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+        insertPayload.pipeline_coluna_id = null;
+      }
       const { data: newContato, error: createErr } = await supabase
         .from("contatos")
-        .insert({ nome: initialNome, tipo: "cliente", telefone: phone, metadata: initialMetadata })
+        .insert(insertPayload)
         .select()
         .single();
       if (createErr) {
-        // Likely duplicate from race condition – fetch existing
         const { data: retry } = await supabase
           .from("contatos")
           .select("*")
-          .eq("telefone", phone)
+          .in("telefone", phoneVariants)
           .limit(1);
         contato = retry?.[0] || null;
         if (!contato) throw createErr;
