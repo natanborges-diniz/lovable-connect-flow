@@ -176,7 +176,9 @@ async function sendViaEvolution(phone: string, text: string) {
         // Number does not exist on WhatsApp — abort immediately, do not retry
         const msgArr = (result as any)?.response?.message;
         if (Array.isArray(msgArr) && msgArr.some((m: any) => m?.exists === false)) {
-          throw new Error(`Evolution API: number ${phone} does not exist on WhatsApp (exists=false)`);
+          const err: any = new Error(`Evolution API: number ${phone} does not exist on WhatsApp`);
+          err.noRetry = true;
+          throw err;
         }
 
         if (res.status >= 500 && attempt < maxAttempts) {
@@ -192,6 +194,8 @@ async function sendViaEvolution(phone: string, text: string) {
       const message = e instanceof Error ? e.message : String(e);
       lastError = message;
       console.error(`[EVOLUTION] Send exception (attempt ${attempt}/${maxAttempts}): ${message}`);
+
+      if ((e as any)?.noRetry) throw e;
 
       if (attempt < maxAttempts) {
         await sleep(500 * attempt);
