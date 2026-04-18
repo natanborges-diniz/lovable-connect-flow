@@ -107,18 +107,41 @@ serve(async (req) => {
     let storeContatoId: string | null = null;
     {
       const cleanPhone = loja_telefone.replace(/\D/g, "");
-      const { data: storeContato } = await supabase
+      // BR: gera variantes com/sem 9 pra match robusto
+      const variants = new Set<string>([cleanPhone, loja_telefone]);
+      if (cleanPhone.length === 13 && cleanPhone.startsWith("55") && cleanPhone[4] === "9") {
+        variants.add("55" + cleanPhone.substring(2, 4) + cleanPhone.substring(5));
+      }
+      if (cleanPhone.length === 12 && cleanPhone.startsWith("55")) {
+        variants.add("55" + cleanPhone.substring(2, 4) + "9" + cleanPhone.substring(4));
+      }
+      const variantArr = Array.from(variants);
+      const { data: storeContatos } = await supabase
         .from("contatos")
-        .select("id")
-        .eq("telefone", cleanPhone)
-        .limit(1)
-        .single();
+        .select("id, tipo, setor_destino, pipeline_coluna_id")
+        .in("telefone", variantArr)
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const storeContato = storeContatos?.[0];
       if (storeContato) {
         storeContatoId = storeContato.id;
+        // Garante tipo/setor corretos e fora do CRM
+        const updates: Record<string, unknown> = {};
+        if (storeContato.tipo !== "loja" && storeContato.tipo !== "colaborador") updates.tipo = "loja";
+        if (storeContato.pipeline_coluna_id) updates.pipeline_coluna_id = null;
+        if (Object.keys(updates).length > 0) {
+          await supabase.from("contatos").update(updates).eq("id", storeContatoId);
+        }
       } else {
         const { data: newCt } = await supabase
           .from("contatos")
-          .insert({ nome: loja_nome, tipo: "loja", telefone: cleanPhone })
+          .insert({
+            nome: loja_nome,
+            tipo: "loja",
+            telefone: cleanPhone,
+            setor_destino: "32cbd99c-4b20-4c8b-b7b2-901904d0aff6",
+            metadata: { nome_confirmado: true },
+          })
           .select("id")
           .single();
         storeContatoId = newCt?.id || null;

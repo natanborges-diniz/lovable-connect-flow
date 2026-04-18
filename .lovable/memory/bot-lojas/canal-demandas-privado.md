@@ -15,9 +15,18 @@ Canal **paralelo e privado** entre operador (CRM) e loja, vinculado ao atendimen
 3. **A loja não vê o número do cliente** — apenas "Cliente: <nome>".
 4. **O atendimento espelho da loja (criado por `criar-demanda-loja`) é marcado** com `metadata.suprimir_ia=true`, `suprimir_bot=true`, `atendimento_demanda=true`, e `modo='ia'`. `ai-triage` e `bot-lojas` abortam imediatamente ao ver essas flags — assim a loja não cai no fluxo padrão de cliente nem no menu corporativo enquanto a demanda está aberta.
 
+## Hard-guard corporativo no webhook (CRÍTICO)
+
+`whatsapp-webhook` faz lookup em `telefones_lojas` **ANTES** de criar/buscar contato, usando `brPhoneCandidates(phone)` (variantes BR com/sem o dígito 9 do celular — Meta às vezes entrega 12 dígitos, Evolution 13). Isso é fundamental porque:
+- Se não checasse, números corporativos virariam contato `tipo='cliente'` no CRM, com nome do `senderName` do WhatsApp (ex: "Franciana" ao invés de "Loja Teste").
+- Lookup `contatos` também usa `.in("telefone", phoneVariants)` pra evitar duplicatas (12 vs 13 dígitos).
+- Se `isLojaEarly`, contato é criado/atualizado com `tipo=loja|colaborador`, `setor_destino=Atendimento Corporativo`, `pipeline_coluna_id=NULL`, nome = `nome_loja`/`nome_colaborador` cadastrado (NUNCA senderName), `metadata.nome_confirmado=true`.
+
+`criar-demanda-loja` aplica a mesma normalização ao buscar/criar o contato espelho da loja.
+
 ## Roteamento de respostas da loja
 
-Em `whatsapp-webhook`, antes de invocar `bot-lojas`/`ai-triage`, `routeDemandaResposta` decide:
+Em `whatsapp-webhook`, antes de invocar `bot-lojas`/`ai-triage`, `routeDemandaResposta` (que também usa `brPhoneCandidates`) decide:
 
 1. **Comando `menu`** (texto exatamente "menu") → escapa: cai no `bot-lojas` normal sem afetar a demanda. Permite à loja consultar pagamentos/boletos sem encerrar.
 2. **Prefixo `#NN`** (`#42`, `#DEM-42`, `#dem42`...) → match explícito por `numero_curto`. Útil quando a loja tem múltiplas demandas abertas.

@@ -44,11 +44,24 @@ serve(async (req) => {
     let { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
     console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
-    // 1. Find or create contato
+    // ─── 0. CORPORATE EARLY-CHECK ───
+    // Lookup telefones_lojas usando variantes BR (com/sem 9) ANTES de criar contato.
+    // Garante que números corporativos NUNCA virem cliente novo no CRM.
+    const phoneVariants = brPhoneCandidates(phone);
+    const { data: lojaCandidates } = await supabase
+      .from("telefones_lojas")
+      .select("*")
+      .in("telefone", phoneVariants)
+      .eq("ativo", true)
+      .limit(1);
+    const lojaMatch = lojaCandidates?.[0] || null;
+    const isLojaEarly = !!lojaMatch;
+
+    // 1. Find or create contato (busca por TODAS as variantes do telefone)
     let { data: contatoResult } = await supabase
       .from("contatos")
       .select("*")
-      .eq("telefone", phone)
+      .in("telefone", phoneVariants)
       .order("created_at", { ascending: true })
       .limit(1);
 
@@ -56,25 +69,38 @@ serve(async (req) => {
 
     // Detect if pushName looks like a real person name (vs a phone number, brand, etc.)
     const realName = looksLikeRealName(senderName, phone) ? senderName : null;
-    const initialNome = realName || phone;
+    // Para corporativo, nome inicial = nome_loja cadastrado (nunca senderName).
+    const initialNome = isLojaEarly
+      ? (lojaMatch.nome_colaborador || lojaMatch.nome_loja)
+      : (realName || phone);
+    // Telefone canônico salvo: se é loja, usa o cadastrado em telefones_lojas (mantém formato consistente).
+    const canonicalPhone = isLojaEarly ? lojaMatch.telefone : phone;
 
     if (!contato) {
-      // Insert new contato; if race condition hits the partial unique index, fetch instead
       const initialMetadata: Record<string, unknown> = {
         nome_perfil_whatsapp: senderName || null,
-        nome_confirmado: false, // só vira true quando o cliente confirmar pela IA
+        nome_confirmado: isLojaEarly ? true : false,
       };
+      const insertPayload: Record<string, unknown> = {
+        nome: initialNome,
+        tipo: isLojaEarly ? (lojaMatch.tipo === "colaborador" ? "colaborador" : "loja") : "cliente",
+        telefone: canonicalPhone,
+        metadata: initialMetadata,
+      };
+      if (isLojaEarly) {
+        insertPayload.setor_destino = lojaMatch.setor_destino_id || "32cbd99c-4b20-4c8b-b7b2-901904d0aff6";
+        insertPayload.pipeline_coluna_id = null;
+      }
       const { data: newContato, error: createErr } = await supabase
         .from("contatos")
-        .insert({ nome: initialNome, tipo: "cliente", telefone: phone, metadata: initialMetadata })
+        .insert(insertPayload)
         .select()
         .single();
       if (createErr) {
-        // Likely duplicate from race condition – fetch existing
         const { data: retry } = await supabase
           .from("contatos")
           .select("*")
-          .eq("telefone", phone)
+          .in("telefone", phoneVariants)
           .limit(1);
         contato = retry?.[0] || null;
         if (!contato) throw createErr;
@@ -117,17 +143,9 @@ serve(async (req) => {
       });
     }
 
-    // 2.5. Check if this is a store phone
-    const cleanPhoneForLoja = phone.replace(/\D/g, "");
-    const { data: lojaMatch } = await supabase
-      .from("telefones_lojas")
-      .select("*")
-      .eq("telefone", cleanPhoneForLoja)
-      .eq("ativo", true)
-      .limit(1)
-      .single();
-
-    const isLoja = !!lojaMatch;
+    // 2.5. Corporate detection (já fizemos lookup early — reusa lojaMatch).
+    const cleanPhoneForLoja = (lojaMatch?.telefone || phone).replace(/\D/g, "");
+    const isLoja = isLojaEarly;
     const isCorporate = isLoja;
     const corporateTipo = lojaMatch?.tipo || "loja"; // loja, colaborador, departamento
 
@@ -875,6 +893,11 @@ async function routeDemandaResposta(
   mediaMime: string | null
 ): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number; matchType?: string }> {
   const cleanPhone = phone.replace(/\D/g, "");
+  const variants = brPhoneCandidates(phone).map((v) => v.replace(/\D/g, ""));
+  const phoneMatches = (other: string) => {
+    const o = String(other || "").replace(/\D/g, "");
+    return variants.includes(o) || o === cleanPhone;
+  };
   const trimmed = (text || "").trim();
 
   // Try explicit #NN prefix first
@@ -896,9 +919,8 @@ async function routeDemandaResposta(
       .limit(1)
       .maybeSingle();
     if (data) {
-      const demandaPhone = String(data.loja_telefone).replace(/\D/g, "");
-      if (demandaPhone === cleanPhone) demanda = data;
-      else console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${demandaPhone}`);
+      if (phoneMatches(data.loja_telefone)) demanda = data;
+      else console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${data.loja_telefone}`);
     }
   }
 
@@ -911,9 +933,7 @@ async function routeDemandaResposta(
       .order("created_at", { ascending: false })
       .limit(20);
 
-    const mineDemandas = (openDemandas || []).filter(
-      (d: any) => String(d.loja_telefone).replace(/\D/g, "") === cleanPhone
-    );
+    const mineDemandas = (openDemandas || []).filter((d: any) => phoneMatches(d.loja_telefone));
 
     if (mineDemandas.length === 1) {
       demanda = mineDemandas[0];
@@ -1199,4 +1219,23 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
   }
 
   return null;
+}
+
+// ─── BR phone variant helper ───
+// WhatsApp/Meta às vezes entrega o número BR sem o "9" do mobile (formato antigo) e
+// outras vezes com. Para fazer match robusto contra telefones_lojas/contatos,
+// geramos as duas variantes (com e sem 9) sempre que o padrão BR mobile é detectado.
+function brPhoneCandidates(phone: string): string[] {
+  const digits = (phone || "").replace(/\D/g, "");
+  if (!digits) return [phone].filter(Boolean);
+  const set = new Set<string>([digits, phone]);
+  // BR celular: 55 + DDD (2) + 9 + 8 dígitos = 13
+  if (digits.length === 13 && digits.startsWith("55") && digits[4] === "9") {
+    set.add("55" + digits.substring(2, 4) + digits.substring(5)); // remove o 9
+  }
+  // BR sem 9: 55 + DDD (2) + 8 dígitos = 12 → adiciona 9
+  if (digits.length === 12 && digits.startsWith("55")) {
+    set.add("55" + digits.substring(2, 4) + "9" + digits.substring(4));
+  }
+  return Array.from(set);
 }
