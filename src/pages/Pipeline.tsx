@@ -143,6 +143,13 @@ export default function Pipeline() {
   const [newColunaNome, setNewColunaNome] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  // Transfer dialog (kanban drag-and-drop) — opens when card is dragged to "Agendamento"
+  const [kanbanTransferOpen, setKanbanTransferOpen] = useState(false);
+  const [kanbanTransferContatoId, setKanbanTransferContatoId] = useState<string>("");
+  const [kanbanTransferContatoNome, setKanbanTransferContatoNome] = useState<string>("");
+  const [kanbanTransferColunaId, setKanbanTransferColunaId] = useState<string>("");
+  const [kanbanTransferColunaNome, setKanbanTransferColunaNome] = useState<string>("");
+
   const isLoading = loadingContatos || loadingColunasVendas;
 
   const filteredContatos = (contatos ?? []).filter((c) => {
@@ -219,6 +226,19 @@ export default function Pipeline() {
     const sourceColunaId = result.source.droppableId;
     if (destColunaId === "sem-coluna") return;
     if (destColunaId === sourceColunaId) return;
+
+    // Detect "Agendamento" column — requires loja + data/hora before persisting
+    const destCol = (colunas ?? []).find((c) => c.id === destColunaId);
+    const isAgendamento = destCol && /agendam/i.test(destCol.nome);
+    if (isAgendamento) {
+      const contato = (contatos ?? []).find((c) => c.id === contatoId);
+      setKanbanTransferContatoId(contatoId);
+      setKanbanTransferContatoNome(contato?.nome ?? "Contato");
+      setKanbanTransferColunaId(destColunaId);
+      setKanbanTransferColunaNome(destCol.nome);
+      setKanbanTransferOpen(true);
+      return; // do NOT move card yet — dialog will create agendamento + clear pipeline_coluna_id
+    }
 
     updateContato.mutate({ id: contatoId, pipeline_coluna_id: destColunaId } as any, {
       onSuccess: async () => {
@@ -726,6 +746,21 @@ export default function Pipeline() {
         firstColumnId={firstColumnId}
       />
 
+      {/* Kanban drag-to-Agendamento dialog */}
+      <TransferPipelineDialog
+        open={kanbanTransferOpen}
+        onOpenChange={setKanbanTransferOpen}
+        destino="lojas"
+        contatoId={kanbanTransferContatoId}
+        contatoNome={kanbanTransferContatoNome}
+        colunaDestinoId={kanbanTransferColunaId}
+        colunaDestinoNome={kanbanTransferColunaNome}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["contatos"] });
+          queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+        }}
+      />
+
       {/* Confirm delete dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <AlertDialogContent>
@@ -816,9 +851,12 @@ function ConversationPanel({
     const setorNome = selectedCol.setor_nome || "CRM";
     const destinoKey = SETOR_MAP[setorNome];
 
-    // If moving to another pipeline, open transfer dialog
-    if (destinoKey) {
-      setTransferDestino(destinoKey);
+    // Detect "Agendamento" column inside CRM (vendas) — also requires loja + data/hora
+    const isAgendamentoCRM = !destinoKey && /agendam/i.test(selectedCol.nome);
+
+    // If moving to another pipeline OR to CRM "Agendamento", open transfer dialog
+    if (destinoKey || isAgendamentoCRM) {
+      setTransferDestino(destinoKey ?? "lojas");
       setTransferColunaId(colunaId);
       setTransferColunaNome(selectedCol.nome);
       setTransferOpen(true);
