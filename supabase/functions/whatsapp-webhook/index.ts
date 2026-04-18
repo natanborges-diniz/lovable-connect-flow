@@ -481,14 +481,21 @@ serve(async (req) => {
     // 7. Check homologação mode
     const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
 
-    // 7.5. DEMANDA LOJA — if message is from a store, check if it's a reply to a demand
+    // 7.5. DEMANDA LOJA — if message is from a store with active demand, route to thread.
+    // Auto-route ANY message (no #NN required) when there's an open demand for this store,
+    // unless the store explicitly types "menu" to escape into the corporate bot.
     if (isCorporate && !shouldSkipBot) {
-      const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
-      if (demandaRoute.handled) {
-        console.log(`[DEMANDA] Routed reply to demanda ${demandaRoute.demandaId} (numero #${demandaRoute.numeroCurto})`);
-        return new Response(JSON.stringify({ status: "ok", action: "demanda_reply", demanda_id: demandaRoute.demandaId }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      const escapeToMenu = /^\s*menu\s*$/i.test(text || "");
+      if (!escapeToMenu) {
+        const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
+        if (demandaRoute.handled) {
+          console.log(`[DEMANDA] Routed reply to demanda ${demandaRoute.demandaId} (numero #${demandaRoute.numeroCurto}) via ${demandaRoute.matchType}`);
+          return new Response(JSON.stringify({ status: "ok", action: "demanda_reply", demanda_id: demandaRoute.demandaId }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        console.log(`[DEMANDA] Store ${phone} typed 'menu' — bypassing demand auto-route, falling through to bot-lojas`);
       }
     }
 
