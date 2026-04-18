@@ -113,6 +113,7 @@ export function TelefonesLojasCard() {
         google_profile_url: data.google_profile_url,
         cargo: data.cargo,
         nome_colaborador: data.nome_colaborador,
+        setor_destino_id: data.setor_destino_id ?? null,
       } as any);
       if (error) throw error;
     },
@@ -134,6 +135,7 @@ export function TelefonesLojasCard() {
         google_profile_url: data.google_profile_url,
         cargo: data.cargo,
         nome_colaborador: data.nome_colaborador,
+        setor_destino_id: data.setor_destino_id ?? null,
       } as any).eq("id", id);
       if (error) throw error;
     },
