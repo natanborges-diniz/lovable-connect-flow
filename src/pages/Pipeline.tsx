@@ -746,6 +746,21 @@ export default function Pipeline() {
         firstColumnId={firstColumnId}
       />
 
+      {/* Kanban drag-to-Agendamento dialog */}
+      <TransferPipelineDialog
+        open={kanbanTransferOpen}
+        onOpenChange={setKanbanTransferOpen}
+        destino="lojas"
+        contatoId={kanbanTransferContatoId}
+        contatoNome={kanbanTransferContatoNome}
+        colunaDestinoId={kanbanTransferColunaId}
+        colunaDestinoNome={kanbanTransferColunaNome}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["contatos"] });
+          queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+        }}
+      />
+
       {/* Confirm delete dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <AlertDialogContent>
