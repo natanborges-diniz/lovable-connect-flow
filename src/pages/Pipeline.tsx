@@ -1064,35 +1064,9 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
       queryClient.invalidateQueries({ queryKey: ["atendimento_contato"] });
       queryClient.invalidateQueries({ queryKey: ["pipeline_latest_messages"] });
 
-      // Devolução humano→IA: dispara continuidade contextual mesmo sem nova msg do cliente
+      // Devolução humano→IA: troca silenciosa. IA aguarda próxima msg do cliente.
       if (targetMode === "ia" && (previousMode === "humano" || previousMode === "hibrido")) {
-        // Anti-double-trigger: bail if invoked < 30s ago
-        const meta = (atendimento.metadata as Record<string, any>) || {};
-        const lastTrigger = meta.last_devolucao_trigger_at ? new Date(meta.last_devolucao_trigger_at).getTime() : 0;
-        if (Date.now() - lastTrigger < 30_000) {
-          toast.success("IA reativada");
-        } else {
-          await supabase
-            .from("atendimentos")
-            .update({ metadata: { ...meta, last_devolucao_trigger_at: new Date().toISOString() } } as any)
-            .eq("id", atendimentoId);
-
-          const mensagemTexto = latestExternalMessage?.conteudo?.trim()
-            || `[${(latestExternalMessage as any)?.tipo_conteudo || "continuidade"}]`;
-          const { data, error: invokeError } = await supabase.functions.invoke("ai-triage", {
-            body: {
-              atendimento_id: atendimentoId,
-              mensagem_texto: mensagemTexto,
-              forcar_processamento: true,
-              motivo_disparo: "devolucao_humano_ia",
-            },
-          });
-
-          if (invokeError) throw invokeError;
-          if (data?.error) throw new Error(data.error);
-
-          toast.success("IA assumiu a continuidade do atendimento");
-        }
+        toast.success("IA reativada — aguardando retorno do cliente");
       } else {
         toast.success(targetMode === "humano" ? "Conversa assumida pelo humano" : "IA reativada");
       }
