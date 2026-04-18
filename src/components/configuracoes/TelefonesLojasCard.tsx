@@ -170,7 +170,7 @@ export function TelefonesLojasCard() {
           </DialogTrigger>
           <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Cadastrar Telefone Corporativo</DialogTitle></DialogHeader>
-            <LojaForm onSubmit={(data) => createTelefone.mutate(data)} loading={createTelefone.isPending} submitLabel="Cadastrar" />
+            <LojaForm setores={setores ?? []} onSubmit={(data) => createTelefone.mutate(data)} loading={createTelefone.isPending} submitLabel="Cadastrar" />
           </DialogContent>
         </Dialog>
       </CardHeader>
