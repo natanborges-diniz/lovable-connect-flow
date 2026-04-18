@@ -35,7 +35,7 @@ serve(async (req) => {
     const phone = contato?.telefone;
     if (!phone) throw new Error("Contact has no phone number");
 
-    const provedor = (atendimento as any).canal_provedor || "meta_official";
+    const provedor = force_provider || (atendimento as any).canal_provedor || "meta_official";
     const cleanPhone = phone.replace(/\D/g, "");
 
     let apiResult: any;
