@@ -315,13 +315,23 @@ function detectPrescriptionCorrection(text: string): {
   return { od, oe, has_addition, rx_type, raw: text.slice(0, 400) };
 }
 
-function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
+function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean, hasReceitas?: boolean, isLCContext?: boolean): {
   resposta: string;
   intencao: string;
   pipeline_coluna: string;
   precisa_humano: boolean;
 } {
   const n = norm(msg);
+
+  // Guardrail: receita salva + contexto LC → nunca devolver "dois caminhos"
+  if (hasReceitas && isLCContext) {
+    return {
+      resposta: "Beleza! Já estou montando aqui as opções de lentes de contato com base na sua receita 😊 Em qual região/bairro você está? Assim eu já indico a loja mais próxima.",
+      intencao: "orcamento_lc",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
 
   // If image context, use dedicated image fallback pool
   if (isImageContext || /\[image\]|\[document\]/.test(n)) {
