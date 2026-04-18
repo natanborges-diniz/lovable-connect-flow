@@ -138,7 +138,7 @@ export default function Atendimentos() {
       </Card>
 
       <Dialog open={!!detailId} onOpenChange={(open) => !open && setDetailId(null)}>
-        <DialogContent className="max-w-2xl w-[calc(100vw-2rem)] h-[90vh] sm:h-[85vh] flex flex-col overflow-hidden p-0 gap-0">
+        <DialogContent className="max-w-2xl w-[calc(100vw-2rem)] h-[96vh] sm:h-[95vh] flex flex-col overflow-hidden p-0 gap-0">
           {detailId && <AtendimentoDetail id={detailId} onStatusChange={(status) => updateStatus.mutate({ id: detailId, status })} />}
         </DialogContent>
       </Dialog>
