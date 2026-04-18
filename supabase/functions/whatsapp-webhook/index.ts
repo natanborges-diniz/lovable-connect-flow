@@ -143,17 +143,9 @@ serve(async (req) => {
       });
     }
 
-    // 2.5. Check if this is a store phone
-    const cleanPhoneForLoja = phone.replace(/\D/g, "");
-    const { data: lojaMatch } = await supabase
-      .from("telefones_lojas")
-      .select("*")
-      .eq("telefone", cleanPhoneForLoja)
-      .eq("ativo", true)
-      .limit(1)
-      .single();
-
-    const isLoja = !!lojaMatch;
+    // 2.5. Corporate detection (já fizemos lookup early — reusa lojaMatch).
+    const cleanPhoneForLoja = (lojaMatch?.telefone || phone).replace(/\D/g, "");
+    const isLoja = isLojaEarly;
     const isCorporate = isLoja;
     const corporateTipo = lojaMatch?.tipo || "loja"; // loja, colaborador, departamento
 
