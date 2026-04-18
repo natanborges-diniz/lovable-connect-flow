@@ -158,6 +158,7 @@ serve(async (req) => {
               solicitacao_id: sol.id,
               contato_id: storeContatoId,
               canal: "whatsapp",
+              canal_provedor: "evolution_api",
               status: "aguardando",
               modo: "humano",
             })
