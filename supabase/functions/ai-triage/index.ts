@@ -315,13 +315,23 @@ function detectPrescriptionCorrection(text: string): {
   return { od, oe, has_addition, rx_type, raw: text.slice(0, 400) };
 }
 
-function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean): {
+function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean, hasReceitas?: boolean, isLCContext?: boolean): {
   resposta: string;
   intencao: string;
   pipeline_coluna: string;
   precisa_humano: boolean;
 } {
   const n = norm(msg);
+
+  // Guardrail: receita salva + contexto LC → nunca devolver "dois caminhos"
+  if (hasReceitas && isLCContext) {
+    return {
+      resposta: "Beleza! Já estou montando aqui as opções de lentes de contato com base na sua receita 😊 Em qual região/bairro você está? Assim eu já indico a loja mais próxima.",
+      intencao: "orcamento_lc",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
 
   // If image context, use dedicated image fallback pool
   if (isImageContext || /\[image\]|\[document\]/.test(n)) {
@@ -1620,8 +1630,9 @@ serve(async (req) => {
       hasRecentUnparsedPrescriptionImage,
       receitas.length > 0,
     );
+    const isLCContextGlobal = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/i.test(recentInboundTexts.join(" | ").toLowerCase());
     if (isDevolucaoHumanoIA) {
-      console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"}`);
+      console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"} | lc_context=${isLCContextGlobal}`);
     }
 
     const messages: any[] = [
@@ -1652,7 +1663,9 @@ serve(async (req) => {
       ...(receitas.length > 0
         ? [{
             role: "system",
-            content: "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente, 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
+            content: isLCContextGlobal
+              ? "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO — LENTES DE CONTATO] Já existe receita interpretada e o contexto é LENTES DE CONTATO. PROIBIDO responder com 'posso seguir por dois caminhos?', 'quer opções ou orçamento?' ou pedir confirmação genérica. PROIBIDO escalar para humano nesse cenário. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes_contato AGORA com os valores da receita mais recente (NÃO consultar_lentes — esse é para óculos), 2) apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta, priorizando DNZ quando compatível, 3) se cliente mencionou esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva) MAS sem omitir quinzenal/mensal — o cliente decide, 4) finalize perguntando a região/bairro pra indicar a loja mais próxima e sugerir agendamento. NUNCA encerre pedindo só marca/tipo se já há receita."
+              : "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente, 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
           }]
         : []),
     ];
@@ -1872,6 +1885,8 @@ serve(async (req) => {
       if (forcedIntent) {
         const forceMsg = forcedIntent.tool === "consultar_lentes"
           ? "[SISTEMA: LOOP DETECTADO + INTENT CLARO] Você está repetindo a mesma pergunta. O cliente JÁ pediu orçamento e há receita salva. AÇÃO OBRIGATÓRIA: chame consultar_lentes AGORA com a receita mais recente. NÃO pergunte de novo o que ele quer."
+          : forcedIntent.tool === "consultar_lentes_contato"
+          ? "[SISTEMA: LOOP DETECTADO + INTENT CLARO — LENTES DE CONTATO] Você está repetindo a mesma pergunta. O cliente JÁ pediu orçamento de LENTES DE CONTATO e há receita salva. AÇÃO OBRIGATÓRIA: chame consultar_lentes_contato AGORA (NÃO consultar_lentes) com os valores da receita mais recente, apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias: diária + quinzenal/mensal), priorize DNZ quando compatível, e termine perguntando a região pra indicar a loja. PROIBIDO escalar para humano nesse cenário. PROIBIDO repetir 'posso seguir por dois caminhos'."
           : forcedIntent.tool === "interpretar_receita"
           ? "[SISTEMA: LOOP DETECTADO + IMAGEM PENDENTE] Você está repetindo a mesma pergunta. O cliente já enviou uma imagem (provável receita) e pediu orçamento. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA usando a imagem do histórico. NÃO pergunte se pode analisar — analise."
           : forcedIntent.tool === "agendar_cliente_intent"
@@ -1895,9 +1910,11 @@ serve(async (req) => {
           precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: "humano",
         });
       }
-    } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "interpretar_receita")) {
+    } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita")) {
       const hint = forcedIntent.tool === "consultar_lentes"
         ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere."
+        : forcedIntent.tool === "consultar_lentes_contato"
+        ? "[SISTEMA: INTENT CLARO — LENTES DE CONTATO] Cliente pediu orçamento de LENTES DE CONTATO e há receita salva. Use consultar_lentes_contato AGORA (NÃO consultar_lentes — esse é para óculos), apresente 2-3 opções com descartes VARIADOS (diária + quinzenal/mensal), priorize DNZ, e termine perguntando a região. PROIBIDO repetir 'posso seguir por dois caminhos'. PROIBIDO escalar para humano."
         : "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há imagem pendente. Use interpretar_receita AGORA — não pergunte se pode analisar.";
       messages.push({ role: "system", content: hint });
       console.log(`[INTENT-FORCE] Hinting ${forcedIntent.tool} (no loop, but clear intent)`);
@@ -1967,7 +1984,7 @@ serve(async (req) => {
         resposta = plainContent;
         validatorFlags.push("no_tool_plain_text");
       } else {
-        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
         resposta = fallback.resposta;
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
@@ -2640,7 +2657,7 @@ serve(async (req) => {
                   validatorFlags.push("deterministic_fallback");
                   console.log("[VALIDATOR] Using rotating fallback");
                 } else {
-                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
                   resposta = contextualFallback.resposta;
                   intencao = contextualFallback.intencao;
                   pipeline_coluna = contextualFallback.pipeline_coluna;
@@ -2658,7 +2675,7 @@ serve(async (req) => {
               resposta = fb;
               validatorFlags.push("deterministic_fallback");
             } else {
-              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
               resposta = contextualFallback.resposta;
               intencao = contextualFallback.intencao;
               pipeline_coluna = contextualFallback.pipeline_coluna;
@@ -2680,7 +2697,7 @@ serve(async (req) => {
         pipeline_coluna = "Orçamento";
         validatorFlags.push("empty_response_image_fallback");
       } else {
-        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
         resposta = fallback.resposta;
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
