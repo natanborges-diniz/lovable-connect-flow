@@ -1630,8 +1630,9 @@ serve(async (req) => {
       hasRecentUnparsedPrescriptionImage,
       receitas.length > 0,
     );
+    const isLCContextGlobal = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/i.test(recentInboundTexts.join(" | ").toLowerCase());
     if (isDevolucaoHumanoIA) {
-      console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"}`);
+      console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"} | lc_context=${isLCContextGlobal}`);
     }
 
     const messages: any[] = [
