@@ -851,9 +851,12 @@ function ConversationPanel({
     const setorNome = selectedCol.setor_nome || "CRM";
     const destinoKey = SETOR_MAP[setorNome];
 
-    // If moving to another pipeline, open transfer dialog
-    if (destinoKey) {
-      setTransferDestino(destinoKey);
+    // Detect "Agendamento" column inside CRM (vendas) — also requires loja + data/hora
+    const isAgendamentoCRM = !destinoKey && /agendam/i.test(selectedCol.nome);
+
+    // If moving to another pipeline OR to CRM "Agendamento", open transfer dialog
+    if (destinoKey || isAgendamentoCRM) {
+      setTransferDestino(destinoKey ?? "lojas");
       setTransferColunaId(colunaId);
       setTransferColunaNome(selectedCol.nome);
       setTransferOpen(true);
