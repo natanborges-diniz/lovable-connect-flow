@@ -50,3 +50,6 @@ verify_jwt = false
 
 [functions.watchdog-inbound-orfao]
 verify_jwt = false
+
+[functions.admin-reset-password]
+verify_jwt = false

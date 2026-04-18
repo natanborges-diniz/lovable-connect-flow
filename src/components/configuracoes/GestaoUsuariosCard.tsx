@@ -8,7 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Users, Plus, Loader2, HelpCircle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Users, Plus, Loader2, HelpCircle, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 
@@ -90,6 +100,27 @@ export function GestaoUsuariosCard() {
   // Pending "setor" intent: user picked Setor in dropdown but hasn't added any area yet.
   // Without this, currentLevel falls back to null and the Áreas column hides the picker.
   const [pendingSetorIntent, setPendingSetorIntent] = useState<Set<string>>(new Set());
+
+  // Reset password dialog state
+  const [resetTarget, setResetTarget] = useState<{ id: string; nome: string } | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+
+  const resetPassword = useMutation({
+    mutationFn: async ({ userId, password }: { userId: string; password: string }) => {
+      const { data, error } = await supabase.functions.invoke("admin-reset-password", {
+        body: { user_id: userId, new_password: password },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data;
+    },
+    onSuccess: () => {
+      toast.success("Senha redefinida com sucesso");
+      setResetTarget(null);
+      setNewPassword("");
+    },
+    onError: (e: any) => toast.error(e.message ?? "Falha ao redefinir senha"),
+  });
 
   const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
   const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
@@ -257,6 +288,7 @@ export function GestaoUsuariosCard() {
                     </div>
                   </TableHead>
                   <TableHead>Ativo</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -379,6 +411,26 @@ export function GestaoUsuariosCard() {
                           onCheckedChange={(v) => toggleAtivo.mutate({ id: p.id, ativo: v })}
                         />
                       </TableCell>
+                      <TableCell className="text-right">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0"
+                              onClick={() => {
+                                setResetTarget({ id: p.id, nome: p.nome });
+                                setNewPassword("");
+                              }}
+                            >
+                              <KeyRound className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="left" className="text-xs">
+                            Redefinir senha
+                          </TooltipContent>
+                        </Tooltip>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -387,6 +439,47 @@ export function GestaoUsuariosCard() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!resetTarget} onOpenChange={(o) => !o && setResetTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Redefinir senha</DialogTitle>
+            <DialogDescription>
+              Defina uma nova senha para <span className="font-medium">{resetTarget?.nome}</span>.
+              Avise o usuário para trocá-la após o primeiro login.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="new-password">Nova senha</Label>
+            <Input
+              id="new-password"
+              type="text"
+              autoComplete="new-password"
+              placeholder="Mínimo 6 caracteres"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setResetTarget(null)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={resetPassword.isPending || newPassword.length < 6 || !resetTarget}
+              onClick={() =>
+                resetTarget &&
+                resetPassword.mutate({ userId: resetTarget.id, password: newPassword })
+              }
+            >
+              {resetPassword.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Salvar nova senha"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }
