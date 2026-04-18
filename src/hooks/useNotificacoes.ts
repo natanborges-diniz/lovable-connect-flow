@@ -4,12 +4,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
 export function useNotificacoes() {
-  const { user, profile } = useAuth();
+  const { user, profile, isAuthReady } = useAuth();
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ["notificacoes", user?.id],
-    enabled: !!user,
+    enabled: !!user && isAuthReady,
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("notificacoes")

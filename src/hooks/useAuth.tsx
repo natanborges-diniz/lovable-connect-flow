@@ -21,12 +21,20 @@ interface Profile {
   ativo: boolean;
 }
 
+interface SetorInfo {
+  id: string;
+  nome: string;
+}
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: Profile | null;
   roles: UserRole[];
+  setores: SetorInfo[];
   loading: boolean;
+  /** True quando a sessão está restaurada E perfil/roles/setores foram hidratados (ou não há usuário logado). */
+  isAuthReady: boolean;
   isAdmin: boolean;
   isOperador: boolean;
   hasRole: (role: AppRole) => boolean;
@@ -41,7 +49,9 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   profile: null,
   roles: [],
+  setores: [],
   loading: true,
+  isAuthReady: false,
   isAdmin: false,
   isOperador: false,
   hasRole: () => false,
@@ -56,7 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<UserRole[]>([]);
+  const [setores, setSetores] = useState<SetorInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
   const fetchProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -82,6 +94,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const fetchSetoresByIds = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return [] as SetorInfo[];
+    const { data, error } = await supabase
+      .from("setores")
+      .select("id, nome")
+      .in("id", ids);
+    if (error) throw error;
+    return (data || []) as SetorInfo[];
+  }, []);
+
   const hydrateAuthState = useCallback(async (nextSession: Session | null) => {
     setSession(nextSession);
     setUser(nextSession?.user ?? null);
@@ -89,11 +111,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!nextSession?.user) {
       setProfile(null);
       setRoles([]);
+      setSetores([]);
       setLoading(false);
+      setIsAuthReady(true); // anônimo já está "pronto"
       return;
     }
 
     setLoading(true);
+    setIsAuthReady(false);
 
     try {
       const [nextProfile, nextRoles] = await Promise.all([
@@ -101,33 +126,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fetchRoles(nextSession.user.id),
       ]);
 
-      // Diagnóstico temporário SSO/cross-login
+      // Setor efetivo: roles primeiro, depois profile como fallback
+      const setorIdsFromRoles = nextRoles.filter((r) => r.setor_id).map((r) => r.setor_id!);
+      const effectiveIds =
+        setorIdsFromRoles.length > 0
+          ? setorIdsFromRoles
+          : nextProfile?.setor_id
+          ? [nextProfile.setor_id]
+          : [];
+
+      const nextSetores = await fetchSetoresByIds([...new Set(effectiveIds)]);
+
       console.log("[useAuth] hydrated", {
         userId: nextSession.user.id,
         email: nextSession.user.email,
         profile: nextProfile,
         roles: nextRoles,
+        setores: nextSetores,
       });
 
       setProfile(nextProfile);
       setRoles(nextRoles);
+      setSetores(nextSetores);
     } catch (err) {
       console.error("[useAuth] hydrate error", err);
       setProfile(null);
       setRoles([]);
+      setSetores([]);
     } finally {
       setLoading(false);
+      setIsAuthReady(true);
     }
-  }, [fetchProfile, fetchRoles]);
+  }, [fetchProfile, fetchRoles, fetchSetoresByIds]);
 
   useEffect(() => {
     setLoading(true);
+    setIsAuthReady(false);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
-        // Sincronamente sinaliza loading para evitar flash de "roles vazias"
-        // entre o evento SIGNED_IN e a hidratação do profile/roles.
-        if (nextSession?.user) setLoading(true);
+        if (nextSession?.user) {
+          setLoading(true);
+          setIsAuthReady(false);
+        }
         setTimeout(() => {
           void hydrateAuthState(nextSession);
         }, 0);
@@ -152,8 +193,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [roles]
   );
 
-  // Fallback: usa profile.setor_id quando user_roles ainda não tem setor.
-  // Garante que SSO/cross-login não fique sem setor por atraso de provisionamento.
   const getEffectiveSetorIds = useCallback(() => {
     const fromRoles = roles.filter((r) => r.setor_id).map((r) => r.setor_id!);
     if (fromRoles.length > 0) return fromRoles;
@@ -172,10 +211,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setProfile(null);
     setRoles([]);
+    setSetores([]);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, loading, isAdmin, isOperador, hasRole, getUserSetorIds, getEffectiveSetorIds, getUserLojaNames, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        roles,
+        setores,
+        loading,
+        isAuthReady,
+        isAdmin,
+        isOperador,
+        hasRole,
+        getUserSetorIds,
+        getEffectiveSetorIds,
+        getUserLojaNames,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
