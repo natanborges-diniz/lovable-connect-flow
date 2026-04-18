@@ -1984,7 +1984,7 @@ serve(async (req) => {
         resposta = plainContent;
         validatorFlags.push("no_tool_plain_text");
       } else {
-        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
         resposta = fallback.resposta;
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
@@ -2657,7 +2657,7 @@ serve(async (req) => {
                   validatorFlags.push("deterministic_fallback");
                   console.log("[VALIDATOR] Using rotating fallback");
                 } else {
-                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+                  const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
                   resposta = contextualFallback.resposta;
                   intencao = contextualFallback.intencao;
                   pipeline_coluna = contextualFallback.pipeline_coluna;
@@ -2675,7 +2675,7 @@ serve(async (req) => {
               resposta = fb;
               validatorFlags.push("deterministic_fallback");
             } else {
-              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+              const contextualFallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
               resposta = contextualFallback.resposta;
               intencao = contextualFallback.intencao;
               pipeline_coluna = contextualFallback.pipeline_coluna;
@@ -2697,7 +2697,7 @@ serve(async (req) => {
         pipeline_coluna = "Orçamento";
         validatorFlags.push("empty_response_image_fallback");
       } else {
-        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext);
+        const fallback = deterministicIntentFallback(currentMsg, inboundCount, isHibrido, recentOutbound, isImageContext, receitas.length > 0, isLCContextGlobal);
         resposta = fallback.resposta;
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
