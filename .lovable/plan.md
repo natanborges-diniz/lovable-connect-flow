@@ -1,103 +1,70 @@
 
-## Diagnóstico atualizado
+O usuário quer um cadastro simples de telefones que, ao chegarem, são direcionados automaticamente para um setor — exatamente como já acontece com a Diniz E-commerce hoje via "ponte de mensageria".
 
-As correções anteriores já cobriram o óbvio:
-- fallback por `profile.setor_id`
-- `sso-login` mais robusto
-- `/interno` usando setor efetivo
+Vou revisar o que já existe e propor o caminho mais limpo.
 
-Se ainda falhou, o problema mais provável mudou:
+## O que já existe (e funciona)
 
-1. **A sessão da Marilene não está chegando “pronta” quando o app começa a consultar dados**
-   - isso pode fazer queries autenticadas rodarem cedo demais
-   - resultado: menu e telas setoriais continuam sem reconhecer o setor na hora certa
+1. **Tabela `telefones_lojas`** — já cadastra telefones corporativos (loja/colaborador/departamento) com `tipo`, `nome`, etc. Tem trigger `on_telefone_loja_change` que dispara `sanitize_corporate_contact` automaticamente.
 
-2. **O topo ainda depende de uma segunda consulta em `setores` para montar os módulos**
-   - mesmo com `profile.setor_id` resolvido, o menu ainda espera `useSetorNames()`
-   - se essa consulta falhar/atrasar no primeiro ciclo, a UI continua inconsistente
+2. **Função `sanitize_corporate_contact`** — quando um telefone é cadastrado:
+   - força `setor_destino = Atendimento Corporativo` no contato
+   - ajusta `tipo` (loja/colaborador)
+   - encerra atendimentos humanos órfãos
+   - limpa coluna de pipeline não-corporativa
 
-3. **Ainda falta validar o dado real da Marilene no backend**
-   - hoje os logs disponíveis mostram só um admin
-   - então ainda não temos a prova do que aconteceu no login real dela
+3. **Sistema de Ponte (`contato_ponte`)** — quando contato tem `setor_destino` e o setor tem **um único** responsável ativo, ativa modo "ponte": mensagens do WhatsApp espelham na mensageria interna do responsável e respostas dele voltam pelo WhatsApp. Trigger `on_contato_setor_destino_change` faz isso automaticamente.
 
-## Plano de correção
+4. **UI já existe**: `TelefonesLojasCard` em Configurações faz CRUD completo.
 
-### 1. Auditar o login real da Marilene no backend
-Verificar no backend:
-- `profiles` da Marilene
-- `user_roles` da Marilene
-- logs reais da função `sso-login` no momento do login
-- se o `departamento` chegou
-- se virou `setor_id`
-- se o `user_roles` foi criado/achado
+## O gap
 
-Objetivo:
-- separar se o problema é **dados/provisionamento** ou **hidratação da sessão no front**
+O fluxo atual **força tudo para "Atendimento Corporativo"**. O caso Diniz funciona porque:
+- foi cadastrado como tipo `loja` em `telefones_lojas`
+- alguém manualmente trocou o `setor_destino` do contato para "Dpto Armações"
+- como Marilene é a única no setor, a ponte ativou
 
-### 2. Remover a dependência frágil do menu em uma query secundária
-Hoje o `TopNavigation` ainda busca nomes em `setores` para decidir os módulos.
+Para o usuário poder cadastrar novos telefones e escolher o setor de destino direto no cadastro (sem ajuste manual), falta:
 
-Vou mudar para que a própria autenticação já entregue o setor efetivo pronto para uso no menu, sem depender de uma segunda consulta no primeiro render.
+1. **Permitir escolher o setor de destino no cadastro** do telefone (hoje só pode escolher tipo loja/colaborador/departamento, mas não para qual setor mandar).
+2. **Ajustar `sanitize_corporate_contact`** para respeitar um `setor_destino_id` configurado no `telefones_lojas` em vez de sempre forçar "Atendimento Corporativo".
 
-Objetivo:
-- o menu da Marilene aparecer imediatamente quando o setor já existir no perfil/roles
+## Plano
 
-### 3. Implementar “auth ready” de verdade
-Ajustar a camada de autenticação para separar:
-- sessão restaurada
-- usuário autenticado
-- perfil/roles hidratados
-- app pronto para consultar dados protegidos
+### 1. Adicionar coluna `setor_destino_id` em `telefones_lojas`
+Migration adicionando a coluna (nullable, FK lógica para `setores.id`). Quando preenchida, sobrescreve o setor padrão corporativo.
 
-Depois disso, as queries e telas só rodam quando a autenticação estiver realmente pronta.
+### 2. Atualizar `sanitize_corporate_contact`
+Migration alterando a função: se o registro de `telefones_lojas` tiver `setor_destino_id` preenchido, usa ele; senão cai no "Atendimento Corporativo" como hoje.
 
-Objetivo:
-- eliminar corrida de inicialização após SSO/magic link
+### 3. Atualizar `TelefonesLojasCard.tsx`
+Adicionar um `<Select>` "Setor de Destino" no formulário (lista vinda da tabela `setores` ativos). Mostrar a coluna "Setor" na tabela.
 
-### 4. Travar queries dependentes de login até a autenticação estar pronta
-Aplicar `enabled` com estado de prontidão nas queries mais sensíveis, começando por:
-- navegação/topbar
-- mensagens internas
-- notificações
-- telas setoriais
+### 4. Validar fluxo end-to-end
+Testar com um telefone novo: cadastrar → escolher setor → mandar WhatsApp do número → confirmar que cai como mensagem interna no responsável único do setor.
 
-Objetivo:
-- impedir que o app monte a UI com estado incompleto
+## Arquivos a editar
 
-### 5. Validar o fluxo real da Marilene
-Depois da correção:
-1. logout completo
-2. login pelo Em Foco
-3. entrada aqui via SSO
-4. confirmar que aparecem:
-   - Interno
-   - Mensagens
-   - Tarefas
-5. confirmar que `/interno` abre no setor correto dela
-
-## Arquivos previstos
-
-- `src/hooks/useAuth.tsx`
-- `src/components/layout/TopNavigation.tsx`
-- `src/components/layout/AppLayout.tsx`
-- `src/hooks/useNotificacoes.ts`
-- `src/hooks/useMensagensInternas.ts`
-- possivelmente páginas com queries setoriais que dependam de auth pronta
-- `supabase/functions/sso-login/index.ts` apenas se os logs mostrarem falha de provisionamento
+- **Nova migration**: adicionar coluna + atualizar função `sanitize_corporate_contact`
+- `src/components/configuracoes/TelefonesLojasCard.tsx`: campo "Setor de Destino" + coluna na tabela
+- `.lovable/memory/arquitetura/ponte-mensageria-whatsapp.md`: registrar que `setor_destino_id` em `telefones_lojas` agora dirige a ponte
 
 ## Resultado esperado
 
-Depois disso, a Marilene deve:
-- entrar pelo Em Foco
-- ter setor reconhecido sem corrida de inicialização
-- ver os menus corretos imediatamente
-- cair na área setorial esperada
+Usuário entra em Configurações → Telefones Corporativos → Novo Cadastro:
+- digita telefone
+- escolhe tipo (loja/colaborador/departamento)
+- **escolhe setor de destino** (Dpto Armações, Financeiro, TI, etc.)
+- salva
+
+Quando esse número mandar WhatsApp:
+- contato é criado/atualizado
+- `setor_destino` vai pro setor escolhido
+- se o setor tem 1 responsável → ponte ativa, msg cai no chat interno dele
+- se tem 0 ou >1 → fluxo normal de IA/humano
 
 ## Detalhes técnicos
 
-- Estratégia nova: parar de “remendar fallback” isolado e atacar a causa raiz:
-  - **auth readiness**
-  - **menu sem query extra desnecessária**
-  - **validação do login real no backend**
-- Se os logs mostrarem que `sso-login` já entrega `profile.setor_id` e `user_roles`, a correção será 100% no frontend
-- Se os logs mostrarem que o setor não está sendo persistido para a Marilene, a correção volta para o fluxo SSO/provisionamento
+- A ponte só ativa com responsável único — isso é regra existente, não muda. Se o usuário cadastrar setor com vários atendentes, a msg cai no atendimento normal do setor (não vira ponte 1:1).
+- O reaproveitamento de contato por telefone já existe (`idx_contatos_telefone_unique`), então re-cadastrar não duplica.
+- A trigger `on_telefone_loja_change` já dispara `sanitize_corporate_contact` em INSERT/UPDATE, então mudar o setor no cadastro reflete imediatamente nos contatos existentes daquele telefone.
