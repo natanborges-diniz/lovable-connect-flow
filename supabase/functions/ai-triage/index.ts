@@ -1230,6 +1230,12 @@ serve(async (req) => {
     if (atendimento.modo === "ponte") {
       return jsonResponse({ status: "skipped", reason: "modo ponte (operado via mensageria interna)" });
     }
+    // Suppress IA on demand-mirror atendimentos (created by criar-demanda-loja)
+    const _atMeta = (atendimento.metadata as Record<string, any>) || {};
+    if (_atMeta.suprimir_ia === true || _atMeta.atendimento_demanda === true) {
+      console.log(`[ABORT] atendimento ${atendimento_id} marked as suprimir_ia (demanda mirror) — skipping IA`);
+      return jsonResponse({ status: "skipped", reason: "atendimento espelho de demanda (suprimir_ia)" });
+    }
 
     // ── 1.5. DEBOUNCE — prevent parallel processing for rapid messages ──
     const meta = (atendimento.metadata as Record<string, any>) || {};
