@@ -2,70 +2,71 @@
 
 ## Diagnóstico
 
-Quando a loja respondeu o teste, a mensagem caiu no `whatsapp-webhook` → como o telefone é corporativo (`telefones_lojas`) e tem demanda aberta, deveria ter sido roteada via `routeDemandaResposta` (memory `canal-demandas-privado.md`). Mas: a loja respondeu **sem prefixo `#NN`**, então caiu no fluxo padrão. Pior: o atendimento da loja foi criado por `criar-demanda-loja` em modo `humano` sem operador → `ai-triage` ou bot-lojas pegou e entrou em loop.
+A loja Teste respondeu ao número oficial e o webhook criou um card novo no CRM como se fosse cliente ("Franciana"). Causa raiz provável:
 
-## Causa raiz
+1. **Webhook não detectou que o telefone é corporativo** antes de criar contato/atendimento. Deveria checar `telefones_lojas` no início do fluxo de inbound e:
+   - NUNCA criar contato como `tipo='cliente'`
+   - NUNCA inserir no pipeline CRM
+   - Rotear direto pra thread da demanda aberta (já implementamos auto-routing, mas só funciona se o atendimento já existir como "espelho da loja"; se webhook criou um atendimento novo de cliente, passou por fora)
+2. **Trigger `sanitize_corporate_contact`** existe e corrige tipo/setor — mas roda só quando `telefones_lojas` muda. Não roda no momento que o webhook cria o contato. Resultado: contato nasce como cliente e fica até alguém mexer no cadastro da loja.
+3. **"Franciana"** é o `senderName` do WhatsApp da loja (nome do dono do número). Sem checagem corporativa, virou nome do "cliente novo".
 
-1. Loja não sabe/esqueceu de usar `#1` no início da resposta.
-2. Mesmo se soubesse, não há **vínculo automático**: enquanto há demanda aberta com aquela loja para um operador, **toda mensagem dela deve ir pra thread da demanda por padrão**, não exigir prefixo.
-3. Falta encerramento explícito da demanda → fica aberta pra sempre.
-4. Atendimento da loja criado pela demanda fica ativo e a IA/bot-lojas tentam processar mensagens normais.
+## Investigação a confirmar (default mode)
+
+- SQL: `contatos` com telefone da Loja Teste — quantos registros existem? Algum criado agora? Tipo atual?
+- SQL: `atendimentos` recentes desse telefone — qual `solicitacao_id`, `pipeline_coluna_id` da solicitação, `metadata`?
+- `whatsapp-webhook/index.ts` — ler o trecho de criação de contato/atendimento pra inbound e identificar onde falta o early-check corporativo.
+- `criar-demanda-loja/index.ts` — confirmar que o atendimento espelho da loja foi criado com telefone exato e que o webhook deveria ter encontrado.
+
+## Causa específica do "novo card Franciana"
+
+Hipótese forte: o atendimento espelho criado por `criar-demanda-loja` foi achado pelo auto-routing OU não foi (verificar). Mas o webhook **também** seguiu o fluxo padrão e criou um segundo registro/card no CRM (Franciana). Provavelmente o auto-routing está gravando a msg na thread da demanda **mas não está dando `return` cedo o suficiente** — o resto do webhook continua e cria o cliente.
 
 ## Plano
 
-### 1. Auto-roteamento por demanda ativa (sem exigir `#NN`)
-Em `whatsapp-webhook`, antes de chamar `bot-lojas`/`ai-triage`:
-- Se telefone do remetente é loja corporativa **E** existe `demandas_loja` com `status='aberta'` para essa loja → roteia automaticamente pra thread da demanda mais recente (`direcao='loja_para_operador'`), marca `vista_pelo_operador=false`, **NÃO chama bot-lojas nem IA**.
-- Prefixo `#NN` continua suportado pra desambiguar quando a loja tem múltiplas demandas abertas simultâneas.
-- Comando `menu` força sair da demanda e abrir bot-lojas normal (escape hatch pra loja acessar pagamentos/boletos sem encerrar a demanda).
+### 1. Hard-guard corporativo no `whatsapp-webhook` (raiz do problema)
+No início do processamento inbound, ANTES de criar/buscar contato:
+- Lookup em `telefones_lojas` por telefone normalizado.
+- Se encontrado:
+  - Forçar `contatos.tipo = loja|colaborador` (upsert).
+  - Forçar `contatos.setor_destino = setor_destino_id` da loja (ou `Atendimento Corporativo` default).
+  - Forçar `contatos.pipeline_coluna_id = NULL` (NUNCA entrar no CRM de vendas).
+  - **Ignorar `senderName`** do WhatsApp se contato já existe (não sobrescrever nome cadastrado da loja).
+  - Se `senderName` veio e contato é novo, usar `nome_loja` da `telefones_lojas`, não o `senderName`.
 
-### 2. Suprimir IA/bot no atendimento "espelho" da loja
-O atendimento criado por `criar-demanda-loja` para a loja serve só pra registrar mensagens WhatsApp. Marcar com flag clara:
-- `atendimentos.modo = 'demanda_loja'` (novo modo) OU `metadata.suprimir_ia=true, suprimir_bot=true`.
-- `ai-triage` e `bot-lojas` checam essa flag no início e abortam imediatamente.
+### 2. Auto-routing precisa ser terminal
+Quando há demanda aberta pra essa loja:
+- Gravar msg na thread (`demanda_mensagens`).
+- Atualizar `demandas_loja.vista_pelo_operador=false, ultima_mensagem_loja_at=now()`.
+- Notificar operador (`notificacoes` pro `solicitante_id`).
+- **`return` imediato** — não chamar bot-lojas, não chamar IA, não criar/atualizar atendimento de cliente, não criar solicitação no CRM.
+- A msg também é gravada em `mensagens` do atendimento espelho (pra histórico WhatsApp), mas sem efeitos colaterais no CRM.
 
-### 3. Encerramento explícito pelo operador
-- Botão **"Encerrar demanda"** no `DemandaThreadDialog` → chama nova EF `encerrar-demanda-loja`:
-  - Seta `demandas_loja.status='encerrada'`, `encerrada_at=now()`.
-  - Envia WhatsApp pra loja: *"✅ Demanda DEM-2026-00001 encerrada pelo operador. Obrigado! Para nova solicitação, digite menu."*
-  - Adiciona msg `direcao='sistema'` na thread.
-  - **Após encerrar**, próxima mensagem da loja cai no bot-lojas normal (menu corporativo).
+### 3. Limpeza do estrago atual
+Migration / SQL pontual:
+- Achar contato "Franciana" criado agora pra esse telefone, mergear com o contato real da Loja Teste (mover msgs/atendimentos), deletar o duplicado OU só corrigir tipo/setor/coluna.
+- Rodar `sanitize_corporate_contact` pro telefone da Loja Teste.
 
-### 4. Auto-encerramento de segurança
-Cron diário (ou via `cron_jobs`): demandas `aberta`/`respondida` sem atividade há > 7 dias → auto-encerra com nota sistema. Evita lixo eterno.
+### 4. UI: card da demanda mostra a resposta
+No `DemandaLojaPanel` / `DemandaThreadDialog`:
+- Garantir que toda nova msg na thread aparece em tempo real (Realtime na `demanda_mensagens` por `demanda_id`).
+- Badge "🟡 Resposta nova" no card quando `vista_pelo_operador=false`.
+- Marcar `vista_pelo_operador=true` ao abrir a thread.
 
-### 5. UI: badge de demanda ativa + ação rápida
-No `DemandaLojaPanel`:
-- Badge "🟢 Aguardando loja" / "🟡 Resposta nova" / "⚪ Encerrada".
-- Botão "Encerrar" visível em demandas abertas/respondidas.
-- Lista mostra contador de mensagens não vistas.
+### 5. Memory update
+Atualizar `mem://bot-lojas/canal-demandas-privado.md` e `mem://crm/fila-prioridade-humana.md`:
+- Webhook DEVE checar `telefones_lojas` antes de qualquer criação de contato.
+- Auto-routing pra demanda é terminal (return imediato, sem efeitos no CRM).
 
 ## Arquivos afetados
 
-- `supabase/functions/whatsapp-webhook/index.ts` — auto-routing por demanda ativa antes de bot/IA.
-- `supabase/functions/ai-triage/index.ts` — abort early se `modo='demanda_loja'` ou flag metadata.
-- `supabase/functions/bot-lojas/index.ts` — mesmo abort + suporte ao comando `menu` que sai da demanda.
-- `supabase/functions/criar-demanda-loja/index.ts` — criar atendimento da loja já com `modo='demanda_loja'` ou flag de supressão.
-- `supabase/functions/encerrar-demanda-loja/index.ts` — **nova**: encerra demanda + WA pra loja + nota sistema.
-- `src/components/atendimentos/DemandaLojaPanel.tsx` + `DemandaThreadDialog.tsx` — botão Encerrar + badges de status.
-- Migration: adicionar valor `'demanda_loja'` ao check de `atendimentos.modo` (se for enum/check), ou só usar `metadata.suprimir_ia`. **Prefiro `metadata.suprimir_ia=true` + `metadata.suprimir_bot=true`** — sem migration de schema, mais flexível.
-- Memory update: `mem://bot-lojas/canal-demandas-privado.md` — documentar auto-routing sem prefixo + encerramento explícito.
+- `supabase/functions/whatsapp-webhook/index.ts` — early corporate guard + auto-routing terminal.
+- `supabase/functions/criar-demanda-loja/index.ts` — garantir que contato espelho da loja seja upserted com tipo/setor corretos (idempotente).
+- Migration/SQL — limpar contato "Franciana" duplicado e rodar `sanitize_corporate_contact`.
+- `src/components/atendimentos/DemandaLojaPanel.tsx` + `DemandaThreadDialog.tsx` — Realtime + marcar como vista.
+- `mem://bot-lojas/canal-demandas-privado.md` + `mem://crm/fila-prioridade-humana.md` — atualizar regras.
 
-## Fluxo final
+## Resultado
 
-```text
-Operador "Solicitar à loja"
-  → criar-demanda-loja (atendimento loja com suprimir_ia/bot=true)
-  → WA pra loja com pergunta + instrução opcional #NN
-
-Loja responde qualquer coisa
-  → webhook detecta demanda aberta → vai pra thread (NÃO chama IA/bot)
-  → operador vê resposta, edita, "Encaminhar ao cliente"
-
-Operador clica "Encerrar demanda"
-  → encerrar-demanda-loja → WA confirma → status=encerrada
-
-Próxima msg da loja (sem demanda ativa)
-  → bot-lojas normal (menu corporativo)
-```
+Loja Teste responde → webhook detecta corporativo → grava direto na thread da demanda → operador vê no card original → nenhum card cliente "Franciana" criado. Próxima msg da loja sem demanda ativa cai no bot-lojas (menu corporativo) — nunca no CRM de vendas.
 
