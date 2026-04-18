@@ -1661,16 +1661,12 @@ serve(async (req) => {
           }]
         : []),
       ...(receitas.length > 0
-        ? (() => {
-            const joinedRecent = recentInboundTexts.join(" | ").toLowerCase();
-            const isLCContext = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/i.test(joinedRecent);
-            return [{
-              role: "system",
-              content: isLCContext
-                ? "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO — LENTES DE CONTATO] Já existe receita interpretada e o contexto é LENTES DE CONTATO. PROIBIDO responder com 'posso seguir por dois caminhos?', 'quer opções ou orçamento?' ou pedir confirmação genérica. PROIBIDO escalar para humano nesse cenário. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes_contato AGORA com os valores da receita mais recente (NÃO consultar_lentes — esse é para óculos), 2) apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta, priorizando DNZ quando compatível, 3) se cliente mencionou esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva) MAS sem omitir quinzenal/mensal — o cliente decide, 4) finalize perguntando a região/bairro pra indicar a loja mais próxima e sugerir agendamento. NUNCA encerre pedindo só marca/tipo se já há receita."
-                : "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente, 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
-            }];
-          })()
+        ? [{
+            role: "system",
+            content: isLCContextGlobal
+              ? "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO — LENTES DE CONTATO] Já existe receita interpretada e o contexto é LENTES DE CONTATO. PROIBIDO responder com 'posso seguir por dois caminhos?', 'quer opções ou orçamento?' ou pedir confirmação genérica. PROIBIDO escalar para humano nesse cenário. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes_contato AGORA com os valores da receita mais recente (NÃO consultar_lentes — esse é para óculos), 2) apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta, priorizando DNZ quando compatível, 3) se cliente mencionou esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva) MAS sem omitir quinzenal/mensal — o cliente decide, 4) finalize perguntando a região/bairro pra indicar a loja mais próxima e sugerir agendamento. NUNCA encerre pedindo só marca/tipo se já há receita."
+              : "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente, 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
+          }]
         : []),
     ];
 
