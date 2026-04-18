@@ -1,4 +1,9 @@
 
-O usuário quer ajustar o prompt da IA para quando o cliente pede indicação de clínica/exame. Hoje a regra é "sem exames médicos na loja" mas a IA deve oferecer agendar visita à loja e a equipe lá facilita o exame.
+Pergunta de diagnóstico — não requer mudança de código. O usuário quer entender por que a IA escalou para humano e se há como passar orçamento sem isso.
 
-Preciso localizar onde no `ai-triage` (ou no prompt compilado) está a regra de clínica/exame médico para ajustar o texto.
+Vou olhar:
+1. Logs do `ai-triage` para esse contato (Leandro)
+2. Lógica de escalonamento no `ai-triage` (palavras que disparam `precisa_humano`)
+3. Tool `consultar_lentes` / `pricing_table_lentes` para ver se Kodak existe no catálogo
+
+Isso me dá o "porquê" exato.
