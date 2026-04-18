@@ -1,6 +1,6 @@
 ---
 name: Ponte Mensageria (WhatsApp ↔ Interno)
-description: Regra geral para contatos com setor_destino e responsável único — espelha WhatsApp na mensageria interna; resposta interna vira WhatsApp
+description: Regra geral para contatos com setor_destino e responsável único — espelha WhatsApp na mensageria interna; resposta interna vira WhatsApp. Roteamento por setor configurável em telefones_lojas.setor_destino_id
 type: feature
 ---
 Regra geral do sistema: contato externo com `setor_destino` cujo setor tem **um único** `setor_usuario` ativo entra automaticamente em modo **ponte**.
@@ -15,8 +15,14 @@ Regra geral do sistema: contato externo com `setor_destino` cujo setor tem **um 
 - **Trigger `on_mensagem_interna_ponte`**: dispara bridge automaticamente quando responsável envia em conversa `ponte_*`
 - **Perfil "Sistema · Ponte WhatsApp"** (criado on-demand): remetente das msgs espelhadas; `ativo=false` pra não aparecer em listas
 
+## Roteamento por setor (cadastro)
+- Em **Configurações → Telefones Corporativos**, cada cadastro tem campo opcional **Setor de Destino** (`telefones_lojas.setor_destino_id`).
+- Quando preenchido: `sanitize_corporate_contact` força `contatos.setor_destino` pra esse setor (em vez do default "Atendimento Corporativo").
+- Trigger `on_telefone_loja_change` re-aplica saneamento ao mudar `setor_destino_id`, refletindo imediatamente em contatos já existentes.
+- Fluxo final: cadastra telefone + setor → contato chega no WhatsApp → vira contato com `setor_destino` certo → se setor tem 1 responsável → ponte ativa automaticamente.
+
 ## Caso real
-Diniz E-commerce (5511913171871) → Setor "Dpto Armações" → única responsável: Marilene. Msgs do WhatsApp aparecem na mensageria interna dela; respostas dela voltam pelo WhatsApp.
+Diniz E-commerce (5511913171871) → cadastrado com `setor_destino_id` = "Dpto Armações" → única responsável: Marilene. Msgs do WhatsApp aparecem na mensageria interna dela; respostas dela voltam pelo WhatsApp.
 
 ## Resolução de responsável
 - 1 usuário ativo no setor → ponte ativada

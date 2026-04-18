@@ -1692,6 +1692,7 @@ export type Database = {
           id: string
           nome_colaborador: string | null
           nome_loja: string
+          setor_destino_id: string | null
           telefone: string
           tipo: string
         }
@@ -1708,6 +1709,7 @@ export type Database = {
           id?: string
           nome_colaborador?: string | null
           nome_loja: string
+          setor_destino_id?: string | null
           telefone: string
           tipo?: string
         }
@@ -1724,10 +1726,19 @@ export type Database = {
           id?: string
           nome_colaborador?: string | null
           nome_loja?: string
+          setor_destino_id?: string | null
           telefone?: string
           tipo?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "telefones_lojas_setor_destino_id_fkey"
+            columns: ["setor_destino_id"]
+            isOneToOne: false
+            referencedRelation: "setores"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {

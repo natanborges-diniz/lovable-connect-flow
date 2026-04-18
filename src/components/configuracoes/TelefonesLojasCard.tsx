@@ -28,6 +28,7 @@ interface LojaFormData {
   google_profile_url?: string;
   cargo?: string;
   nome_colaborador?: string;
+  setor_destino_id?: string | null;
 }
 
 const TIPO_LABELS: Record<TipoCorporativo, string> = {
@@ -60,6 +61,22 @@ export function TelefonesLojasCard() {
       return data;
     },
   });
+
+  const { data: setores } = useQuery({
+    queryKey: ["setores", "ativos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("setores")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const setorNome = (id?: string | null) =>
+    id ? setores?.find((s) => s.id === id)?.nome ?? "—" : "—";
 
   const filtered = telefones?.filter((t: any) =>
     filtroTipo === "todos" ? true : (t.tipo || "loja") === filtroTipo
@@ -96,6 +113,7 @@ export function TelefonesLojasCard() {
         google_profile_url: data.google_profile_url,
         cargo: data.cargo,
         nome_colaborador: data.nome_colaborador,
+        setor_destino_id: data.setor_destino_id ?? null,
       } as any);
       if (error) throw error;
     },
@@ -117,6 +135,7 @@ export function TelefonesLojasCard() {
         google_profile_url: data.google_profile_url,
         cargo: data.cargo,
         nome_colaborador: data.nome_colaborador,
+        setor_destino_id: data.setor_destino_id ?? null,
       } as any).eq("id", id);
       if (error) throw error;
     },
@@ -151,7 +170,7 @@ export function TelefonesLojasCard() {
           </DialogTrigger>
           <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Cadastrar Telefone Corporativo</DialogTitle></DialogHeader>
-            <LojaForm onSubmit={(data) => createTelefone.mutate(data)} loading={createTelefone.isPending} submitLabel="Cadastrar" />
+            <LojaForm setores={setores ?? []} onSubmit={(data) => createTelefone.mutate(data)} loading={createTelefone.isPending} submitLabel="Cadastrar" />
           </DialogContent>
         </Dialog>
       </CardHeader>
@@ -180,6 +199,7 @@ export function TelefonesLojasCard() {
                 <TableHead>Tipo</TableHead>
                 <TableHead>Telefone</TableHead>
                 <TableHead>Nome</TableHead>
+                <TableHead>Setor de Destino</TableHead>
                 <TableHead>Info</TableHead>
                 <TableHead>Ativo</TableHead>
                 <TableHead className="w-20"></TableHead>
@@ -195,6 +215,13 @@ export function TelefonesLojasCard() {
                   </TableCell>
                   <TableCell className="font-mono text-sm">{t.telefone}</TableCell>
                   <TableCell className="font-medium">{getDisplayName(t)}</TableCell>
+                  <TableCell className="text-xs">
+                    {t.setor_destino_id ? (
+                      <Badge variant="secondary">{setorNome(t.setor_destino_id)}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">Atendimento Corporativo</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">{getSubInfo(t)}</TableCell>
                   <TableCell>
                     <Switch checked={t.ativo ?? true} onCheckedChange={(v) => toggleAtivo.mutate({ id: t.id, ativo: v })} />
@@ -221,6 +248,7 @@ export function TelefonesLojasCard() {
           <DialogHeader><DialogTitle>Editar Cadastro</DialogTitle></DialogHeader>
           {editingLoja && (
             <LojaForm
+              setores={setores ?? []}
               initialData={{
                 telefone: editingLoja.telefone,
                 nome_loja: editingLoja.nome_loja,
@@ -233,6 +261,7 @@ export function TelefonesLojasCard() {
                 google_profile_url: editingLoja.google_profile_url || "",
                 cargo: editingLoja.cargo || "",
                 nome_colaborador: editingLoja.nome_colaborador || "",
+                setor_destino_id: editingLoja.setor_destino_id || null,
               }}
               onSubmit={(data) => updateTelefone.mutate({ id: editingLoja.id, data })}
               loading={updateTelefone.isPending}
@@ -246,12 +275,13 @@ export function TelefonesLojasCard() {
 }
 
 function LojaForm({
-  onSubmit, loading, submitLabel, initialData,
+  onSubmit, loading, submitLabel, initialData, setores,
 }: {
   onSubmit: (data: LojaFormData) => void;
   loading: boolean;
   submitLabel: string;
   initialData?: Partial<LojaFormData> & { telefone: string; nome_loja: string };
+  setores: { id: string; nome: string }[];
 }) {
   const [form, setForm] = useState({
     telefone: initialData?.telefone || "",
@@ -265,6 +295,7 @@ function LojaForm({
     google_profile_url: initialData?.google_profile_url || "",
     cargo: initialData?.cargo || "",
     nome_colaborador: initialData?.nome_colaborador || "",
+    setor_destino_id: initialData?.setor_destino_id || "",
   });
 
   const isNameValid = form.tipo === "colaborador" ? !!form.nome_colaborador : !!form.nome_loja;
@@ -285,6 +316,7 @@ function LojaForm({
           google_profile_url: form.google_profile_url || undefined,
           cargo: form.cargo || undefined,
           nome_colaborador: form.nome_colaborador || undefined,
+          setor_destino_id: form.setor_destino_id || null,
         });
       }}
       className="space-y-4"
@@ -304,6 +336,25 @@ function LojaForm({
       <div className="space-y-2">
         <Label>Telefone *</Label>
         <Input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="5511999999999" className="font-mono" required />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Setor de Destino</Label>
+        <Select
+          value={form.setor_destino_id || "__default__"}
+          onValueChange={(v) => setForm({ ...form, setor_destino_id: v === "__default__" ? "" : v })}
+        >
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default__">Atendimento Corporativo (padrão)</SelectItem>
+            {setores.map((s) => (
+              <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Quando esse número entrar em contato, será direcionado direto a este setor. Se o setor tiver um único responsável ativo, a conversa cai como mensagem interna direto pra ele.
+        </p>
       </div>
 
       {form.tipo === "colaborador" && (
