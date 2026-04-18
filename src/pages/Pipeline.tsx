@@ -143,6 +143,13 @@ export default function Pipeline() {
   const [newColunaNome, setNewColunaNome] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  // Transfer dialog (kanban drag-and-drop) — opens when card is dragged to "Agendamento"
+  const [kanbanTransferOpen, setKanbanTransferOpen] = useState(false);
+  const [kanbanTransferContatoId, setKanbanTransferContatoId] = useState<string>("");
+  const [kanbanTransferContatoNome, setKanbanTransferContatoNome] = useState<string>("");
+  const [kanbanTransferColunaId, setKanbanTransferColunaId] = useState<string>("");
+  const [kanbanTransferColunaNome, setKanbanTransferColunaNome] = useState<string>("");
+
   const isLoading = loadingContatos || loadingColunasVendas;
 
   const filteredContatos = (contatos ?? []).filter((c) => {
