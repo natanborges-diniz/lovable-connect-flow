@@ -1,18 +1,4 @@
 
-A sidebar já é colapsável (botão no footer recolhe para modo ícone, ~3rem). O usuário quer:
-1. Reduzir a largura quando expandida (hoje shadcn default é `--sidebar-width: 16rem`).
-2. Confirmar que pode recolher totalmente (já existe via toggle).
+O usuário quer ajustar o prompt da IA para quando o cliente pede indicação de clínica/exame. Hoje a regra é "sem exames médicos na loja" mas a IA deve oferecer agendar visita à loja e a equipe lá facilita o exame.
 
-**Plano:**
-
-**Arquivo:** `src/components/layout/AppLayout.tsx`
-
-Passar `style` ao `SidebarProvider` reduzindo a largura expandida de 16rem para ~12rem:
-
-```tsx
-<SidebarProvider style={{ "--sidebar-width": "12rem" } as React.CSSProperties}>
-```
-
-Isso libera ~4rem de largura para o Pipeline quando a sidebar está aberta. O modo colapsado (ícones) já funciona via botão "Recolher" no footer da `AppSidebar`.
-
-Sem outras mudanças — o toggle existente já permite minimizar para a esquerda mostrando só ícones.
+Preciso localizar onde no `ai-triage` (ou no prompt compilado) está a regra de clínica/exame médico para ajustar o texto.
