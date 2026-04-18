@@ -499,21 +499,17 @@ serve(async (req) => {
     // 7. Check homologação mode
     const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
 
-    // 7.5. DEMANDA LOJA — if message is from a store with active demand, route to thread.
-    // Auto-route ANY message (no #NN required) when there's an open demand for this store,
-    // unless the store explicitly types "menu" to escape into the corporate bot.
+    // 7.5. DEMANDA LOJA — auto-routing absoluto.
+    // Enquanto houver demanda aberta para esta loja, TODA mensagem (texto, foto, áudio,
+    // vídeo, doc) é roteada pra thread privada. Bot/IA não acessam. Único escape:
+    // o comando #encerrademanda (loja força encerramento da demanda mais recente).
     if (isCorporate && !shouldSkipBot) {
-      const escapeToMenu = /^\s*menu\s*$/i.test(text || "");
-      if (!escapeToMenu) {
-        const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
-        if (demandaRoute.handled) {
-          console.log(`[DEMANDA] Routed reply to demanda ${demandaRoute.demandaId} (numero #${demandaRoute.numeroCurto}) via ${demandaRoute.matchType}`);
-          return new Response(JSON.stringify({ status: "ok", action: "demanda_reply", demanda_id: demandaRoute.demandaId }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      } else {
-        console.log(`[DEMANDA] Store ${phone} typed 'menu' — bypassing demand auto-route, falling through to bot-lojas`);
+      const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
+      if (demandaRoute.handled) {
+        console.log(`[DEMANDA] Routed (${demandaRoute.action}) to demanda ${demandaRoute.demandaId} (#${demandaRoute.numeroCurto})`);
+        return new Response(JSON.stringify({ status: "ok", action: demandaRoute.action, demanda_id: demandaRoute.demandaId }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
     }
 
@@ -880,18 +876,16 @@ async function triggerBridgeMensageria(
 }
 
 // ─── Route store reply to an active demanda ───
-// Strategy:
-//   1. If text starts with #NN → match by numero_curto (explicit, supports multiple open demands).
-//   2. Otherwise → if there's exactly ONE open/respondida demand for this store, auto-route to it.
-//   3. If multiple open demands and no #NN → don't handle (let bot-lojas deal; operator should
-//      instruct store to use #NN, but UI will hint this on creation).
+// Auto-routing absoluto: enquanto houver QUALQUER demanda aberta/respondida para a loja,
+// TODA mensagem (texto, foto, áudio, vídeo, doc) vai pra thread privada.
+// Único comando especial: "#encerrademanda" → loja força encerramento da demanda mais recente.
 async function routeDemandaResposta(
   supabase: any,
   phone: string,
   text: string,
   mediaUrl: string | null,
   mediaMime: string | null
-): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number; matchType?: string }> {
+): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number; action?: string }> {
   const cleanPhone = phone.replace(/\D/g, "");
   const variants = brPhoneCandidates(phone).map((v) => v.replace(/\D/g, ""));
   const phoneMatches = (other: string) => {
@@ -900,63 +894,50 @@ async function routeDemandaResposta(
   };
   const trimmed = (text || "").trim();
 
-  // Try explicit #NN prefix first
-  const match = trimmed.match(/^#\s*(?:dem[-\s]?)?(\d{1,6})\b\s*([\s\S]*)/i);
-  let demanda: any = null;
-  let conteudo = trimmed;
-  let matchType = "auto";
+  // Find open demands for this store (most recent first)
+  const { data: openDemandas } = await supabase
+    .from("demandas_loja")
+    .select("id, numero_curto, protocolo, status, loja_telefone")
+    .neq("status", "encerrada")
+    .order("created_at", { ascending: false })
+    .limit(20);
 
-  if (match) {
-    const numero = parseInt(match[1], 10);
-    conteudo = (match[2] || "").trim();
-    matchType = "prefix";
-    const { data } = await supabase
-      .from("demandas_loja")
-      .select("id, numero_curto, status, loja_telefone")
-      .eq("numero_curto", numero)
-      .neq("status", "encerrada")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (data) {
-      if (phoneMatches(data.loja_telefone)) demanda = data;
-      else console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${data.loja_telefone}`);
+  const mineDemandas = (openDemandas || []).filter((d: any) => phoneMatches(d.loja_telefone));
+  if (mineDemandas.length === 0) return { handled: false };
+
+  const demanda = mineDemandas[0]; // sempre a mais recente
+
+  // Comando especial: #encerrademanda → loja encerra
+  if (/^#\s*encerrar?\s*demanda\b/i.test(trimmed)) {
+    try {
+      await fetch(`${SUPABASE_URL}/functions/v1/encerrar-demanda-loja`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+          "X-Internal-Caller": "whatsapp-webhook",
+        },
+        body: JSON.stringify({
+          demanda_id: demanda.id,
+          encerrado_por: "loja",
+        }),
+      });
+    } catch (e) {
+      console.error("[DEMANDA] encerrar-demanda-loja (loja) failed:", e);
     }
+    return { handled: true, demandaId: demanda.id, numeroCurto: demanda.numero_curto, action: "demanda_encerrada_loja" };
   }
 
-  // Auto-route: find open demands for this store
-  if (!demanda) {
-    const { data: openDemandas } = await supabase
-      .from("demandas_loja")
-      .select("id, numero_curto, status, loja_telefone")
-      .neq("status", "encerrada")
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    const mineDemandas = (openDemandas || []).filter((d: any) => phoneMatches(d.loja_telefone));
-
-    if (mineDemandas.length === 1) {
-      demanda = mineDemandas[0];
-      matchType = "auto_single";
-    } else if (mineDemandas.length > 1) {
-      // Multiple open demands without #NN — pick most recent but log warning
-      demanda = mineDemandas[0];
-      matchType = "auto_most_recent";
-      console.warn(`[DEMANDA] Store ${cleanPhone} has ${mineDemandas.length} open demands, routing to most recent #${demanda.numero_curto}. Operator should ask for #NN.`);
-    }
-  }
-
-  if (!demanda) return { handled: false };
-
+  // Mensagem normal (texto/mídia) → grava na thread
   await supabase.from("demanda_mensagens").insert({
     demanda_id: demanda.id,
     direcao: "loja_para_operador",
     autor_nome: "Loja",
-    conteudo: conteudo || (mediaUrl ? "[anexo enviado]" : ""),
+    conteudo: trimmed || (mediaUrl ? "[anexo enviado]" : ""),
     tipo_conteudo: mediaUrl ? "media" : "text",
     anexo_url: mediaUrl || null,
     anexo_mime: mediaMime || null,
-    metadata: { match_type: matchType },
+    metadata: { match_type: "auto_most_recent", total_open: mineDemandas.length },
   });
 
   await supabase
@@ -968,7 +949,7 @@ async function routeDemandaResposta(
     })
     .eq("id", demanda.id);
 
-  return { handled: true, demandaId: demanda.id, numeroCurto: demanda.numero_curto, matchType };
+  return { handled: true, demandaId: demanda.id, numeroCurto: demanda.numero_curto, action: "demanda_reply" };
 }
 
 function runInBackground(promise: Promise<unknown>) {
