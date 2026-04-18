@@ -158,6 +158,7 @@ serve(async (req) => {
               solicitacao_id: sol.id,
               contato_id: storeContatoId,
               canal: "whatsapp",
+              canal_provedor: "evolution_api",
               status: "aguardando",
               modo: "humano",
             })
@@ -168,7 +169,7 @@ serve(async (req) => {
       }
     }
 
-    // Send via WhatsApp
+    // Send via WhatsApp — sempre forçar Evolution (canal não-oficial) para B2B com lojas
     if (storeAtendimentoId) {
       const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
         method: "POST",
@@ -177,6 +178,7 @@ serve(async (req) => {
           atendimento_id: storeAtendimentoId,
           texto: waMessage,
           remetente_nome: `Demanda (${operadorNome})`,
+          force_provider: "evolution_api",
         }),
       });
       const sendData = await sendRes.json().catch(() => ({}));

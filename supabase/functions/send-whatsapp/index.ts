@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { atendimento_id, texto, remetente_nome } = await req.json();
+    const { atendimento_id, texto, remetente_nome, force_provider } = await req.json();
 
     if (!atendimento_id || !texto) {
       throw new Error("atendimento_id and texto are required");
@@ -35,7 +35,7 @@ serve(async (req) => {
     const phone = contato?.telefone;
     if (!phone) throw new Error("Contact has no phone number");
 
-    const provedor = (atendimento as any).canal_provedor || "meta_official";
+    const provedor = force_provider || (atendimento as any).canal_provedor || "meta_official";
     const cleanPhone = phone.replace(/\D/g, "");
 
     let apiResult: any;
