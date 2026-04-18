@@ -1220,3 +1220,22 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
 
   return null;
 }
+
+// ─── BR phone variant helper ───
+// WhatsApp/Meta às vezes entrega o número BR sem o "9" do mobile (formato antigo) e
+// outras vezes com. Para fazer match robusto contra telefones_lojas/contatos,
+// geramos as duas variantes (com e sem 9) sempre que o padrão BR mobile é detectado.
+function brPhoneCandidates(phone: string): string[] {
+  const digits = (phone || "").replace(/\D/g, "");
+  if (!digits) return [phone].filter(Boolean);
+  const set = new Set<string>([digits, phone]);
+  // BR celular: 55 + DDD (2) + 9 + 8 dígitos = 13
+  if (digits.length === 13 && digits.startsWith("55") && digits[4] === "9") {
+    set.add("55" + digits.substring(2, 4) + digits.substring(5)); // remove o 9
+  }
+  // BR sem 9: 55 + DDD (2) + 8 dígitos = 12 → adiciona 9
+  if (digits.length === 12 && digits.startsWith("55")) {
+    set.add("55" + digits.substring(2, 4) + "9" + digits.substring(4));
+  }
+  return Array.from(set);
+}
