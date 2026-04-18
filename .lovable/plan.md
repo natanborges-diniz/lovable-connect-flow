@@ -1,54 +1,48 @@
 
-## Objetivo
-Responder ao Leandro com explicação técnica resumida (Optifog vs Crizal Sapphire HR vs Crizal Prevencia, intermediária/ocupacional vs multifocal ampla), reforçando que a diferença real se percebe presencialmente. Em seguida, oferecer as lojas e perguntar se ele quer agendar.
-
-Não há mudança estrutural pendente — o caso anterior (Kelly) já cobriu o fluxo pós-receita LC. Aqui é Kodak (óculos multifocal), que por regra de memória **escala manual obrigatória** (Kodak Precise não está em `pricing_table_lentes`). O Consultor já passou os valores às 16:31. Falta só responder às perguntas técnicas e empurrar agendamento.
-
 ## Diagnóstico
-- IA travou em loop "dois caminhos" / "acionei consultor" sem responder dúvidas técnicas específicas (diferença entre lente R$ 1.554 vs R$ 2.045, o que é Optifog, Crizal Sapphire HR, intermediária/ocupacional).
-- Cliente quer comparativo conceitual antes de ir à loja.
-- Já foi escalado e respondido pelo Consultor, então o canal está em modo humano/híbrido — resposta deve ser manual via `send-whatsapp` no atendimento ativo, remetente "Consultor Diniz" (continuidade da última fala humana).
+Cliente "Ju" pediu **modelos de óculos** (armações) — IA respondeu duplicando o orçamento de **lentes** (já enviado). Dois problemas:
+
+1. **Confusão semântica:** "modelos de óculos" = armações, não lentes. IA não distingue.
+2. **Duplicação:** mesma resposta enviada 2× seguidas (falha de debounce na rota `consultar_lentes`).
+
+## Regra de negócio
+Não temos catálogo digital de armações em banco. Política: **armações são experimentadas presencialmente** (memória `mem://ia/regras-de-terminologia-e-produto`: usar "provar armações" na loja, nunca "experimentar lentes"). IA NÃO deve listar/inventar modelos de armação — deve convidar para a loja.
 
 ## Implementação
 
-### Frente única — Resposta operacional manual
-Enviar via `send-whatsapp` no atendimento do Leandro, mensagem única consolidando as respostas técnicas + lojas + CTA de agendamento:
+### 1) `supabase/functions/ai-triage/index.ts` — detector "modelos/armações"
+Adicionar detecção determinística antes da rota de quote:
+- Regex: `/\b(modelo|modelos|armaç|armacao|armações|óculos.*(?:mostrar|enviar|ver|foto|catálogo|catalogo))\b/i` no texto do cliente.
+- Se acionado E não houver pedido explícito de "lente/grau/orçamento de lente", forçar resposta determinística (sem chamar tool de lentes):
+  > "Sobre armações, a gente trabalha com várias marcas e estilos (Ray-Ban, Oakley, Vogue, Carolina Herrera, Diniz exclusivas, infantis, esportivas...). Como o caimento muda muito de rosto pra rosto, o ideal é provar pessoalmente — a gente separa várias opções pra você no balcão 😊
+  > 
+  > Quer agendar uma visita? Temos *Antônio Agú* (centro), *União Osasco* e *SuperShopping*. Qual fica melhor pra você?"
+- Marcar no metadata `armacoes_orientado: true` para anti-loop.
 
-> "Oi Leandro! Boa, vou te explicar rapidinho 👇
->
-> *Diferença entre R$ 1.554 e R$ 2.045 (ambas Kodak multifocal + Transitions):*
-> • R$ 1.554 → traz o **Optifog** (antiembaçante ativado com paninho próprio — útil pra máscara, cozinha, mudança de temperatura).
-> • R$ 2.045 → traz o **Crizal Sapphire HR** (antirreflexo premium da Essilor, mais resistente a risco, repele água/gordura, visão mais nítida à noite e contra faróis). Não tem o Optifog incluso, mas o AR é bem superior.
->
-> *Resumo dos termos:*
-> • **Optifog** = tratamento antiembaçante (precisa ativar com paninho).
-> • **Crizal Sapphire HR** = antirreflexo top de linha, mais durável e transparente.
-> • **AR Premium** = camada antirreflexo de alta performance (reduz reflexo de tela, farol, luz artificial).
->
-> *Multifocal x Ocupacional (intermediária):*
-> A multifocal tem 3 campos (longe + intermediário + perto) — uso o dia todo. A ocupacional é otimizada pra perto e intermediário (computador, leitura) — não é pra dirigir. Pelo seu pedido de "campo amplo", a **multifocal** é o caminho.
->
-> Mas olha, sinceramente: essas diferenças de antirreflexo e nitidez você sente de verdade **experimentando na loja** — a gente coloca lentes demo pra você comparar lado a lado. É bem rápido e tira a dúvida na hora 👍
->
-> *Nossas lojas em Osasco:*
-> 📍 **Antônio Agú** (centro)
-> 📍 **União Osasco** (shopping, até 22h)
-> 📍 **SuperShopping** (até 22h)
->
-> Quer que eu já deixe um horário reservado pra quando você vier? Me diz o dia e a unidade que prefere 😊"
+### 2) Anti-duplicação reforçada
+No mesmo handler, antes de responder com bloco "Opções de lentes para o seu grau", checar última mensagem outbound:
+- Se conteúdo idêntico (>90% similar) enviado nos últimos 60s → **abortar segunda emissão** e logar `[DEDUPE] consultar_lentes duplicado bloqueado`.
+- Já existe `seenOutboundContent` em alguns pontos; estender para a saída da tool `consultar_lentes` formatada.
 
-(Valores e nomes batem com o que o Consultor já enviou às 16:31 — sem inventar.)
+### 3) Memória nova `mem://ia/armacoes-presencial.md`
+- "Modelos/armações = produto presencial. IA nunca lista marcas inventadas nem promete catálogo. Sempre convidar pra loja com as 3 unidades de Osasco."
+- Atualizar `mem://index.md` Core: "Armações nunca listadas digitalmente — convite presencial com 3 lojas."
 
-### Sem mudanças de código
-- Nenhuma edição em `ai-triage` ou outras EFs.
-- Nenhuma migração.
-- Nenhuma alteração de memória — caso Kodak já documentado em `mem://ia/marca-kodak-escalada-manual` (escala manual mantida; aqui o humano já está no controle).
+### 4) Resposta operacional imediata para Ju
+Enviar manual via `send-whatsapp` no atendimento ativo, remetente "Consultor Diniz":
+> "Oi Ju! Desculpa a confusão — você pediu *modelos de armação*, não de lente 🙈
+> 
+> A gente trabalha com várias marcas (Ray-Ban, Oakley, Vogue, Carolina Herrera, linha Diniz exclusiva, infantis e esportivas). Como caimento e estilo dependem muito do seu rosto, o ideal é provar pessoalmente — separamos várias opções pra você no balcão.
+> 
+> *Nossas lojas:*
+> 📍 Antônio Agú (centro Osasco)
+> 📍 União Osasco (shopping)
+> 📍 SuperShopping (até 22h)
+> 
+> Quer que eu reserve um horário? Me diz o dia e a unidade 😊"
 
-## Resultado esperado
-- Leandro recebe resposta técnica clara e curta.
-- Reforça experiência presencial sem soar evasivo.
-- Próximo passo concreto: escolher loja e dia.
-- Sem novo loop da IA (atendimento permanece em modo humano/Consultor).
-
-## Arquivo/ação
-- Único: chamada `send-whatsapp` para o atendimento ativo do Leandro Laba, remetente "Consultor Diniz".
+## Arquivos
+- `supabase/functions/ai-triage/index.ts` (detector + dedupe)
+- `.lovable/memory/ia/armacoes-presencial.md` (nova)
+- `.lovable/memory/index.md` (atualizar Core)
+- Ação operacional: `send-whatsapp` para atendimento da Ju
