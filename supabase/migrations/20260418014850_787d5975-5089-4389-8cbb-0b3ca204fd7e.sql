@@ -1,0 +1,1 @@
+UPDATE public.atendimentos SET canal_provedor = 'evolution_api' WHERE id = 'e646a688-a632-4139-8cc7-f3ae048fb5ac';
