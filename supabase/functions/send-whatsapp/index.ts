@@ -38,6 +38,15 @@ serve(async (req) => {
     const provedor = force_provider || (atendimento as any).canal_provedor || "meta_official";
     const cleanPhone = phone.replace(/\D/g, "");
 
+    // Guard: reject obviously invalid / placeholder numbers (avoids 3x retry loop on Evolution)
+    const isRepeatedDigits = /^(\d)\1+$/.test(cleanPhone.slice(-9)); // e.g. 999999999
+    if (cleanPhone.length < 10 || cleanPhone.length > 15 || isRepeatedDigits) {
+      return new Response(
+        JSON.stringify({ error: "invalid_phone", phone: cleanPhone, reason: "placeholder_or_malformed" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     let apiResult: any;
 
     if (provedor === "evolution_api") {
