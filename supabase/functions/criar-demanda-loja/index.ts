@@ -139,6 +139,14 @@ serve(async (req) => {
 
       if (openAt) {
         storeAtendimentoId = openAt.id;
+        // Ensure existing store atendimento is flagged as demand mirror to suppress IA/bot
+        await supabase
+          .from("atendimentos")
+          .update({
+            metadata: { suprimir_ia: true, suprimir_bot: true, atendimento_demanda: true },
+            canal_provedor: "evolution_api",
+          })
+          .eq("id", openAt.id);
       } else {
         const { data: sol } = await supabase
           .from("solicitacoes")
@@ -160,7 +168,8 @@ serve(async (req) => {
               canal: "whatsapp",
               canal_provedor: "evolution_api",
               status: "aguardando",
-              modo: "humano",
+              modo: "ia",
+              metadata: { suprimir_ia: true, suprimir_bot: true, atendimento_demanda: true },
             })
             .select("id")
             .single();

@@ -284,14 +284,19 @@ function DemandaThreadDialog({ demanda, onClose }: { demanda: Demanda; onClose: 
 
   const handleClose = async () => {
     setClosing(true);
-    const { error } = await supabase
-      .from("demandas_loja" as any)
-      .update({ status: "encerrada", encerrada_at: new Date().toISOString() } as any)
-      .eq("id", demanda.id);
-    setClosing(false);
-    if (error) { toast.error(error.message); return; }
-    toast.success("Demanda encerrada");
-    onClose();
+    try {
+      const { data, error } = await supabase.functions.invoke("encerrar-demanda-loja", {
+        body: { demanda_id: demanda.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast.success("Demanda encerrada — loja notificada");
+      onClose();
+    } catch (e: any) {
+      toast.error("Falha ao encerrar: " + (e?.message || "erro"));
+    } finally {
+      setClosing(false);
+    }
   };
 
   const toggleSelect = (m: DemandaMsg) => {

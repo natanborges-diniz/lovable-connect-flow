@@ -382,6 +382,20 @@ serve(async (req) => {
     const mediaContext = { media_url, media_mime_type };
     if (!atendimento_id) throw new Error("atendimento_id is required");
 
+    // 0. Suppress bot on demand-mirror atendimentos (created by criar-demanda-loja)
+    const { data: _atend } = await supabase
+      .from("atendimentos")
+      .select("metadata")
+      .eq("id", atendimento_id)
+      .maybeSingle();
+    const _atMeta = (_atend?.metadata as Record<string, any>) || {};
+    if (_atMeta.suprimir_bot === true || _atMeta.atendimento_demanda === true) {
+      console.log(`[ABORT] atendimento ${atendimento_id} marked as suprimir_bot (demanda mirror) — skipping bot-lojas`);
+      return new Response(JSON.stringify({ status: "skipped", reason: "atendimento espelho de demanda" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // 1. Get or create bot session
     let { data: sessao } = await supabase
       .from("bot_sessoes")

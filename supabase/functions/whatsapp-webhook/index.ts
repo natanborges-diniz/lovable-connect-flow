@@ -481,14 +481,21 @@ serve(async (req) => {
     // 7. Check homologação mode
     const shouldSkipBot = await isHomologacaoBlocked(supabase, phone);
 
-    // 7.5. DEMANDA LOJA — if message is from a store, check if it's a reply to a demand
+    // 7.5. DEMANDA LOJA — if message is from a store with active demand, route to thread.
+    // Auto-route ANY message (no #NN required) when there's an open demand for this store,
+    // unless the store explicitly types "menu" to escape into the corporate bot.
     if (isCorporate && !shouldSkipBot) {
-      const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
-      if (demandaRoute.handled) {
-        console.log(`[DEMANDA] Routed reply to demanda ${demandaRoute.demandaId} (numero #${demandaRoute.numeroCurto})`);
-        return new Response(JSON.stringify({ status: "ok", action: "demanda_reply", demanda_id: demandaRoute.demandaId }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      const escapeToMenu = /^\s*menu\s*$/i.test(text || "");
+      if (!escapeToMenu) {
+        const demandaRoute = await routeDemandaResposta(supabase, phone, text, storedMediaUrl, storedMediaMimeType);
+        if (demandaRoute.handled) {
+          console.log(`[DEMANDA] Routed reply to demanda ${demandaRoute.demandaId} (numero #${demandaRoute.numeroCurto}) via ${demandaRoute.matchType}`);
+          return new Response(JSON.stringify({ status: "ok", action: "demanda_reply", demanda_id: demandaRoute.demandaId }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        console.log(`[DEMANDA] Store ${phone} typed 'menu' — bypassing demand auto-route, falling through to bot-lojas`);
       }
     }
 
@@ -854,41 +861,72 @@ async function triggerBridgeMensageria(
   });
 }
 
-// ─── Route store reply to an active demanda (if message starts with #NN) ───
+// ─── Route store reply to an active demanda ───
+// Strategy:
+//   1. If text starts with #NN → match by numero_curto (explicit, supports multiple open demands).
+//   2. Otherwise → if there's exactly ONE open/respondida demand for this store, auto-route to it.
+//   3. If multiple open demands and no #NN → don't handle (let bot-lojas deal; operator should
+//      instruct store to use #NN, but UI will hint this on creation).
 async function routeDemandaResposta(
   supabase: any,
   phone: string,
   text: string,
   mediaUrl: string | null,
   mediaMime: string | null
-): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number }> {
+): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number; matchType?: string }> {
   const cleanPhone = phone.replace(/\D/g, "");
   const trimmed = (text || "").trim();
 
-  // Match patterns: "#42", "#42 ...", "#DEM-42", "#dem42 ..."
+  // Try explicit #NN prefix first
   const match = trimmed.match(/^#\s*(?:dem[-\s]?)?(\d{1,6})\b\s*([\s\S]*)/i);
-  if (!match) return { handled: false };
+  let demanda: any = null;
+  let conteudo = trimmed;
+  let matchType = "auto";
 
-  const numero = parseInt(match[1], 10);
-  const conteudo = (match[2] || "").trim();
+  if (match) {
+    const numero = parseInt(match[1], 10);
+    conteudo = (match[2] || "").trim();
+    matchType = "prefix";
+    const { data } = await supabase
+      .from("demandas_loja")
+      .select("id, numero_curto, status, loja_telefone")
+      .eq("numero_curto", numero)
+      .neq("status", "encerrada")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data) {
+      const demandaPhone = String(data.loja_telefone).replace(/\D/g, "");
+      if (demandaPhone === cleanPhone) demanda = data;
+      else console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${demandaPhone}`);
+    }
+  }
 
-  // Find open demanda for this store + number
-  const { data: demanda } = await supabase
-    .from("demandas_loja")
-    .select("id, numero_curto, status, loja_telefone")
-    .eq("numero_curto", numero)
-    .neq("status", "encerrada")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+  // Auto-route: find open demands for this store
+  if (!demanda) {
+    const { data: openDemandas } = await supabase
+      .from("demandas_loja")
+      .select("id, numero_curto, status, loja_telefone")
+      .neq("status", "encerrada")
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    const mineDemandas = (openDemandas || []).filter(
+      (d: any) => String(d.loja_telefone).replace(/\D/g, "") === cleanPhone
+    );
+
+    if (mineDemandas.length === 1) {
+      demanda = mineDemandas[0];
+      matchType = "auto_single";
+    } else if (mineDemandas.length > 1) {
+      // Multiple open demands without #NN — pick most recent but log warning
+      demanda = mineDemandas[0];
+      matchType = "auto_most_recent";
+      console.warn(`[DEMANDA] Store ${cleanPhone} has ${mineDemandas.length} open demands, routing to most recent #${demanda.numero_curto}. Operator should ask for #NN.`);
+    }
+  }
 
   if (!demanda) return { handled: false };
-
-  const demandaPhone = String(demanda.loja_telefone).replace(/\D/g, "");
-  if (demandaPhone !== cleanPhone) {
-    console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${demandaPhone}`);
-    return { handled: false };
-  }
 
   await supabase.from("demanda_mensagens").insert({
     demanda_id: demanda.id,
@@ -898,6 +936,7 @@ async function routeDemandaResposta(
     tipo_conteudo: mediaUrl ? "media" : "text",
     anexo_url: mediaUrl || null,
     anexo_mime: mediaMime || null,
+    metadata: { match_type: matchType },
   });
 
   await supabase
@@ -909,7 +948,7 @@ async function routeDemandaResposta(
     })
     .eq("id", demanda.id);
 
-  return { handled: true, demandaId: demanda.id, numeroCurto: numero };
+  return { handled: true, demandaId: demanda.id, numeroCurto: demanda.numero_curto, matchType };
 }
 
 function runInBackground(promise: Promise<unknown>) {
