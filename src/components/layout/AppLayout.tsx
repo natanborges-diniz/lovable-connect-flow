@@ -38,7 +38,7 @@ export function AppLayout() {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider style={{ "--sidebar-width": "12rem" } as React.CSSProperties}>
       <div className="min-h-screen flex flex-col w-full bg-app-bg">
         <TopNavigation activeModule={activeModule} />
         <div className="flex flex-1 w-full">
