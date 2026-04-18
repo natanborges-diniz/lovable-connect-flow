@@ -1202,15 +1202,17 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
         </div>
       )}
 
-      {/* AI Summary card */}
+      {/* AI Summary card (colapsável p/ liberar espaço da lista) */}
       {atendimento && (atendimento as any).metadata?.resumo_ia && (
-        <div className="mx-4 mt-2 rounded-lg border border-warning-muted bg-warning-soft px-3 py-2 flex gap-2 items-start shrink-0">
-          <FileText className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-          <div className="text-sm text-warning">
-            <p className="font-medium text-xs mb-1">Resumo IA</p>
-            <p className="whitespace-pre-wrap text-xs">{(atendimento as any).metadata.resumo_ia}</p>
-          </div>
-        </div>
+        <details className="mx-4 mt-1 rounded-lg border border-warning-muted bg-warning-soft px-3 py-1 shrink-0 group">
+          <summary className="flex gap-2 items-center cursor-pointer text-warning text-xs font-medium list-none">
+            <FileText className="h-3.5 w-3.5 shrink-0" />
+            <span>Resumo IA</span>
+            <span className="ml-auto text-[10px] opacity-70 group-open:hidden">expandir</span>
+            <span className="ml-auto text-[10px] opacity-70 hidden group-open:inline">recolher</span>
+          </summary>
+          <p className="whitespace-pre-wrap text-xs text-warning mt-1 pb-1">{(atendimento as any).metadata.resumo_ia}</p>
+        </details>
       )}
 
       {/* Mensagens scrolláveis */}
