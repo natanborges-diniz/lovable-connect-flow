@@ -17,13 +17,13 @@ export interface Conversa {
 }
 
 export function useMensagensInternas() {
-  const { user } = useAuth();
+  const { user, isAuthReady } = useAuth();
   const qc = useQueryClient();
   const uid = user?.id;
 
   // Realtime subscription
   useEffect(() => {
-    if (!uid) return;
+    if (!uid || !isAuthReady) return;
     const channelName = `mensagens_internas_rt_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
@@ -49,12 +49,12 @@ export function useMensagensInternas() {
       );
     channel.subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [uid, qc]);
+  }, [uid, qc, isAuthReady]);
 
   // List conversations
   const conversas = useQuery({
     queryKey: ["conversas-internas", uid],
-    enabled: !!uid,
+    enabled: !!uid && isAuthReady,
     queryFn: async () => {
       const { data: msgs, error } = await supabase
         .from("mensagens_internas")
@@ -100,7 +100,7 @@ export function useMensagensInternas() {
   // Total unread count
   const totalNaoLidas = useQuery({
     queryKey: ["total-nao-lidas", uid],
-    enabled: !!uid,
+    enabled: !!uid && isAuthReady,
     queryFn: async () => {
       const { count, error } = await supabase
         .from("mensagens_internas")

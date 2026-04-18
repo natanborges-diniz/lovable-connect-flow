@@ -11,8 +11,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import type { ModuleKey } from "./AppLayout";
 
 interface TopNavigationProps {
@@ -31,58 +29,54 @@ const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defa
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
 ];
 
+// Normaliza nome de setor: minúsculo, sem acentos, sem cedilha, sem prefixos "dpto"/"depto"/"departamento"/"setor"
+function normalizeSetor(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ç/g, "c")
+    .replace(/[._\-/]+/g, " ")
+    .replace(/\b(dpto|depto|departamento|setor)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
   financeiro: ["financeiro", "tarefas", "mensagens"],
   ti: ["ti", "tarefas", "mensagens"],
   atendimento: ["crm", "tarefas", "mensagens"],
   loja: ["lojas", "mensagens"],
   "atendimento corporativo": ["interno", "mensagens"],
-  "dpto armacoes": ["interno", "mensagens", "tarefas"],
+  armacoes: ["interno", "mensagens", "tarefas"],
 };
 
 // Fallback para setores não mapeados (departamentos novos operam via Ponte de Mensageria)
 const DEFAULT_SETOR_MODULES: ModuleKey[] = ["interno", "mensagens", "tarefas"];
 
-function useSetorNames(setorIds: string[]) {
-  const stableKey = [...setorIds].sort().join(",");
-  return useQuery({
-    queryKey: ["setor-names", stableKey],
-    enabled: setorIds.length > 0,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("setores")
-        .select("id, nome")
-        .in("id", setorIds);
-      return data || [];
-    },
-  });
-}
-
 export function TopNavigation({ activeModule }: TopNavigationProps) {
   const navigate = useNavigate();
-  const { profile, signOut, isAdmin, isOperador, getEffectiveSetorIds, roles } = useAuth();
+  const { profile, signOut, isAdmin, isOperador, getEffectiveSetorIds, setores, isAuthReady } = useAuth();
   const { data: notificacoes, naoLidas, marcarLida, marcarTodasLidas } = useNotificacoes();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const { totalNaoLidas } = useMensagensInternas();
   const msgNaoLidas = totalNaoLidas.data || 0;
 
   const setorIds = getEffectiveSetorIds();
-  const { data: setorNames } = useSetorNames(setorIds);
 
   const visibleModules = (() => {
+    // Enquanto auth não está pronto, não renderizamos menus para evitar flash incorreto.
+    if (!isAuthReady) return [] as typeof allModules;
     if (isAdmin || isOperador) return allModules;
 
-    // Fallback seguro: usuário sem roles provisionadas → mínimo (mensagens + tarefas).
-    // Nunca devolver allModules para evitar exposição de menus administrativos.
     const allowedKeys = new Set<ModuleKey>(["tarefas", "mensagens"]);
-    if (setorNames && setorNames.length > 0) {
-      for (const s of setorNames) {
-        const key = s.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (setores && setores.length > 0) {
+      for (const s of setores) {
+        const key = normalizeSetor(s.nome);
         const mapped = SETOR_MODULE_MAP[key] ?? DEFAULT_SETOR_MODULES;
         mapped.forEach((m) => allowedKeys.add(m));
       }
     } else if (setorIds.length > 0) {
-      // Setor user mas nomes ainda não carregaram → aplica fallback genérico
       DEFAULT_SETOR_MODULES.forEach((m) => allowedKeys.add(m));
     }
     return allModules.filter((m) => allowedKeys.has(m.key));
