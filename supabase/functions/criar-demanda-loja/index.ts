@@ -98,8 +98,8 @@ serve(async (req) => {
       pergunta,
       ``,
       `────────────`,
-      `💬 Para responder, comece sua mensagem com *#${demanda.numero_curto}*`,
-      `🔄 Para abrir o menu corporativo, digite *menu*`,
+      `💬 Responda diretamente esta mensagem. Tudo que enviar (texto, foto, áudio) será encaminhado ao operador.`,
+      `🔚 Para encerrar, digite *#encerrademanda*`,
     ].join("\n");
 
     // Find or create atendimento for the store and send the message via send-whatsapp
