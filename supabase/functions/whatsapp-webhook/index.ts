@@ -893,6 +893,11 @@ async function routeDemandaResposta(
   mediaMime: string | null
 ): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number; matchType?: string }> {
   const cleanPhone = phone.replace(/\D/g, "");
+  const variants = brPhoneCandidates(phone).map((v) => v.replace(/\D/g, ""));
+  const phoneMatches = (other: string) => {
+    const o = String(other || "").replace(/\D/g, "");
+    return variants.includes(o) || o === cleanPhone;
+  };
   const trimmed = (text || "").trim();
 
   // Try explicit #NN prefix first
@@ -914,9 +919,8 @@ async function routeDemandaResposta(
       .limit(1)
       .maybeSingle();
     if (data) {
-      const demandaPhone = String(data.loja_telefone).replace(/\D/g, "");
-      if (demandaPhone === cleanPhone) demanda = data;
-      else console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${demandaPhone}`);
+      if (phoneMatches(data.loja_telefone)) demanda = data;
+      else console.warn(`[DEMANDA] phone mismatch: store ${cleanPhone} replied to demanda ${numero} owned by ${data.loja_telefone}`);
     }
   }
 
@@ -929,9 +933,7 @@ async function routeDemandaResposta(
       .order("created_at", { ascending: false })
       .limit(20);
 
-    const mineDemandas = (openDemandas || []).filter(
-      (d: any) => String(d.loja_telefone).replace(/\D/g, "") === cleanPhone
-    );
+    const mineDemandas = (openDemandas || []).filter((d: any) => phoneMatches(d.loja_telefone));
 
     if (mineDemandas.length === 1) {
       demanda = mineDemandas[0];
