@@ -62,6 +62,22 @@ export function TelefonesLojasCard() {
     },
   });
 
+  const { data: setores } = useQuery({
+    queryKey: ["setores", "ativos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("setores")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const setorNome = (id?: string | null) =>
+    id ? setores?.find((s) => s.id === id)?.nome ?? "—" : "—";
+
   const filtered = telefones?.filter((t: any) =>
     filtroTipo === "todos" ? true : (t.tipo || "loja") === filtroTipo
   );
