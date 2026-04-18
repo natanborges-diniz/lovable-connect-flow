@@ -9,6 +9,7 @@ Regra geral do sistema: contato externo com `setor_destino` cujo setor tem **um 
 - **Tabela `contato_ponte`**: contato_id, responsavel_user_id, setor_id, conversa_id (`ponte_<contato_id>`), ativo
 - **Função `setup_contato_ponte(contato_id)`**: resolve responsável único e ativa ponte. Trigger em `contatos.setor_destino` chama auto.
 - **Modo `ponte`** em `atendimentos.modo`: webhook desvia pra `bridge-mensageria` em vez de ai-triage; ai-triage skipa.
+- **PONTE OVERRIDE no webhook**: antes de decidir bot-lojas/ia/etc, checa `contato_ponte` ativa. Se sim → bridge ganha de tudo (inclusive de `isCorporate`/bot-lojas) e força `atendimento.modo='ponte'`. Isso evita que números corporativos com setor de destino caiam no menu do bot.
 - **Edge `bridge-mensageria`** com 2 direções:
   - `whatsapp_to_interno`: msg externa → mensagem interna prefixada `📲 Nome (telefone)` pro responsável
   - `interno_to_whatsapp`: msg interna do responsável → send-whatsapp pro contato
