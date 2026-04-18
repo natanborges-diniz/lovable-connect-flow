@@ -15,38 +15,43 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Não autorizado" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Validate caller
-    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData.user) {
-      return new Response(JSON.stringify({ error: "Sessão inválida" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const INTERNAL_SECRET = Deno.env.get("INTERNAL_SERVICE_SECRET");
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // Verify caller is admin
-    const { data: isAdminData, error: isAdminErr } = await admin.rpc("is_admin", {
-      _user_id: userData.user.id,
-    });
-    if (isAdminErr || !isAdminData) {
-      return new Response(JSON.stringify({ error: "Apenas admins podem redefinir senhas" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Allow internal service-to-service calls via shared secret (one-off ops)
+    const internalHeader = req.headers.get("x-internal-secret");
+    const isInternalCall = !!INTERNAL_SECRET && internalHeader === INTERNAL_SECRET;
+
+    if (!isInternalCall) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Não autorizado" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: userData, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !userData.user) {
+        return new Response(JSON.stringify({ error: "Sessão inválida" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: isAdminData, error: isAdminErr } = await admin.rpc("is_admin", {
+        _user_id: userData.user.id,
+      });
+      if (isAdminErr || !isAdminData) {
+        return new Response(JSON.stringify({ error: "Apenas admins podem redefinir senhas" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const body = await req.json();
