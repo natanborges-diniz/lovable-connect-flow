@@ -1,44 +1,62 @@
 
 
-## Pergunta do usuário
-Onde ficam visualmente as conversas das demandas com a loja?
+## Diagnóstico
 
-## Resposta direta (sem mudanças de código)
+Auto-routing atual ainda exige `#NN` em alguns casos (múltiplas demandas) e não trata mídia/foto. Solução: enquanto há demanda aberta pra loja, **TODA** mensagem dela (texto, foto, áudio, vídeo) vai pra thread automaticamente. Sem prefixo, sem bot, sem IA.
 
-A thread da demanda **não fica no card do CRM do cliente**. Ela vive em um painel próprio dentro do atendimento do cliente que originou a demanda. Mapa atual:
+## Plano
 
-### 1. Onde aparece
-- **Tela `Atendimentos`** (`/atendimentos`) → abre um atendimento de cliente que já tem demanda criada → no painel lateral aparece o componente **`DemandaLojaPanel`** listando todas as demandas vinculadas àquele atendimento (com badge de status: aberta / respondida / encerrada).
-- Clicando numa demanda da lista, abre o **`DemandaThreadDialog`** — modal com a thread completa (mensagens `operador→loja`, `loja→operador`, `sistema`), botão "Encerrar demanda" e textarea "Encaminhar ao cliente".
+### 1. Auto-routing absoluto (sem `#NN`)
+`whatsapp-webhook` → `routeDemandaResposta`:
+- Se loja tem **qualquer** demanda aberta → roteia automaticamente pra mais recente.
+- Funciona pra texto, imagem, áudio, vídeo, documento (todos os tipos vão pra `demanda_mensagens` com `tipo_conteudo` e `anexo_url`).
+- Remove a lógica de prefixo `#NN` (não precisa mais — só uma demanda ativa por vez é a regra prática; se houver múltiplas, sempre a mais recente).
+- Mantém comando especial `#encerrademanda` (loja força encerramento).
+- Remove comando `menu` como escape — enquanto demanda aberta, loja não acessa bot. Pra acessar bot, precisa encerrar primeiro.
 
-### 2. Onde os dados moram
-- Tabela `demandas_loja` → 1 linha por demanda (protocolo `DEM-AAAA-NNNNN`, status, vista_pelo_operador).
-- Tabela `demanda_mensagens` → todas as mensagens da thread privada (não vão pra `mensagens` do CRM, não aparecem no chat do cliente).
+### 2. Comando `#encerrademanda` pela loja
+Em `routeDemandaResposta`, se texto = `#encerrademanda` (case-insensitive, trim):
+- Chama `encerrar-demanda-loja` com `encerrado_por='loja'`.
+- WA pra loja: *"✅ Demanda DEM-AAAA-NNNNN encerrada por você. Para nova solicitação, digite menu."*
+- Notifica operador via `notificacoes`: "Loja X encerrou a demanda DEM-NNNNN".
 
-### 3. O que NÃO acontece (e isso é proposital)
-- A resposta da loja **não aparece** como mensagem no chat do cliente.
-- A resposta da loja **não cria card no CRM** (com o hard-guard corporativo que acabamos de implementar).
-- O operador é o filtro: lê na thread da demanda, edita se quiser, e clica "Encaminhar ao cliente" → aí sim vira mensagem no chat do cliente via `encaminhar-demanda-cliente`.
+### 3. Auto-encerramento por inatividade (30min)
+Nova edge function `auto-encerrar-demandas` + cron job a cada 5min:
+- Busca `demandas_loja` com `status IN ('aberta','respondida')` e `updated_at < now() - 30min`.
+- Encerra cada uma chamando lógica de `encerrar-demanda-loja` com `encerrado_por='auto'`.
+- WA pra loja: *"⏰ Demanda DEM-AAAA-NNNNN encerrada automaticamente por inatividade (30min). Para nova solicitação, digite menu."*
+- Nota sistema na thread + notifica operador.
 
-### 4. Fluxo visual
-
-```text
-/atendimentos
-  └─ Atendimento do cliente "João" (card aberto)
-      ├─ Chat principal (mensagens cliente↔operador/IA)
-      └─ DemandaLojaPanel (lateral)
-          ├─ DEM-2026-00001 [🟡 respondida] ← clica
-          │     └─ DemandaThreadDialog
-          │         • operador→loja: "Tem armação X em estoque?"
-          │         • loja→operador: "Sim, R$ 450"
-          │         • [Encaminhar ao cliente] [Encerrar demanda]
-          └─ DEM-2026-00002 [⚪ encerrada]
+Cron via `cron_jobs` (UI gerenciada):
+```sql
+SELECT cron.schedule('auto-encerrar-demandas', '*/5 * * * *',
+  $$SELECT net.http_post(url:='.../auto-encerrar-demandas', ...)$$);
 ```
 
-### 5. Possíveis melhorias (se quiser, posso propor plano dedicado)
-- Indicador no card do CRM ("📌 1 demanda aberta") pra operador saber sem entrar no atendimento.
-- Aba "Demandas" no menu lateral global, listando todas as demandas pendentes pra todos operadores.
-- Notificação in-app quando a loja responde uma demanda sua.
+### 4. Mensagens padronizadas pra loja
+Centralizar em `encerrar-demanda-loja` com switch por `encerrado_por`:
+- `operador`: "✅ Demanda {protocolo} encerrada pelo operador. Obrigado! Para nova solicitação, digite menu."
+- `loja`: "✅ Demanda {protocolo} encerrada por você. Para nova solicitação, digite menu."
+- `auto`: "⏰ Demanda {protocolo} encerrada automaticamente por inatividade (30min). Para nova solicitação, digite menu."
 
-Quer que eu monte plano pra alguma dessas? Ou prefere validar primeiro o fluxo atual mandando uma resposta de teste pela Loja Teste?
+Todas via Evolution (`force_provider='evolution_api'`).
+
+### 5. Atualizar memory
+`mem://bot-lojas/canal-demandas-privado.md`:
+- Auto-routing absoluto (sem prefixo, todos os tipos de mídia).
+- `#encerrademanda` como única forma da loja sair.
+- Auto-encerramento 30min.
+- Bot/IA bloqueados enquanto demanda aberta.
+
+## Arquivos afetados
+
+- `supabase/functions/whatsapp-webhook/index.ts` — `routeDemandaResposta` simplificado: roteia tudo, suporta mídia, detecta `#encerrademanda`, remove escape `menu`.
+- `supabase/functions/encerrar-demanda-loja/index.ts` — aceita `encerrado_por` (`operador|loja|auto`), mensagens diferenciadas, notificação ao operador quando loja/auto encerra.
+- `supabase/functions/auto-encerrar-demandas/index.ts` — **nova**: scan + encerra por inatividade.
+- Migration: criar cron job `auto-encerrar-demandas` a cada 5min via `cron.schedule` + entry em `cron_jobs`.
+- `mem://bot-lojas/canal-demandas-privado.md` — atualizar regras.
+
+## Resultado
+
+Operador abre demanda → conversa fica privada com a loja (texto/foto/áudio tudo vai pra thread) → operador encerra OU loja envia `#encerrademanda` OU sistema encerra após 30min sem atividade → loja recebe confirmação → próxima msg cai no bot-lojas normal.
 
