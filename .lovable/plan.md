@@ -1,70 +1,43 @@
 
-O usuário quer um cadastro simples de telefones que, ao chegarem, são direcionados automaticamente para um setor — exatamente como já acontece com a Diniz E-commerce hoje via "ponte de mensageria".
+O usuário quer entender por que, num diálogo onde o cliente pediu explicitamente preço de lentes Kodak multifocais (com Transitions, antirreflexo, etc.) e enviou a receita, a IA não passou preços e escalou para humano.
 
-Vou revisar o que já existe e propor o caminho mais limpo.
+Isso é uma investigação, não implementação. Vou diagnosticar olhando os dados reais do atendimento e os logs.
 
-## O que já existe (e funciona)
+## Hipóteses iniciais
 
-1. **Tabela `telefones_lojas`** — já cadastra telefones corporativos (loja/colaborador/departamento) com `tipo`, `nome`, etc. Tem trigger `on_telefone_loja_change` que dispara `sanitize_corporate_contact` automaticamente.
+1. **OCR da receita falhou ou veio com baixa confiança** — IA disse "consegui ler boa parte" 3x seguidas, sinal clássico de que `interpretar_receita` retornou parcial e ela ficou em loop.
+2. **Watchdog de loop ou guardrail de similaridade** — repetiu a mesma frase 3x → `watchdog-loop-ia` ou `detectLoop` escalou pra humano automaticamente (memória `auto-receita-e-anti-loop` confirma isso).
+3. **Quote engine sem catálogo Kodak** — `pricing_table_lentes` pode não ter linhas com `brand = 'Kodak'`, então `consultar_lentes` retornou vazio e a IA fugiu pra escalada.
+4. **Catálogo tem Kodak mas a IA não disparou `consultar_lentes`** — ficou presa em "posso te mostrar?" em vez de já mostrar (viola a diretriz reativa+proativa: receita salva → consultar).
 
-2. **Função `sanitize_corporate_contact`** — quando um telefone é cadastrado:
-   - força `setor_destino = Atendimento Corporativo` no contato
-   - ajusta `tipo` (loja/colaborador)
-   - encerra atendimentos humanos órfãos
-   - limpa coluna de pipeline não-corporativa
+## Plano de investigação
 
-3. **Sistema de Ponte (`contato_ponte`)** — quando contato tem `setor_destino` e o setor tem **um único** responsável ativo, ativa modo "ponte": mensagens do WhatsApp espelham na mensageria interna do responsável e respostas dele voltam pelo WhatsApp. Trigger `on_contato_setor_destino_change` faz isso automaticamente.
+### 1. Identificar o atendimento
+Buscar em `atendimentos` + `mensagens` o contato "Leandro Laba" / horário 21:34–21:54 de hoje, pegar `atendimento_id`.
 
-4. **UI já existe**: `TelefonesLojasCard` em Configurações faz CRUD completo.
+### 2. Inspecionar metadados
+- `contatos.metadata.receitas[]` — ver se a receita foi salva e com que confiança
+- `mensagens.metadata` das 3 respostas repetidas — ver se vieram do guardrail / fallback
+- `eventos_crm` desse contato — procurar `loop_ia_escalado`, `loop_ia_escalado_watchdog`, `precisa_humano`
 
-## O gap
+### 3. Verificar catálogo Kodak
+`SELECT brand, family, category, count(*) FROM pricing_table_lentes WHERE brand ILIKE '%kodak%' GROUP BY 1,2,3` — confirmar se existe e cobre multifocal/Transitions/AR.
 
-O fluxo atual **força tudo para "Atendimento Corporativo"**. O caso Diniz funciona porque:
-- foi cadastrado como tipo `loja` em `telefones_lojas`
-- alguém manualmente trocou o `setor_destino` do contato para "Dpto Armações"
-- como Marilene é a única no setor, a ponte ativou
+### 4. Logs do `ai-triage`
+Filtrar por `atendimento_id` no horário, ver:
+- se `interpretar_receita` foi chamada e o que retornou
+- se `consultar_lentes` foi chamada
+- se houve disparo de loop detector
+- motivo do `precisa_humano = true`
 
-Para o usuário poder cadastrar novos telefones e escolher o setor de destino direto no cadastro (sem ajuste manual), falta:
-
-1. **Permitir escolher o setor de destino no cadastro** do telefone (hoje só pode escolher tipo loja/colaborador/departamento, mas não para qual setor mandar).
-2. **Ajustar `sanitize_corporate_contact`** para respeitar um `setor_destino_id` configurado no `telefones_lojas` em vez de sempre forçar "Atendimento Corporativo".
-
-## Plano
-
-### 1. Adicionar coluna `setor_destino_id` em `telefones_lojas`
-Migration adicionando a coluna (nullable, FK lógica para `setores.id`). Quando preenchida, sobrescreve o setor padrão corporativo.
-
-### 2. Atualizar `sanitize_corporate_contact`
-Migration alterando a função: se o registro de `telefones_lojas` tiver `setor_destino_id` preenchido, usa ele; senão cai no "Atendimento Corporativo" como hoje.
-
-### 3. Atualizar `TelefonesLojasCard.tsx`
-Adicionar um `<Select>` "Setor de Destino" no formulário (lista vinda da tabela `setores` ativos). Mostrar a coluna "Setor" na tabela.
-
-### 4. Validar fluxo end-to-end
-Testar com um telefone novo: cadastrar → escolher setor → mandar WhatsApp do número → confirmar que cai como mensagem interna no responsável único do setor.
-
-## Arquivos a editar
-
-- **Nova migration**: adicionar coluna + atualizar função `sanitize_corporate_contact`
-- `src/components/configuracoes/TelefonesLojasCard.tsx`: campo "Setor de Destino" + coluna na tabela
-- `.lovable/memory/arquitetura/ponte-mensageria-whatsapp.md`: registrar que `setor_destino_id` em `telefones_lojas` agora dirige a ponte
-
-## Resultado esperado
-
-Usuário entra em Configurações → Telefones Corporativos → Novo Cadastro:
-- digita telefone
-- escolhe tipo (loja/colaborador/departamento)
-- **escolhe setor de destino** (Dpto Armações, Financeiro, TI, etc.)
-- salva
-
-Quando esse número mandar WhatsApp:
-- contato é criado/atualizado
-- `setor_destino` vai pro setor escolhido
-- se o setor tem 1 responsável → ponte ativa, msg cai no chat interno dele
-- se tem 0 ou >1 → fluxo normal de IA/humano
+### 5. Diagnóstico final
+Cruzar tudo e produzir uma causa raiz única + recomendação de correção (que viraria um plano de implementação na sequência, se for o caso).
 
 ## Detalhes técnicos
 
-- A ponte só ativa com responsável único — isso é regra existente, não muda. Se o usuário cadastrar setor com vários atendentes, a msg cai no atendimento normal do setor (não vira ponte 1:1).
-- O reaproveitamento de contato por telefone já existe (`idx_contatos_telefone_unique`), então re-cadastrar não duplica.
-- A trigger `on_telefone_loja_change` já dispara `sanitize_corporate_contact` em INSERT/UPDATE, então mudar o setor no cadastro reflete imediatamente nos contatos existentes daquele telefone.
+- A escalada "Vou chamar alguém da equipe" é a frase padrão quando a IA seta `modo='humano'` via tool `escalar_humano` ou via watchdog.
+- A repetição triplicada de "Consegui ler boa parte da sua receita, mas quero te passar a opção certinha. Posso te mostrar uma base e confirmar na loja?" + a dica de "prefiro texto" são fortes indícios de loop detectado pelo watchdog (cron 2min).
+- Memória relevante: `mem://ia/auto-receita-e-anti-loop`, `mem://ia/lentes-de-contato-orcamento` (mas aqui é óculos, então `pricing_table_lentes`), `mem://ia/quote-engine-lentes-e-categorias`.
+
+## Próximo passo
+Se você aprovar, eu rodo as queries e leio os logs do `ai-triage` desse atendimento e te trago a causa raiz com a correção sugerida (provavelmente: faltam linhas Kodak no catálogo OU o `interpretar_receita` está retornando confiança baixa que trava o `consultar_lentes`).
