@@ -25,12 +25,11 @@ serve(async (req) => {
   }
 
   const DELAY_HOURS = [
-    payload.delay_primeira_tentativa ?? 48,
-    payload.delay_segunda_tentativa ?? 72,
-    payload.delay_terceira_tentativa ?? 72,
+    payload.delay_primeira_tentativa ?? 1,
+    payload.delay_segunda_tentativa ?? 24,
   ];
-  const FINAL_WAIT_HOURS = payload.espera_final ?? 72;
-  const MAX_TENTATIVAS = payload.max_tentativas ?? 3;
+  const FINAL_WAIT_HOURS = payload.espera_final ?? 1;
+  const MAX_TENTATIVAS = payload.max_tentativas ?? 2;
   const INACTIVITY_DEFAULT = payload.inatividade_default ?? 48;
 
   // Eligible columns — configurable via payload
@@ -206,23 +205,45 @@ async function processContato(
     const hoursSinceLastAttempt = (now.getTime() - lastAttemptAt.getTime()) / (1000 * 60 * 60);
 
     if (hoursSinceLastAttempt >= FINAL_WAIT_HOURS) {
+      const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
+      const despedida = `Olá ${firstName}! 😊 Agradeço muito o seu contato com as Óticas Diniz Osasco. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨`;
+
+      // Envia mensagem fixa de despedida via send-whatsapp (Evolution mantém continuidade)
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            atendimento_id: atendimento.id,
+            texto: despedida,
+            remetente_nome: "Gael",
+          }),
+        });
+      } catch (despedidaErr) {
+        console.error(`[DESPEDIDA] Failed to send for ${contato.id}:`, despedidaErr);
+      }
+
       await supabase.from("atendimentos")
         .update({ status: "encerrado", fim_at: now.toISOString() })
         .eq("id", atendimento.id);
 
       await supabase.from("contatos").update({
         pipeline_coluna_id: perdidosCol.id,
-        metadata: { ...meta, recuperacao_vendas: { ...recuperacao, status: "perdido" } },
+        metadata: { ...meta, recuperacao_vendas: { ...recuperacao, status: "perdido", despedida_enviada_at: now.toISOString() } },
       }).eq("id", contato.id);
 
       await supabase.from("eventos_crm").insert({
         contato_id: contato.id,
-        tipo: "lead_perdido",
-        descricao: `Lead movido para Perdidos após ${MAX_TENTATIVAS} tentativas de recuperação sem resposta. Atendimento encerrado automaticamente.`,
+        tipo: "lead_despedida_final",
+        descricao: `Despedida final enviada após ${MAX_TENTATIVAS} retomadas sem resposta. Atendimento encerrado e lead movido para Perdidos.`,
+        metadata: { mensagem: despedida },
       });
 
       result.movedToPerdidos++;
-      console.log(`[PERDIDO] ${contato.nome} (${contato.id}) moved to Perdidos + atendimento closed`);
+      console.log(`[DESPEDIDA] ${contato.nome} (${contato.id}) recebeu despedida + movido para Perdidos`);
     }
     return result;
   }
