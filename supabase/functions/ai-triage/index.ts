@@ -162,10 +162,14 @@ function detectPendingIntent(
     };
   }
   if (/\b(pre[çc]o|valor|or[çc]amento|quanto custa|quanto fica|quanto sai)\b/i.test(joined)) {
+    const isLC = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?)\b/i.test(joined)
+      || /\b(esporte|academia|futebol|nata[çc][aã]o|corrida|corre[rd]|treino)\b/i.test(joined);
     return {
       intent: "quote",
       hint: hasReceitas
-        ? "Cliente quer ORÇAMENTO e já há receita salva. Use consultar_lentes para responder com opções."
+        ? (isLC
+            ? "Cliente quer ORÇAMENTO de LENTES DE CONTATO e já há receita salva. OBRIGATÓRIO: use consultar_lentes_contato AGORA e apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta. Se cliente mencionar esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva), MAS sem omitir quinzenal/mensal — o cliente decide. Termine perguntando a região pra indicar a loja. NUNCA encerrar pedindo só marca/tipo se já há receita."
+            : "Cliente quer ORÇAMENTO e já há receita salva. Use consultar_lentes para responder com opções.")
         : "Cliente quer ORÇAMENTO mas falta receita. Peça foto da receita uma única vez.",
     };
   }
@@ -212,7 +216,8 @@ function detectForcedToolIntent(
 
   // Quote / pricing keywords
   if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
-    if (hasReceitas) return { tool: "consultar_lentes", reason: "cliente pediu orçamento e há receita salva" };
+    const isLC = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
+    if (hasReceitas) return { tool: isLC ? "consultar_lentes_contato" : "consultar_lentes", reason: `cliente pediu orçamento${isLC ? " de LC" : ""} e há receita salva` };
     if (hasUnparsedImage) return { tool: "interpretar_receita", reason: "cliente pediu orçamento e há imagem pendente" };
     return { tool: "responder_pedindo_receita", reason: "cliente pediu orçamento mas não há receita" };
   }
