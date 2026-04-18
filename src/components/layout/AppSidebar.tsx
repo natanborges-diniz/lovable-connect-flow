@@ -2,13 +2,15 @@ import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset
+  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -119,7 +121,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
 };
 
 export function AppSidebar({ activeModule }: AppSidebarProps) {
-  const { state } = useSidebar();
+  const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const sections = moduleMenus[activeModule] || [];
@@ -176,6 +178,26 @@ export function AppSidebar({ activeModule }: AppSidebarProps) {
           </SidebarGroup>
         ))}
       </SidebarContent>
+      <SidebarFooter className="border-t p-2">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={collapsed ? "Expandir barra lateral" : "Recolher barra lateral"}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors",
+            collapsed ? "justify-center" : "justify-end"
+          )}
+        >
+          {collapsed ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <>
+              <span>Recolher</span>
+              <ChevronLeft className="h-4 w-4" />
+            </>
+          )}
+        </button>
+      </SidebarFooter>
     </Sidebar>
   );
 }
