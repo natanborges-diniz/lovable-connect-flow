@@ -197,6 +197,35 @@ async function processContato(
 
   const lastInboundAt = new Date(lastInbound.created_at);
 
+  // ── COOLDOWN PÓS-HANDOFF HUMANO (24h) ──
+  // Se houve mensagem outbound humana (consultor/atendente) nas últimas 24h,
+  // não dispara cadência de recuperação — o consultor está conduzindo manualmente.
+  // Evita templates "retomada_contexto_X" interrompendo o fluxo do operador.
+  const COOLDOWN_HUMANO_MS = 24 * 60 * 60 * 1000;
+  const { data: lastHumanOut } = await supabase
+    .from("mensagens")
+    .select("created_at, remetente_nome")
+    .eq("atendimento_id", atendimento.id)
+    .eq("direcao", "outbound")
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (lastHumanOut?.length) {
+    const humanOut = lastHumanOut.find((m: any) => {
+      const nome = String(m.remetente_nome || "").toLowerCase();
+      // Considera humano qualquer remetente que NÃO seja Gael/IA/Sistema/template
+      return nome && !/gael|sistema|template|bot|ia\b/i.test(nome);
+    });
+    if (humanOut) {
+      const since = now.getTime() - new Date(humanOut.created_at).getTime();
+      if (since < COOLDOWN_HUMANO_MS) {
+        const horas = Math.round(since / (60 * 60 * 1000));
+        console.log(`[COOLDOWN-HUMANO] ${contato.nome}: humano respondeu há ${horas}h (<24h) — recuperação suspensa`);
+        return result;
+      }
+    }
+  }
+
   // ── Recovery cadence (IA-mode only) ──
 
   // If already completed max attempts, check if time to move to Perdidos
