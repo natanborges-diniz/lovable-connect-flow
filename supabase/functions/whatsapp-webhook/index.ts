@@ -44,6 +44,24 @@ serve(async (req) => {
     let { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
     console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
+    // ─── 0a. ECHO-SAUDAÇÃO FILTER ───
+    // Provedores (Evolution/Z-API) às vezes ecoam a saudação automática enviada pelo nosso próprio número
+    // de volta como inbound. Detecta padrões fixos e descarta antes de criar contato/atendimento.
+    if (text && (mediaType === "text" || !mediaType)) {
+      const SAUDACAO_ECHO_PATTERNS = [
+        /^ol[áa],?\s+que\s+bom\s+poder\s+conversar\s+com\s+voc[êe]\.?\s*como\s+posso\s+te\s+ajudar/i,
+        /^ola\s+que\s+bom\s+poder\s+conversar/i,
+        /^oi[!,.]?\s*tudo\s+bem\??\s*como\s+posso\s+te\s+ajudar/i,
+      ];
+      const echoNorm = text.trim();
+      if (SAUDACAO_ECHO_PATTERNS.some((re) => re.test(echoNorm))) {
+        console.log(`[ECHO-FILTER] Ignored saudacao-automatica echo from ${phone}: "${echoNorm.substring(0, 60)}"`);
+        return new Response(JSON.stringify({ status: "ignored", reason: "saudacao_echo" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // ─── 0. CORPORATE EARLY-CHECK ───
     // Lookup telefones_lojas usando variantes BR (com/sem 9) ANTES de criar contato.
     // Garante que números corporativos NUNCA virem cliente novo no CRM.
