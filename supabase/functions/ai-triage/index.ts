@@ -333,6 +333,18 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
+  // Guardrail (óculos): receita salva + intent claro de quote → nunca devolver "dois caminhos"
+  // Caso Ju (18/04): cliente já tinha receita interpretada, pediu "modelos/orçamento", IA respondeu
+  // duas vezes o mesmo bloco de lentes. Aqui forçamos uma transição limpa para a tool de quote.
+  if (hasReceitas && /\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|op[cç][oõ]es?|lentes?\s+compat|cota[cç][aã]o|modelos?\s+de\s+lente)\b/i.test(n)) {
+    return {
+      resposta: "Beleza! Já vou te mandar as opções de lentes compatíveis com a sua receita 😊 Enquanto isso, em qual região você está? Assim já te indico a loja mais próxima pra fechar.",
+      intencao: "orcamento",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
+
   // If image context, use dedicated image fallback pool
   if (isImageContext || /\[image\]|\[document\]/.test(n)) {
     const recentNorm = (recentOutbound || []).slice(-10).map(norm);
