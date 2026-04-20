@@ -196,6 +196,34 @@ export function WhatsAppTemplatesCard() {
     onError: (e: any) => toast.error("Erro: " + e.message),
   });
 
+  // ── Auto-corrigir template rejeitado ──
+  const autoFixMutation = useMutation({
+    mutationFn: async (t: CatalogoTemplate) => {
+      const { fixed, changed, notes } = autoFixBody(t.body);
+      if (!changed) {
+        throw new Error("Não foi possível detectar problema automaticamente. Edite manualmente.");
+      }
+      const { error } = await supabase
+        .from("whatsapp_templates")
+        .update({
+          body: fixed,
+          status: "rascunho",
+          motivo_rejeicao: null,
+          ultima_sincronizacao: new Date().toISOString(),
+        })
+        .eq("id", t.id);
+      if (error) throw error;
+      return notes;
+    },
+    onSuccess: (notes) => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-templates-catalogo"] });
+      toast.success("Template corrigido e salvo como rascunho", {
+        description: notes.join(" "),
+      });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   return (
     <Card className="shadow-card">
       <CardHeader className="space-y-3">
