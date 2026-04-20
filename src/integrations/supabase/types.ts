@@ -1045,6 +1045,8 @@ export type Database = {
       }
       mensagens_internas: {
         Row: {
+          anexo_tipo: string | null
+          anexo_url: string | null
           conteudo: string
           conversa_id: string
           created_at: string
@@ -1054,6 +1056,8 @@ export type Database = {
           remetente_id: string
         }
         Insert: {
+          anexo_tipo?: string | null
+          anexo_url?: string | null
           conteudo: string
           conversa_id: string
           created_at?: string
@@ -1063,6 +1067,8 @@ export type Database = {
           remetente_id: string
         }
         Update: {
+          anexo_tipo?: string | null
+          anexo_url?: string | null
           conteudo?: string
           conversa_id?: string
           created_at?: string
