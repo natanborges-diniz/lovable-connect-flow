@@ -21,7 +21,7 @@ type: feature
 
 ## Funções consumidoras (todas roteiam internamente)
 
-- `criar-demanda-loja`: usa `resolver_destinatarios_loja(loja_nome)` → notificacoes + mensagens_internas. Sem WhatsApp.
+- `criar-demanda-loja`: usa `resolver_destinatarios_loja(loja_nome)` → notificacoes + mensagens_internas com `conversa_id='demanda_<id>'` (broadcast). Ver `mem://arquitetura/ponte-demandas-messenger`.
 - `encerrar-demanda-loja`: notifica solicitante (loja/auto) ou destinatários internos (operador). Sem WhatsApp.
 - `payment-webhook`: comprovante picote vai como `notificacoes` + `solicitacao_comentarios`. Sem WhatsApp.
 - `agendamentos-cron` (cobranças loja): notificacoes em vez de WA. Lembretes para clientes finais ainda via WA dentro de 24h.

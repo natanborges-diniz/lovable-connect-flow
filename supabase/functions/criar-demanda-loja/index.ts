@@ -1,5 +1,6 @@
 // CANAL ÚNICO: B2B com lojas/colaboradores agora roda 100% pelo app Atrium Messenger
 // (mensagens_internas + notificacoes). NENHUMA mensagem WhatsApp é disparada.
+// A conversa entre operador e loja usa conversa_id = 'demanda_<id>' (broadcast 1:N).
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -7,10 +8,6 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-function makeConversaId(a: string, b: string) {
-  return [a, b].sort().join("_");
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -78,13 +75,14 @@ serve(async (req) => {
     const protocolo = `DEM-${ano}-${String(demanda.numero_curto).padStart(5, "0")}`;
     await supabase.from("demandas_loja").update({ protocolo }).eq("id", demanda.id);
 
-    // Mensagem inicial no thread da demanda
+    // Mensagem inicial direto na thread oficial (fonte de verdade do painel)
     await supabase.from("demanda_mensagens").insert({
       demanda_id: demanda.id,
       direcao: "operador_para_loja",
       autor_id: user.id,
       autor_nome: operadorNome,
       conteudo: pergunta,
+      metadata: { bootstrap: true },
     });
 
     // Resolve destinatários internos (app Atrium Messenger)
@@ -94,9 +92,10 @@ serve(async (req) => {
     const dests = (destinatarios || []) as Array<{ user_id: string; setor_id: string | null }>;
     console.log(`[criar-demanda-loja] Demanda ${protocolo} → ${dests.length} destinatário(s) interno(s)`);
 
-    // Envia notificação + mensagem interna para cada destinatário
+    // Conversa-demanda: mesma conversa_id para todos os destinatários (broadcast)
+    const conversa_id = `demanda_${demanda.id}`;
     const titulo = `Nova demanda ${protocolo} (${loja_nome})`;
-    const mensagemBody = `${operadorNome} sobre cliente ${clienteNome}: ${pergunta}`;
+    const corpoChat = `📌 *${protocolo}* — ${loja_nome}\nCliente: ${clienteNome}\n\n${pergunta}\n\n_Responda aqui ou envie /encerrar para fechar._`;
 
     for (const d of dests) {
       // Notificação push-friendly
@@ -105,27 +104,27 @@ serve(async (req) => {
         setor_id: d.setor_id,
         tipo: "demanda_loja",
         titulo,
-        mensagem: mensagemBody,
+        mensagem: `${operadorNome} sobre cliente ${clienteNome}: ${pergunta}`,
         referencia_id: demanda.id,
       });
 
-      // Mensagem interna (chat) — remetente é o operador, destinatário o usuário interno
-      const conversa_id = makeConversaId(user.id, d.user_id);
+      // Mensagem interna na conversa-demanda (broadcast). O bridge ignora pois o conteúdo
+      // contém o protocolo + a pergunta original (heurística de bootstrap).
       await supabase.from("mensagens_internas").insert({
         remetente_id: user.id,
         destinatario_id: d.user_id,
         conversa_id,
-        conteudo: `📌 *${protocolo}* — ${loja_nome}\nCliente: ${clienteNome}\n\n${pergunta}`,
+        conteudo: corpoChat,
       });
     }
 
     if (dests.length === 0) {
-      console.warn(`[criar-demanda-loja] Nenhum destinatário interno encontrado para loja "${loja_nome}". Demanda criada mas sem entrega push.`);
+      console.warn(`[criar-demanda-loja] Nenhum destinatário interno para "${loja_nome}".`);
       await supabase.from("demanda_mensagens").insert({
         demanda_id: demanda.id,
         direcao: "sistema",
         autor_nome: "Sistema",
-        conteudo: `⚠️ Loja "${loja_nome}" sem usuários internos vinculados no app. Cadastre em Configurações → Lojas / Usuários.`,
+        conteudo: `⚠️ Loja "${loja_nome}" sem usuários internos vinculados no app Atrium Messenger. Cadastre em Configurações → Lojas / Usuários.`,
       });
     }
 
@@ -135,6 +134,7 @@ serve(async (req) => {
       protocolo,
       numero_curto: demanda.numero_curto,
       destinatarios_internos: dests.length,
+      conversa_id,
       canal: "app_atrium_messenger",
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
