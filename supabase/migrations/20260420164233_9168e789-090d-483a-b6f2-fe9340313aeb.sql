@@ -1,0 +1,13 @@
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, tudo bem? Confirmamos seu horário na loja {{2}} para o dia {{3}} às {{4}}. Te esperamos!' WHERE nome = 'confirmacao_agendamento';
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, passando para lembrar do seu horário na loja {{2}} no dia {{3}} às {{4}}. Posso confirmar sua presença?' WHERE nome = 'lembrete_agendamento_24h';
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, sentimos sua falta hoje na loja {{2}}. Quer remarcar? Responda com a melhor data para você.' WHERE nome = 'noshow_recuperacao';
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, tudo bem? Notamos que paramos nosso bate-papo e queremos saber se ainda podemos te ajudar com seus óculos. Se quiser retomar, é só responder.' WHERE nome = 'recuperacao_inatividade_crm';
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, voltando aqui para continuarmos seu atendimento. Pode responder esta mensagem que sigo com você.' WHERE nome = 'retomada_atendimento';
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, tudo bem? Notei que conversamos sobre {{2}} e não fechamos ainda. Posso te ajudar com mais alguma informação?' WHERE nome = 'retomada_contexto_lead';
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, sobre o orçamento de {{2}} que enviamos: ficou alguma dúvida? Posso reservar um horário para você conhecer presencialmente.' WHERE nome = 'retomada_pos_orcamento';
+UPDATE public.whatsapp_templates SET body = 'Olá {{1}}, vou pausar nosso atendimento por aqui. Quando precisar é só chamar! Equipe Óticas Diniz.' WHERE nome = 'despedida_cordial';
+UPDATE public.whatsapp_templates SET body = 'Pagamento confirmado para o cliente {{1}} no valor de R$ {{2}}, NSU {{3}}, na loja {{4}}. Tudo certo!' WHERE nome = 'comprovante_pagamento_loja';
+UPDATE public.whatsapp_templates SET body = 'Nova demanda registrada: protocolo {{1}} para a loja {{2}} — {{3}}. Responda esta mensagem para tratar.' WHERE nome = 'demanda_loja_nova';
+UPDATE public.whatsapp_templates SET body = 'Demanda encerrada: protocolo {{1}}. Resumo: {{2}}. Obrigado pelo atendimento!' WHERE nome = 'demanda_loja_encerrada';
+UPDATE public.whatsapp_templates SET body = 'Atenção: o cliente {{1}} (agendamento {{2}}) ainda não compareceu na loja {{3}}. Pode confirmar o status?' WHERE nome = 'noshow_recuperacao_loja';
+UPDATE public.whatsapp_templates SET status = 'rascunho', motivo_rejeicao = NULL WHERE status = 'rejected';
