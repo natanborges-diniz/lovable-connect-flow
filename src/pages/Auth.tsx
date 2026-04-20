@@ -12,7 +12,7 @@ export default function Auth() {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Painel de marca (esquerda em desktop, topo em mobile) */}
-      <div className="relative flex-1 flex items-center justify-center px-6 py-12 lg:py-0 overflow-hidden bg-gradient-to-br from-brand via-brand-hover to-neutral-900">
+      <div className="relative flex-1 flex items-center justify-center px-6 py-12 lg:py-0 overflow-hidden bg-gradient-to-br from-brand to-brand-hover">
         {/* Decorativos */}
         <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" aria-hidden />
         <div className="absolute -bottom-32 -right-16 h-80 w-80 rounded-full bg-white/5 blur-3xl" aria-hidden />
