@@ -159,7 +159,16 @@ export function WhatsAppTemplatesCard() {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-templates-catalogo"] });
       toast.success("Template enviado à Meta. Aguardando análise (1-24h).");
     },
-    onError: (e: any) => toast.error("Erro ao submeter: " + e.message),
+    onError: (e: any) => {
+      const msg = String(e?.message || "");
+      if (msg.includes("2388024") || /já existe conteúdo/i.test(msg)) {
+        toast.error("Meta rejeitou: já existe template com esse nome+idioma.", {
+          description: "Clique em 'Auto-corrigir' para criar uma versão _v2, ou renomeie o rascunho antes de submeter.",
+        });
+      } else {
+        toast.error("Erro ao submeter: " + msg);
+      }
+    },
   });
 
   // ── Sincronizar status com Meta (upsert real via edge) ──
