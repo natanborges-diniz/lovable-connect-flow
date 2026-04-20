@@ -330,7 +330,7 @@ export function WhatsAppTemplatesCard() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <StatusBadge status={t.status} />
-                    {(t.status === "rascunho" || t.status === "rejected") && (
+                    {t.status === "rascunho" && (
                       <Button
                         size="sm"
                         variant="default"
