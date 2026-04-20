@@ -246,10 +246,9 @@ serve(async (req) => {
       atendimentoId = atendimentoAberto.id;
       atendimentoModo = (atendimentoAberto as any).modo || "ia";
 
-      // Update canal_provedor to current source for correct reply routing
-      if ((atendimentoAberto as any).canal_provedor !== source) {
-        await supabase.from("atendimentos").update({ canal_provedor: source }).eq("id", atendimentoId);
-        console.log(`Updated canal_provedor to ${source} for atendimento ${atendimentoId}`);
+      // CANAL ÚNICO: nunca rebaixa canal_provedor — sempre meta_official.
+      if ((atendimentoAberto as any).canal_provedor !== "meta_official") {
+        await supabase.from("atendimentos").update({ canal_provedor: "meta_official" }).eq("id", atendimentoId);
       }
     } else {
       const { data: solicitacao, error: solErr } = await supabase
@@ -272,7 +271,7 @@ serve(async (req) => {
           contato_id: contato.id,
           canal: "whatsapp",
           status: "aguardando",
-          canal_provedor: source,
+          canal_provedor: "meta_official",
           modo: "ia",
         })
         .select()

@@ -11,6 +11,15 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // CANAL ÚNICO: bot-lojas via WhatsApp foi DESCONTINUADO.
+  // Toda interação corporativa migrou para o app Atrium Messenger.
+  console.log("[bot-lojas] Inbound ignorado — canal corporativo migrado para app Atrium Messenger.");
+  return new Response(JSON.stringify({
+    status: "ignored",
+    reason: "bot_lojas_inbound_ignored",
+    canal: "app_atrium_messenger",
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const OPTICAL_BUSINESS_URL = Deno.env.get("OPTICAL_BUSINESS_URL");
