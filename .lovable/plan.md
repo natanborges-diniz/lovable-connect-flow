@@ -1,66 +1,108 @@
 
 
-## Racional dos dois projetos
+## Reconectar demandas/retornos/bots via Messenger (canal único)
 
-Você tem **dois projetos React** apontando para o **mesmo banco Supabase** (`kvggebtnqmxydtwaumqz`):
+### O que está quebrado hoje
 
-| Projeto | Papel | Audiência |
+| Capacidade | Estado | Problema |
 |---|---|---|
-| **infoco-ops** (este, `atrium-link`) | Plataforma operacional completa: CRM, Lojas, Financeiro, TI, Configurações, WhatsApp Meta, IA Gael, automações, cron, edge functions | Operadores internos no desktop/web |
-| **Desktop Companion** (`Atrium Messenger`) | App enxuto e focado: só **Mensagens internas + Demandas + Notificações + Perfil** | Lojas e colaboradores no celular (PWA/native) |
+| Operador → Loja: abrir demanda | ✅ funciona | Já cria `notificacoes` + `mensagens_internas` para usuários da loja |
+| Loja → Operador: responder | ❌ quebrado | Resposta cai em `mensagens_internas` direto, mas **não vira `demanda_mensagens`** nem aparece no `DemandaLojaPanel`; `bot-lojas` está desligado |
+| Encerramento de demanda | ⚠️ parcial | Notifica destinatários, mas não há "encerrar pela loja" pelo Messenger |
+| Bots corporativos (Financeiro / TI / Departamentos: link pgto, boleto, CPF, reembolso) | ❌ quebrado | `bot-lojas` retorna `ignored` na linha 14; lojas não conseguem mais abrir solicitação alguma |
+| Notificações de fluxos (`fluxo_responsaveis`) | ❌ quebrado | Disparavam via WhatsApp; sem código equivalente no Messenger |
 
-Ambos escrevem/leem nas **mesmas tabelas** (`mensagens_internas`, `notificacoes`, `solicitacoes`), com RLS garantindo isolamento. É exatamente o modelo "Canal Único — App Atrium Messenger" que já está nas memórias.
+### Arquitetura proposta — "Demandas-via-Messenger"
+
+Reaproveita o pattern já implementado em `bridge-mensageria` (conversa-ponte por contato) e cria **conversas-demanda** no Messenger:
 
 ```text
-              ┌────────────────────────────┐
-              │   Supabase (único backend) │
-              │  kvggebtnqmxydtwaumqz      │
-              │  • mensagens_internas       │
-              │  • notificacoes             │
-              │  • solicitacoes / profiles  │
-              └──────────┬─────────────────┘
-                         │
-        ┌────────────────┴───────────────┐
-        │                                │
-┌───────▼──────────┐            ┌────────▼──────────┐
-│  infoco-ops      │            │  Desktop Companion│
-│  (operação web)  │            │  (Atrium Messenger│
-│  desktop pesado  │            │   leve, mobile)   │
-└──────────────────┘            └───────────────────┘
+                       infoco-ops (este projeto)
+┌──────────────────────────────────────────────────────────────────┐
+│  Operador abre demanda → criar-demanda-loja                       │
+│    ├── insert demandas_loja                                        │
+│    ├── insert mensagens_internas (conversa_id = demanda_<id>)     │
+│    └── insert notificacoes → push                                  │
+└──────────────────────────────────────────────────────────────────┘
+                              ↕  (Realtime + Push)
+┌──────────────────────────────────────────────────────────────────┐
+│              Desktop Companion (app loja/colaborador)              │
+│  Vê "Demandas" + responde no chat da conversa demanda_<id>         │
+└──────────────────────────────────────────────────────────────────┘
+                              ↕
+       Trigger novo: on_mensagem_interna_demanda (conversa_id LIKE 'demanda_%')
+                              ↓
+            EF nova: bridge-demanda  →  insert demanda_mensagens
+                                        update demandas_loja (resp/encerrada)
+                                        notifica solicitante (push + UI)
 ```
 
-## O que fazer em cada lado
+**Convenção de conversa**: `conversa_id = 'demanda_' || demanda.id`. O `DemandaLojaPanel` continua lendo `demanda_mensagens` (sem mudança de UI), e a fonte de verdade da conversa entre operador↔loja passa a ser `mensagens_internas` espelhada para `demanda_mensagens` via trigger/EF.
 
-### No **Desktop Companion** (o outro projeto)
-É **lá** que o app mobile do colaborador/loja vive. Ele já tem:
-- Login → Lista de conversas → Chat 1:1 (com Realtime já validado)
-- Lista de demandas (`solicitacoes`)
-- Notificações
-- Perfil
+### Mudanças
 
-**Próximos passos naturais lá:**
-1. Empacotar como **PWA + Capacitor** (mesmo modelo que acabamos de aplicar aqui) — porque é esse projeto que vai virar o app instalável de fato.
-2. Registrar **push token** no `profiles.metadata.push_token` ao logar no celular → habilita o `dispatch-push` que já existe aqui.
-3. Adicionar badge de não lidas + indicador de digitando.
+#### 1. Banco (migration)
+- `mensagens_internas`: índice em `conversa_id` (já implícito, garantir).
+- Trigger novo `on_mensagem_interna_demanda` em `mensagens_internas`: quando `conversa_id LIKE 'demanda_%'`, chama `bridge-demanda`.
+- Sequência/coluna `protocolo` corporativo já existe (`SOL-AAAA-NNNNN`).
 
-### No **infoco-ops** (este projeto)
-A página `/mensagens` daqui **continua existindo** como espelho desktop para os operadores que já estão no painel — não precisa virar app mobile. As alterações de Capacitor/PWA que acabei de fazer aqui são **opcionais** (servem se você quiser que operadores também instalem o painel inteiro no celular), mas o **caminho oficial mobile é o Desktop Companion**.
+#### 2. Edge functions (novas / refeitas)
 
-## Minha recomendação
+**`bridge-demanda`** (nova) — espelha mensagens internas ↔ thread da demanda:
+- INPUT do trigger: `mensagem_interna_id`, `conversa_id`, `remetente_id`, `conteudo`.
+- Extrai `demanda_id` do `conversa_id`.
+- Resolve direção: se remetente é solicitante → `operador_para_loja`; senão → `loja_para_operador`.
+- INSERT em `demanda_mensagens` (com flag anti-loop `metadata.via_bridge=true`).
+- Atualiza `demandas_loja.ultima_mensagem_loja_at` + `vista_pelo_operador=false` quando vier da loja.
+- Comandos textuais especiais da loja: `/encerrar` ou `/resolvido` → chama `encerrar-demanda-loja` com `encerrado_por='loja'`.
+- Notifica solicitante via `notificacoes` quando resposta for da loja.
 
-1. **Aqui (infoco-ops)**: reverter (ou simplesmente ignorar) o setup Capacitor/PWA — este projeto é desktop-first, o `/mensagens` continua útil só para operadores no painel.
-2. **Lá (Desktop Companion)**: aplicar o setup PWA + Capacitor + push tokens. É o app que será instalado nos celulares de loja/colaborador.
-3. Deixar o `dispatch-push` daqui (já pronto, modo log-only) esperando o token aparecer em `profiles.metadata.push_token` — assim que o Desktop Companion começar a registrar tokens, o push real começa a fluir sem mexer em nada aqui.
+**`criar-demanda-loja`** (ajuste pequeno):
+- Trocar `conversa_id = makeConversaId(operador, loja_user)` por **`conversa_id = 'demanda_' || demanda.id`** em **um grupo** (broadcast): cria N inserts com mesmo `conversa_id` mas `destinatario_id` distinto para cada usuário da loja → todos veem a mesma thread.
+- Mensagem inicial inclui cabeçalho com protocolo + nome do cliente + dica "responda aqui ou /encerrar".
 
-## Memória a atualizar
+**`bot-lojas-messenger`** (nova, substitui `bot-lojas` para fluxos corporativos):
+- Acionada quando uma mensagem interna chega em conversa que NÃO é demanda, NÃO é ponte, e o remetente é um colaborador/loja com `tipo_bot` configurado.
+- Reusa `bot_fluxos` + `bot_menu_opcoes` (mesma engine do `bot-lojas` antigo).
+- IO: lê do `mensagens_internas`, escreve resposta em `mensagens_internas` (do "Sistema · Bot Atrium" → usuário).
+- Cria `solicitacoes` + `solicitacao_anexos` igual antes, mas anexos vêm de `mensagens_internas.anexo_url` (bucket `mensagens-anexos`).
+- Mantém integração `payment-links` (OB), `consulta_cpf`, etc. Sem mudanças em `payment-webhook`.
 
-Adicionar à `mem://arquitetura/canal-unico-meta-e-app-atrium`:
-> "Atrium Messenger" tem projeto Lovable próprio (`Desktop Companion`, id `2d68a67b-…`) apontando para o mesmo Supabase. App mobile = Desktop Companion (PWA/Capacitor). `infoco-ops` mantém `/mensagens` apenas como espelho desktop para operadores.
+**`notificarResponsaveis`** (refator dentro de `bot-lojas-messenger`):
+- Em vez de WhatsApp, lê `fluxo_responsaveis` e busca o `user_id` correspondente em `telefones_lojas → setor_destino_id → user_roles`. Para cada um: `notificacoes` + `mensagens_internas` direto (1:1).
 
-## Pergunta de decisão
+#### 3. Frontend (este projeto, painel operador)
 
-Quer que eu:
-- **(A)** remova o Capacitor/PWA daqui e foque o setup mobile **no Desktop Companion** (recomendado), ou
-- **(B)** mantenha aqui também (dois apps instaláveis: painel operacional + messenger), ou
-- **(C)** primeiro vá ao Desktop Companion fazer o setup mobile lá e depois decidimos sobre este?
+**`DemandaLojaPanel.tsx`**:
+- Adicionar badge "via Messenger" no cabeçalho.
+- Já consome `demanda_mensagens` via Realtime → funciona automaticamente após bridge.
+- `NovaDemandaDialog`: mostrar contagem de destinatários (`resolver_destinatarios_loja`) antes de enviar; alerta se `0`.
+- `DemandaThreadDialog`: rótulos atuais (`loja_para_operador`, etc.) ficam corretos via bridge.
+
+**`AppLayout` / Notificações**: nada a mudar — `useNotificacoes` já lê `notificacoes`.
+
+#### 4. Memória
+- Atualizar `mem://arquitetura/canal-unico-meta-e-app-atrium`: documentar `conversa_id = 'demanda_<id>'` e `bot-lojas-messenger`.
+- Marcar `mem://bot-lojas/motor-de-fluxos-configuraveis` como "engine reutilizada via Messenger".
+- Nova memória `mem://arquitetura/ponte-demandas-messenger` com a convenção do `conversa_id` e o trigger.
+
+### Detalhes técnicos
+
+- **Anti-loop**: `bridge-demanda` ignora qualquer `mensagens_internas` com `metadata.via_bridge=true`. `criar-demanda-loja` marca seus inserts iniciais com `metadata.bootstrap_demanda=true` para não duplicar em `demanda_mensagens` (ela já insere lá diretamente).
+- **Multi-destinatário**: `mensagens_internas` é 1:1; usamos `conversa_id` compartilhado + N linhas (uma por destinatário) para broadcast. O bridge deduplica por `mensagens_internas.id` original (usar a primeira linha do batch como canônica via `metadata.broadcast_root_id`).
+- **Anexos da loja**: `mensagens_internas.anexo_url` (bucket `mensagens-anexos` recém-criado) → bridge copia para `demanda_mensagens.anexo_url`.
+- **`bot-lojas-messenger` — gatilho**: trigger em `mensagens_internas` que dispara quando `destinatario_id` = perfil "Sistema · Bot Atrium" (criado on-demand igual ao "Sistema · Ponte"). UI do Companion vai oferecer botão "Abrir bot" que envia mensagem para esse perfil.
+- **Encerramento pela loja**: comando `/encerrar` no chat da demanda → `bridge-demanda` chama `encerrar-demanda-loja` com `X-Internal-Caller` + `encerrado_por='loja'` (já suportado).
+- **`bot-lojas` antigo**: mantido como `410 Gone` para webhooks Meta legados; código real esvaziado.
+
+### Plano de execução (tarefas)
+
+1. Migration: trigger `on_mensagem_interna_demanda` + perfil "Sistema · Bot Atrium" placeholder.
+2. EF nova `bridge-demanda` (espelha + comandos + notif solicitante).
+3. Refator `criar-demanda-loja`: `conversa_id = 'demanda_<id>'`, broadcast por usuário, marca bootstrap.
+4. EF nova `bot-lojas-messenger` (porta da engine `bot-lojas` para Messenger; mantém `bot_fluxos` e integração OB).
+5. Trigger `on_mensagem_interna_bot` para acionar `bot-lojas-messenger`.
+6. Ajustes UI em `DemandaLojaPanel` (badge + alerta destinatários=0).
+7. Atualizar 3 memórias.
+8. Teste E2E manual: abrir demanda → responder no Companion → ver no painel; comando `/encerrar`; fluxo "link de pagamento" pelo Companion.
 
