@@ -1394,6 +1394,7 @@ export type Database = {
           created_at: string
           email: string | null
           id: string
+          metadata: Json
           nome: string
           setor_id: string | null
           updated_at: string
@@ -1405,6 +1406,7 @@ export type Database = {
           created_at?: string
           email?: string | null
           id: string
+          metadata?: Json
           nome: string
           setor_id?: string | null
           updated_at?: string
@@ -1416,6 +1418,7 @@ export type Database = {
           created_at?: string
           email?: string | null
           id?: string
+          metadata?: Json
           nome?: string
           setor_id?: string | null
           updated_at?: string
