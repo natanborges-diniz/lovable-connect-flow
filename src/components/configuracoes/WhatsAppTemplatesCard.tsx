@@ -124,53 +124,14 @@ export function WhatsAppTemplatesCard() {
     onError: (e: any) => toast.error("Erro ao submeter: " + e.message),
   });
 
-  // ── Sincronizar status com Meta ──
+  // ── Sincronizar status com Meta (upsert real via edge) ──
   const syncMutation = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke("manage-whatsapp-templates", {
-        body: { action: "list" },
+        body: { action: "list", sync: true },
       });
       if (error) throw error;
-      const metaTemplates = (data?.data || []) as MetaTemplate[];
-
-      const updates: { nome: string; status: CatalogoTemplate["status"]; motivo: string | null }[] = [];
-      for (const m of metaTemplates) {
-        const statusMap: Record<string, CatalogoTemplate["status"]> = {
-          APPROVED: "approved",
-          PENDING: "pending",
-          IN_APPEAL: "pending",
-          REJECTED: "rejected",
-          PAUSED: "pending",
-          DISABLED: "rejected",
-        };
-        const localStatus = statusMap[m.status] || "pending";
-        updates.push({
-          nome: m.name,
-          status: localStatus,
-          motivo: m.rejected_reason || null,
-        });
-      }
-
-      let synced = 0;
-      for (const u of updates) {
-        const { data: existing } = await supabase
-          .from("whatsapp_templates")
-          .select("id")
-          .eq("nome", u.nome)
-          .maybeSingle();
-        if (existing) {
-          await supabase
-            .from("whatsapp_templates")
-            .update({
-              status: u.status,
-              motivo_rejeicao: u.motivo,
-              ultima_sincronizacao: new Date().toISOString(),
-            })
-            .eq("id", existing.id);
-          synced++;
-        }
-      }
-      return synced;
+      return (data?.synced as number) || 0;
     },
     onSuccess: (n) => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-templates-catalogo"] });
