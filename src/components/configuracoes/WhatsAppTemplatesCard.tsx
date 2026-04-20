@@ -133,41 +133,61 @@ export function WhatsAppTemplatesCard() {
     return c;
   }, [catalogo]);
 
-  // ── Submeter à Meta ──
+  // ── Submeter à Meta (com auto-retry em colisão de nome+idioma) ──
   const submitMutation = useMutation({
     mutationFn: async (t: CatalogoTemplate) => {
       const components = [{ type: "BODY", text: t.body }];
-      const { data, error } = await supabase.functions.invoke("manage-whatsapp-templates", {
-        body: {
-          action: "create",
-          template_data: {
-            name: t.nome,
-            language: t.idioma,
-            category: t.categoria,
-            components,
+      const baseName = t.nome.replace(/_v\d+$/, "");
+      let nomeAtual = t.nome;
+      let tentativa = 0;
+      const maxTentativas = 10;
+
+      while (tentativa < maxTentativas) {
+        const { data, error } = await supabase.functions.invoke("manage-whatsapp-templates", {
+          body: {
+            action: "create",
+            template_data: {
+              name: nomeAtual,
+              language: t.idioma,
+              category: t.categoria,
+              components,
+            },
           },
-        },
-      });
-      if (error) throw error;
-      await supabase
-        .from("whatsapp_templates")
-        .update({ status: "pending", ultima_sincronizacao: new Date().toISOString() })
-        .eq("id", t.id);
-      return data;
+        });
+
+        const errMsg = String(error?.message || "") + " " + JSON.stringify(data || {});
+        const isCollision = errMsg.includes("2388024") || /já existe conteúdo/i.test(errMsg);
+
+        if (!error && !isCollision) {
+          // Sucesso: persiste novo nome (se mudou) e marca pending
+          await supabase
+            .from("whatsapp_templates")
+            .update({
+              nome: nomeAtual,
+              status: "pending",
+              motivo_rejeicao: null,
+              ultima_sincronizacao: new Date().toISOString(),
+            })
+            .eq("id", t.id);
+          return { data, nomeFinal: nomeAtual };
+        }
+
+        if (!isCollision) throw error;
+
+        // Colisão → bump versão e tenta de novo
+        tentativa++;
+        const match = nomeAtual.match(/_v(\d+)$/);
+        const proxV = match ? parseInt(match[1]) + 1 : 2;
+        nomeAtual = `${baseName}_v${proxV}`;
+      }
+      throw new Error("Não foi possível encontrar nome disponível na Meta após 10 tentativas.");
     },
-    onSuccess: () => {
+    onSuccess: ({ nomeFinal }) => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-templates-catalogo"] });
-      toast.success("Template enviado à Meta. Aguardando análise (1-24h).");
+      toast.success(`Template "${nomeFinal}" enviado à Meta. Aguardando análise (1-24h).`);
     },
     onError: (e: any) => {
-      const msg = String(e?.message || "");
-      if (msg.includes("2388024") || /já existe conteúdo/i.test(msg)) {
-        toast.error("Meta rejeitou: já existe template com esse nome+idioma.", {
-          description: "Clique em 'Auto-corrigir' para criar uma versão _v2, ou renomeie o rascunho antes de submeter.",
-        });
-      } else {
-        toast.error("Erro ao submeter: " + msg);
-      }
+      toast.error("Erro ao submeter: " + (e?.message || "desconhecido"));
     },
   });
 
