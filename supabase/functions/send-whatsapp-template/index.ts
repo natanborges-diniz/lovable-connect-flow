@@ -29,6 +29,34 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // ─── GATE: bloquear se template não estiver aprovado no catálogo local ───
+    // Se o template não existe no catálogo, deixa passar (compat com templates legados Meta).
+    // Se existe e status != 'approved', bloqueia e registra evento.
+    const { data: catalogo } = await supabase
+      .from("whatsapp_templates")
+      .select("status, motivo_rejeicao")
+      .eq("nome", template_name)
+      .maybeSingle();
+
+    if (catalogo && catalogo.status !== "approved") {
+      console.warn(`[GATE] Template "${template_name}" status=${catalogo.status} — disparo bloqueado`);
+      await supabase.from("eventos_crm").insert({
+        contato_id,
+        tipo: "template_pendente",
+        descricao: `Disparo proativo bloqueado: template "${template_name}" status=${catalogo.status}`,
+        metadata: { template_name, status: catalogo.status, motivo: catalogo.motivo_rejeicao },
+      });
+      return new Response(JSON.stringify({
+        status: "blocked_template_not_approved",
+        template_name,
+        template_status: catalogo.status,
+        motivo: catalogo.motivo_rejeicao,
+      }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Get contato
     const { data: contato, error: cErr } = await supabase
       .from("contatos")
