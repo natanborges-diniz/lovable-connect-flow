@@ -159,7 +159,16 @@ export function WhatsAppTemplatesCard() {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-templates-catalogo"] });
       toast.success("Template enviado à Meta. Aguardando análise (1-24h).");
     },
-    onError: (e: any) => toast.error("Erro ao submeter: " + e.message),
+    onError: (e: any) => {
+      const msg = String(e?.message || "");
+      if (msg.includes("2388024") || /já existe conteúdo/i.test(msg)) {
+        toast.error("Meta rejeitou: já existe template com esse nome+idioma.", {
+          description: "Clique em 'Auto-corrigir' para criar uma versão _v2, ou renomeie o rascunho antes de submeter.",
+        });
+      } else {
+        toast.error("Erro ao submeter: " + msg);
+      }
+    },
   });
 
   // ── Sincronizar status com Meta (upsert real via edge) ──
@@ -197,22 +206,38 @@ export function WhatsAppTemplatesCard() {
   });
 
   // ── Auto-corrigir template rejeitado ──
+  // Meta NÃO aceita reenvio do mesmo nome+idioma → cria novo nome versionado (_v2, _v3...)
   const autoFixMutation = useMutation({
     mutationFn: async (t: CatalogoTemplate) => {
       const { fixed, changed, notes } = autoFixBody(t.body);
       if (!changed) {
         throw new Error("Não foi possível detectar problema automaticamente. Edite manualmente.");
       }
-      const { error } = await supabase
+
+      // Calcula próximo nome versionado: foo, foo_v2, foo_v3...
+      const baseName = t.nome.replace(/_v\d+$/, "");
+      const { data: existentes } = await supabase
         .from("whatsapp_templates")
-        .update({
-          body: fixed,
-          status: "rascunho",
-          motivo_rejeicao: null,
-          ultima_sincronizacao: new Date().toISOString(),
-        })
-        .eq("id", t.id);
-      if (error) throw error;
+        .select("nome")
+        .like("nome", `${baseName}%`);
+      const usados = new Set((existentes || []).map((r: any) => r.nome));
+      let v = 2;
+      while (usados.has(`${baseName}_v${v}`)) v++;
+      const novoNome = `${baseName}_v${v}`;
+
+      // Insere novo rascunho versionado (preservando o original como histórico)
+      const { error: insErr } = await supabase.from("whatsapp_templates").insert({
+        nome: novoNome,
+        categoria: t.categoria,
+        idioma: t.idioma,
+        body: fixed,
+        variaveis: t.variaveis,
+        status: "rascunho",
+        funcao_alvo: t.funcao_alvo,
+      });
+      if (insErr) throw insErr;
+
+      notes.push(`Salvo como novo rascunho: "${novoNome}" (Meta não aceita reenvio do mesmo nome).`);
       return notes;
     },
     onSuccess: (notes) => {
