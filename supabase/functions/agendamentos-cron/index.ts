@@ -314,47 +314,41 @@ async function processStoreTimeout(supabase: any, now: Date, results: string[], 
 }
 
 // ═══════════════════════════════════════════
-// Helper: Envia mensagem de cobrança à loja
+// Helper: Notifica loja via app Atrium Messenger (NÃO mais via WhatsApp)
 // ═══════════════════════════════════════════
 async function sendStoreChargeMessage(
-  supabase: any, ag: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, isSecondAttempt = false
+  supabase: any, ag: any, _now: Date, _SUPABASE_URL: string, _SERVICE_KEY: string, isSecondAttempt = false
 ) {
   const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
   const dt = new Date(ag.data_horario);
   const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
-
-  const cleanPhone = ag.loja_telefone.replace(/\D/g, "");
-  const { data: lojaContato } = await supabase
-    .from("contatos")
-    .select("id")
-    .eq("telefone", cleanPhone)
-    .eq("tipo", "loja")
-    .single();
-
-  if (!lojaContato) return;
-
-  const { data: lojaAt } = await supabase
-    .from("atendimentos")
-    .select("id")
-    .eq("contato_id", lojaContato.id)
-    .eq("canal", "whatsapp")
-    .neq("status", "encerrado")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (!lojaAt) return;
-
   const clienteName = contato?.nome || "Cliente";
-  const msg = isSecondAttempt
-    ? `⚠️ *Pendência de Confirmação*\n\nAinda precisamos da confirmação sobre o cliente *${clienteName}* (agendamento às *${hora}*).\n\nPor favor, use a opção *4* do menu para informar se ele compareceu.`
-    : `📋 *Confirmação de Comparecimento*\n\nO cliente *${clienteName}* tinha agendamento às *${hora}*.\n\nEle compareceu? Use a opção *4* do menu para confirmar.`;
 
-  await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ atendimento_id: lojaAt.id, texto: msg, remetente_nome: "Sistema" }),
-  });
+  const titulo = isSecondAttempt
+    ? `⚠️ Pendência de confirmação — ${clienteName}`
+    : `📋 Confirme comparecimento — ${clienteName}`;
+  const mensagem = isSecondAttempt
+    ? `Cliente ${clienteName} (agendado às ${hora}) ainda sem confirmação. Atualize no app.`
+    : `Cliente ${clienteName} tinha agendamento às ${hora}. Compareceu?`;
+
+  const { data: dests } = await supabase
+    .rpc("resolver_destinatarios_loja", { _loja_nome: ag.loja_nome });
+  const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
+
+  for (const d of list) {
+    await supabase.from("notificacoes").insert({
+      usuario_id: d.user_id,
+      setor_id: d.setor_id,
+      tipo: "agendamento_confirmacao",
+      titulo,
+      mensagem,
+      referencia_id: ag.id,
+    });
+  }
+
+  if (list.length === 0) {
+    console.warn(`[agendamentos-cron] Loja "${ag.loja_nome}" sem destinatários internos — confirmação não entregue.`);
+  }
 }
 
 // ═══════════════════════════════════════════
