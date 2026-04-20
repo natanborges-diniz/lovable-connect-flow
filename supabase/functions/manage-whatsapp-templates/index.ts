@@ -14,6 +14,21 @@ const META_TO_LOCAL_STATUS: Record<string, string> = {
   DISABLED: "disabled",
 };
 
+function buildJsonResponse(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function parseMetaError(payload: unknown) {
+  if (payload && typeof payload === "object" && "error" in payload) {
+    return (payload as { error?: Record<string, unknown> }).error ?? payload;
+  }
+
+  return payload;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -97,7 +112,21 @@ serve(async (req) => {
         }
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(JSON.stringify(data.error || data));
+      if (!res.ok) {
+        const metaError = parseMetaError(data) as Record<string, unknown>;
+        const isNameLanguageCollision = String(metaError?.error_subcode || "") === "2388024";
+
+        return buildJsonResponse(
+          {
+            status: isNameLanguageCollision ? "name_language_collision" : "meta_error",
+            error: isNameLanguageCollision ? "template_name_language_already_exists" : "meta_request_failed",
+            error_code: metaError?.code ?? null,
+            error_subcode: metaError?.error_subcode ?? null,
+            meta_error: metaError,
+          },
+          isNameLanguageCollision ? 409 : 400,
+        );
+      }
       return jsonRes({ status: "created", data });
     }
 
@@ -115,9 +144,7 @@ serve(async (req) => {
     throw new Error("Invalid action. Use: list, status, create, delete");
   } catch (e) {
     console.error("manage-whatsapp-templates error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return buildJsonResponse({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
 });
 
