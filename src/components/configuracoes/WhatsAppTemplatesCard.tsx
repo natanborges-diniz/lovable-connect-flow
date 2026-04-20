@@ -10,8 +10,46 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Plus, RefreshCw, Trash2, Loader2, MessageSquare, ChevronDown, Eye,
-  Send, AlertCircle, CheckCircle2, Clock, XCircle,
+  Send, AlertCircle, CheckCircle2, Clock, XCircle, Wand2,
 } from "lucide-react";
+
+/**
+ * Auto-corrige body para a regra Meta:
+ * "variáveis não podem estar no início ou no fim do template"
+ * - Se começa com {{N}} ou "Olá {{N}}," → injeta saudação fixa antes
+ * - Se termina com {{N}} (com ou sem pontuação) → adiciona assinatura fixa
+ */
+function autoFixBody(body: string): { fixed: string; changed: boolean; notes: string[] } {
+  let fixed = body.trim();
+  const notes: string[] = [];
+
+  // 1) INÍCIO — variável muito perto do começo
+  // padrões: "{{1}} ..."  |  "Olá {{1}}, ..."  |  "Oi {{1}} ..."
+  const startsWithVar = /^\{\{\d+\}\}/.test(fixed);
+  const greetingThenVar = /^(Olá|Oi|Ola|Bom dia|Boa tarde|Boa noite)[,\s!]+\{\{\d+\}\}/i.test(fixed);
+
+  if (startsWithVar) {
+    fixed = `Olá! Tudo bem, ${fixed.replace(/^/, "")}`;
+    notes.push("Adicionada saudação fixa antes da variável inicial.");
+  } else if (greetingThenVar) {
+    // "Olá {{1}}, ..." → "Olá! Aqui é das Óticas Diniz. {{1}}, ..."
+    fixed = fixed.replace(
+      /^(Olá|Oi|Ola|Bom dia|Boa tarde|Boa noite)[,\s!]+(\{\{\d+\}\})/i,
+      "Olá! Aqui é das Óticas Diniz. $2"
+    );
+    notes.push("Saudação fixa inserida antes da variável de nome.");
+  }
+
+  // 2) FIM — variável no final (com ou sem pontuação)
+  const endsWithVar = /\{\{\d+\}\}[\s.!?]*$/.test(fixed);
+  if (endsWithVar) {
+    fixed = fixed.replace(/[\s.!?]*$/, "");
+    fixed += ". Estamos à disposição! Equipe Óticas Diniz.";
+    notes.push("Adicionada assinatura fixa após a variável final.");
+  }
+
+  return { fixed, changed: fixed !== body, notes };
+}
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
