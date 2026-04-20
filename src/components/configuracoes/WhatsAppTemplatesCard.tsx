@@ -98,6 +98,52 @@ function buildPreviewComponents(t: CatalogoTemplate) {
   return [{ type: "BODY", text: t.body }];
 }
 
+const META_NAME_COLLISION_SUBCODE = "2388024";
+
+function getBaseTemplateName(nome: string) {
+  return nome.replace(/_v\d+$/, "");
+}
+
+function getNextVersionedName(nomeAtual: string, existingNames: Set<string>) {
+  const baseName = getBaseTemplateName(nomeAtual);
+  const match = nomeAtual.match(/_v(\d+)$/);
+  let version = match ? Number(match[1]) + 1 : 2;
+  let candidate = `${baseName}_v${version}`;
+
+  while (existingNames.has(candidate)) {
+    version += 1;
+    candidate = `${baseName}_v${version}`;
+  }
+
+  return candidate;
+}
+
+function isMetaNameCollision(data: any, error: any) {
+  const joined = [
+    error?.message,
+    data?.status,
+    data?.error_code,
+    data?.error_subcode,
+    data?.meta_error?.error_subcode,
+    data?.meta_error?.error_user_title,
+    data?.meta_error?.error_user_msg,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return joined.includes(META_NAME_COLLISION_SUBCODE) || /já existe conteúdo nesse idioma/i.test(joined);
+}
+
+function getInvokeErrorMessage(data: any, error: any) {
+  return (
+    data?.meta_error?.error_user_msg ||
+    data?.meta_error?.message ||
+    error?.message ||
+    data?.error ||
+    "desconhecido"
+  );
+}
+
 export function WhatsAppTemplatesCard() {
   const queryClient = useQueryClient();
   const [createDialog, setCreateDialog] = useState(false);
@@ -137,10 +183,10 @@ export function WhatsAppTemplatesCard() {
   const submitMutation = useMutation({
     mutationFn: async (t: CatalogoTemplate) => {
       const components = [{ type: "BODY", text: t.body }];
-      const baseName = t.nome.replace(/_v\d+$/, "");
       let nomeAtual = t.nome;
       let tentativa = 0;
       const maxTentativas = 10;
+      const existingLocalNames = new Set((catalogo || []).filter((item) => item.id !== t.id).map((item) => item.nome));
 
       while (tentativa < maxTentativas) {
         const { data, error } = await supabase.functions.invoke("manage-whatsapp-templates", {
@@ -155,12 +201,11 @@ export function WhatsAppTemplatesCard() {
           },
         });
 
-        const errMsg = String(error?.message || "") + " " + JSON.stringify(data || {});
-        const isCollision = errMsg.includes("2388024") || /já existe conteúdo/i.test(errMsg);
+        const isCollision = isMetaNameCollision(data, error);
 
-        if (!error && !isCollision) {
+        if (!error && data?.status === "created") {
           // Sucesso: persiste novo nome (se mudou) e marca pending
-          await supabase
+          const { error: updateError } = await supabase
             .from("whatsapp_templates")
             .update({
               nome: nomeAtual,
@@ -169,17 +214,21 @@ export function WhatsAppTemplatesCard() {
               ultima_sincronizacao: new Date().toISOString(),
             })
             .eq("id", t.id);
+
+          if (updateError) throw updateError;
           return { data, nomeFinal: nomeAtual };
         }
 
-        if (!isCollision) throw error;
+        if (!isCollision) {
+          throw new Error(getInvokeErrorMessage(data, error));
+        }
 
         // Colisão → bump versão e tenta de novo
         tentativa++;
-        const match = nomeAtual.match(/_v(\d+)$/);
-        const proxV = match ? parseInt(match[1]) + 1 : 2;
-        nomeAtual = `${baseName}_v${proxV}`;
+        nomeAtual = getNextVersionedName(nomeAtual, existingLocalNames);
+        existingLocalNames.add(nomeAtual);
       }
+
       throw new Error("Não foi possível encontrar nome disponível na Meta após 10 tentativas.");
     },
     onSuccess: ({ nomeFinal }) => {
@@ -235,7 +284,7 @@ export function WhatsAppTemplatesCard() {
       }
 
       // Calcula próximo nome versionado: foo, foo_v2, foo_v3...
-      const baseName = t.nome.replace(/_v\d+$/, "");
+      const baseName = getBaseTemplateName(t.nome);
       const { data: existentes } = await supabase
         .from("whatsapp_templates")
         .select("nome")
