@@ -71,6 +71,7 @@ export function DemandaLojaPanel({ atendimentoId, modo }: { atendimentoId: strin
         <div className="flex items-center gap-2">
           <Pin className="h-4 w-4 text-primary" />
           <h4 className="text-sm font-medium">Demandas à Loja</h4>
+          <Badge variant="outline" className="h-5 text-[10px] border-primary/40 text-primary">via Messenger</Badge>
           {naoVistas > 0 && <Badge variant="default" className="h-5 text-[10px]">{naoVistas} nova{naoVistas > 1 ? "s" : ""}</Badge>}
         </div>
         {isHumano ? (
@@ -142,6 +143,7 @@ function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoI
   const [lojaTelefone, setLojaTelefone] = useState("");
   const [pergunta, setPergunta] = useState("");
   const [sending, setSending] = useState(false);
+  const [destCount, setDestCount] = useState<number | null>(null);
 
   useEffect(() => {
     supabase
@@ -160,6 +162,16 @@ function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoI
         setLojas(uniq as any);
       });
   }, []);
+
+  // Recalcula destinatários internos sempre que a loja muda
+  useEffect(() => {
+    if (!lojaTelefone) { setDestCount(null); return; }
+    const loja = lojas.find((l) => l.telefone === lojaTelefone);
+    if (!loja) { setDestCount(null); return; }
+    supabase
+      .rpc("resolver_destinatarios_loja", { _loja_nome: loja.nome_loja })
+      .then(({ data }) => setDestCount(Array.isArray(data) ? data.length : 0));
+  }, [lojaTelefone, lojas]);
 
   const handleSend = async () => {
     if (!lojaTelefone || !pergunta.trim()) return;
@@ -216,7 +228,14 @@ function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoI
               rows={4}
               className="text-sm resize-none"
             />
-            <p className="text-[10px] text-muted-foreground mt-1">A loja receberá um WhatsApp identificado e poderá responder usando #código.</p>
+            <p className="text-[10px] text-muted-foreground mt-1">A loja receberá no app Atrium Messenger e poderá responder direto na thread (ou enviar /encerrar).</p>
+            {destCount !== null && (
+              <p className={cn("text-[10px] mt-1", destCount === 0 ? "text-destructive" : "text-muted-foreground")}>
+                {destCount === 0
+                  ? "⚠️ Nenhum usuário interno vinculado a esta loja — a demanda será criada sem entrega push."
+                  : `📨 ${destCount} usuário(s) interno(s) receberão a notificação.`}
+              </p>
+            )}
           </div>
         </div>
         <DialogFooter>
