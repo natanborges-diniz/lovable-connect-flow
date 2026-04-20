@@ -7,20 +7,16 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const INTERNAL_SERVICE_SECRET = Deno.env.get("INTERNAL_SERVICE_SECRET");
 
-  // Authenticate via x-service-key
   const serviceKey = req.headers.get("x-service-key");
   if (!serviceKey || serviceKey !== INTERNAL_SERVICE_SECRET) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -34,12 +30,8 @@ serve(async (req) => {
     } = payload;
 
     console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref });
+    if (!payment_link_id) throw new Error("payment_link_id é obrigatório");
 
-    if (!payment_link_id) {
-      throw new Error("payment_link_id é obrigatório");
-    }
-
-    // Find the solicitação by payment_link_id in metadata
     const { data: solicitacoes } = await supabase
       .from("solicitacoes")
       .select("id, metadata, contato_id, pipeline_coluna_id")
@@ -59,22 +51,14 @@ serve(async (req) => {
       });
     }
 
-    // Determine target column based on payment status
     let targetColunaNome: string | null = null;
-    if (status === "PAGO") {
-      targetColunaNome = "Link Pago";
-    } else if (status === "CANCELADO" || status === "EXPIRADO") {
-      targetColunaNome = "Cancelado";
-    }
+    if (status === "PAGO") targetColunaNome = "Link Pago";
+    else if (status === "CANCELADO" || status === "EXPIRADO") targetColunaNome = "Cancelado";
 
     let colunaId: string | null = null;
     if (targetColunaNome) {
       const { data: financeiroSetor } = await supabase
-        .from("setores")
-        .select("id")
-        .eq("nome", "Financeiro")
-        .single();
-
+        .from("setores").select("id").eq("nome", "Financeiro").single();
       if (financeiroSetor) {
         const { data: coluna } = await supabase
           .from("pipeline_colunas")
@@ -83,12 +67,10 @@ serve(async (req) => {
           .eq("nome", targetColunaNome)
           .eq("ativo", true)
           .single();
-
         colunaId = coluna?.id || null;
       }
     }
 
-    // Update solicitação metadata with all payment details
     const now = new Date();
     const existingMeta = (solicitacao.metadata || {}) as Record<string, unknown>;
     const updatedMeta = {
@@ -105,19 +87,11 @@ serve(async (req) => {
     };
 
     const updateData: Record<string, unknown> = { metadata: updatedMeta };
-    if (colunaId) {
-      updateData.pipeline_coluna_id = colunaId;
-    }
-    if (status === "PAGO") {
-      updateData.status = "concluida";
-    }
+    if (colunaId) updateData.pipeline_coluna_id = colunaId;
+    if (status === "PAGO") updateData.status = "concluida";
 
-    await supabase
-      .from("solicitacoes")
-      .update(updateData)
-      .eq("id", solicitacao.id);
+    await supabase.from("solicitacoes").update(updateData).eq("id", solicitacao.id);
 
-    // Log CRM event
     const nsuLabel = nsu ? ` | NSU: ${nsu}` : "";
     await supabase.from("eventos_crm").insert({
       contato_id: solicitacao.contato_id,
@@ -130,107 +104,72 @@ serve(async (req) => {
       metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments },
     });
 
-    // Send receipt ("picote") to the store via WhatsApp
+    // Comprovante "picote" entregue via app Atrium Messenger (notificações + comentário no ticket).
     if (status === "PAGO") {
       try {
-        // Get store contact info
         const { data: contato } = await supabase
-          .from("contatos")
-          .select("id, nome, telefone")
-          .eq("id", solicitacao.contato_id)
-          .single();
+          .from("contatos").select("id, nome, telefone").eq("id", solicitacao.contato_id).single();
 
-        if (contato?.telefone) {
-          // Find active WhatsApp atendimento for this store
-          const { data: atendimento } = await supabase
-            .from("atendimentos")
-            .select("id, canal_provedor")
-            .eq("contato_id", contato.id)
-            .eq("canal", "whatsapp")
-            .eq("status", "em_atendimento")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+        const dateStr = now.toLocaleDateString("pt-BR");
+        const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const clienteName = nome_cliente || "N/A";
+        const valorFmt = valor ? `R$ ${Number(valor).toFixed(2)}` : "N/A";
+        const descFmt = descricao || "";
+        const nsuFmt = nsu || "N/A";
+        const tidFmt = tid || "N/A";
+        const last4Fmt = last4 || "****";
+        const installmentsFmt = installments || 1;
 
-          const dateStr = now.toLocaleDateString("pt-BR");
-          const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-          const clienteName = nome_cliente || "N/A";
-          const valorFmt = valor ? `R$ ${Number(valor).toFixed(2)}` : "N/A";
-          const descFmt = descricao || "";
-          const nsuFmt = nsu || "N/A";
-          const tidFmt = tid || "N/A";
-          const authFmt = authorization || "N/A";
-          const last4Fmt = last4 || "****";
-          const installmentsFmt = installments || 1;
+        let receiptMsg = `📩 *Comprovante de pagamento — ${clienteName}*\n\n`;
+        receiptMsg += `✅ *Pagamento Confirmado!*\n`;
+        receiptMsg += `💰 Valor: ${valorFmt}\n`;
+        if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
+        receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
+        receiptMsg += `🔑 *NSU: ${nsuFmt}*\n`;
+        receiptMsg += `   ↳ Use para baixa no sistema\n`;
+        receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
+        receiptMsg += `🆔 TID: ${tidFmt}\n`;
+        receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
+        receiptMsg += `💳 Cartão: **** ${last4Fmt} | ${installmentsFmt}x`;
 
-          let receiptMsg = `📩 *Segue comprovante de pagamento da cliente ${clienteName}*\n\n`;
-          receiptMsg += `✅ *Pagamento Confirmado!*\n\n`;
-          receiptMsg += `💰 Valor: ${valorFmt}\n`;
-          if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
-          receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
-          receiptMsg += `🔑 *NSU: ${nsuFmt}*\n`;
-          receiptMsg += `   ↳ Use este número para baixa no sistema\n`;
-          receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
-          receiptMsg += `🆔 TID: ${tidFmt}\n`;
-          receiptMsg += `🔐 Autorização: ${authFmt}\n`;
-          receiptMsg += `📅 Data: ${dateStr} às ${timeStr}\n`;
-          receiptMsg += `💳 Cartão: **** ${last4Fmt}\n`;
-          receiptMsg += `📦 Parcelas: ${installmentsFmt}x`;
+        const lojaNome = contato?.nome || "Loja";
+        const { data: dests } = await supabase
+          .rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+        const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
 
-          if (atendimento?.id) {
-            // Use send-whatsapp via direct fetch (service role auth)
-            const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                atendimento_id: atendimento.id,
-                texto: receiptMsg,
-                remetente_nome: "Sistema Financeiro",
-              }),
-            });
-            const sendResult = await sendRes.json();
-            console.log("[payment-webhook] Receipt sent via send-whatsapp:", sendResult);
-          } else {
-            // No active atendimento — send directly via Evolution API
-            const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL");
-            const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY");
-            const EVOLUTION_INSTANCE_NAME = Deno.env.get("EVOLUTION_INSTANCE_NAME");
-
-            if (EVOLUTION_API_URL && EVOLUTION_API_KEY && EVOLUTION_INSTANCE_NAME) {
-              const cleanPhone = contato.telefone.replace(/\D/g, "");
-              const evoRes = await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE_NAME}`, {
-                method: "POST",
-                headers: { apikey: EVOLUTION_API_KEY, "Content-Type": "application/json" },
-                body: JSON.stringify({ number: cleanPhone, text: receiptMsg }),
-              });
-              const evoResult = await evoRes.json();
-              console.log("[payment-webhook] Receipt sent directly via Evolution:", evoResult);
-            } else {
-              console.warn("[payment-webhook] No atendimento and no Evolution credentials — cannot send receipt");
-            }
-          }
-
-          console.log("[payment-webhook] Receipt sent to store:", contato.telefone);
+        for (const d of list) {
+          await supabase.from("notificacoes").insert({
+            usuario_id: d.user_id,
+            setor_id: d.setor_id,
+            tipo: "comprovante_pagamento",
+            titulo: `💳 Pagamento confirmado — ${clienteName}`,
+            mensagem: `Valor ${valorFmt} | NSU ${nsuFmt}`,
+            referencia_id: solicitacao.id,
+          });
         }
-      } catch (whatsappErr) {
-        console.error("[payment-webhook] Failed to send WhatsApp receipt:", whatsappErr);
-        // Don't fail the webhook response
+
+        await supabase.from("solicitacao_comentarios").insert({
+          solicitacao_id: solicitacao.id,
+          tipo: "sistema",
+          autor_nome: "Sistema Financeiro",
+          conteudo: receiptMsg,
+        });
+
+        console.log(`[payment-webhook] Picote entregue via app para ${list.length} destinatário(s) — loja "${lojaNome}"`);
+      } catch (notifyErr) {
+        console.error("[payment-webhook] Failed to dispatch picote internally:", notifyErr);
       }
     }
 
     console.log("[payment-webhook] Solicitação updated:", solicitacao.id, "→", targetColunaNome);
 
-    return new Response(JSON.stringify({ received: true, processed: true, solicitacao_id: solicitacao.id, coluna: targetColunaNome }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({
+      received: true, processed: true, solicitacao_id: solicitacao.id, coluna: targetColunaNome,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("[payment-webhook] Error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
