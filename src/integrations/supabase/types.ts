@@ -1775,6 +1775,51 @@ export type Database = {
           },
         ]
       }
+      whatsapp_templates: {
+        Row: {
+          body: string
+          categoria: string
+          created_at: string
+          funcao_alvo: string | null
+          id: string
+          idioma: string
+          motivo_rejeicao: string | null
+          nome: string
+          status: string
+          ultima_sincronizacao: string | null
+          updated_at: string
+          variaveis: Json
+        }
+        Insert: {
+          body: string
+          categoria: string
+          created_at?: string
+          funcao_alvo?: string | null
+          id?: string
+          idioma?: string
+          motivo_rejeicao?: string | null
+          nome: string
+          status?: string
+          ultima_sincronizacao?: string | null
+          updated_at?: string
+          variaveis?: Json
+        }
+        Update: {
+          body?: string
+          categoria?: string
+          created_at?: string
+          funcao_alvo?: string | null
+          id?: string
+          idioma?: string
+          motivo_rejeicao?: string | null
+          nome?: string
+          status?: string
+          ultima_sincronizacao?: string | null
+          updated_at?: string
+          variaveis?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       funil_metricas_vendas: {
