@@ -371,9 +371,32 @@ export function WhatsAppTemplatesCard() {
                       ))}
                     </div>
                   )}
-                  {t.status === "rejected" && t.motivo_rejeicao && (
-                    <div className="text-xs bg-destructive/10 text-destructive border border-destructive/20 rounded p-2">
-                      <strong>Motivo da reprovação:</strong> {t.motivo_rejeicao}
+                  {t.status === "rejected" && (
+                    <div className="space-y-2">
+                      <div className="text-xs bg-destructive/10 text-destructive border border-destructive/20 rounded p-2 space-y-1">
+                        <p><strong>Motivo da reprovação:</strong> {t.motivo_rejeicao || "Não informado pela Meta"}</p>
+                        {/^(Olá|Oi)[,\s!]+\{\{\d+\}\}/i.test(t.body) || /^\{\{\d+\}\}/.test(t.body) ? (
+                          <p className="text-[11px] opacity-80">⚠️ Detectado: variável <code className="font-mono">{`{{1}}`}</code> muito próxima do <strong>início</strong> — Meta não permite.</p>
+                        ) : null}
+                        {/\{\{\d+\}\}[\s.!?]*$/.test(t.body) ? (
+                          <p className="text-[11px] opacity-80">⚠️ Detectado: variável no <strong>fim</strong> do template — Meta não permite.</p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => autoFixMutation.mutate(t)}
+                          disabled={autoFixMutation.isPending}
+                          className="gap-1.5"
+                        >
+                          <Wand2 className="h-3.5 w-3.5" />
+                          Auto-corrigir e salvar como rascunho
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditing(t)}>
+                          Editar manualmente
+                        </Button>
+                      </div>
                     </div>
                   )}
                   {t.status === "rascunho" && (
