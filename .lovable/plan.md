@@ -1,123 +1,91 @@
 
 
 ## Objetivo
-Entregar um **prompt completo, autossuficiente, pronto para colar em um novo projeto Lovable** que gera o app mobile "Atrium Messenger" — substituto interno do WhatsApp para lojas/colaboradores, integrado em tempo real à plataforma atual via Lovable Cloud (Supabase) compartilhado.
+Consolidar o sistema atual em **dois canais únicos e bem separados**:
 
-O entregável desta sessão é **um único artefato Markdown** (`/mnt/documents/prompt-atrium-messenger.md`) contendo o prompt — não há mudanças no projeto atual.
+1. **WhatsApp = somente Meta Official** — usado exclusivamente para clientes finais.
+2. **App Atrium Messenger (em desenvolvimento)** — usado para tudo que é interno: lojas, colaboradores, departamentos, setores, agendamentos internos, demandas B2B, comprovantes, confirmações etc.
 
----
-
-## O que o prompt vai cobrir
-
-### 1. Identidade do projeto
-- Nome: **Atrium Messenger**
-- Stack: React + Vite + Tailwind + Capacitor (Android + iOS) + Lovable Cloud (mesma instância Supabase do projeto principal `atrium-link`).
-- Distribuição: PWA instalável + builds nativos para Play Store / App Store.
-
-### 2. Conexão com backend existente (reuso, não duplicação)
-- Mesmas credenciais Supabase (URL + anon key) do projeto principal — **não cria backend novo**.
-- Tabelas reutilizadas: `mensagens_internas`, `demandas_loja`, `demanda_mensagens`, `notificacoes`, `telefones_lojas`, `profiles`, `user_roles`, `bot_fluxos`, `bot_menu_opcoes`, `bot_sessoes`, `solicitacoes`, `solicitacao_anexos`, `agendamentos`, `whatsapp_templates`.
-- Storage buckets reutilizados: `whatsapp-media` (anexos), `cpf-documentos`.
-- Edge Functions chamadas (não recriadas): `bridge-mensageria`, `criar-demanda-loja`, `encerrar-demanda-loja`, `bot-lojas`, `responder-solicitacao`, `payment-webhook`, `send-whatsapp-template` (para casos legados).
-
-### 3. Autenticação
-- Login email/senha + Google OAuth contra o mesmo Supabase Auth.
-- Convite obrigatório: usuário só entra se telefone bate com `telefones_lojas` (lojas/colaboradores) ou `profiles.ativo=true` (operadores).
-- Após login, hidrata `profiles`, `user_roles` e identifica papel: **loja**, **colaborador**, **operador**, **admin**.
-
-### 4. Funcionalidades do app (paridade WhatsApp + mais)
-**Chat 1:1 e de grupo (interno corporativo)**
-- Lista de conversas (espelho da tela `/mensagens` da web).
-- Threads em tempo real via Supabase Realtime em `mensagens_internas`.
-- Envio de texto, imagem, áudio (gravado), arquivo, localização.
-- Indicadores: digitando, entregue, lida (atualiza `lida=true` ao abrir).
-- Badge de não lidas global e por conversa.
-
-**Bots e fluxos automatizados (substituem bot-lojas WhatsApp)**
-- Tela "Atendimento" mostra menu hierárquico vindo de `bot_menu_opcoes` (filtra por `tipo_bot` do contato).
-- Fluxos consumidos via `bot_fluxos.etapas`: link de pagamento, boleto, CPF, reembolso, falar com equipe, confirmar comparecimento.
-- Sessão persistida em `bot_sessoes`. Anexos via `solicitacao_anexos` no bucket `whatsapp-media`.
-- Protocolo sequencial `SOL-AAAA-NNNNN` exibido no card de confirmação.
-
-**Demandas e operações controladas**
-- Aba "Demandas" reflete `demandas_loja` da loja logada (RLS por `loja_nome`).
-- Mensagens de demanda em `demanda_mensagens` com encaminhamento ao cliente final controlado pela plataforma (botão "Encaminhar para cliente" só visível a operadores).
-- Confirmação de comparecimento de agendamento atualiza `agendamentos.loja_confirmou_presenca` direto (substitui opção 4 do bot WhatsApp).
-- Envio de comprovante de pagamento (`payment-webhook` recebe e dispara fluxo Picote interno).
-
-**Notificações push (FCM Android / APNs iOS)**
-- Plugin Capacitor Push Notifications.
-- Token salvo em `profiles.metadata.push_token`.
-- Disparado por trigger Postgres (NEW row em `notificacoes`) → Edge Function nova `dispatch-push` → FCM/APNs.
-- Tipos: nova mensagem, nova demanda, nova solicitação atribuída, lembrete de agendamento.
-
-**Imagens e mídia (paridade total WhatsApp)**
-- Picker nativo (Capacitor Camera) para foto/galeria.
-- Compressão client-side antes do upload.
-- Preview inline + visualizador full-screen.
-- Anexos guardados em `whatsapp-media/{ano}/{mes}/{conversa_id}/{uuid}`.
-- Áudio: gravação via `@capacitor-community/voice-recorder`, WAV → upload, player inline.
-
-**Receitas (continuidade do fluxo óptico)**
-- Loja envia foto da receita → trigger chama Edge Function `interpretar-receita` (já existe) → retorna OD/OE/Add → grava em `contatos.metadata.receitas[]`.
-- Card visual com a receita parsed, botão "Compartilhar com cliente".
-
-### 5. Arquitetura mobile
-- Capacitor 6 com plugins: Camera, Filesystem, PushNotifications, Geolocation, VoiceRecorder, LocalNotifications, Network (offline detection), App (deep links).
-- Service Worker (Workbox) para cache offline das últimas 50 conversas.
-- IndexedDB (Dexie) para fila de envios offline; sync quando voltar online.
-- Realtime: 1 canal global `notificacoes-{user_id}` + canais sob demanda por conversa.
-- Padrão obrigatório: registrar `.on()` antes de `.subscribe()` (memória `arquitetura/padrao-realtime-subscription`).
-
-### 6. UI/UX
-- Tema escuro/claro.
-- Bottom tab nav: **Conversas | Demandas | Atendimento | Notificações | Perfil**.
-- Estilo iMessage/WhatsApp: bolhas, avatar, swipe-to-reply, long-press menu, busca global.
-- Suporte a modo loja (vê só sua loja) vs modo operador (vê tudo do setor).
-- Componentes shadcn/ui adaptados para mobile (sheet, drawer, toast nativo).
-
-### 7. Segurança e RBAC
-- RLS já existente em `mensagens_internas`, `notificacoes`, `demandas_loja` é o que protege.
-- Cliente nunca recebe service role key.
-- App usa `@supabase/supabase-js` com anon key (já public).
-- Validações zod em todo input (nome, telefone, mensagem ≤ 4000 chars).
-- HIBP password check ativo no Auth.
-
-### 8. Substituição do WhatsApp — fluxo de migração
-- Convite via SMS único contendo deep link `atrium://invite?token=...`.
-- Onboarding força associação telefone↔conta.
-- Após adoção pela loja, o backend principal **deixa de enviar via Meta** para esse contato e marca `telefones_lojas.metadata.canal_preferido = 'app'`.
-- Fallback automático: se app não confirmou recebimento em 5 min, dispara WhatsApp template (mantém continuidade durante rollout).
-
-### 9. Edge Function nova exigida (do lado do projeto principal, fora do escopo do app)
-- `dispatch-push` (push para tokens FCM/APNs). O prompt **lista** isso como dependência mas o app em si só consome.
-
-### 10. O que NÃO está no escopo do app
-- Pipelines Kanban (CRM, Lojas, Financeiro) → continuam só na web.
-- Configurações administrativas (cron, templates, RBAC) → continuam só na web.
-- IA Gael conversacional do CRM → app só exibe mensagens já geradas.
+Remover de vez Evolution / Z-API do código de produção e redirecionar todo tráfego B2B/interno para a fila do app (notificações + mensagens internas).
 
 ---
 
-## Estrutura do prompt entregue
-O arquivo `prompt-atrium-messenger.md` terá estas seções, prontas para colar:
-1. Visão e objetivo
-2. Stack obrigatória + versões
-3. Credenciais Lovable Cloud (placeholders para o usuário preencher: SUPABASE_URL, ANON_KEY)
-4. Schema reutilizado (lista de tabelas + RLS observada)
-5. Telas (lista detalhada com componentes e comportamentos)
-6. Fluxos críticos passo a passo (login, enviar mensagem, receber push, abrir demanda, confirmar agendamento, enviar receita)
-7. Padrões de código obrigatórios (Realtime subscribe order, zod, debounce, error toasts)
-8. Capacitor setup completo (appId, appName, plugins, comandos `cap add`, `cap sync`)
-9. Roadmap de entrega em 5 sprints
-10. Critérios de aceite por funcionalidade
+## Mudanças
 
-Tamanho alvo: 6-8 mil caracteres, copiar-e-colar único.
+### 1. `supabase/functions/send-whatsapp/index.ts` — Meta only
+- Remover `sendViaEvolution` e `sendViaZApi`.
+- `provedor` sempre `meta_official`. Ignora `force_provider` com warning.
+- Mantém guard de telefone inválido + guard 24h Meta (bloqueia texto livre fora da janela; obriga template).
+- Salva `mensagens.provedor = 'meta_official'`.
+
+### 2. `supabase/functions/whatsapp-webhook/index.ts`
+- Parser Meta apenas. Comentar branches Evolution/Z-API (deixar como referência).
+- Novo atendimento: `canal_provedor = 'meta_official'` sempre.
+- Nunca mais reescreve `canal_provedor` para outro provedor.
+
+### 3. Roteamento B2B/interno → app, não WhatsApp
+Funções que hoje disparam WhatsApp para lojas/colaboradores passam a disparar **mensagem interna + notificação** (consumida pelo app Atrium Messenger e pela web `/mensagens`):
+
+- **`criar-demanda-loja`** — cria `demandas_loja` + `demanda_mensagens` + `notificacoes` (setor/usuário responsável da loja). Remove envio WhatsApp.
+- **`encerrar-demanda-loja`** — só fecha demanda + notifica via app. Remove envio WhatsApp.
+- **`payment-webhook`** — gera mensagem "Picote" como `demanda_mensagens` + `notificacoes` para a loja envolvida. Remove envio WhatsApp direto.
+- **`agendamentos-cron`** — cobranças/lembretes para lojas viram `notificacoes` (tipo `agendamento`) + entrada em `mensagens_internas` no canal do setor da loja. Mensagens para clientes finais continuam dependentes de template Meta aprovado (gate já existe).
+- **`bot-lojas`** — desativado para chamadas WhatsApp inbound. Toda interação loja/colaborador agora acontece dentro do app (telas Demandas/Atendimento). Webhook que receber inbound de número corporativo retorna 200 sem processar e loga `bot_lojas_inbound_ignored`.
+
+### 4. Resolução de destinatário interno
+Função SQL nova `resolver_destinatarios_loja(loja_nome text)` que retorna lista de `user_id` ativos no setor da loja (consulta `telefones_lojas` → `setor_destino_id` → `user_roles` filtrando por `role='setor_usuario'` e `loja_nome` quando aplicável). Usada por `criar-demanda-loja`, `payment-webhook`, `agendamentos-cron` para enfileirar `notificacoes` e `mensagens_internas`.
+
+### 5. Banco
+Migration:
+- `UPDATE atendimentos SET canal_provedor='meta_official' WHERE canal_provedor IN ('evolution_api','z_api') AND status<>'encerrado';`
+- `UPDATE canais SET provedor='meta_official' WHERE provedor IN ('evolution_api','z_api');`
+- Marcar `bot_fluxos.ativo=false` onde `tipo_bot IN ('loja','departamento','colaborador')` (bots desligados — substituídos pelo app).
+- Index parcial para acelerar `notificacoes` por `usuario_id`/`setor_id` não lidas.
+
+### 6. Edge Function nova `dispatch-push`
+Gatilho: trigger Postgres em `notificacoes` (AFTER INSERT) chama `dispatch-push` via `pg_net`. Função busca `profiles.metadata.push_token` dos destinatários e envia push (FCM/APNs). Sem token → registra `eventos_crm.tipo='push_skipped_no_token'`. O app Atrium Messenger consome esses pushes.
+
+Secrets necessários (vou solicitar quando implementar): `FCM_SERVER_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`. Caso não estejam prontos, função opera em modo "log only" e mensagens internas continuam funcionando via Realtime.
+
+### 7. UI
+- **`CronJobsCard`** — banner: "Disparos para clientes só com template Meta aprovado. Disparos internos (lojas/colaboradores) agora vão para o app Atrium Messenger."
+- **`DemandaLojaPanel`** — banner permanente "Canal B2B migrado para o app Atrium Messenger. Mensagens digitadas aqui são entregues via app + notificação push."
+- **`Configuracoes` → `BotMenuCard` / `BotFluxosCard`** — badge "Desativado (substituído pelo app)" enquanto `tipo_bot` for `loja|departamento|colaborador`.
+- **Pequena tela em `/configuracoes` → "Canal Único Ativo"** — mostra status: WhatsApp Meta (verde quando `WHATSAPP_PHONE_NUMBER_ID` ok + ≥1 template aprovado), App Atrium (verde quando ≥1 `profiles.metadata.push_token` registrado).
+
+### 8. Memórias
+- Atualizar `mem://index.md` Core: WhatsApp = somente Meta Official para clientes; B2B/interno = App Atrium Messenger via `mensagens_internas` + `notificacoes`.
+- Marcar **deprecated** com aviso no topo: `mem://bot-lojas/demandas-b2b-canal-evolution.md`, `mem://arquitetura/modelo-channel-bridge.md`, `mem://funcionalidades/integracao-whatsapp-dual-number.md`, `mem://projeto/estrategia-migracao-whatsapp-progressiva.md`, `mem://integracao/evolution-api-decodificacao-media.md`.
+- Nova: `mem://arquitetura/canal-unico-meta-e-app-atrium.md` documentando o modelo definitivo.
 
 ---
 
-## Entregável final desta sessão
-- Um único arquivo: `/mnt/documents/prompt-atrium-messenger.md`
-- Tag `<lov-artifact>` para download direto.
-- Nenhuma mudança no projeto atual (`atrium-link`).
+## Arquivos
+**Edits**
+- `supabase/functions/send-whatsapp/index.ts`
+- `supabase/functions/whatsapp-webhook/index.ts`
+- `supabase/functions/criar-demanda-loja/index.ts`
+- `supabase/functions/encerrar-demanda-loja/index.ts`
+- `supabase/functions/payment-webhook/index.ts`
+- `supabase/functions/agendamentos-cron/index.ts`
+- `supabase/functions/bot-lojas/index.ts` (curto-circuito + log)
+- `src/components/configuracoes/CronJobsCard.tsx`
+- `src/components/configuracoes/BotMenuCard.tsx`
+- `src/components/configuracoes/BotFluxosCard.tsx`
+- `src/components/atendimentos/DemandaLojaPanel.tsx`
+
+**Create**
+- `supabase/functions/dispatch-push/index.ts`
+- `supabase/config.toml` — bloco `[functions.dispatch-push] verify_jwt = false`
+- Nova página/seção `src/components/configuracoes/CanalUnicoCard.tsx`
+- Migration: updates de `atendimentos`/`canais`, desativação de `bot_fluxos` corporativos, função `resolver_destinatarios_loja`, trigger `notificacoes_dispatch_push` chamando `dispatch-push`, índice parcial.
+- `mem://arquitetura/canal-unico-meta-e-app-atrium.md`
+
+**Marca deprecated (sem deletar)**
+- 4 arquivos de memória listados acima
+- Funções `bridge-mensageria`, `send-whatsapp` rotas Evolution/Z-API (comentadas)
+
+**Não incluso**
+- Build/Publish do app Atrium Messenger (continua no projeto separado).
+- Configuração de credenciais FCM/APNs (será solicitada via add_secret quando o app estiver pronto para receber pushes; até lá `dispatch-push` opera log-only e o app pega as mensagens via Realtime).
 
