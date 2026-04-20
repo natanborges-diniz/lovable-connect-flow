@@ -1,103 +1,123 @@
 
 
 ## Objetivo
-Criar e submeter para aprovação na Meta os **templates WhatsApp** indispensáveis para retomar a operação (proativos + B2B lojas) usando o número oficial. Sem templates aprovados, todos os crons ficam pausados e a operação trava fora da janela 24h.
+Entregar um **prompt completo, autossuficiente, pronto para colar em um novo projeto Lovable** que gera o app mobile "Atrium Messenger" — substituto interno do WhatsApp para lojas/colaboradores, integrado em tempo real à plataforma atual via Lovable Cloud (Supabase) compartilhado.
 
-## Inventário de templates necessários (mapeado dos crons/EFs)
+O entregável desta sessão é **um único artefato Markdown** (`/mnt/documents/prompt-atrium-messenger.md`) contendo o prompt — não há mudanças no projeto atual.
 
-### Categoria UTILITY (lembretes, confirmações, status)
-1. **lembrete_agendamento_24h** — `agendamentos-cron`
-   Body: "Olá {{1}}! Lembrete: você tem horário marcado em {{2}} no dia {{3}} às {{4}}. Posso confirmar sua presença?"
-2. **confirmacao_agendamento** — `agendamentos-cron` (criação)
-   Body: "Oi {{1}}! Seu horário em {{2}} foi agendado para {{3}} às {{4}}. Endereço: {{5}}."
-3. **noshow_recuperacao_loja** — `agendamentos-cron` (3h após horário)
-   Body: "Cliente {{1}} (agend. {{2}}) não compareceu até agora. Pode confirmar status com a loja {{3}}?"
-4. **comprovante_pagamento_loja** — `payment-webhook`
-   Body: "Pagamento confirmado! Cliente: {{1}} | Valor: R$ {{2}} | NSU: {{3}} | Loja: {{4}}"
-5. **demanda_loja_nova** — `criar-demanda-loja`
-   Body: "Nova demanda {{1}} para loja {{2}}: {{3}}. Responda esta mensagem para tratar."
-6. **demanda_loja_encerrada** — `encerrar-demanda-loja`
-   Body: "Demanda {{1}} encerrada. Resumo: {{2}}"
+---
 
-### Categoria MARKETING (recuperação proativa CRM)
-7. **retomada_contexto_lead** — `vendas-recuperacao-cron`
-   Body: "Oi {{1}}! Tudo bem? Notei que conversamos sobre {{2}} e não fechamos ainda. Posso te ajudar com mais alguma informação?"
-8. **retomada_pos_orcamento** — `vendas-recuperacao-cron`
-   Body: "Olá {{1}}! Sobre o orçamento de {{2}} que enviamos: alguma dúvida? Posso reservar horário para você conhecer presencialmente."
-9. **despedida_cordial** — `vendas-recuperacao-cron` (encerramento da cadência)
-   Body: "{{1}}, vou pausar nosso atendimento por aqui. Quando precisar é só chamar! Equipe Atrium."
+## O que o prompt vai cobrir
 
-## Implementação
+### 1. Identidade do projeto
+- Nome: **Atrium Messenger**
+- Stack: React + Vite + Tailwind + Capacitor (Android + iOS) + Lovable Cloud (mesma instância Supabase do projeto principal `atrium-link`).
+- Distribuição: PWA instalável + builds nativos para Play Store / App Store.
 
-### 1. UI — `WhatsAppTemplatesCard.tsx`
-A interface já existe e fala com `manage-whatsapp-templates`. Adicionar:
-- **Botão "Carregar Templates Padrão"** que injeta os 9 templates acima como rascunhos (form pré-preenchido — usuário revisa antes de submeter).
-- Coluna **Status Meta** com cores: PENDING (amarelo), APPROVED (verde), REJECTED (vermelho com motivo).
-- **Filtro por categoria** (UTILITY / MARKETING / AUTHENTICATION).
-- Ação **Submeter à Meta** chama `manage-whatsapp-templates` action `create`.
-- Ação **Sincronizar Status** chama action `list` e atualiza tabela local.
+### 2. Conexão com backend existente (reuso, não duplicação)
+- Mesmas credenciais Supabase (URL + anon key) do projeto principal — **não cria backend novo**.
+- Tabelas reutilizadas: `mensagens_internas`, `demandas_loja`, `demanda_mensagens`, `notificacoes`, `telefones_lojas`, `profiles`, `user_roles`, `bot_fluxos`, `bot_menu_opcoes`, `bot_sessoes`, `solicitacoes`, `solicitacao_anexos`, `agendamentos`, `whatsapp_templates`.
+- Storage buckets reutilizados: `whatsapp-media` (anexos), `cpf-documentos`.
+- Edge Functions chamadas (não recriadas): `bridge-mensageria`, `criar-demanda-loja`, `encerrar-demanda-loja`, `bot-lojas`, `responder-solicitacao`, `payment-webhook`, `send-whatsapp-template` (para casos legados).
 
-### 2. Tabela `whatsapp_templates` (nova)
-Persistir localmente o catálogo + status sincronizado da Meta:
-```sql
-CREATE TABLE whatsapp_templates (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  nome text UNIQUE NOT NULL,         -- ex: "lembrete_agendamento_24h"
-  categoria text NOT NULL,           -- UTILITY | MARKETING | AUTHENTICATION
-  idioma text NOT NULL DEFAULT 'pt_BR',
-  body text NOT NULL,
-  variaveis jsonb DEFAULT '[]',      -- ["nome","loja","data","hora"]
-  status text DEFAULT 'rascunho',    -- rascunho | pending | approved | rejected
-  motivo_rejeicao text,
-  funcao_alvo text,                  -- qual EF consome (vendas-recuperacao-cron, etc)
-  ultima_sincronizacao timestamptz,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
-);
-```
-RLS: admin escreve, authenticated lê.
+### 3. Autenticação
+- Login email/senha + Google OAuth contra o mesmo Supabase Auth.
+- Convite obrigatório: usuário só entra se telefone bate com `telefones_lojas` (lojas/colaboradores) ou `profiles.ativo=true` (operadores).
+- Após login, hidrata `profiles`, `user_roles` e identifica papel: **loja**, **colaborador**, **operador**, **admin**.
 
-### 3. Edge Functions — adaptar consumidores
-Cada cron/EF que dispara mensagens proativas passa a:
-- Consultar `whatsapp_templates` pelo `nome`.
-- Se `status != 'approved'` → não dispara, registra evento `template_pendente` em `eventos_crm`.
-- Se aprovado → chama `send-whatsapp-template` com nome + params.
+### 4. Funcionalidades do app (paridade WhatsApp + mais)
+**Chat 1:1 e de grupo (interno corporativo)**
+- Lista de conversas (espelho da tela `/mensagens` da web).
+- Threads em tempo real via Supabase Realtime em `mensagens_internas`.
+- Envio de texto, imagem, áudio (gravado), arquivo, localização.
+- Indicadores: digitando, entregue, lida (atualiza `lida=true` ao abrir).
+- Badge de não lidas global e por conversa.
 
-Funções a ajustar (read-only nesta fase, edits na implementação):
-- `vendas-recuperacao-cron/index.ts`
-- `agendamentos-cron/index.ts`
-- `payment-webhook/index.ts`
-- `criar-demanda-loja/index.ts`
-- `encerrar-demanda-loja/index.ts`
+**Bots e fluxos automatizados (substituem bot-lojas WhatsApp)**
+- Tela "Atendimento" mostra menu hierárquico vindo de `bot_menu_opcoes` (filtra por `tipo_bot` do contato).
+- Fluxos consumidos via `bot_fluxos.etapas`: link de pagamento, boleto, CPF, reembolso, falar com equipe, confirmar comparecimento.
+- Sessão persistida em `bot_sessoes`. Anexos via `solicitacao_anexos` no bucket `whatsapp-media`.
+- Protocolo sequencial `SOL-AAAA-NNNNN` exibido no card de confirmação.
 
-### 4. Reativação automática dos crons
-Após aprovação Meta, sincronização atualiza `whatsapp_templates.status = approved` e o card UI mostra botão **"Reativar cron correspondente"** que faz `UPDATE cron_jobs SET ativo = true` + `schedule_cron_job(...)`.
+**Demandas e operações controladas**
+- Aba "Demandas" reflete `demandas_loja` da loja logada (RLS por `loja_nome`).
+- Mensagens de demanda em `demanda_mensagens` com encaminhamento ao cliente final controlado pela plataforma (botão "Encaminhar para cliente" só visível a operadores).
+- Confirmação de comparecimento de agendamento atualiza `agendamentos.loja_confirmou_presenca` direto (substitui opção 4 do bot WhatsApp).
+- Envio de comprovante de pagamento (`payment-webhook` recebe e dispara fluxo Picote interno).
 
-### 5. Memória
-- `mem://integracao/templates-whatsapp-catalogo.md` (nova) — lista os 9 templates, função consumidora, status esperado.
-- `mem://index.md` — atualizar Core mencionando dependência template-aprovado para qualquer disparo proativo.
+**Notificações push (FCM Android / APNs iOS)**
+- Plugin Capacitor Push Notifications.
+- Token salvo em `profiles.metadata.push_token`.
+- Disparado por trigger Postgres (NEW row em `notificacoes`) → Edge Function nova `dispatch-push` → FCM/APNs.
+- Tipos: nova mensagem, nova demanda, nova solicitação atribuída, lembrete de agendamento.
 
-## Fluxo do usuário
-```text
-1. Configurações > WhatsApp Templates
-2. Clica "Carregar Templates Padrão" → 9 rascunhos aparecem
-3. Revisa cada um, clica "Submeter à Meta" → status vai para PENDING
-4. Aguarda 1-24h aprovação Meta
-5. Clica "Sincronizar Status" → APPROVED aparece em verde
-6. Clica "Reativar cron correspondente" → operação volta gradualmente
-```
+**Imagens e mídia (paridade total WhatsApp)**
+- Picker nativo (Capacitor Camera) para foto/galeria.
+- Compressão client-side antes do upload.
+- Preview inline + visualizador full-screen.
+- Anexos guardados em `whatsapp-media/{ano}/{mes}/{conversa_id}/{uuid}`.
+- Áudio: gravação via `@capacitor-community/voice-recorder`, WAV → upload, player inline.
 
-## Arquivos
-**Edits/Create:**
-- `src/components/configuracoes/WhatsAppTemplatesCard.tsx` (rewrite com catálogo padrão + sync)
-- Nova migration: `whatsapp_templates` table + RLS
-- `supabase/functions/vendas-recuperacao-cron/index.ts` (gate por template aprovado)
-- `supabase/functions/agendamentos-cron/index.ts` (gate por template aprovado)
-- `supabase/functions/payment-webhook/index.ts` (rota via template)
-- `supabase/functions/criar-demanda-loja/index.ts` (rota via template)
-- `supabase/functions/encerrar-demanda-loja/index.ts` (rota via template)
-- `mem://integracao/templates-whatsapp-catalogo.md` (nova)
-- `mem://index.md` (Core update)
+**Receitas (continuidade do fluxo óptico)**
+- Loja envia foto da receita → trigger chama Edge Function `interpretar-receita` (já existe) → retorna OD/OE/Add → grava em `contatos.metadata.receitas[]`.
+- Card visual com a receita parsed, botão "Compartilhar com cliente".
 
-**Não incluso:** alterar layout geral de Configurações; tudo concentrado no card existente.
+### 5. Arquitetura mobile
+- Capacitor 6 com plugins: Camera, Filesystem, PushNotifications, Geolocation, VoiceRecorder, LocalNotifications, Network (offline detection), App (deep links).
+- Service Worker (Workbox) para cache offline das últimas 50 conversas.
+- IndexedDB (Dexie) para fila de envios offline; sync quando voltar online.
+- Realtime: 1 canal global `notificacoes-{user_id}` + canais sob demanda por conversa.
+- Padrão obrigatório: registrar `.on()` antes de `.subscribe()` (memória `arquitetura/padrao-realtime-subscription`).
+
+### 6. UI/UX
+- Tema escuro/claro.
+- Bottom tab nav: **Conversas | Demandas | Atendimento | Notificações | Perfil**.
+- Estilo iMessage/WhatsApp: bolhas, avatar, swipe-to-reply, long-press menu, busca global.
+- Suporte a modo loja (vê só sua loja) vs modo operador (vê tudo do setor).
+- Componentes shadcn/ui adaptados para mobile (sheet, drawer, toast nativo).
+
+### 7. Segurança e RBAC
+- RLS já existente em `mensagens_internas`, `notificacoes`, `demandas_loja` é o que protege.
+- Cliente nunca recebe service role key.
+- App usa `@supabase/supabase-js` com anon key (já public).
+- Validações zod em todo input (nome, telefone, mensagem ≤ 4000 chars).
+- HIBP password check ativo no Auth.
+
+### 8. Substituição do WhatsApp — fluxo de migração
+- Convite via SMS único contendo deep link `atrium://invite?token=...`.
+- Onboarding força associação telefone↔conta.
+- Após adoção pela loja, o backend principal **deixa de enviar via Meta** para esse contato e marca `telefones_lojas.metadata.canal_preferido = 'app'`.
+- Fallback automático: se app não confirmou recebimento em 5 min, dispara WhatsApp template (mantém continuidade durante rollout).
+
+### 9. Edge Function nova exigida (do lado do projeto principal, fora do escopo do app)
+- `dispatch-push` (push para tokens FCM/APNs). O prompt **lista** isso como dependência mas o app em si só consome.
+
+### 10. O que NÃO está no escopo do app
+- Pipelines Kanban (CRM, Lojas, Financeiro) → continuam só na web.
+- Configurações administrativas (cron, templates, RBAC) → continuam só na web.
+- IA Gael conversacional do CRM → app só exibe mensagens já geradas.
+
+---
+
+## Estrutura do prompt entregue
+O arquivo `prompt-atrium-messenger.md` terá estas seções, prontas para colar:
+1. Visão e objetivo
+2. Stack obrigatória + versões
+3. Credenciais Lovable Cloud (placeholders para o usuário preencher: SUPABASE_URL, ANON_KEY)
+4. Schema reutilizado (lista de tabelas + RLS observada)
+5. Telas (lista detalhada com componentes e comportamentos)
+6. Fluxos críticos passo a passo (login, enviar mensagem, receber push, abrir demanda, confirmar agendamento, enviar receita)
+7. Padrões de código obrigatórios (Realtime subscribe order, zod, debounce, error toasts)
+8. Capacitor setup completo (appId, appName, plugins, comandos `cap add`, `cap sync`)
+9. Roadmap de entrega em 5 sprints
+10. Critérios de aceite por funcionalidade
+
+Tamanho alvo: 6-8 mil caracteres, copiar-e-colar único.
+
+---
+
+## Entregável final desta sessão
+- Um único arquivo: `/mnt/documents/prompt-atrium-messenger.md`
+- Tag `<lov-artifact>` para download direto.
+- Nenhuma mudança no projeto atual (`atrium-link`).
 
