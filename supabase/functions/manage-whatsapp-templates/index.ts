@@ -1,8 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+const META_TO_LOCAL_STATUS: Record<string, string> = {
+  APPROVED: "approved",
+  PENDING: "pending",
+  REJECTED: "rejected",
+  PAUSED: "paused",
+  DISABLED: "disabled",
 };
 
 serve(async (req) => {
@@ -19,10 +28,14 @@ serve(async (req) => {
     });
   }
 
-  try {
-    const { action, template_name, template_data } = await req.json();
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // LIST templates
+  try {
+    const { action, template_name, template_data, sync } = await req.json();
+
+    // LIST templates (com upsert opcional no catálogo local)
     if (action === "list") {
       const res = await fetch(
         `https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=100`,
@@ -30,7 +43,36 @@ serve(async (req) => {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(JSON.stringify(data.error || data));
-      return jsonRes(data);
+
+      // Sync = true → faz upsert no catálogo local
+      let synced = 0;
+      if (sync === true && Array.isArray(data.data)) {
+        const now = new Date().toISOString();
+        for (const t of data.data) {
+          const body = (t.components || []).find((c: any) => c.type === "BODY")?.text || "";
+          // Extrai variáveis {{1}}, {{2}}…
+          const varMatches = body.match(/\{\{(\d+)\}\}/g) || [];
+          const variaveis = [...new Set(varMatches.map((v: string) => v.replace(/[{}]/g, "")))];
+          const localStatus = META_TO_LOCAL_STATUS[t.status] || t.status?.toLowerCase() || "pending";
+
+          const { error: upErr } = await supabase
+            .from("whatsapp_templates")
+            .upsert({
+              nome: t.name,
+              categoria: t.category || "UTILITY",
+              idioma: t.language || "pt_BR",
+              body,
+              variaveis,
+              status: localStatus,
+              motivo_rejeicao: t.rejected_reason || null,
+              ultima_sincronizacao: now,
+            }, { onConflict: "nome" });
+          if (!upErr) synced++;
+          else console.error(`upsert ${t.name}:`, upErr);
+        }
+      }
+
+      return jsonRes({ ...data, synced });
     }
 
     // GET single template status
