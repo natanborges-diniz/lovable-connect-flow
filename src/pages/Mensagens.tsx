@@ -36,12 +36,18 @@ export default function Mensagens() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Active profiles for new conversation
-  const { data: profiles } = useQuery({
+  const { data: profiles, refetch: refetchProfiles } = useQuery({
     queryKey: ["profiles-ativos"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("id, nome").eq("ativo", true);
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome");
       return (data || []).filter((p) => p.id !== uid);
     },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   // Mark as read when opening a conversation
@@ -106,7 +112,7 @@ export default function Mensagens() {
                 className="pl-8 h-9"
               />
             </div>
-            <Popover open={novaConversaOpen} onOpenChange={setNovaConversaOpen}>
+            <Popover open={novaConversaOpen} onOpenChange={(o) => { setNovaConversaOpen(o); if (o) refetchProfiles(); }}>
               <PopoverTrigger asChild>
                 <Button size="icon" variant="outline" className="h-9 w-9" title="Nova conversa">
                   <Plus className="h-4 w-4" />
