@@ -105,6 +105,46 @@ export function GestaoUsuariosCard() {
   const [resetTarget, setResetTarget] = useState<{ id: string; nome: string } | null>(null);
   const [newPassword, setNewPassword] = useState("");
 
+  // Create user dialog state
+  const [createOpen, setCreateOpen] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [novoEmail, setNovoEmail] = useState("");
+  const [novoCargo, setNovoCargo] = useState("");
+  const [novoSetorId, setNovoSetorId] = useState<string>("");
+  const [novoRole, setNovoRole] = useState<AppRole>("setor_usuario");
+  const [novoLojaNome, setNovoLojaNome] = useState<string>("");
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+
+  const createUser = useMutation({
+    mutationFn: async () => {
+      const payload: Record<string, unknown> = {
+        nome: novoNome.trim(),
+        email: novoEmail.trim(),
+        role: novoRole,
+      };
+      if (novoCargo.trim()) payload.cargo = novoCargo.trim();
+      if (novoSetorId) payload.setor_id = novoSetorId;
+      if (novoLojaNome) payload.loja_nome = novoLojaNome;
+      const { data, error } = await supabase.functions.invoke("admin-create-user", { body: payload });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { user_id: string; email: string; invite_url?: string };
+    },
+    onSuccess: (data) => {
+      toast.success("Usuário criado");
+      setInviteUrl(data?.invite_url ?? null);
+      setNovoNome("");
+      setNovoEmail("");
+      setNovoCargo("");
+      setNovoSetorId("");
+      setNovoRole("setor_usuario");
+      setNovoLojaNome("");
+      invalidateAll();
+      queryClient.invalidateQueries({ queryKey: ["profiles-ativos"] });
+    },
+    onError: (e: any) => toast.error(e.message ?? "Falha ao criar usuário"),
+  });
+
   const resetPassword = useMutation({
     mutationFn: async ({ userId, password }: { userId: string; password: string }) => {
       const { data, error } = await supabase.functions.invoke("admin-reset-password", {
@@ -246,10 +286,13 @@ export function GestaoUsuariosCard() {
   return (
     <TooltipProvider>
       <Card className="shadow-card">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle className="text-lg flex items-center gap-2">
             <Users className="h-5 w-5" /> Gestão de Usuários e Permissões
           </CardTitle>
+          <Button size="sm" onClick={() => { setCreateOpen(true); setInviteUrl(null); }}>
+            <Plus className="h-4 w-4 mr-1" /> Novo usuário
+          </Button>
         </CardHeader>
         <CardContent>
           <DefaultUsuarioConfig />
@@ -477,6 +520,111 @@ export function GestaoUsuariosCard() {
                 "Salvar nova senha"
               )}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={createOpen} onOpenChange={(o) => { setCreateOpen(o); if (!o) setInviteUrl(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Novo usuário</DialogTitle>
+            <DialogDescription>
+              O usuário será criado e poderá acessar o sistema via link de convite.
+            </DialogDescription>
+          </DialogHeader>
+
+          {inviteUrl ? (
+            <div className="space-y-2 py-2">
+              <Label>Link de convite</Label>
+              <div className="flex gap-2">
+                <Input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
+                <Button
+                  variant="outline"
+                  onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success("Link copiado"); }}
+                >
+                  Copiar
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Envie este link para o usuário definir a senha e acessar o sistema.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label htmlFor="novo-nome">Nome</Label>
+                <Input id="novo-nome" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="novo-email">E-mail</Label>
+                <Input id="novo-email" type="email" value={novoEmail} onChange={(e) => setNovoEmail(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="novo-cargo">Cargo (opcional)</Label>
+                <Input id="novo-cargo" value={novoCargo} onChange={(e) => setNovoCargo(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Nível de acesso</Label>
+                <Select value={novoRole} onValueChange={(v) => setNovoRole(v as AppRole)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="operador">Operador</SelectItem>
+                    <SelectItem value="setor_usuario">Setor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {novoRole === "setor_usuario" && (
+                <>
+                  <div className="space-y-1">
+                    <Label>Setor</Label>
+                    <Select value={novoSetorId} onValueChange={(v) => { setNovoSetorId(v); setNovoLojaNome(""); }}>
+                      <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                      <SelectContent>
+                        {setores?.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {isLojaSetor(novoSetorId) && (
+                    <div className="space-y-1">
+                      <Label>Loja</Label>
+                      <Select value={novoLojaNome} onValueChange={setNovoLojaNome}>
+                        <SelectTrigger><SelectValue placeholder="Selecione a loja" /></SelectTrigger>
+                        <SelectContent>
+                          {lojas?.map((l) => (
+                            <SelectItem key={l} value={l}>{l}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            {inviteUrl ? (
+              <Button onClick={() => { setCreateOpen(false); setInviteUrl(null); }}>Fechar</Button>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancelar</Button>
+                <Button
+                  disabled={
+                    createUser.isPending ||
+                    novoNome.trim().length < 2 ||
+                    !novoEmail.includes("@") ||
+                    (novoRole === "setor_usuario" && !novoSetorId) ||
+                    (novoRole === "setor_usuario" && isLojaSetor(novoSetorId) && !novoLojaNome)
+                  }
+                  onClick={() => createUser.mutate()}
+                >
+                  {createUser.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar usuário"}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
