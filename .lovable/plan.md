@@ -1,113 +1,89 @@
 
 
-## Push no celular — iPhone (PWA) e Android (PWA + nativo)
+## Ajuste da URL de deep-link no push de mensagens internas
+
+### Objetivo
+Garantir que o push enviado pelo backend ao receber uma `mensagens_internas` abra exatamente a conversa correta no app Infoco Messenger (`/conversas/:otherId`), usando o `remetente_id` como `otherId`.
 
 ### Diagnóstico
 
-**Hoje no projeto:**
-- Service Worker, `webPush.ts`, `send-push`, `get-vapid-public-key` e botão na topbar já existem e funcionam.
-- `manifest.webmanifest` está mínimo (só `favicon.ico`), sem ícones 192/512.
-- `index.html` não tem `apple-touch-icon` nem metas `apple-mobile-web-app-*`.
-- Existe também a Edge Function `register-push-token` + `dispatch-push` para o **app nativo Atrium Messenger** (FCM/APNs) — esse fluxo é independente e continua valendo para o app nativo separado.
+Hoje o push é gerado em duas camadas:
 
-**Por que não chega push hoje:**
-- **iPhone**: Web Push no iOS só funciona se o site for instalado como **PWA na tela inicial** (Safari iOS 16.4+). Sem ícones reais no manifest, iOS não oferece "Adicionar à Tela de Início" corretamente.
-- **Android**: Web Push funciona direto no Chrome **sem precisar instalar**, mas a experiência fica muito melhor instalado (notificação com ícone, app full-screen). Sem ícones 192/512 o Chrome não dispara o prompt de instalação ("Adicionar à tela inicial") automaticamente.
+1. **Trigger por linha**: `trg_push_nova_mensagem_interna()` é chamado em cada `INSERT` em `public.mensagens_internas`.
+   - Filtra fora `conversa_id` que comece com `ponte_` ou `demanda_`.
+   - Ignora se `destinatario_id` é nulo ou igual ao remetente.
+   - Busca `nome` do remetente em `profiles` e gera `preview` (primeiros 80 caracteres da mensagem).
+   - Chama `public.fn_send_push(...)` com:
+     - `title` = nome do remetente
+     - `body` = preview
+     - `url` = `'/mensagens?conversa=' || new.conversa_id`
+     - `tag` = `'msg_' || new.conversa_id`
 
-### O que será feito
+2. **Função genérica**: `public.fn_send_push(_user_ids, _title, _body, _url, _tag)` empacota o payload JSON e dispara `net.http_post` para a edge function `send-push`. Ela **não conhece o contexto da mensagem** — só repassa o que a trigger mandou.
 
-#### 1. Tornar o app instalável (iOS + Android)
+Ou seja: o problema **não está em `fn_send_push`**. A URL `/mensagens?conversa=...` é montada pela trigger `trg_push_nova_mensagem_interna`. Para o app Messenger abrir `/conversas/<remetente_id>`, é a trigger que precisa mudar.
 
-**Gerar ícones PWA** em `public/icons/`:
-- `icon-192.png`, `icon-512.png`, `icon-512-maskable.png` (Android adaptive)
-- `apple-touch-icon-180.png` (iOS)
-- Fundo `#0b0f17` com marca INFOCO centralizada.
+`fn_send_push` continua igual — ela é compartilhada por mensagens internas, demandas e notificações genéricas, e cada chamadora monta sua própria URL. Mexer em `fn_send_push` quebraria os outros pushes.
 
-**`public/manifest.webmanifest`** — completo:
-```json
-{
-  "name": "INFOCO OPS",
-  "short_name": "INFOCO",
-  "description": "Plataforma de Comunicação e Operações",
-  "start_url": "/",
-  "scope": "/",
-  "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0b0f17",
-  "theme_color": "#0b0f17",
-  "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
-}
-```
+### Plano de execução
 
-**`index.html`** — adicionar no `<head>`:
-```html
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="INFOCO" />
-<meta name="mobile-web-app-capable" content="yes" />
-```
+1. **Mostrar a definição atual** das duas funções (`pg_get_functiondef` para `trg_push_nova_mensagem_interna` e `fn_send_push`) para o usuário confirmar antes da troca.
 
-#### 2. Botão de push com instruções por plataforma
+2. **Criar uma migração** que substitua **apenas** `public.trg_push_nova_mensagem_interna()`, mantendo:
+   - Mesmos filtros (`ponte_*`, `demanda_*`, destinatário válido).
+   - Mesma busca de nome do remetente e preview.
+   - Mesma chamada a `fn_send_push`.
+   - **Única mudança**: `url` passa de `'/mensagens?conversa=' || new.conversa_id` para `'/conversas/' || new.remetente_id::text`.
+   - `tag` continua `'msg_' || new.conversa_id` (garante coalescência por conversa no SO).
 
-Em `src/lib/webPush.ts` adicionar helpers:
-- `isIOS()` — detecta iPhone/iPad via `userAgent` + `maxTouchPoints`.
-- `isAndroid()` — detecta Android via `userAgent`.
-- `isStandalone()` — `matchMedia('(display-mode: standalone)').matches || navigator.standalone === true`.
-- `getIOSVersion()` — extrai versão para alertar quem está em iOS < 16.4.
+3. **Não recriar o trigger** em `mensagens_internas`. Como apenas o corpo da função muda (mesmo nome, mesma assinatura), o trigger atual continua válido e apontando para a nova versão automaticamente.
 
-Em `PushNotificationsButton.tsx` adicionar estados:
-- **`ios-needs-install`** (Safari iOS, fora do standalone): passo-a-passo
-  > 1. Toque em **Compartilhar** ⬆️ na barra do Safari  
-  > 2. Role e toque em **"Adicionar à Tela de Início"**  
-  > 3. Abra o app pelo ícone INFOCO  
-  > 4. Toque em "Ativar notificações"
-- **`ios-too-old`** (iOS < 16.4): pede atualização do iPhone.
-- **`android-can-install`** (Chrome Android, fora do standalone): mensagem opcional sugerindo instalação para experiência completa, mas com botão "Ativar notificações" funcionando do mesmo jeito.
-- Capturar `beforeinstallprompt` no Android para oferecer botão **"Instalar app"** nativo do Chrome.
+4. **Não tocar em** `fn_send_push`, `trg_push_nova_notificacao`, `trg_push_demanda_loja_resposta`, edge function `send-push` nem em `public.app_config`.
 
-#### 3. Ajustes do Service Worker para iOS/Android
+5. **Confirmar pós-migração**: rodar `pg_get_functiondef` da nova `trg_push_nova_mensagem_interna` e colar o código no chat para validação.
 
-`public/sw.js`:
-- Trocar fallback de ícone para PNG: `icon: "/icons/icon-192.png"`, `badge: "/icons/icon-192.png"` (iOS rejeita `.ico`).
-- Garantir `body` não vazio (`body: data.body || " "`) — iOS descarta push silencioso.
-- Adicionar `vibrate: [200, 100, 200]` para Android.
+### Detalhes técnicos
 
-#### 4. Documentação no popover
+- Migração SQL (resumo do que será aplicado):
+  ```sql
+  CREATE OR REPLACE FUNCTION public.trg_push_nova_mensagem_interna()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO 'public'
+  AS $$
+  declare
+    _autor_nome text;
+    _preview text;
+  begin
+    if new.conversa_id like 'ponte_%' or new.conversa_id like 'demanda_%' then
+      return new;
+    end if;
+    if new.destinatario_id is null or new.destinatario_id = new.remetente_id then
+      return new;
+    end if;
 
-Colapsável "Como funciona em cada dispositivo":
-- **Android (Chrome/Edge)**: ativar direto. Funciona com app aberto, fechado ou tela bloqueada. Instalar é opcional mas recomendado.
-- **iPhone/iPad (iOS 16.4+)**: precisa instalar como app na tela inicial. Sem isso, iOS bloqueia notificações web.
-- **Desktop**: ativar direto em Chrome, Edge, Firefox, Safari.
+    select nome into _autor_nome from public.profiles where id = new.remetente_id;
+    _preview := left(coalesce(new.conteudo, ''), 80);
 
-#### 5. App nativo Atrium Messenger (FCM/APNs)
+    perform public.fn_send_push(
+      array[new.destinatario_id],
+      coalesce(_autor_nome, 'Nova mensagem'),
+      _preview,
+      '/conversas/' || new.remetente_id::text,
+      'msg_' || new.conversa_id
+    );
+    return new;
+  end;
+  $$;
+  ```
+- Ressalva: o app `infoco-ops` (este projeto) não tem rota `/conversas/:id`. Esse deep-link só funciona quando o push for aberto no app Atrium Messenger (`desktop-joy-app.lovable.app`), que é exatamente o destino desejado para mensagens internas. Para usuários que receberem o push enquanto estiverem com o painel `infoco-ops` aberto no navegador, a URL não vai casar com nenhuma rota local — comportamento esperado, já que mensagens internas vivem no Messenger.
 
-Sem mudanças neste loop — `register-push-token` e `dispatch-push` continuam servindo o app nativo separado. O fluxo Web Push aqui é complementar, para quem usa o INFOCO OPS pelo navegador/PWA.
+### Resultado esperado
 
-### Critério de aceite
-
-**Android (Chrome):**
-- Abrir `https://atrium-link.lovable.app` → botão "Ativar notificações" funciona direto, sem instalar.
-- Após ativar, registro aparece em `push_subscriptions` com endpoint `fcm.googleapis.com`.
-- "Testar" → notificação chega na barra de notificações do Android com ícone INFOCO, mesmo com o navegador fechado.
-- Se Chrome oferecer prompt de instalação, ícone INFOCO aparece corretamente na tela inicial.
-
-**iPhone (Safari iOS 16.4+):**
-- Abrir o link no Safari → menu Compartilhar mostra "Adicionar à Tela de Início" com ícone INFOCO real.
-- Abrir o app pelo ícone → barra de status some (standalone), botão deixa de mostrar instrução de instalação.
-- Tocar "Ativar" → iOS pede permissão → ao conceder, registro aparece em `push_subscriptions` com endpoint `web.push.apple.com`.
-- "Testar" → notificação chega na tela bloqueada do iPhone.
-
-**Fallback claro:**
-- iPhone iOS < 16.4 → mensagem pedindo atualização.
-- Safari iOS sem instalar → instruções passo-a-passo.
-- Navegador não suportado → aviso explícito.
-
-### Memória
-
-Salvar `mem://integracao/web-push-mobile-pwa.md`: requisitos por plataforma (iOS exige standalone + 16.4+ + ícones PNG; Android funciona direto no Chrome; ambos usam o mesmo endpoint `send-push`).
+- Push de nova mensagem interna chega no celular com:
+  - título = nome do remetente
+  - corpo = primeiros 80 caracteres da mensagem
+  - ao tocar, abre `/conversas/<uuid-do-remetente>` no Messenger
+- Pushes de demandas e notificações genéricas continuam funcionando exatamente como antes.
 
