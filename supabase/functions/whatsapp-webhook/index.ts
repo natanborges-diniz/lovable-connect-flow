@@ -385,13 +385,10 @@ serve(async (req) => {
       tipoConteudo = mediaType; // image, document, audio, video, sticker
       try {
         const storedMedia = await downloadAndStoreMedia(supabase, SUPABASE_URL, {
-          source,
           mediaId,
-          mediaUrl,
           mediaMimeType,
           atendimentoId,
           messageId,
-          evolutionMessageKey: message.evolutionMessageKey,
         });
         storedMediaUrl = storedMedia?.publicUrl || null;
         inlineMediaBase64 = storedMedia?.inlineBase64 || null;
@@ -430,16 +427,16 @@ serve(async (req) => {
       tipo_conteudo: isTranscribedAudio ? "text" : tipoConteudo,
       metadata: {
         whatsapp_message_id: messageId,
-        source,
+        source: "meta_official",
         ...(storedMediaUrl && { media_url: storedMediaUrl }),
         ...(storedMediaMimeType && { mime_type: storedMediaMimeType }),
         ...(isTranscribedAudio && { transcribed_from: "audio", original_type: "audio" }),
       },
-      provedor: source,
+      provedor: "meta_official",
     });
 
-    // 6. Mark as read (Meta official API only)
-    if (source === "meta_official" && messageId) {
+    // 6. Mark as read (Meta Graph API)
+    if (messageId) {
       markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
     }
 
@@ -490,18 +487,17 @@ serve(async (req) => {
             direcao: "outbound",
             conteudo: confirmMsg,
             remetente_nome: "Sistema",
-            provedor: source,
+            provedor: "meta_official",
           });
 
-          // Send via WhatsApp
+          // Send via WhatsApp (Meta Official)
           await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
             method: "POST",
             headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              phone: cleanPhoneForLoja,
-              message: confirmMsg,
               atendimento_id: atendimentoId,
-              source,
+              texto: confirmMsg,
+              remetente_nome: "Sistema",
             }),
           });
 
