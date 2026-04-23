@@ -44,11 +44,10 @@ export function PushNotificationsButton() {
     setBusy(false);
     if (res.ok) {
       toast({ title: "Notificações ativadas", description: "Você receberá pushes neste dispositivo." });
-      await refresh();
     } else {
       toast({ title: "Não foi possível ativar", description: res.reason, variant: "destructive" });
-      await refresh();
     }
+    await refresh();
   }
 
   async function handleDisable() {
