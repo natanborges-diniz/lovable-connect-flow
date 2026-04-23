@@ -42,7 +42,7 @@ export function PushNotificationsButton() {
     setBusy(true);
     const res = await enableWebPush();
     setBusy(false);
-    if (res.ok) {
+    if (res.ok === true) {
       toast({ title: "Notificações ativadas", description: "Você receberá pushes neste dispositivo." });
     } else {
       toast({ title: "Não foi possível ativar", description: res.reason, variant: "destructive" });
