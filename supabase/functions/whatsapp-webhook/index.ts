@@ -921,12 +921,9 @@ interface NormalizedMessage {
   senderName: string;
   text: string;
   messageId: string;
-  source: "meta_official" | "evolution_api" | "z_api" | "generic";
   mediaType?: string;    // image, audio, video, document, sticker
   mediaId?: string;      // Meta media ID
-  mediaUrl?: string;     // Direct URL (Evolution/Z-API)
   mediaMimeType?: string;
-  evolutionMessageKey?: any; // Full key object for Evolution API media download
 }
 
 // ── Filter out brand/store names that come as pushName from customers
