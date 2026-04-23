@@ -141,14 +141,14 @@ serve(async (req) => {
       }).eq("id", contato.id);
     }
 
-    // 2. Find or create canal (with provedor)
+    // 2. Find or create canal (sempre meta_official)
     let { data: canal } = await supabase
       .from("canais")
       .select("*")
       .eq("contato_id", contato.id)
       .eq("tipo", "whatsapp")
       .eq("identificador", phone)
-      .eq("provedor", source)
+      .eq("provedor", "meta_official")
       .single();
 
     if (!canal) {
@@ -157,7 +157,7 @@ serve(async (req) => {
         tipo: "whatsapp",
         identificador: phone,
         principal: true,
-        provedor: source,
+        provedor: "meta_official",
       });
     }
 
