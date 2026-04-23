@@ -523,6 +523,111 @@ export function GestaoUsuariosCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={createOpen} onOpenChange={(o) => { setCreateOpen(o); if (!o) setInviteUrl(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Novo usuário</DialogTitle>
+            <DialogDescription>
+              O usuário será criado e poderá acessar o sistema via link de convite.
+            </DialogDescription>
+          </DialogHeader>
+
+          {inviteUrl ? (
+            <div className="space-y-2 py-2">
+              <Label>Link de convite</Label>
+              <div className="flex gap-2">
+                <Input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
+                <Button
+                  variant="outline"
+                  onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success("Link copiado"); }}
+                >
+                  Copiar
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Envie este link para o usuário definir a senha e acessar o sistema.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label htmlFor="novo-nome">Nome</Label>
+                <Input id="novo-nome" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="novo-email">E-mail</Label>
+                <Input id="novo-email" type="email" value={novoEmail} onChange={(e) => setNovoEmail(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="novo-cargo">Cargo (opcional)</Label>
+                <Input id="novo-cargo" value={novoCargo} onChange={(e) => setNovoCargo(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Nível de acesso</Label>
+                <Select value={novoRole} onValueChange={(v) => setNovoRole(v as AppRole)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="operador">Operador</SelectItem>
+                    <SelectItem value="setor_usuario">Setor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {novoRole === "setor_usuario" && (
+                <>
+                  <div className="space-y-1">
+                    <Label>Setor</Label>
+                    <Select value={novoSetorId} onValueChange={(v) => { setNovoSetorId(v); setNovoLojaNome(""); }}>
+                      <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                      <SelectContent>
+                        {setores?.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {isLojaSetor(novoSetorId) && (
+                    <div className="space-y-1">
+                      <Label>Loja</Label>
+                      <Select value={novoLojaNome} onValueChange={setNovoLojaNome}>
+                        <SelectTrigger><SelectValue placeholder="Selecione a loja" /></SelectTrigger>
+                        <SelectContent>
+                          {lojas?.map((l) => (
+                            <SelectItem key={l} value={l}>{l}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            {inviteUrl ? (
+              <Button onClick={() => { setCreateOpen(false); setInviteUrl(null); }}>Fechar</Button>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancelar</Button>
+                <Button
+                  disabled={
+                    createUser.isPending ||
+                    novoNome.trim().length < 2 ||
+                    !novoEmail.includes("@") ||
+                    (novoRole === "setor_usuario" && !novoSetorId) ||
+                    (novoRole === "setor_usuario" && isLojaSetor(novoSetorId) && !novoLojaNome)
+                  }
+                  onClick={() => createUser.mutate()}
+                >
+                  {createUser.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar usuário"}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }
