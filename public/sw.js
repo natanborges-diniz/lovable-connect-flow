@@ -19,12 +19,14 @@ self.addEventListener("push", (event) => {
 
   const title = data.title || "INFOCO OPS";
   const options = {
-    body: data.body || "",
-    icon: "/favicon.ico",
-    badge: "/favicon.ico",
+    // iOS descarta push com body vazio — garantimos pelo menos um espaço
+    body: data.body || " ",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
     tag: data.tag || undefined,
     data: { url: data.url || "/" },
     renotify: !!data.tag,
+    vibrate: [200, 100, 200],
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -38,8 +40,6 @@ self.addEventListener("notificationclick", (event) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         try {
-          const url = new URL(client.url);
-          // Se já existe uma aba do app aberta, foca e navega
           if ("focus" in client) {
             client.focus();
             if ("navigate" in client) client.navigate(targetUrl).catch(() => {});
