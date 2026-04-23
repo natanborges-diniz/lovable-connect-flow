@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BellRing, BellOff, Loader2, Send } from "lucide-react";
+import { BellRing, BellOff, Loader2, Send, Smartphone, Share, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -12,12 +12,24 @@ import {
   enableWebPush,
   getCurrentSubscription,
   getNotificationPermission,
+  isAndroid,
   isInIframe,
+  isIOS,
   isPushSupported,
+  isStandalone,
+  iosSupportsWebPush,
   sendTestPush,
 } from "@/lib/webPush";
 
-type Status = "loading" | "unsupported" | "iframe" | "denied" | "off" | "on";
+type Status =
+  | "loading"
+  | "unsupported"
+  | "iframe"
+  | "ios-too-old"
+  | "ios-needs-install"
+  | "denied"
+  | "off"
+  | "on";
 
 export function PushNotificationsButton() {
   const { toast } = useToast();
@@ -26,8 +38,15 @@ export function PushNotificationsButton() {
   const [open, setOpen] = useState(false);
 
   async function refresh() {
-    if (!isPushSupported()) return setStatus("unsupported");
     if (isInIframe()) return setStatus("iframe");
+
+    if (isIOS()) {
+      if (!iosSupportsWebPush()) return setStatus("ios-too-old");
+      if (!isStandalone()) return setStatus("ios-needs-install");
+    }
+
+    if (!isPushSupported()) return setStatus("unsupported");
+
     const perm = await getNotificationPermission();
     if (perm === "denied") return setStatus("denied");
     const sub = await getCurrentSubscription();
@@ -36,6 +55,12 @@ export function PushNotificationsButton() {
 
   useEffect(() => {
     refresh();
+    // Re-checa quando a aba volta ao foco (útil ao instalar PWA e abrir pelo ícone)
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
   async function handleEnable() {
@@ -79,7 +104,7 @@ export function PushNotificationsButton() {
           <Icon className={`h-4 w-4 ${tone}`} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-3" align="end">
+      <PopoverContent className="w-80 p-3" align="end">
         <div className="space-y-3">
           <div>
             <p className="text-sm font-semibold">Notificações no dispositivo</p>
@@ -104,6 +129,47 @@ export function PushNotificationsButton() {
             </p>
           )}
 
+          {status === "ios-too-old" && (
+            <div className="space-y-2 rounded-md border border-amber-300/40 bg-amber-50/50 p-2 dark:bg-amber-950/30">
+              <div className="flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                <Smartphone className="h-3 w-3" /> iPhone precisa de iOS 16.4 ou superior
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Atualize seu iPhone em <strong>Ajustes → Geral → Atualização de Software</strong> e tente novamente.
+              </p>
+            </div>
+          )}
+
+          {status === "ios-needs-install" && (
+            <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-2">
+              <div className="flex items-center gap-2 text-xs font-medium text-primary">
+                <Smartphone className="h-3 w-3" /> Instale o app no iPhone
+              </div>
+              <ol className="space-y-1.5 text-xs text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="font-semibold text-foreground">1.</span>
+                  <span>
+                    Toque no ícone <Share className="inline h-3 w-3" /> <strong>Compartilhar</strong> na barra do Safari
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-semibold text-foreground">2.</span>
+                  <span>
+                    Role e toque em <Plus className="inline h-3 w-3" /> <strong>Adicionar à Tela de Início</strong>
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-semibold text-foreground">3.</span>
+                  <span>Abra o app pelo ícone <strong>INFOCO</strong> na tela inicial</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-semibold text-foreground">4.</span>
+                  <span>Volte aqui e toque em "Ativar notificações"</span>
+                </li>
+              </ol>
+            </div>
+          )}
+
           {status === "denied" && (
             <p className="text-xs text-destructive">
               Permissão bloqueada. Libere notificações nas configurações do navegador e recarregue.
@@ -111,10 +177,17 @@ export function PushNotificationsButton() {
           )}
 
           {status === "off" && (
-            <Button size="sm" onClick={handleEnable} disabled={busy} className="w-full">
-              {busy ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <BellRing className="h-3 w-3 mr-2" />}
-              Ativar notificações
-            </Button>
+            <>
+              {isAndroid() && !isStandalone() && (
+                <p className="text-[11px] text-muted-foreground -mb-1">
+                  💡 No Android funciona direto. Instalar o app na tela inicial é opcional.
+                </p>
+              )}
+              <Button size="sm" onClick={handleEnable} disabled={busy} className="w-full">
+                {busy ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <BellRing className="h-3 w-3 mr-2" />}
+                Ativar notificações
+              </Button>
+            </>
           )}
 
           {status === "on" && (
@@ -130,6 +203,15 @@ export function PushNotificationsButton() {
               </div>
             </div>
           )}
+
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer hover:text-foreground">Como funciona em cada dispositivo</summary>
+            <ul className="mt-2 space-y-1.5 pl-1">
+              <li><strong>Android (Chrome/Edge):</strong> ativa direto, funciona com app fechado.</li>
+              <li><strong>iPhone/iPad:</strong> precisa instalar como app na tela inicial (iOS 16.4+).</li>
+              <li><strong>Desktop:</strong> ativa direto em Chrome, Edge, Firefox e Safari.</li>
+            </ul>
+          </details>
         </div>
       </PopoverContent>
     </Popover>
