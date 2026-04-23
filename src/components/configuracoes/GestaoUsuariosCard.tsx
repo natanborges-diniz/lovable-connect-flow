@@ -105,6 +105,46 @@ export function GestaoUsuariosCard() {
   const [resetTarget, setResetTarget] = useState<{ id: string; nome: string } | null>(null);
   const [newPassword, setNewPassword] = useState("");
 
+  // Create user dialog state
+  const [createOpen, setCreateOpen] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [novoEmail, setNovoEmail] = useState("");
+  const [novoCargo, setNovoCargo] = useState("");
+  const [novoSetorId, setNovoSetorId] = useState<string>("");
+  const [novoRole, setNovoRole] = useState<AppRole>("setor_usuario");
+  const [novoLojaNome, setNovoLojaNome] = useState<string>("");
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+
+  const createUser = useMutation({
+    mutationFn: async () => {
+      const payload: Record<string, unknown> = {
+        nome: novoNome.trim(),
+        email: novoEmail.trim(),
+        role: novoRole,
+      };
+      if (novoCargo.trim()) payload.cargo = novoCargo.trim();
+      if (novoSetorId) payload.setor_id = novoSetorId;
+      if (novoLojaNome) payload.loja_nome = novoLojaNome;
+      const { data, error } = await supabase.functions.invoke("admin-create-user", { body: payload });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { user_id: string; email: string; invite_url?: string };
+    },
+    onSuccess: (data) => {
+      toast.success("Usuário criado");
+      setInviteUrl(data?.invite_url ?? null);
+      setNovoNome("");
+      setNovoEmail("");
+      setNovoCargo("");
+      setNovoSetorId("");
+      setNovoRole("setor_usuario");
+      setNovoLojaNome("");
+      invalidateAll();
+      queryClient.invalidateQueries({ queryKey: ["profiles-ativos"] });
+    },
+    onError: (e: any) => toast.error(e.message ?? "Falha ao criar usuário"),
+  });
+
   const resetPassword = useMutation({
     mutationFn: async ({ userId, password }: { userId: string; password: string }) => {
       const { data, error } = await supabase.functions.invoke("admin-reset-password", {
