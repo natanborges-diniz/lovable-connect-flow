@@ -983,7 +983,6 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
           phone: msg.from,
           senderName: contactInfo?.profile?.name || msg.from,
           messageId: msg.id || "",
-          source: "meta_official" as const,
         };
 
         if (msg.type === "text") {
@@ -1039,103 +1038,8 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     return null;
   }
 
-  // ── Evolution API ──
-  if (body.data?.key?.remoteJid) {
-    const phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
-    const msgData = body.data.message;
-    const rawPushName = body.data.pushName || phone;
-
-    // Image message
-    if (msgData?.imageMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: msgData.imageMessage.caption || "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "image",
-        mediaUrl: msgData.imageMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.imageMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Document message
-    if (msgData?.documentMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: msgData.documentMessage.caption || msgData.documentMessage.fileName || "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "document",
-        mediaUrl: msgData.documentMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.documentMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Audio message
-    if (msgData?.audioMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "audio",
-        mediaUrl: msgData.audioMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.audioMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Video message
-    if (msgData?.videoMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: msgData.videoMessage.caption || "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "video",
-        mediaUrl: msgData.videoMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.videoMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Text message (fallback)
-    return {
-      phone,
-      senderName: rawPushName,
-      text: msgData?.conversation || msgData?.extendedTextMessage?.text || "",
-      messageId: body.data.key.id || "",
-      source: "evolution_api",
-    };
-  }
-
-  // ── Z-API ──
-  if (body.phone) {
-    const base = {
-      phone: body.phone.replace(/\D/g, ""),
-      senderName: body.senderName || body.phone,
-      messageId: body.messageId || body.zapiMessageId || "",
-      source: "z_api" as const,
-    };
-    if (body.image) {
-      return { ...base, text: body.image.caption || "", mediaType: "image", mediaUrl: body.image.imageUrl };
-    }
-    return { ...base, text: body.text?.message || body.message || "" };
-  }
-
-  // ── Generic ──
-  if (body.from && body.body) {
-    return {
-      phone: body.from.replace(/\D/g, ""),
-      senderName: body.senderName || body.from,
-      text: body.body,
-      messageId: body.id || "",
-      source: "generic",
-    };
-  }
-
+  // Payload não-Meta: ignorado silenciosamente (Evolution/Z-API descontinuados).
+  console.warn("[webhook] Payload não-Meta recebido — ignorado (canal único = meta_official).");
   return null;
 }
 
