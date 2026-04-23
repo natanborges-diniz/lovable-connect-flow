@@ -37,6 +37,41 @@ export function isInIframe(): boolean {
   }
 }
 
+export function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isIPadOS =
+    ua.includes("Macintosh") &&
+    (navigator as Navigator & { maxTouchPoints?: number }).maxTouchPoints !== undefined &&
+    (navigator as Navigator & { maxTouchPoints?: number }).maxTouchPoints! > 1;
+  return /iPhone|iPad|iPod/.test(ua) || isIPadOS;
+}
+
+export function isAndroid(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android/i.test(navigator.userAgent || "");
+}
+
+export function isStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  const mql = window.matchMedia?.("(display-mode: standalone)").matches ?? false;
+  const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return mql || iosStandalone;
+}
+
+export function getIOSVersion(): { major: number; minor: number } | null {
+  if (!isIOS()) return null;
+  const match = /OS (\d+)_(\d+)/.exec(navigator.userAgent || "");
+  if (!match) return null;
+  return { major: parseInt(match[1], 10), minor: parseInt(match[2], 10) };
+}
+
+export function iosSupportsWebPush(): boolean {
+  const v = getIOSVersion();
+  if (!v) return false;
+  return v.major > 16 || (v.major === 16 && v.minor >= 4);
+}
+
 async function getVapidPublicKey(): Promise<string> {
   const { data, error } = await supabase.functions.invoke<{ publicKey: string }>(
     "get-vapid-public-key",
