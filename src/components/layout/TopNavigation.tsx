@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { ModuleKey } from "./AppLayout";
+import { PushNotificationsButton } from "./PushNotificationsButton";
 
 interface TopNavigationProps {
   activeModule: ModuleKey;
@@ -151,6 +152,8 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
         </nav>
 
         <div className="flex-1" />
+
+        <PushNotificationsButton />
 
         <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
           <PopoverTrigger asChild>
