@@ -114,8 +114,8 @@ export default function Atendimentos() {
                       <div className="flex items-center gap-1.5">
                         <span className="text-muted-foreground capitalize">{a.canal}</span>
                         {a.canal_provedor && (
-                          <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", a.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-amber-500/50 text-amber-600")}>
-                            {a.canal_provedor === "meta_official" ? "Oficial" : a.canal_provedor === "evolution_api" ? "Evolution" : a.canal_provedor === "z_api" ? "Z-API" : a.canal_provedor}
+                          <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", a.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-muted-foreground/40 text-muted-foreground")}>
+                            {a.canal_provedor === "meta_official" ? "Oficial" : "Legado"}
                           </Badge>
                         )}
                       </div>
@@ -233,8 +233,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             <AtendimentoStatusBadge status={atendimento.status} />
             <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>
             {atendimento.canal_provedor && (
-              <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-amber-500/50 text-amber-600")}>
-                {atendimento.canal_provedor === "meta_official" ? "Oficial" : atendimento.canal_provedor === "evolution_api" ? "Evolution" : "Z-API"}
+              <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-muted-foreground/40 text-muted-foreground")}>
+                {atendimento.canal_provedor === "meta_official" ? "Oficial" : "Legado"}
               </Badge>
             )}
             <Badge

@@ -41,12 +41,12 @@ serve(async (req) => {
       });
     }
 
-    let { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
-    console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
+    let { phone, senderName, text, messageId, mediaType, mediaId, mediaMimeType } = message;
+    const source = "meta_official"; // CANAL ÚNICO: webhook só aceita Meta Official.
+    console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
     // ─── 0a. ECHO-SAUDAÇÃO FILTER ───
-    // Provedores (Evolution/Z-API) às vezes ecoam a saudação automática enviada pelo nosso próprio número
-    // de volta como inbound. Detecta padrões fixos e descarta antes de criar contato/atendimento.
+    // Defensivo: descarta se nosso próprio número devolver a saudação automática como inbound.
     if (text && (mediaType === "text" || !mediaType)) {
       const SAUDACAO_ECHO_PATTERNS = [
         /^ol[áa],?\s+que\s+bom\s+poder\s+conversar\s+com\s+voc[êe]\.?\s*como\s+posso\s+te\s+ajudar/i,
@@ -141,14 +141,14 @@ serve(async (req) => {
       }).eq("id", contato.id);
     }
 
-    // 2. Find or create canal (with provedor)
+    // 2. Find or create canal (sempre meta_official)
     let { data: canal } = await supabase
       .from("canais")
       .select("*")
       .eq("contato_id", contato.id)
       .eq("tipo", "whatsapp")
       .eq("identificador", phone)
-      .eq("provedor", source)
+      .eq("provedor", "meta_official")
       .single();
 
     if (!canal) {
@@ -157,7 +157,7 @@ serve(async (req) => {
         tipo: "whatsapp",
         identificador: phone,
         principal: true,
-        provedor: source,
+        provedor: "meta_official",
       });
     }
 
@@ -385,13 +385,10 @@ serve(async (req) => {
       tipoConteudo = mediaType; // image, document, audio, video, sticker
       try {
         const storedMedia = await downloadAndStoreMedia(supabase, SUPABASE_URL, {
-          source,
           mediaId,
-          mediaUrl,
           mediaMimeType,
           atendimentoId,
           messageId,
-          evolutionMessageKey: message.evolutionMessageKey,
         });
         storedMediaUrl = storedMedia?.publicUrl || null;
         inlineMediaBase64 = storedMedia?.inlineBase64 || null;
@@ -430,16 +427,16 @@ serve(async (req) => {
       tipo_conteudo: isTranscribedAudio ? "text" : tipoConteudo,
       metadata: {
         whatsapp_message_id: messageId,
-        source,
+        source: "meta_official",
         ...(storedMediaUrl && { media_url: storedMediaUrl }),
         ...(storedMediaMimeType && { mime_type: storedMediaMimeType }),
         ...(isTranscribedAudio && { transcribed_from: "audio", original_type: "audio" }),
       },
-      provedor: source,
+      provedor: "meta_official",
     });
 
-    // 6. Mark as read (Meta official API only)
-    if (source === "meta_official" && messageId) {
+    // 6. Mark as read (Meta Graph API)
+    if (messageId) {
       markAsRead(messageId).catch((e) => console.error("Failed to mark as read:", e));
     }
 
@@ -490,18 +487,17 @@ serve(async (req) => {
             direcao: "outbound",
             conteudo: confirmMsg,
             remetente_nome: "Sistema",
-            provedor: source,
+            provedor: "meta_official",
           });
 
-          // Send via WhatsApp
+          // Send via WhatsApp (Meta Official)
           await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
             method: "POST",
             headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              phone: cleanPhoneForLoja,
-              message: confirmMsg,
               atendimento_id: atendimentoId,
-              source,
+              texto: confirmMsg,
+              remetente_nome: "Sistema",
             }),
           });
 
@@ -612,112 +608,39 @@ serve(async (req) => {
   }
 });
 
-// ─── Download and Store Media ───
+// ─── Download and Store Media (Meta Official only) ───
 async function downloadAndStoreMedia(
   supabase: any,
   supabaseUrl: string,
   opts: {
-    source: string;
     mediaId?: string;
-    mediaUrl?: string;
     mediaMimeType?: string;
     atendimentoId: string;
     messageId: string;
-    evolutionMessageKey?: any;
   }
 ): Promise<{ publicUrl: string | null; inlineBase64: string | null; mimeType: string; mediaBytes: ArrayBuffer | null } | null> {
   let mediaBytes: ArrayBuffer | null = null;
   let mimeType = opts.mediaMimeType || "application/octet-stream";
 
-  if (opts.source === "meta_official" && opts.mediaId) {
-    // Step 1: Get media URL from Graph API
-    const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-    if (!accessToken) throw new Error("WHATSAPP_ACCESS_TOKEN not set");
+  if (!opts.mediaId) return null;
 
-    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${opts.mediaId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!metaRes.ok) throw new Error(`Meta media lookup failed: ${metaRes.status}`);
-    const metaData = await metaRes.json();
-    mimeType = metaData.mime_type || mimeType;
+  // Step 1: Get media URL from Graph API
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  if (!accessToken) throw new Error("WHATSAPP_ACCESS_TOKEN not set");
 
-    // Step 2: Download the actual media
-    const downloadRes = await fetch(metaData.url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!downloadRes.ok) throw new Error(`Meta media download failed: ${downloadRes.status}`);
-    mediaBytes = await downloadRes.arrayBuffer();
+  const metaRes = await fetch(`https://graph.facebook.com/v21.0/${opts.mediaId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!metaRes.ok) throw new Error(`Meta media lookup failed: ${metaRes.status}`);
+  const metaData = await metaRes.json();
+  mimeType = metaData.mime_type || mimeType;
 
-  } else if (opts.source === "evolution_api" && opts.evolutionMessageKey) {
-    // Evolution API: use getBase64FromMediaMessage endpoint
-    const evolutionApiUrl = Deno.env.get("EVOLUTION_API_URL");
-    const evolutionApiKey = Deno.env.get("EVOLUTION_API_KEY");
-    const evolutionInstance = Deno.env.get("EVOLUTION_INSTANCE_NAME");
-
-    if (evolutionApiUrl && evolutionApiKey && evolutionInstance) {
-      try {
-        const b64Res = await fetch(
-          `${evolutionApiUrl}/chat/getBase64FromMediaMessage/${evolutionInstance}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: evolutionApiKey,
-            },
-            body: JSON.stringify({
-              message: { key: opts.evolutionMessageKey },
-              convertToMp4: false,
-            }),
-          }
-        );
-
-        if (b64Res.ok) {
-          const b64Data = await b64Res.json();
-          const base64String = b64Data.base64 || b64Data.data;
-          if (base64String) {
-            // base64 may include data URI prefix
-            const raw = base64String.includes(",")
-              ? base64String.split(",")[1]
-              : base64String;
-            // Decode base64 to bytes
-            const binaryStr = atob(raw);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) {
-              bytes[i] = binaryStr.charCodeAt(i);
-            }
-            mediaBytes = bytes.buffer;
-            // Try to extract mime from data URI if present
-            if (base64String.includes(",") && base64String.startsWith("data:")) {
-              const extractedMime = base64String.split(";")[0].replace("data:", "");
-              if (extractedMime) mimeType = extractedMime;
-            }
-            console.log(`[MEDIA] Evolution base64 decoded: ${bytes.length} bytes, mime=${mimeType}`);
-          }
-        } else {
-          console.warn(`[MEDIA] Evolution getBase64 failed: ${b64Res.status} — falling back to direct URL`);
-        }
-      } catch (e) {
-        console.warn("[MEDIA] Evolution getBase64 error — falling back to direct URL:", e);
-      }
-    }
-
-    // Fallback: try direct URL with API key header
-    if (!mediaBytes && opts.mediaUrl) {
-      const evolutionKey = Deno.env.get("EVOLUTION_API_KEY");
-      const headers: Record<string, string> = {};
-      if (evolutionKey) headers["apikey"] = evolutionKey;
-      const downloadRes = await fetch(opts.mediaUrl, { headers });
-      if (downloadRes.ok) {
-        mediaBytes = await downloadRes.arrayBuffer();
-      }
-    }
-
-  } else if (opts.mediaUrl) {
-    // Z-API / Generic: direct URL download
-    const downloadRes = await fetch(opts.mediaUrl);
-    if (!downloadRes.ok) throw new Error(`Media download failed: ${downloadRes.status}`);
-    mediaBytes = await downloadRes.arrayBuffer();
-  }
+  // Step 2: Download the actual media
+  const downloadRes = await fetch(metaData.url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!downloadRes.ok) throw new Error(`Meta media download failed: ${downloadRes.status}`);
+  mediaBytes = await downloadRes.arrayBuffer();
 
   if (!mediaBytes) return null;
 
@@ -998,12 +921,9 @@ interface NormalizedMessage {
   senderName: string;
   text: string;
   messageId: string;
-  source: "meta_official" | "evolution_api" | "z_api" | "generic";
   mediaType?: string;    // image, audio, video, document, sticker
   mediaId?: string;      // Meta media ID
-  mediaUrl?: string;     // Direct URL (Evolution/Z-API)
   mediaMimeType?: string;
-  evolutionMessageKey?: any; // Full key object for Evolution API media download
 }
 
 // ── Filter out brand/store names that come as pushName from customers
@@ -1063,7 +983,6 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
           phone: msg.from,
           senderName: contactInfo?.profile?.name || msg.from,
           messageId: msg.id || "",
-          source: "meta_official" as const,
         };
 
         if (msg.type === "text") {
@@ -1119,103 +1038,8 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
     return null;
   }
 
-  // ── Evolution API ──
-  if (body.data?.key?.remoteJid) {
-    const phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
-    const msgData = body.data.message;
-    const rawPushName = body.data.pushName || phone;
-
-    // Image message
-    if (msgData?.imageMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: msgData.imageMessage.caption || "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "image",
-        mediaUrl: msgData.imageMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.imageMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Document message
-    if (msgData?.documentMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: msgData.documentMessage.caption || msgData.documentMessage.fileName || "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "document",
-        mediaUrl: msgData.documentMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.documentMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Audio message
-    if (msgData?.audioMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "audio",
-        mediaUrl: msgData.audioMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.audioMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Video message
-    if (msgData?.videoMessage) {
-      return {
-        phone,
-        senderName: rawPushName,
-        text: msgData.videoMessage.caption || "",
-        messageId: body.data.key.id || "",
-        source: "evolution_api",
-        mediaType: "video",
-        mediaUrl: msgData.videoMessage.url || body.data.mediaUrl,
-        mediaMimeType: msgData.videoMessage.mimetype,
-        evolutionMessageKey: body.data.key,
-      };
-    }
-    // Text message (fallback)
-    return {
-      phone,
-      senderName: rawPushName,
-      text: msgData?.conversation || msgData?.extendedTextMessage?.text || "",
-      messageId: body.data.key.id || "",
-      source: "evolution_api",
-    };
-  }
-
-  // ── Z-API ──
-  if (body.phone) {
-    const base = {
-      phone: body.phone.replace(/\D/g, ""),
-      senderName: body.senderName || body.phone,
-      messageId: body.messageId || body.zapiMessageId || "",
-      source: "z_api" as const,
-    };
-    if (body.image) {
-      return { ...base, text: body.image.caption || "", mediaType: "image", mediaUrl: body.image.imageUrl };
-    }
-    return { ...base, text: body.text?.message || body.message || "" };
-  }
-
-  // ── Generic ──
-  if (body.from && body.body) {
-    return {
-      phone: body.from.replace(/\D/g, ""),
-      senderName: body.senderName || body.from,
-      text: body.body,
-      messageId: body.id || "",
-      source: "generic",
-    };
-  }
-
+  // Payload não-Meta: ignorado silenciosamente (Evolution/Z-API descontinuados).
+  console.warn("[webhook] Payload não-Meta recebido — ignorado (canal único = meta_official).");
   return null;
 }
 

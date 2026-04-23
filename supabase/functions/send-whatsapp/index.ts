@@ -12,14 +12,10 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { atendimento_id, texto, remetente_nome, force_provider } = await req.json();
+    const { atendimento_id, texto, remetente_nome } = await req.json();
 
     if (!atendimento_id || !texto) {
       throw new Error("atendimento_id and texto are required");
-    }
-
-    if (force_provider && force_provider !== "meta_official") {
-      console.warn(`[send-whatsapp] Ignoring force_provider="${force_provider}" — only meta_official is supported.`);
     }
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;

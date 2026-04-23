@@ -10,8 +10,9 @@ type: feature
 
 1. **WhatsApp Meta Official** — exclusivo para clientes finais.
    - `send-whatsapp` envia somente via Meta. Texto livre só dentro da janela 24h; fora exige template aprovado.
-   - `whatsapp-webhook` parser Meta apenas. `canal_provedor` sempre `meta_official`.
-   - Evolution API e Z-API foram descontinuados — código mantido apenas como referência histórica.
+   - `whatsapp-webhook` aceita **apenas** payload Meta Cloud API. Branches Evolution/Z-API/Generic foram removidos do código (não só "deprecated"). Ver `mem://integracao/whatsapp-meta-only-webhook`.
+   - `canal_provedor` sempre `meta_official` em novos registros.
+   - Evolution API e Z-API descontinuados — secrets `EVOLUTION_*` ainda no projeto mas não lidos.
 
 2. **App Atrium Messenger** — exclusivo para tudo que é interno/B2B.
    - Lojas, colaboradores, departamentos, setores, agendamentos internos, demandas B2B, comprovantes (picote), confirmações de comparecimento.
