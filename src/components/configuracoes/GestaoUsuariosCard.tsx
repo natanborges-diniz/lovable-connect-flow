@@ -286,10 +286,13 @@ export function GestaoUsuariosCard() {
   return (
     <TooltipProvider>
       <Card className="shadow-card">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle className="text-lg flex items-center gap-2">
             <Users className="h-5 w-5" /> Gestão de Usuários e Permissões
           </CardTitle>
+          <Button size="sm" onClick={() => { setCreateOpen(true); setInviteUrl(null); }}>
+            <Plus className="h-4 w-4 mr-1" /> Novo usuário
+          </Button>
         </CardHeader>
         <CardContent>
           <DefaultUsuarioConfig />
