@@ -102,11 +102,28 @@ export async function getNotificationPermission(): Promise<NotificationPermissio
 }
 
 export async function enableWebPush(): Promise<{ ok: true } | { ok: false; reason: string }> {
-  if (!isPushSupported()) return { ok: false, reason: "Navegador não suporta Web Push" };
+  if (!isPushSupported()) {
+    if (isIOS() && !iosSupportsWebPush()) {
+      return { ok: false, reason: "iOS 16.4 ou superior é necessário. Atualize seu iPhone." };
+    }
+    if (isIOS() && !isStandalone()) {
+      return {
+        ok: false,
+        reason: "No iPhone, instale o app na tela inicial primeiro (Compartilhar → Adicionar à Tela de Início).",
+      };
+    }
+    return { ok: false, reason: "Navegador não suporta Web Push" };
+  }
   if (isInIframe()) {
     return {
       ok: false,
       reason: "Abra o app fora do preview (em uma aba própria) para ativar notificações.",
+    };
+  }
+  if (isIOS() && !isStandalone()) {
+    return {
+      ok: false,
+      reason: "No iPhone, instale o app na tela inicial primeiro (Compartilhar → Adicionar à Tela de Início).",
     };
   }
 
