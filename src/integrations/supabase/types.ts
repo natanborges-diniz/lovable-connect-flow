@@ -1876,6 +1876,16 @@ export type Database = {
       }
     }
     Functions: {
+      fn_send_push: {
+        Args: {
+          _body: string
+          _tag?: string
+          _title: string
+          _url?: string
+          _user_ids: string[]
+        }
+        Returns: undefined
+      }
       get_user_setor_ids: { Args: { _user_id: string }; Returns: string[] }
       has_role: {
         Args: {
