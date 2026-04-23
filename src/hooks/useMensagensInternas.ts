@@ -24,9 +24,9 @@ export function useMensagensInternas() {
   // Realtime subscription
   useEffect(() => {
     if (!uid || !isAuthReady) return;
-    const channelName = `mensagens_internas_rt_${Date.now()}`;
-    const channel = supabase
-      .channel(channelName)
+    const channelName = `mensagens_internas_rt_${uid}_${Math.random().toString(36).slice(2)}`;
+    const channel = supabase.channel(channelName);
+    channel
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mensagens_internas" },
@@ -46,8 +46,8 @@ export function useMensagensInternas() {
           qc.invalidateQueries({ queryKey: ["conversas-internas"] });
           qc.invalidateQueries({ queryKey: ["total-nao-lidas"] });
         }
-      );
-    channel.subscribe();
+      )
+      .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [uid, qc, isAuthReady]);
 
