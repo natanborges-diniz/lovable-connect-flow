@@ -41,12 +41,12 @@ serve(async (req) => {
       });
     }
 
-    let { phone, senderName, text, messageId, source, mediaType, mediaId, mediaUrl, mediaMimeType } = message;
-    console.log(`Message received via ${source} from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
+    let { phone, senderName, text, messageId, mediaType, mediaId, mediaMimeType } = message;
+    const source = "meta_official"; // CANAL ÚNICO: webhook só aceita Meta Official.
+    console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
 
     // ─── 0a. ECHO-SAUDAÇÃO FILTER ───
-    // Provedores (Evolution/Z-API) às vezes ecoam a saudação automática enviada pelo nosso próprio número
-    // de volta como inbound. Detecta padrões fixos e descarta antes de criar contato/atendimento.
+    // Defensivo: descarta se nosso próprio número devolver a saudação automática como inbound.
     if (text && (mediaType === "text" || !mediaType)) {
       const SAUDACAO_ECHO_PATTERNS = [
         /^ol[áa],?\s+que\s+bom\s+poder\s+conversar\s+com\s+voc[êe]\.?\s*como\s+posso\s+te\s+ajudar/i,
