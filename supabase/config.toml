@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.get-vapid-public-key]
 verify_jwt = false
+
+[functions.seed-app-config]
+verify_jwt = false
