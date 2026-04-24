@@ -380,3 +380,83 @@ function resolveQuando(dataHorario: string, now?: Date): string {
   const dia = dtSP.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   return `${dia} às ${hora}`;
 }
+
+// ═══════════════════════════════════════════
+// Helper: Lembrete DIA-D às 08:00 (America/Sao_Paulo)
+// Reabre a conversa com o cliente no dia da visita.
+// Idempotente via metadata.lembrete_dia_d_at.
+// ═══════════════════════════════════════════
+async function processLembreteDiaD(
+  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[]
+) {
+  // Hora atual em São Paulo
+  const spNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const spHour = spNow.getHours();
+
+  // Janela: roda só entre 08:00 e 08:59 SP. Cron de 5 em 5 min cobre isso com folga.
+  if (spHour !== 8) return;
+
+  // Limites do "hoje" em SP, traduzidos para UTC para o filtro do banco
+  const startSP = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate(), 0, 0, 0);
+  const endSP = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate(), 23, 59, 59);
+  // Convert SP wall-time → UTC ISO. SP é UTC-3 fixo (sem DST desde 2019).
+  const toUtcIso = (d: Date) => new Date(d.getTime() + 3 * 60 * 60 * 1000).toISOString();
+
+  const { data: doDia } = await supabase
+    .from("agendamentos")
+    .select("id, contato_id, atendimento_id, data_horario, loja_nome, metadata, status")
+    .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+    .is("loja_confirmou_presenca", null)
+    .gte("data_horario", toUtcIso(startSP))
+    .lte("data_horario", toUtcIso(endSP));
+
+  for (const ag of doDia || []) {
+    const md = (ag.metadata || {}) as Record<string, any>;
+    if (md.lembrete_dia_d_at) continue; // já enviado hoje
+
+    if (!ag.atendimento_id) {
+      // Sem atendimento aberto: registra evento e pula (envio HSM fica para futuro).
+      await supabase.from("eventos_crm").insert({
+        contato_id: ag.contato_id,
+        tipo: "lembrete_dia_d_skip",
+        descricao: "Lembrete dia-D não enviado: sem atendimento aberto",
+        referencia_id: ag.id,
+        referencia_tipo: "agendamento",
+      });
+      await supabase.from("agendamentos").update({
+        metadata: { ...md, lembrete_dia_d_skipped_at: new Date().toISOString() },
+      }).eq("id", ag.id);
+      continue;
+    }
+
+    const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
+    const firstName = contato?.nome?.split(" ")[0] || "";
+    const dt = new Date(ag.data_horario);
+    const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const lojaTxt = ag.loja_nome ? `*Diniz ${ag.loja_nome}*` : "*Diniz*";
+
+    const msg = `Bom dia${firstName ? ", " + firstName : ""}! 👋 Passando pra lembrar da sua visita hoje às *${hora}* na ${lojaTxt}. Posso confirmar que você vem? Se preferir remarcar, é só me dizer 😉`;
+
+    const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
+    });
+
+    const sentOk = sendRes.ok;
+
+    await supabase.from("agendamentos").update({
+      metadata: { ...md, lembrete_dia_d_at: new Date().toISOString(), lembrete_dia_d_ok: sentOk },
+    }).eq("id", ag.id);
+
+    await supabase.from("eventos_crm").insert({
+      contato_id: ag.contato_id,
+      tipo: sentOk ? "lembrete_dia_d_enviado" : "lembrete_dia_d_falha",
+      descricao: `Lembrete dia-D ${sentOk ? "enviado" : "falhou"} (${hora} ${ag.loja_nome || ""})`,
+      referencia_id: ag.id,
+      referencia_tipo: "agendamento",
+    });
+
+    results.push(`lembrete_dia_d:${ag.id}`);
+  }
+}
