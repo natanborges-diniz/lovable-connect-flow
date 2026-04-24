@@ -53,5 +53,10 @@ Se `confidence < 0.6` ou `needs_human_review=true` ou eyes vazios: pedir valores
 - `forcedIntent` cobria LC mas o hint de loop e o hint de intent claro só mencionavam `consultar_lentes` e `interpretar_receita`, deixando `consultar_lentes_contato` sem reforço explícito → modelo caía em fallback genérico.
 - `deterministicIntentFallback` ainda devolvia "dois caminhos" mesmo com receita salva e contexto LC.
 
+**Artur Borges (558499498472, 24-04-2026):** Cliente pediu LC sem receita, depois enviou imagem da receita. IA respondeu 5× seguidas com "Recebi sua receita aqui 😊… dois caminhos" sem nunca chamar `interpretar_receita`. Cliente respondeu "Sim", "É uma receita", "Analise para mim" e ficou em loop. Correções:
+- Removida frase "dois caminhos" hard-coded de `imageContextFallback` e do branch `receita` em `deterministicIntentFallback` — agora devolve "Recebi sua receita 👀 Já estou analisando…".
+- `detectForcedToolIntent` agora dispara `interpretar_receita` quando há imagem pendente + intent de análise (`analise|leia|olha|sim|pode|é uma receita`), não só quando o cliente repete "orçamento".
+- Novo guardrail antes do `sendWhatsApp`: se a resposta gerada contém "dois caminhos" E a mesma frase já está em `recentOutbound`, descarta e substitui por mensagem-ponte ("já estou analisando" / "já vou te mandar as opções") conforme contexto (imagem pendente, receita+LC, receita+óculos, sem receita).
+
 ## Regra desativada
 `lentes_de_contato` em `ia_regras_proibidas` foi desativada (id 489cef81-bbc9-4d87-b1f3-0a785afcca21).
