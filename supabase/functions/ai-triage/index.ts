@@ -377,7 +377,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 
   if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|enviei minha receita|recebeu minha receita/.test(n)) {
     return {
-      resposta: "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
+      resposta: "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções compatíveis em seguida, um instante…",
       intencao: "receita_oftalmologica",
       pipeline_coluna: "Orçamento",
       precisa_humano: false,
