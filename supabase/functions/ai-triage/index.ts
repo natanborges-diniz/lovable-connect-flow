@@ -1265,6 +1265,34 @@ function pickFallback(recentOutbound: string[]): string | null {
   return null;
 }
 
+// Fallback determinístico para contexto de detalhamento/comparação de lentes.
+// Usa as marcas detectadas no orçamento anterior + conhecimento embutido para
+// montar uma resposta mínima quando o LLM falha. Nunca usa o pool genérico.
+function detalhamentoFallback(orcamentoText: string, brands: string[], currentMsg: string): string {
+  const knowledge: Record<string, string> = {
+    DNZ: "*DNZ* — linha própria Diniz, ótima relação preço × qualidade, antirreflexo (AR Verde/Azul) e fabricação nacional.",
+    ESSILOR: "*Essilor* — francesa, líder global. Foco em conforto digital (linha Eyezen) e multifocais Varilux. Tratamento Crizal Prevencia entrega antirreflexo + filtro de luz azul + UV.",
+    ZEISS: "*Zeiss* — alemã, engenharia de precisão. Linha SmartLife Individual é personalizada ao seu rosto/armação. DuraVision Platinum UV (antirreflexo top) + BlueGuard (filtro azul integrado ao material da lente, não só camada).",
+    HOYA: "*Hoya* — japonesa, premium. Hi-Vision LongLife (antirreflexo durável) e iD MyStyle (multifocais sob medida).",
+    KODAK: "*Kodak* — marca licenciada, intermediário-premium acessível com tratamentos CleAR.",
+    DMAX: "*DMAX* — linha de custo-benefício, boa qualidade óptica para uso geral.",
+    SOLFLEX: "*Solflex* — linha nacional, especialmente forte em tóricas (astigmatismo).",
+  };
+  const msgLower = currentMsg.toLowerCase();
+  const targetBrands = brands.filter(b => msgLower.includes(b.toLowerCase()));
+  const finalBrands = targetBrands.length > 0 ? targetBrands : brands;
+  const paras = finalBrands
+    .map(b => knowledge[b.toUpperCase()] || `*${b}* — boa opção do orçamento que te enviei.`)
+    .slice(0, 3);
+  if (paras.length === 0) {
+    return "Olha as 3 opções que te mandei: a econômica é a *DNZ* (custo-benefício), a intermediária é da *Essilor* (foco em conforto digital com Crizal) e a premium é da *Zeiss* (alemã, BlueGuard integrado e DuraVision Platinum UV). Quer fechar com alguma delas ou agendar uma visita pra ver na loja?";
+  }
+  const closing = finalBrands.length >= 2
+    ? `Quer fechar com a *${finalBrands[0]}*, com a *${finalBrands[1]}*, ou prefere agendar pra ver as armações na loja?`
+    : `Quer fechar com a *${finalBrands[0]}* ou prefere agendar pra ver na loja?`;
+  return paras.join("\n\n") + "\n\n" + closing;
+}
+
 // ═══════════════════════════════════════════
 // MAIN HANDLER
 // ═══════════════════════════════════════════
