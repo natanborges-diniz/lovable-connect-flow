@@ -2438,6 +2438,30 @@ serve(async (req) => {
           }
         }
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
+        // ── GUARDRAIL LC: lente de contato NÃO requer visita à loja ──
+        // Se o contexto é LC + receita salva, agendar_visita está PROIBIDO
+        // (cliente não vai à loja "tirar medidas" — fechamento é com humano,
+        // que define a loja de retirada no momento do pagamento).
+        if (isLCContextGlobal && receitas.length > 0) {
+          console.log(`[GUARDRAIL-LC] Blocked ${fn} in LC context — converting to fechamento_lc`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "lc_agendamento_bloqueado",
+            descricao: `IA tentou ${fn} em contexto de lentes de contato — bloqueado e convertido em fechamento humano.`,
+            metadata: { tool: fn, args, motivo: "LC não requer visita para tirar medidas" },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          const nomePrim = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+          const saudacao = nomePrim ? `Perfeito, ${nomePrim}` : "Perfeito";
+          resposta = `${saudacao}! Pra lente de contato você não precisa vir até a loja tirar medidas — sua receita já basta 😉 Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido: com ele você confirma o modelo, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝`;
+          intencao = "fechamento_lc";
+          pipeline_coluna = "Novo Contato"; // mantém na coluna atual
+          precisa_humano = true;
+          setor_sugerido = "";
+          validatorFlags.push("lc_agendamento_bloqueado");
+          continue;
+        }
         resposta = args.resposta;
         intencao = "agendamento";
         pipeline_coluna = "Agendamento";
