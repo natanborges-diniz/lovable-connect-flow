@@ -2773,6 +2773,38 @@ serve(async (req) => {
       }
     }
 
+    // ── 9.5. GUARDRAIL ANTI-LOOP "dois caminhos" ──
+    // Se a resposta contém "dois caminhos" / "te mostrar opções ou montar um orçamento" e a mesma
+    // frase já foi enviada antes, descarta e força o caminho correto. Caso Artur Borges (24/04):
+    // IA repetiu 5× "Recebi sua receita aqui 😊… dois caminhos" sem nunca chamar interpretar_receita.
+    const respostaNorm = norm(resposta || "");
+    const hasDoisCaminhos = /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(resposta || "");
+    const doisCaminhosJaEnviado = (recentOutbound || []).some((prev) =>
+      /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(prev || "")
+    );
+    if (hasDoisCaminhos && doisCaminhosJaEnviado) {
+      console.log(`[GUARDRAIL-DOIS-CAMINHOS] Detectado loop. hasReceitas=${receitas.length > 0} | isImageContext=${isImageContext} | isLC=${isLCContextGlobal}`);
+      validatorFlags.push("anti_loop_dois_caminhos");
+      if (receitas.length === 0 && isImageContext) {
+        // Imagem pendente sem receita interpretada → analisando
+        resposta = "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções compatíveis em seguida, um instante…";
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = "Orçamento";
+      } else if (receitas.length > 0 && isLCContextGlobal) {
+        resposta = "Beleza! Já tô montando aqui as opções de lentes de contato com base na sua receita 😊 Em qual região/bairro você está pra eu indicar a loja mais próxima?";
+        intencao = "orcamento_lc";
+        pipeline_coluna = "Orçamento";
+      } else if (receitas.length > 0) {
+        resposta = "Beleza! Já vou te mandar as opções compatíveis com a sua receita 😊 Em qual região você está? Assim já te indico a loja mais próxima.";
+        intencao = "orcamento";
+        pipeline_coluna = "Orçamento";
+      } else {
+        resposta = "Pra te passar os valores certinhos, me manda a foto da sua receita atualizada por aqui 📸 Se ainda não tiver, posso te orientar também 😉";
+        intencao = "orcamento";
+        pipeline_coluna = "Orçamento";
+      }
+    }
+
     // ── 10. SEND RESPONSE ──
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
