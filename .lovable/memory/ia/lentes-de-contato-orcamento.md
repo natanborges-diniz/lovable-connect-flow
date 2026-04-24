@@ -58,5 +58,12 @@ Se `confidence < 0.6` ou `needs_human_review=true` ou eyes vazios: pedir valores
 - `detectForcedToolIntent` agora dispara `interpretar_receita` quando há imagem pendente + intent de análise (`analise|leia|olha|sim|pode|é uma receita`), não só quando o cliente repete "orçamento".
 - Novo guardrail antes do `sendWhatsApp`: se a resposta gerada contém "dois caminhos" E a mesma frase já está em `recentOutbound`, descarta e substitui por mensagem-ponte ("já estou analisando" / "já vou te mandar as opções") conforme contexto (imagem pendente, receita+LC, receita+óculos, sem receita).
 
+**Artur Borges (558499498472, 24-04-2026 15:13) — REGRESSÃO da correção anterior:** Após o ajuste do "dois caminhos", a IA passou a responder "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções certinhas, um instante…" e **parar**. A frase parecia um "aguarde", mas era o fim da execução — não havia retry nem follow-up. Cliente ficou esperando indefinidamente. Correção:
+- Novo bloco **9.4 FORCED RETRY** em `ai-triage/index.ts` (logo antes do guardrail "dois caminhos"): se `isImageContext && receitas.length === 0 && interpretar_receita NÃO foi chamada neste turno`, faz uma 2ª chamada ao gateway com `tool_choice: { type: "function", function: { name: "interpretar_receita" } }` (forçado), processa o tool call inline, salva a receita em `metadata.receitas[]` e devolve resposta amigável já com OD/OE + pergunta de região (LC ou óculos conforme `isLCContextGlobal`).
+- Se confiança < 0.6 ou eyes vazios → pede valores por texto em vez de salvar lixo.
+- Flags: `forced_interpretar_receita_retry_ok` / `forced_interpretar_receita_low_confidence`.
+- Princípio: a frase "Já estou analisando…" só pode existir se houver follow-up garantido na mesma execução.
+
+
 ## Regra desativada
 `lentes_de_contato` em `ia_regras_proibidas` foi desativada (id 489cef81-bbc9-4d87-b1f3-0a785afcca21).

@@ -2773,6 +2773,105 @@ serve(async (req) => {
       }
     }
 
+    // ── 9.4. FORCED RETRY: interpretar_receita quando há imagem pendente e o modelo não chamou ──
+    // Caso Artur Borges 24/04 15:13: modelo retornou texto ("Recebi sua receita 👀 Já estou analisando…")
+    // sem chamar interpretar_receita. Sem retry, a conversa morre — cliente fica esperando indefinidamente.
+    const interpretouReceitaNesteTurno = (toolCalls || []).some((tc: any) => tc.function?.name === "interpretar_receita");
+    const precisaForcarInterpretacao = isImageContext && receitas.length === 0 && !interpretouReceitaNesteTurno && !precisa_humano;
+
+    if (precisaForcarInterpretacao) {
+      console.log("[FORCE-INTERPRETAR] Imagem pendente sem chamada de interpretar_receita — forçando retry");
+      try {
+        const forcedMessages = [
+          ...messages,
+          { role: "system" as const, content: "[SISTEMA: TOOL FORÇADA] Você DEVE chamar interpretar_receita AGORA com a imagem da receita do cliente que está no histórico. Não responda em texto. Não escale. Apenas execute a tool com os valores que conseguir ler da imagem." },
+        ];
+        const forcedResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "openai/gpt-5",
+            messages: forcedMessages,
+            tools: TOOLS,
+            tool_choice: { type: "function", function: { name: "interpretar_receita" } },
+            max_completion_tokens: 1500,
+          }),
+        });
+        if (forcedResp.ok) {
+          const forcedData = await forcedResp.json();
+          const forcedToolCalls = forcedData?.choices?.[0]?.message?.tool_calls || [];
+          const interpretarCall = forcedToolCalls.find((tc: any) => tc.function?.name === "interpretar_receita");
+          if (interpretarCall) {
+            try {
+              const args = JSON.parse(interpretarCall.function?.arguments || "{}");
+              const od = args.eyes?.od || {};
+              const oe = args.eyes?.oe || {};
+              const confidence = typeof args.confidence === "number" ? args.confidence : 0.6;
+              const sphereValues = [od.sphere, oe.sphere].filter((v: any) => typeof v === "number") as number[];
+              const cylValues = [od.cylinder, oe.cylinder].filter((v: any) => typeof v === "number") as number[];
+              const addValues = [od.add, oe.add].filter((v: any) => typeof v === "number") as number[];
+              const hasAddition = addValues.length > 0;
+              const hasMyopia = sphereValues.some((v: number) => v < 0);
+              const hasHyperopia = sphereValues.some((v: number) => v > 0);
+              const hasAstigmatism = cylValues.some((v: number) => v !== 0);
+              const rxType = hasAddition ? "progressive" : (sphereValues.length > 0 || cylValues.length > 0 ? "single_vision" : "unknown");
+              const lowConfidence = confidence < 0.6 || (sphereValues.length === 0 && cylValues.length === 0);
+
+              const rxData = {
+                rx_type: rxType, eyes: { od, oe }, pd: args.pd ?? null, issued_at: args.issued_at ?? null,
+                summary: { has_myopia: hasMyopia, has_hyperopia: hasHyperopia, has_astigmatism: hasAstigmatism, has_addition: hasAddition, needs_progressive: hasAddition, suggested_category: rxType },
+                confidence, needs_human_review: lowConfidence, missing_fields: args.missing_fields || [], raw_notes: args.raw_notes || [], data_leitura: new Date().toISOString(),
+              };
+
+              if (!lowConfidence) {
+                const { data: cData } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+                const eMeta = (cData?.metadata as Record<string, any>) || {};
+                let eRec: any[] = Array.isArray(eMeta.receitas) ? eMeta.receitas : [];
+                const rxLabel = args.label || (eRec.length === 0 ? "cliente" : `pessoa_${eRec.length + 1}`);
+                eRec.push({ ...rxData, label: rxLabel });
+                if (eRec.length > 5) eRec = eRec.slice(-5);
+                await supabase.from("contatos").update({ metadata: { ...eMeta, receitas: eRec, ultima_receita: rxData } }).eq("id", contatoId);
+                await supabase.from("eventos_crm").insert({
+                  contato_id: contatoId, tipo: "receita_interpretada",
+                  descricao: `Receita interpretada via retry forçado (confidence=${confidence})`,
+                  metadata: { rx_data: rxData, forced_retry: true },
+                  referencia_tipo: "atendimento", referencia_id: atendimento_id,
+                });
+
+                const sphereTxt = (eye: any) => typeof eye?.sphere === "number" ? `esf ${eye.sphere > 0 ? "+" : ""}${eye.sphere.toFixed(2)}` : "";
+                const cylTxt = (eye: any) => typeof eye?.cylinder === "number" && eye.cylinder !== 0 ? ` cil ${eye.cylinder.toFixed(2)}` : "";
+                const odSummary = `OD ${sphereTxt(od)}${cylTxt(od)}`.trim();
+                const oeSummary = `OE ${sphereTxt(oe)}${cylTxt(oe)}`.trim();
+                const ctxLC = isLCContextGlobal ? "lentes de contato" : "lentes";
+
+                resposta = `Prontinho, consegui ler sua receita 😊\n${odSummary}\n${oeSummary}\n\nJá vou separar opções de ${ctxLC} compatíveis. Em qual região/bairro você está pra eu indicar a loja mais próxima?`;
+                intencao = isLCContextGlobal ? "orcamento_lc" : "orcamento";
+                pipeline_coluna = "Orçamento";
+                precisa_humano = false;
+                validatorFlags.push("forced_interpretar_receita_retry_ok");
+                console.log(`[FORCE-INTERPRETAR] Receita salva via retry (lc=${isLCContextGlobal})`);
+              } else {
+                resposta = "Consegui abrir sua receita, mas não estou conseguindo ler os valores com clareza 😅 Pode me passar por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? Assim já te passo as opções certinhas.";
+                intencao = "receita_oftalmologica";
+                pipeline_coluna = "Orçamento";
+                precisa_humano = false;
+                validatorFlags.push("forced_interpretar_receita_low_confidence");
+                console.log("[FORCE-INTERPRETAR] Confiança baixa — pedindo valores por texto");
+              }
+            } catch (parseErr) {
+              console.error("[FORCE-INTERPRETAR] Erro ao processar args:", parseErr);
+            }
+          } else {
+            console.warn("[FORCE-INTERPRETAR] Modelo não retornou tool call mesmo com tool_choice forçado");
+          }
+        } else {
+          console.warn(`[FORCE-INTERPRETAR] Erro ${forcedResp.status} no retry`);
+        }
+      } catch (e) {
+        console.error("[FORCE-INTERPRETAR] Exception no retry:", e);
+      }
+    }
+
     // ── 9.5. GUARDRAIL ANTI-LOOP "dois caminhos" ──
     // Se a resposta contém "dois caminhos" / "te mostrar opções ou montar um orçamento" e a mesma
     // frase já foi enviada antes, descarta e força o caminho correto. Caso Artur Borges (24/04):
