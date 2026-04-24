@@ -2846,8 +2846,20 @@ Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alem
     if (resposta && !precisa_humano) {
       const validation = validateResponse(resposta, recentOutbound);
 
-      if (!validation.valid) {
-        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext}`);
+      // BYPASS: no contexto de detalhamento, similaridade alta é esperada (reuso de
+      // termos técnicos: nomes de marca, "índice", "filtro azul"). Aceita a resposta
+      // se for longa o suficiente (>120ch) e contiver pelo menos uma marca do orçamento.
+      const detalhamentoBypass = isDetalhamentoContext
+        && !validation.valid
+        && validation.reason.startsWith("similarity")
+        && resposta.length > 120
+        && orcamentoBrandsList.some(b => new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(resposta));
+
+      if (detalhamentoBypass) {
+        console.log(`[VALIDATOR] BYPASS detalhamento: aceitando resposta apesar de ${validation.reason}`);
+        validatorFlags.push("detalhamento_bypass");
+      } else if (!validation.valid) {
+        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext} | isDetalhamento=${isDetalhamentoContext}`);
         validatorFlags.push(`rejected:${validation.reason}`);
 
         // IMAGE CONTEXT: NEVER use generic fallback — always use image-specific response
