@@ -222,6 +222,16 @@ function detectForcedToolIntent(
     return { tool: "responder_pedindo_receita", reason: "cliente pediu orçamento mas não há receita" };
   }
 
+  // Análise direta da receita: "analise", "leia", "lê pra mim", "pode ler", "vê pra mim", "dá uma olhada"
+  // ou confirmação curta após IA perguntar "quer que eu analise/leia?": "sim", "pode", "manda ver", "é uma receita"
+  if (hasUnparsedImage && !hasReceitas) {
+    if (/\b(analis[ae]|analisar|le[ia]|ler|l[eê]\b|olha[rd]?|v[eê]\b|d[aá] uma olhada|interpreta[rd]?|verifica[rd]?)\b/.test(t)
+        || /\b(sim|pode|claro|isso|manda ver|por favor|pfv|beleza|ok|tá|tudo bem)\b/.test(t)
+        || /\b[ée]\s+(uma\s+)?receita\b|^receita$|minha receita/.test(t)) {
+      return { tool: "interpretar_receita", reason: "cliente confirmou/pediu análise da receita pendente" };
+    }
+  }
+
   // Scheduling keywords
   if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|essa semana|pode marcar|pode agendar|reservar)\b/.test(t)) {
     return { tool: "agendar_cliente_intent", reason: "cliente quer agendar" };
@@ -346,12 +356,14 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
   }
 
   // If image context, use dedicated image fallback pool
+  // IMPORTANTE: nunca devolver "dois caminhos" — isso virou frase de loop quando o modelo
+  // se recusa a chamar interpretar_receita. Sempre indicar que está analisando.
   if (isImageContext || /\[image\]|\[document\]/.test(n)) {
     const recentNorm = (recentOutbound || []).slice(-10).map(norm);
     const receitaPool = [
-      "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
-      "Recebi sua imagem! Parece ser uma receita. Quer que eu leia e te passe opções de lentes? 😊",
-      "Vi que enviou uma imagem. Se for receita, eu consigo analisar e já te mostrar as melhores opções de lente!",
+      "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções certinhas, um instante…",
+      "Peguei a imagem da receita aqui 😊 Tô lendo os valores pra montar seu orçamento, só um momento…",
+      "Recebi! Tô analisando sua receita pra te mandar as opções compatíveis em seguida 👍",
     ];
     for (const fb of receitaPool) {
       const fbNorm = norm(fb);
@@ -375,7 +387,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 
   if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|enviei minha receita|recebeu minha receita/.test(n)) {
     return {
-      resposta: "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
+      resposta: "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções compatíveis em seguida, um instante…",
       intencao: "receita_oftalmologica",
       pipeline_coluna: "Orçamento",
       precisa_humano: false,
@@ -2758,6 +2770,38 @@ serve(async (req) => {
         pipeline_coluna = fallback.pipeline_coluna;
         precisa_humano = fallback.precisa_humano;
         validatorFlags.push("empty_response_deterministic");
+      }
+    }
+
+    // ── 9.5. GUARDRAIL ANTI-LOOP "dois caminhos" ──
+    // Se a resposta contém "dois caminhos" / "te mostrar opções ou montar um orçamento" e a mesma
+    // frase já foi enviada antes, descarta e força o caminho correto. Caso Artur Borges (24/04):
+    // IA repetiu 5× "Recebi sua receita aqui 😊… dois caminhos" sem nunca chamar interpretar_receita.
+    
+    const hasDoisCaminhos = /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(resposta || "");
+    const doisCaminhosJaEnviado = (recentOutbound || []).some((prev) =>
+      /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(prev || "")
+    );
+    if (hasDoisCaminhos && doisCaminhosJaEnviado) {
+      console.log(`[GUARDRAIL-DOIS-CAMINHOS] Detectado loop. hasReceitas=${receitas.length > 0} | isImageContext=${isImageContext} | isLC=${isLCContextGlobal}`);
+      validatorFlags.push("anti_loop_dois_caminhos");
+      if (receitas.length === 0 && isImageContext) {
+        // Imagem pendente sem receita interpretada → analisando
+        resposta = "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções compatíveis em seguida, um instante…";
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = "Orçamento";
+      } else if (receitas.length > 0 && isLCContextGlobal) {
+        resposta = "Beleza! Já tô montando aqui as opções de lentes de contato com base na sua receita 😊 Em qual região/bairro você está pra eu indicar a loja mais próxima?";
+        intencao = "orcamento_lc";
+        pipeline_coluna = "Orçamento";
+      } else if (receitas.length > 0) {
+        resposta = "Beleza! Já vou te mandar as opções compatíveis com a sua receita 😊 Em qual região você está? Assim já te indico a loja mais próxima.";
+        intencao = "orcamento";
+        pipeline_coluna = "Orçamento";
+      } else {
+        resposta = "Pra te passar os valores certinhos, me manda a foto da sua receita atualizada por aqui 📸 Se ainda não tiver, posso te orientar também 😉";
+        intencao = "orcamento";
+        pipeline_coluna = "Orçamento";
       }
     }
 
