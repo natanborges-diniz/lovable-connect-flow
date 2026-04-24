@@ -1849,8 +1849,8 @@ serve(async (req) => {
       console.log(`[OFERTA-COMP] Cliente dispensou comparativo. askedHelpMore=${askedHelpMore} → ${isShortNoToHelp ? "DESPEDIDA" : "OFERECER AJUDA"}`);
     }
 
-    // Dados do agendamento mais recente para fechamento contextual
-    const agAtivoRecent = (agendamentosAtivos || []).find((a: any) => ["agendado","confirmado"].includes(a.status)) || (agendamentosAtivos || [])[0];
+    // Dados do agendamento mais recente para fechamento contextual (reusa agAtivoRecentEarly)
+    const agAtivoRecent = agAtivoRecentEarly;
     let agendamentoFmt = "";
     if (agAtivoRecent?.data_horario) {
       try {
@@ -1862,7 +1862,10 @@ serve(async (req) => {
     }
 
     if (isDetalhamentoContext) {
-      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
+      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | longYes=${isLongYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
+    }
+    if (isThanksClose || isShortNoToHelp) {
+      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} → DESPEDIDA forçada`);
     }
 
     const messages: any[] = [
