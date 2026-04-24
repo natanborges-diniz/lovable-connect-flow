@@ -1,61 +1,95 @@
-## O que aconteceu na conversa do Artur
+## O que aconteceu no caso do Artur
 
-Hoje (24/04, 15:13) o Artur enviou a foto da receita. A IA respondeu **"Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções certinhas, um instante…"** e parou. Nunca mais respondeu.
+A conversa andou até o ponto certo: a IA interpretou a receita, trouxe opções de lentes de contato e até perguntou se queria reservar.
 
-A frase parece um "aguarde", mas na verdade é o **fim da execução**. Não há nenhum mecanismo que continue depois dela.
+O problema começou depois disso:
+- o cliente respondeu **"Acuvue"**
+- depois **"Quero reservar"** / **"Quero reservar as lentes de contato"**
+- e a IA caiu em resposta genérica: **"Me explica melhor a sua necessidade..."**
+
+Ou seja: o sistema conseguiu vender, mas falhou no **fechamento**.
 
 ## Causa raiz
 
-Na correção anterior (caso Artur Borges das 12:54), criamos o guardrail anti-loop que substitui a frase "dois caminhos" por "Já estou analisando…". O problema:
+No `supabase/functions/ai-triage/index.ts`:
 
-1. **A frase de "analisando" virou um beco sem saída.** Quando o modelo se recusa a chamar `interpretar_receita` e devolve qualquer texto, o guardrail troca esse texto pela frase tranquilizadora — mas a Edge Function termina logo depois (`sendWhatsApp` + `return`). Não dispara a tool, não agenda retry, não faz follow-up.
-2. **Não há "segundo turno" automático.** Como o cliente não envia uma nova mensagem (afinal, a IA disse "um instante…"), o `ai-triage` nunca mais é chamado. A receita nunca é interpretada. A conversa morre.
-3. **Mesmo o `[PRIORIDADE MÁXIMA — RECEITA PENDENTE]` injetado no prompt** não garante a chamada da tool — é só uma instrução. Quando o modelo ignora, não há plano B server-side que force a execução de `interpretar_receita`.
+1. **Não existe intent forte para "escolhi uma lente e quero reservar".**
+   `detectForcedToolIntent` só cobre orçamento, interpretar receita e agendamento. Quando o cliente fala só **"Acuvue"**, não casa com nenhum fluxo. Quando fala **"quero reservar"**, é mapeado como agendamento genérico — mas não há loja nem data, então a IA não consegue chamar `agendar_visita` e fica perdida.
 
-Resumindo: trocamos um loop infinito por uma parada silenciosa. O cliente fica esperando uma resposta que não vem.
+2. **Não há continuidade pós-orçamento de LC.**
+   O prompt força `consultar_lentes_contato` para apresentar opções, mas não há regra para o passo seguinte (cliente escolheu marca / pediu reserva).
+
+3. **Validador cai no pool genérico** ("Me explica melhor a sua necessidade…") quando o modelo não executa ação útil — exatamente o que apareceu no diálogo.
 
 ## Correção proposta
 
-Tornar `interpretar_receita` **server-side enforceable**: quando há imagem pendente e o modelo devolve texto sem chamar a tool, o próprio `ai-triage` chama a tool diretamente (sem depender do modelo) e segue o fluxo.
+### 1. Intent determinístico para fechamento de LC
 
-### Alterações em `supabase/functions/ai-triage/index.ts`
+Expandir `detectForcedToolIntent` para reconhecer:
+- "quero reservar", "quero fechar", "vou querer", "fica com a X", "pode reservar", "quero pedir", "quero essa"
+- nome de marca isolado (Acuvue, Biofinity, Solflex, DNZ, Air Optix, Oasys) **quando** já houve `consultar_lentes_contato` recente
 
-1. **Retry forçado com `tool_choice` específico**
-   - Detectar: `hasUnparsedImage === true` + `receitas.length === 0` + resposta sem tool_call.
-   - Antes de aceitar a resposta de texto, fazer uma **segunda chamada ao modelo** com `tool_choice: { type: "function", function: { name: "interpretar_receita" } }` — força a tool.
-   - Se o segundo turno também falhar, executar `interpretar_receita` **diretamente** (sem modelo) usando a `media_url` da última imagem inbound, e em seguida chamar `consultar_lentes_contato` (ou `consultar_lentes`) para devolver opções na mesma resposta.
+Quando esse padrão for detectado em **contexto LC com receita salva e opções já apresentadas**, marcar o intent como **fechamento_lc** (novo).
 
-2. **Guardrail "Já estou analisando" deixa de ser terminal**
-   - Quando o guardrail troca a resposta para "Já estou analisando…", marcar uma flag `requiresFollowUp = true`.
-   - Após `sendWhatsApp`, se a flag estiver setada, executar imediatamente o pipeline `interpretar_receita → consultar_lentes_contato` e enviar uma segunda mensagem com as opções (5–10s depois, para parecer natural).
-   - Assim a frase tranquilizadora cumpre a promessa: o cliente recebe as opções logo em seguida.
+### 2. Encaminhamento obrigatório para HUMANO no fechamento
 
-3. **Watchdog de imagem pendente sem follow-up**
-   - Adicionar verificação no `watchdog-loop-ia` (ou similar): se a última outbound contém "estou analisando" / "um instante" e há imagem inbound não interpretada há mais de 60s, disparar `ai-triage` com hint forçado para processar a receita.
-   - Garante recuperação mesmo se o retry inline falhar por timeout.
+**Regra nova e principal:** assim que o cliente confirma uma escolha de lente de contato (marca/modelo) ou pede reserva, a IA deve **encerrar a triagem e passar para um humano fechar a venda**.
 
-4. **Log e telemetria**
-   - Adicionar `validatorFlags.push("forced_interpretar_receita_retry")` e `("inline_followup_after_analyzing")` para conseguirmos rastrear quantas vezes o modelo recusa a tool.
+Comportamento concreto:
+1. Reconhecer a opção escolhida (echo curto: "Perfeito — você escolheu a Acuvue Oasys para Astigmatismo").
+2. Reforçar que é sob encomenda quando aplicável (pagamento confirma a reserva).
+3. **Acionar `escalar_consultor`** com motivo `fechamento_lentes_contato` e setor de vendas/loja apropriado.
+4. Marcar `atendimentos.modo = 'humano'` para parar a IA.
+5. Mover o card no pipeline para a coluna de fechamento (ex.: "Negociação" / "Fechamento" — usar a coluna de fechamento já existente do CRM).
+6. Registrar `eventos_crm` com `tipo = 'fechamento_lc_escalado'` contendo: marca escolhida, descarte, preço, região do cliente, loja sugerida.
+7. Enviar uma única mensagem ao cliente confirmando que um Consultor especializado vai dar continuidade ao pedido (sem prometer prazo automático).
 
-### Memória atualizada
+Exemplo de mensagem final da IA antes de passar para humano:
+> "Perfeito, Artur — você escolheu a *Acuvue Oasys para Astigmatismo* 👌 Como é uma lente tórica sob encomenda, o pagamento confirma a reserva. Já estou chamando um Consultor da nossa equipe pra te passar o link de pagamento e te dar continuidade no pedido. Em instantes ele te chama por aqui mesmo 🤝"
 
-Adicionar ao `mem://ia/lentes-de-contato-orcamento` o caso "Artur Borges 24/04 15:13" como **regressão da correção anterior** — documentar que a frase "Já estou analisando" só pode existir se houver follow-up garantido.
+### 3. Bloquear "agendar_visita" como fallback de reserva de LC
 
-## Validação
+Hoje "quero reservar" cai no intent de agendamento. Quando o contexto é **LC + receita salva + opções já apresentadas**, "reservar" deve significar **fechar pedido**, não marcar visita. Adicionar guardrail para impedir essa rota errada nesse cenário específico.
 
-Reproduzir o cenário Artur:
-1. Cliente envia receita pela primeira vez → IA chama `interpretar_receita` direto (sem cair em "analisando…").
-2. Se cair em "Já estou analisando…", uma segunda mensagem com opções de lente chega em até 10s.
-3. O watchdog cobre o caso de falha do retry inline (segunda camada de proteção).
+### 4. Blindar o validador
+
+Adicionar guardrail no pós-validação: em contexto de LC com receita salva + orçamento recém-apresentado + cliente confirmando escolha, é **proibido** usar o `VALIDATOR_FAILED_POOL` ("me explica melhor…"). O fallback nesse contexto deve ser o próprio fluxo de escalonamento para humano descrito em (2).
+
+### 5. Documentar regressão na memória
+
+Atualizar `mem://ia/lentes-de-contato-orcamento` com o caso "Artur Borges 24/04 15:43" como regressão de **fechamento** (distinto das regressões anteriores, que eram de pré-orçamento). Documentar a regra: pós-escolha de LC → escalonamento para humano fechar a venda.
 
 ## Arquivos afetados
 
-- `supabase/functions/ai-triage/index.ts` (retry forçado + follow-up inline)
-- `supabase/functions/watchdog-loop-ia/index.ts` (detecção de "analisando" órfão) — opcional, depende se o watchdog inline já cobrir
-- `.lovable/memory/ia/lentes-de-contato-orcamento.md` (documentar regressão)
+- `supabase/functions/ai-triage/index.ts`
+- `.lovable/memory/ia/lentes-de-contato-orcamento.md`
 
-## Observações
+## Validação
 
-- Sem mudança de schema.
-- Sem mudança de UI.
-- Custo extra: até 1 chamada adicional ao modelo por mensagem com imagem pendente (apenas quando o primeiro turno falha em chamar a tool).
+1. **Marca isolada** ("Acuvue") após orçamento → IA confirma escolha + escala para humano.
+2. **Reserva explícita** ("Quero reservar") em contexto LC → IA escala, **não** tenta `agendar_visita`.
+3. **Marca + reserva** ("Quero reservar a Acuvue") → IA confirma marca + escala.
+4. **Sem opções recentes** ("Acuvue" sem `consultar_lentes_contato` no histórico) → IA pede contexto normalmente, sem escalar à toa.
+
+## Detalhes técnicos
+
+Fluxo final esperado:
+
+```text
+consultar_lentes_contato (IA apresenta 2-3 opções)
+  -> cliente escolhe marca/modelo OU diz "quero reservar"
+    -> detectForcedToolIntent => fechamento_lc
+    -> IA: confirma escolha + reforça regra de encomenda/pagamento
+    -> escalar_consultor(motivo="fechamento_lentes_contato")
+    -> atendimentos.modo = 'humano'
+    -> pipeline: mover para coluna de fechamento
+    -> eventos_crm: fechamento_lc_escalado
+    -> mensagem única ao cliente: "Consultor vai dar continuidade"
+```
+
+Pontos no código a ajustar:
+- expandir `detectForcedToolIntent` (novo branch `fechamento_lc`)
+- novo bloco system prompt: "[FLUXO PÓS-ORÇAMENTO LC — FECHAMENTO COM HUMANO]"
+- guardrail antes de `agendar_visita` para não confundir "reservar lente" com "agendar visita"
+- guardrail no validador para não cair no pool genérico nesse contexto
+- handler para o intent `fechamento_lc` que dispara `escalar_consultor` server-side se o modelo não disparar sozinho
