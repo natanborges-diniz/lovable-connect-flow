@@ -2251,7 +2251,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           : forcedIntent.tool === "interpretar_receita"
           ? "[SISTEMA: LOOP DETECTADO + IMAGEM PENDENTE] Você está repetindo a mesma pergunta. O cliente já enviou uma imagem (provável receita) e pediu orçamento. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA usando a imagem do histórico. NÃO pergunte se pode analisar — analise."
           : forcedIntent.tool === "agendar_cliente_intent"
-          ? "[SISTEMA: LOOP DETECTADO + INTENT AGENDAR] Você está repetindo a mesma pergunta. O cliente quer agendar. Se já tem loja+data+hora, chame agendar_visita. Caso contrário, faça UMA pergunta objetiva pedindo o que falta — sem repetir o prompt anterior."
+          ? (hasAgendamentoAtivo
+              ? `[SISTEMA: LOOP DETECTADO + AGENDAMENTO JÁ ATIVO] O cliente JÁ tem agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS"}). NÃO chame agendar_visita. Apenas reafirme: "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga com comparativo/encerramento.`
+              : "[SISTEMA: LOOP DETECTADO + INTENT AGENDAR] Você está repetindo a mesma pergunta. O cliente quer agendar. Se já tem loja+data+hora, chame agendar_visita. Caso contrário, faça UMA pergunta objetiva pedindo o que falta — sem repetir o prompt anterior.")
           : "[SISTEMA: LOOP DETECTADO] Você está repetindo a mesma pergunta. Mude a abordagem — faça uma pergunta diferente OU execute uma ação concreta. NÃO repita a frase anterior.";
         messages.push({ role: "system", content: forceMsg });
         console.log(`[LOOP-DETECTOR] Forcing tool=${forcedIntent.tool} (${forcedIntent.reason})`);
