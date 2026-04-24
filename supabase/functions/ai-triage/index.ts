@@ -2648,6 +2648,34 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           validatorFlags.push("lc_agendamento_bloqueado");
           continue;
         }
+        // ── GUARDRAIL ANTI-DUPLICAÇÃO: cliente já tem agendamento ativo ──
+        // Se já existe agendamento em "agendado/lembrete_enviado/confirmado" e o cliente
+        // NÃO pediu explicitamente remarcar/cancelar/mudar, NÃO criamos novo nem reconfirmamos
+        // como se fosse novo. Apenas reafirmamos o existente e seguimos com encerramento.
+        const lastInboundLowerForGuard = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
+        const explicitChangeRequest = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInboundLowerForGuard);
+        const existingActive = (agendamentosAtivos || []).find((a: any) => ["agendado","lembrete_enviado","confirmado"].includes(a.status));
+        if (fn === "agendar_visita" && existingActive && !explicitChangeRequest) {
+          console.log(`[GUARDRAIL] agendar_visita bloqueado — já existe agendamento ativo ${existingActive.id} sem pedido explícito de mudança`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "agendamento_duplicado_evitado",
+            descricao: `IA tentou agendar nova visita sem pedido explícito de mudança — bloqueado.`,
+            metadata: { tentativa: args, existente: existingActive, msg: lastInboundLowerForGuard.slice(0, 200) },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          // Reafirma o existente (sem bloco de "Agendamento confirmado" — já foi enviado antes).
+          const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+          resposta = agendamentoFmt
+            ? `Tudo certo${_nomePrim ? ", " + _nomePrim : ""}! Seu agendamento segue mantido — ${agendamentoFmt}. Posso te ajudar em mais alguma coisa antes de finalizar?`
+            : `Tudo certo${_nomePrim ? ", " + _nomePrim : ""}! Seu agendamento já está mantido. Posso te ajudar em mais alguma coisa antes de finalizar?`;
+          intencao = "agendamento_mantido";
+          pipeline_coluna = "Agendamento";
+          validatorFlags.push("agendamento_duplicado_bloqueado");
+          continue;
+        }
+
         resposta = args.resposta;
         intencao = "agendamento";
         pipeline_coluna = "Agendamento";
