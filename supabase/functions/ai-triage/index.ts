@@ -1789,6 +1789,38 @@ serve(async (req) => {
               : "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente, 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
           }]
         : []),
+      ...(isDetalhamentoContext
+        ? [{
+            role: "system",
+            content: `[FLUXO DETALHAMENTO/COMPARAÇÃO DE LENTES] O cliente está pedindo para detalhar/comparar as opções do orçamento que VOCÊ JÁ ENVIOU. NÃO repita "Quer que eu detalhe?", "Já mandei as opções acima", "Me conta mais", "Conta pra mim com mais detalhes" — isso é loop e será rejeitado.
+
+ORÇAMENTO ENVIADO RECENTEMENTE (referência):
+${recentOrcamento}
+
+MARCAS A DETALHAR: ${orcamentoBrandsList.join(", ") || "as que o cliente citou"}
+
+CONHECIMENTO DAS MARCAS (use para escrever a comparação):
+- DNZ (HDI / Mensal / 1 Day): linha própria Diniz, custo-benefício, AR Verde/Azul, fabricação nacional, ótima relação preço × qualidade.
+- ESSILOR: francesa, líder global. Eyezen/Eyezen Boost = foco em fadiga visual digital (celular, tela), zonas de relaxamento. Varilux = referência em multifocais. Crizal Prevencia = antirreflexo + filtro de luz azul nociva + UV. Crizal Sapphire HR = antirreflexo top de transparência.
+- ZEISS: alemã, engenharia óptica de precisão. SmartLife = desenhada pro estilo de vida conectado (transições rápidas celular↔mundo). "Individual" = personalizada ao seu rosto/armação, visão periférica perfeita. DuraVision Platinum UV = antirreflexo super resistente + proteção UV total. BlueGuard = filtro de luz azul INTEGRADO ao material da lente (não é só camada — toda a superfície protege).
+- HOYA: japonesa, premium, Hi-Vision LongLife (antirreflexo durável), iD MyStyle (multifocais sob medida).
+- KODAK: marca licenciada, intermediário-premium acessível, tratamentos CleAR.
+
+REGRAS DE FORMATO:
+1) Escreva 1 parágrafo curto por marca solicitada (3–4 linhas), destacando 2–3 diferenciais técnicos/comerciais relevantes. Use **negrito** apenas no nome da família/lente (formato WhatsApp *texto*).
+2) Use os DADOS DO ORÇAMENTO acima (índice, tratamento, preço) — não invente valor, não troque marca, não some/desconte.
+3) Termine com UMA pergunta clara entre: "fechar com a [marca A]", "ir com a [marca B]", ou "agendar visita pra ver na loja". Sem outras opções genéricas.
+4) PROIBIDO chamar tool consultar_lentes de novo (já foi feito). Use a tool responder.
+5) PROIBIDO escalar para humano por essa pergunta.
+
+EXEMPLO DE TOM (Essilor vs Zeiss):
+"A *Essilor Eyezen Boost 0.6* é da francesa Essilor, líder global. Foi desenhada pra quem usa muita tela — tem zonas de relaxamento que reduzem fadiga visual. Vem com Crizal Prevencia: antirreflexo + filtro de luz azul + UV.
+
+A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada ao seu rosto e armação, garantindo visão periférica perfeita. Tem DuraVision Platinum UV (antirreflexo super resistente) + BlueGuard, que é filtro azul integrado no material da lente.
+
+Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"`,
+          }]
+        : []),
     ];
 
     for (const [i, m] of contextWindow.entries()) {
