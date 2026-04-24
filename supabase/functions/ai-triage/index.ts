@@ -1964,6 +1964,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta. NÃO insista, NÃO repita a oferta, NÃO faça mais de uma pergunta. Responda EXATAMENTE: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". Sem listar opções. Sem segunda pergunta. Use a tool responder.`,
           }]
         : []),
+      ...(isDiaDReschedule && agDiaD
+        ? [{
+            role: "system",
+            content: `[FLUXO REAGENDAMENTO PÓS-LEMBRETE-DIA-D] O cliente recebeu o lembrete da visita de hoje e PEDIU PARA REMARCAR. AÇÕES OBRIGATÓRIAS: 1) Reconheça com calor humano ("Sem problema, ${contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : ""}, vamos ajustar"). 2) Ofereça 2-3 opções concretas de dia/horário próximas (próximos 3 dias úteis, em horários comerciais 10h–19h) na MESMA loja (${agDiaD.loja_nome || "a loja já escolhida"}), a menos que o cliente peça outra unidade. 3) Pergunte qual encaixa melhor. NÃO chame agendar_visita ainda — espere a escolha do cliente. Quando ele escolher, AÍ SIM chame agendar_visita (a tool é idempotente, vai atualizar o agendamento existente). PROIBIDO responder "mantemos ou cancelamos?" — ele JÁ DISSE que quer remarcar.`,
+          }]
+        : []),
     ];
 
     for (const [i, m] of contextWindow.entries()) {
