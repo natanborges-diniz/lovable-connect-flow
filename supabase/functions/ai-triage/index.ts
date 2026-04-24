@@ -1265,6 +1265,34 @@ function pickFallback(recentOutbound: string[]): string | null {
   return null;
 }
 
+// Fallback determinístico para contexto de detalhamento/comparação de lentes.
+// Usa as marcas detectadas no orçamento anterior + conhecimento embutido para
+// montar uma resposta mínima quando o LLM falha. Nunca usa o pool genérico.
+function detalhamentoFallback(orcamentoText: string, brands: string[], currentMsg: string): string {
+  const knowledge: Record<string, string> = {
+    DNZ: "*DNZ* — linha própria Diniz, ótima relação preço × qualidade, antirreflexo (AR Verde/Azul) e fabricação nacional.",
+    ESSILOR: "*Essilor* — francesa, líder global. Foco em conforto digital (linha Eyezen) e multifocais Varilux. Tratamento Crizal Prevencia entrega antirreflexo + filtro de luz azul + UV.",
+    ZEISS: "*Zeiss* — alemã, engenharia de precisão. Linha SmartLife Individual é personalizada ao seu rosto/armação. DuraVision Platinum UV (antirreflexo top) + BlueGuard (filtro azul integrado ao material da lente, não só camada).",
+    HOYA: "*Hoya* — japonesa, premium. Hi-Vision LongLife (antirreflexo durável) e iD MyStyle (multifocais sob medida).",
+    KODAK: "*Kodak* — marca licenciada, intermediário-premium acessível com tratamentos CleAR.",
+    DMAX: "*DMAX* — linha de custo-benefício, boa qualidade óptica para uso geral.",
+    SOLFLEX: "*Solflex* — linha nacional, especialmente forte em tóricas (astigmatismo).",
+  };
+  const msgLower = currentMsg.toLowerCase();
+  const targetBrands = brands.filter(b => msgLower.includes(b.toLowerCase()));
+  const finalBrands = targetBrands.length > 0 ? targetBrands : brands;
+  const paras = finalBrands
+    .map(b => knowledge[b.toUpperCase()] || `*${b}* — boa opção do orçamento que te enviei.`)
+    .slice(0, 3);
+  if (paras.length === 0) {
+    return "Olha as 3 opções que te mandei: a econômica é a *DNZ* (custo-benefício), a intermediária é da *Essilor* (foco em conforto digital com Crizal) e a premium é da *Zeiss* (alemã, BlueGuard integrado e DuraVision Platinum UV). Quer fechar com alguma delas ou agendar uma visita pra ver na loja?";
+  }
+  const closing = finalBrands.length >= 2
+    ? `Quer fechar com a *${finalBrands[0]}*, com a *${finalBrands[1]}*, ou prefere agendar pra ver as armações na loja?`
+    : `Quer fechar com a *${finalBrands[0]}* ou prefere agendar pra ver na loja?`;
+  return paras.join("\n\n") + "\n\n" + closing;
+}
+
 // ═══════════════════════════════════════════
 // MAIN HANDLER
 // ═══════════════════════════════════════════
@@ -1733,6 +1761,29 @@ serve(async (req) => {
       console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"} | lc_context=${isLCContextGlobal}`);
     }
 
+    // ── DETECTOR: cliente pediu DETALHE/COMPARAÇÃO de lentes já cotadas ──
+    // Dispara quando: (a) msg atual contém intent de detalhar/comparar,
+    // (b) há orçamento recente nas últimas 3 outbound, (c) cliente menciona
+    // pelo menos 1 marca/categoria do orçamento (ou pediu genericamente).
+    const detalharIntentRegex = /\b(detalh[ae]r?|detalhe|me\s+explica|explic[ae]r?|diferen[çc]a|compar[ae]r?|compare|qual\s+a\s+melhor|por\s*qu[eê]\s+a|porque\s+a|vantage(m|ns)|prós?\s+e\s+contras?)\b/i;
+    const orcamentoOutboundRegex = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎)/i;
+    const recentOrcamento = (recentOutbound || []).slice(-3).find((t: string) => orcamentoOutboundRegex.test(t || "")) || "";
+    let orcamentoBrandsList: string[] = [];
+    if (recentOrcamento) {
+      // Extrai marcas dos formatos "*BRAND family*" e categorias
+      const brandMatches = [...recentOrcamento.matchAll(/\*([A-Z][A-Z0-9 ]{1,12})\b/g)];
+      orcamentoBrandsList = [...new Set(brandMatches.map(m => m[1].trim()).filter(b => b.length >= 3))];
+    }
+    const msgMencionaMarca = orcamentoBrandsList.some(b =>
+      new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(currentMsg)
+    );
+    const isDetalhamentoContext = !!recentOrcamento
+      && (detalharIntentRegex.test(currentMsg) || msgMencionaMarca)
+      && currentMsg.length < 200;
+    if (isDetalhamentoContext) {
+      console.log(`[DETALHAMENTO] Ativo. Marcas no orçamento: ${orcamentoBrandsList.join(",")} | msg=${currentMsg.slice(0,80)}`);
+    }
+
     const messages: any[] = [
       { role: "system", content: systemPrompt },
       {
@@ -1764,6 +1815,38 @@ serve(async (req) => {
             content: isLCContextGlobal
               ? "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO — LENTES DE CONTATO] Já existe receita interpretada e o contexto é LENTES DE CONTATO. PROIBIDO responder com 'posso seguir por dois caminhos?', 'quer opções ou orçamento?' ou pedir confirmação genérica. PROIBIDO escalar para humano nesse cenário. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes_contato AGORA com os valores da receita mais recente (NÃO consultar_lentes — esse é para óculos), 2) apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta, priorizando DNZ quando compatível, 3) se cliente mencionou esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva) MAS sem omitir quinzenal/mensal — o cliente decide, 4) finalize perguntando a região/bairro pra indicar a loja mais próxima e sugerir agendamento. NUNCA encerre pedindo só marca/tipo se já há receita."
               : "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente, 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
+          }]
+        : []),
+      ...(isDetalhamentoContext
+        ? [{
+            role: "system",
+            content: `[FLUXO DETALHAMENTO/COMPARAÇÃO DE LENTES] O cliente está pedindo para detalhar/comparar as opções do orçamento que VOCÊ JÁ ENVIOU. NÃO repita "Quer que eu detalhe?", "Já mandei as opções acima", "Me conta mais", "Conta pra mim com mais detalhes" — isso é loop e será rejeitado.
+
+ORÇAMENTO ENVIADO RECENTEMENTE (referência):
+${recentOrcamento}
+
+MARCAS A DETALHAR: ${orcamentoBrandsList.join(", ") || "as que o cliente citou"}
+
+CONHECIMENTO DAS MARCAS (use para escrever a comparação):
+- DNZ (HDI / Mensal / 1 Day): linha própria Diniz, custo-benefício, AR Verde/Azul, fabricação nacional, ótima relação preço × qualidade.
+- ESSILOR: francesa, líder global. Eyezen/Eyezen Boost = foco em fadiga visual digital (celular, tela), zonas de relaxamento. Varilux = referência em multifocais. Crizal Prevencia = antirreflexo + filtro de luz azul nociva + UV. Crizal Sapphire HR = antirreflexo top de transparência.
+- ZEISS: alemã, engenharia óptica de precisão. SmartLife = desenhada pro estilo de vida conectado (transições rápidas celular↔mundo). "Individual" = personalizada ao seu rosto/armação, visão periférica perfeita. DuraVision Platinum UV = antirreflexo super resistente + proteção UV total. BlueGuard = filtro de luz azul INTEGRADO ao material da lente (não é só camada — toda a superfície protege).
+- HOYA: japonesa, premium, Hi-Vision LongLife (antirreflexo durável), iD MyStyle (multifocais sob medida).
+- KODAK: marca licenciada, intermediário-premium acessível, tratamentos CleAR.
+
+REGRAS DE FORMATO:
+1) Escreva 1 parágrafo curto por marca solicitada (3–4 linhas), destacando 2–3 diferenciais técnicos/comerciais relevantes. Use **negrito** apenas no nome da família/lente (formato WhatsApp *texto*).
+2) Use os DADOS DO ORÇAMENTO acima (índice, tratamento, preço) — não invente valor, não troque marca, não some/desconte.
+3) Termine com UMA pergunta clara entre: "fechar com a [marca A]", "ir com a [marca B]", ou "agendar visita pra ver na loja". Sem outras opções genéricas.
+4) PROIBIDO chamar tool consultar_lentes de novo (já foi feito). Use a tool responder.
+5) PROIBIDO escalar para humano por essa pergunta.
+
+EXEMPLO DE TOM (Essilor vs Zeiss):
+"A *Essilor Eyezen Boost 0.6* é da francesa Essilor, líder global. Foi desenhada pra quem usa muita tela — tem zonas de relaxamento que reduzem fadiga visual. Vem com Crizal Prevencia: antirreflexo + filtro de luz azul + UV.
+
+A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada ao seu rosto e armação, garantindo visão periférica perfeita. Tem DuraVision Platinum UV (antirreflexo super resistente) + BlueGuard, que é filtro azul integrado no material da lente.
+
+Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"`,
           }]
         : []),
     ];
@@ -2791,8 +2874,20 @@ serve(async (req) => {
     if (resposta && !precisa_humano) {
       const validation = validateResponse(resposta, recentOutbound);
 
-      if (!validation.valid) {
-        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext}`);
+      // BYPASS: no contexto de detalhamento, similaridade alta é esperada (reuso de
+      // termos técnicos: nomes de marca, "índice", "filtro azul"). Aceita a resposta
+      // se for longa o suficiente (>120ch) e contiver pelo menos uma marca do orçamento.
+      const detalhamentoBypass = isDetalhamentoContext
+        && !validation.valid
+        && validation.reason.startsWith("similarity")
+        && resposta.length > 120
+        && orcamentoBrandsList.some(b => new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(resposta));
+
+      if (detalhamentoBypass) {
+        console.log(`[VALIDATOR] BYPASS detalhamento: aceitando resposta apesar de ${validation.reason}`);
+        validatorFlags.push("detalhamento_bypass");
+      } else if (!validation.valid) {
+        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext} | isDetalhamento=${isDetalhamentoContext}`);
         validatorFlags.push(`rejected:${validation.reason}`);
 
         // IMAGE CONTEXT: NEVER use generic fallback — always use image-specific response
@@ -2857,6 +2952,11 @@ serve(async (req) => {
                 resposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". O que precisa?";
                 validatorFlags.push("retry_appended_question");
                 console.log("[VALIDATOR] Retry response kept with appended question");
+              } else if (isDetalhamentoContext) {
+                resposta = detalhamentoFallback(recentOrcamento, orcamentoBrandsList, currentMsg);
+                validatorFlags.push("detalhamento_deterministic_fallback");
+                intencao = "orcamento";
+                console.log("[VALIDATOR] Using detalhamento deterministic fallback");
               } else {
                 const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
                   ? null
@@ -2876,6 +2976,11 @@ serve(async (req) => {
                 }
               }
             }
+          } else if (isDetalhamentoContext) {
+            resposta = detalhamentoFallback(recentOrcamento, orcamentoBrandsList, currentMsg);
+            validatorFlags.push("detalhamento_deterministic_fallback");
+            intencao = "orcamento";
+            console.log("[VALIDATOR] Using detalhamento deterministic fallback (no retry)");
           } else {
             const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
               ? null

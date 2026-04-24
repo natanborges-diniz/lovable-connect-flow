@@ -1,47 +1,30 @@
-## Problema
+## Implementado: Detalhamento/Comparação de Lentes Pós-Orçamento
 
-Na primeira mensagem o Gael está enviando duas perguntas sobre o nome em sequência:
+### Problema
+Após enviar orçamento (DNZ / Essilor / Zeiss), cliente pediu "Detalhe a essilor e a zeiss" e a IA respondeu com fallback genérico "Conta pra mim com mais detalhes…" — não detalhou as opções já cotadas.
 
-> "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?. Pode me dizer seu nome completo como prefere ser chamado?"
+### Causa raiz
+- Sem instrução específica para o caso "detalhar/comparar opção já enviada".
+- LLM gerava resposta similar à anterior → validador rejeitava por similaridade >70% → caía no `VALIDATOR_FAILED_POOL` genérico.
+- Sem fallback determinístico para detalhamento.
 
-A causa está no bloco `buildFirstContactBlock` em `supabase/functions/ai-triage/index.ts` (linhas 830-853). A instrução atual fornece a frase modelo entre aspas, mas não proíbe explicitamente o modelo de adicionar uma segunda pergunta de reforço, o que faz o LLM parafrasear/duplicar.
+### Mudanças em `supabase/functions/ai-triage/index.ts`
 
-Também não existe um guardrail intra-mensagem que detecte duas perguntas sobre o mesmo tópico (nome) na mesma resposta.
+1. **Detector `isDetalhamentoContext`** (após `isLCContextGlobal`): dispara quando msg atual contém intent (`detalh|diferença|comparar|qual a melhor|vantagem`) OU menciona uma marca extraída do orçamento recente nas últimas 3 outbound (regex sobre formato `🔍 *Opções* / 💚 / 💛 / 💎`).
 
-## Correção (escopo enxuto)
+2. **Bloco de prompt `[FLUXO DETALHAMENTO/COMPARAÇÃO DE LENTES]`** injetado no array `messages` quando o detector dispara: inclui o orçamento original, lista das marcas detectadas, conhecimento técnico de cada marca (DNZ, Essilor, Zeiss, Hoya, Kodak), regras de formato (1 parágrafo curto por marca, fechamento com 1 pergunta entre escolher ou agendar) e exemplo de resposta.
 
-### 1. Endurecer o prompt da primeira interação
-Arquivo: `supabase/functions/ai-triage/index.ts`, função `buildFirstContactBlock`.
+3. **Bypass do validador de similaridade**: aceita resposta longa (>120ch) que mencione pelo menos uma marca do orçamento, mesmo com similaridade alta — reuso de termos técnicos é esperado.
 
-Reescrever os dois blocos (com nome capturado e sem nome capturado) para:
+4. **Fallback determinístico `detalhamentoFallback()`**: se LLM falhar mesmo após retry, monta resposta a partir do conhecimento embutido das marcas + marcas citadas pelo cliente. Substitui `pickFallback` (genérico) nos dois pontos do validador. Nunca cai em "conta pra mim mais detalhes".
 
-- Deixar a frase modelo como **mensagem final exata** ("envie EXATAMENTE esta mensagem, sem reformular nem adicionar frases extras").
-- Adicionar regra explícita: **uma única pergunta** sobre o nome; **proibido** repetir, parafrasear ou complementar com "como prefere ser chamado", "nome completo", "pode me dizer", etc.
-- Manter limite de 1 frase de saudação + 1 pergunta (sem ponto final duplicado tipo "?.").
-- Manter as duas variações (com/sem nome do WhatsApp), só ajustando as regras anti-duplicação.
+### Memória criada
+- `mem://ia/comparacao-lentes-detalhamento.md` — conhecimento técnico/comercial de cada marca (DNZ, Essilor, Zeiss, Hoya, Kodak, Solflex), tabela comparativa Essilor × Zeiss, formato esperado da resposta, regras anti-loop.
 
-### 2. Guardrail leve intra-mensagem
-Arquivo: `supabase/functions/ai-triage/index.ts` (no validador pós-LLM já existente, citado em `mem://ia/validacao-respostas-guardrails`).
+### Deploy
+Edge function `ai-triage` redeployada.
 
-Adicionar uma checagem específica: se for primeira interação (`inboundCount <= 1`) e a resposta gerada contiver **mais de uma frase interrogativa** OU mencionar "nome" mais de uma vez, reescrever para a frase modelo determinística do bloco (a mesma do prompt). Isso garante o resultado mesmo se o LLM ignorar a instrução.
+### Resultado esperado
+Cliente: *"Detalhe a essilor e a zeiss"*
 
-### 3. Memória de regra
-Criar `mem://ia/saudacao-primeira-mensagem-unica` documentando: na 1ª mensagem, Gael envia exatamente uma saudação + uma pergunta sobre o nome; nunca duplicar/parafrasear.
-
-## Fora de escopo
-
-- Não mexer em `buildContinuityBlock` (já está ok, problema é só na 1ª interação).
-- Não alterar tom ou identidade do Gael.
-- Não tocar nas regras de fechamento de LC implementadas anteriormente.
-
-## Resultado esperado
-
-Mensagem inicial passa a ser, por exemplo:
-
-> "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
-
-Sem segunda pergunta, sem "?." duplicado.
-
-## Deploy
-
-Redeploy da edge function `ai-triage` após a alteração.
+Gael: 1 parágrafo curto por marca com diferenciais técnicos reais (Crizal Prevencia / DuraVision Platinum / BlueGuard integrado) + pergunta de fechamento entre Essilor / Zeiss / agendar visita. Sem fallback genérico.
