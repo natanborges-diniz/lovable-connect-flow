@@ -837,19 +837,19 @@ function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: st
   if (looksReal && !opts?.nomeConfirmado) {
     const primeiroNome = candidato.split(/\s+/)[0];
     return `# PRIMEIRA INTERAÇÃO — CONFIRME O NOME
-- Cumprimente caloroso confirmando o nome capturado: "Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+- Envie EXATAMENTE esta mensagem, sem reformular, sem adicionar frases extras nem segunda pergunta: "Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+- REGRA ABSOLUTA: apenas UMA pergunta nesta mensagem. PROIBIDO complementar com variações como "como prefere ser chamado?", "pode me dizer seu nome completo?", "qual seu nome?". Nada depois do "."
 - Se o cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
 - Se o cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto informado.
-- Depois de confirmar/registrar o nome, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.
-- Mantenha curto (máx. 2 frases).`;
+- Só DEPOIS da confirmação, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.`;
   }
 
   return `# PRIMEIRA INTERAÇÃO — PEÇA O NOME
-- Cumprimente e PEÇA o nome do cliente: "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+- Envie EXATAMENTE esta mensagem, sem reformular e sem adicionar nada depois: "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+- REGRA ABSOLUTA: a mensagem termina no "?" da pergunta sobre o nome. PROIBIDO adicionar uma SEGUNDA pergunta, parafrasear ou complementar com frases como "Pode me dizer seu nome completo?", "Como prefere ser chamado?", "Qual seu nome?". Apenas UMA pergunta sobre o nome, ponto final.
+- PROIBIDO duplicar pontuação ("?.", "??", "?!").
 - Quando o cliente responder o nome → chame a tool registrar_nome_cliente com o nome informado.
-- NÃO mencione receita, lentes, agendamento ou qualquer serviço antes de ter o nome.
-- Deixe o cliente dizer o que deseja DEPOIS de se apresentar.
-- Mantenha a mensagem curta e acolhedora — máximo 2 frases.`;
+- NÃO mencione receita, lentes, agendamento ou qualquer serviço antes de ter o nome.`;
 }
 
 function buildContinuityBlock(inboundCount: number): string {
@@ -3047,6 +3047,21 @@ serve(async (req) => {
     }
 
     // ── 10. SEND RESPONSE ──
+    // Guardrail intra-mensagem: na 1ª interação, garantir UMA única pergunta sobre o nome.
+    // Se o LLM duplicou ("Posso saber seu nome? Pode me dizer seu nome completo?"),
+    // reescreve para a frase modelo determinística.
+    if (inboundCount <= 1 && typeof resposta === "string" && resposta.trim().length > 0) {
+      const lower = resposta.toLowerCase();
+      const questionMarks = (resposta.match(/\?/g) || []).length;
+      const nomeMentions = (lower.match(/\bnome\b/g) || []).length;
+      const hasDuplicatedPunct = /\?\s*\.|\?\s*\?/.test(resposta);
+      const mencionaGael = lower.includes("gael");
+      if (mencionaGael && (questionMarks > 1 || nomeMentions > 1 || hasDuplicatedPunct)) {
+        const original = resposta;
+        resposta = "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?";
+        console.log(`[GUARDRAIL] Saudação duplicada corrigida. Original: "${original}"`);
+      }
+    }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
     // ── 10.1. AUDIO NUDGE — gently encourage text over audio ──
