@@ -1733,6 +1733,29 @@ serve(async (req) => {
       console.log(`[DEVOLUCAO] pending_intent=${pendingIntent?.intent || "none"} | lc_context=${isLCContextGlobal}`);
     }
 
+    // ── DETECTOR: cliente pediu DETALHE/COMPARAÇÃO de lentes já cotadas ──
+    // Dispara quando: (a) msg atual contém intent de detalhar/comparar,
+    // (b) há orçamento recente nas últimas 3 outbound, (c) cliente menciona
+    // pelo menos 1 marca/categoria do orçamento (ou pediu genericamente).
+    const detalharIntentRegex = /\b(detalh[ae]r?|detalhe|me\s+explica|explic[ae]r?|diferen[çc]a|compar[ae]r?|compare|qual\s+a\s+melhor|por\s*qu[eê]\s+a|porque\s+a|vantage(m|ns)|prós?\s+e\s+contras?)\b/i;
+    const orcamentoOutboundRegex = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎)/i;
+    const recentOrcamento = (recentOutbound || []).slice(-3).find((t: string) => orcamentoOutboundRegex.test(t || "")) || "";
+    let orcamentoBrandsList: string[] = [];
+    if (recentOrcamento) {
+      // Extrai marcas dos formatos "*BRAND family*" e categorias
+      const brandMatches = [...recentOrcamento.matchAll(/\*([A-Z][A-Z0-9 ]{1,12})\b/g)];
+      orcamentoBrandsList = [...new Set(brandMatches.map(m => m[1].trim()).filter(b => b.length >= 3))];
+    }
+    const msgMencionaMarca = orcamentoBrandsList.some(b =>
+      new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(currentMsg)
+    );
+    const isDetalhamentoContext = !!recentOrcamento
+      && (detalharIntentRegex.test(currentMsg) || msgMencionaMarca)
+      && currentMsg.length < 200;
+    if (isDetalhamentoContext) {
+      console.log(`[DETALHAMENTO] Ativo. Marcas no orçamento: ${orcamentoBrandsList.join(",")} | msg=${currentMsg.slice(0,80)}`);
+    }
+
     const messages: any[] = [
       { role: "system", content: systemPrompt },
       {
