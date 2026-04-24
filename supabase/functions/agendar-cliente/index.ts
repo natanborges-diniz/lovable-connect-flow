@@ -31,6 +31,46 @@ serve(async (req) => {
 
     if (!contato) throw new Error("Contato not found");
 
+    // ── IDEMPOTÊNCIA: se já existe agendamento ativo equivalente, retorna o existente ──
+    // Critérios:
+    //  (a) mesma loja (case-insensitive) e mesma data (YYYY-MM-DD) → mesmo agendamento.
+    //  (b) qualquer agendamento ativo (agendado/lembrete_enviado/confirmado) nas
+    //      próximas 24h para o mesmo contato → considera duplicidade e devolve o existente.
+    const targetIso = String(data_horario);
+    const targetDay = targetIso.substring(0, 10);
+    const targetTs = new Date(targetIso).getTime();
+
+    const { data: ativos } = await supabase
+      .from("agendamentos")
+      .select("id, loja_nome, data_horario, status, observacoes")
+      .eq("contato_id", contato_id)
+      .in("status", ["agendado", "lembrete_enviado", "confirmado"]) as any;
+
+    const existente = (ativos || []).find((a: any) => {
+      const sameStore = String(a.loja_nome || "").toLowerCase() === String(loja_nome || "").toLowerCase();
+      const sameDay = String(a.data_horario || "").substring(0, 10) === targetDay;
+      if (sameStore && sameDay) return true;
+      // Janela de 24h: trata como mesmo agendamento mesmo se loja/dia divergirem (cliente repetindo "agendar")
+      const ts = new Date(a.data_horario).getTime();
+      if (Number.isFinite(ts) && Math.abs(ts - targetTs) < 24 * 60 * 60 * 1000) return true;
+      return false;
+    });
+
+    if (existente) {
+      console.log(`[agendar-cliente] Idempotent hit — returning existing agendamento ${existente.id}`);
+      await supabase.from("eventos_crm").insert({
+        contato_id,
+        tipo: "agendamento_duplicado_evitado",
+        descricao: `Tentativa de criar agendamento duplicado bloqueada — existente: ${existente.loja_nome} em ${existente.data_horario}`,
+        referencia_tipo: "agendamento",
+        referencia_id: existente.id,
+        metadata: { tentativa: { loja_nome, data_horario }, existente },
+      });
+      return new Response(JSON.stringify({ status: "ok", agendamento: existente, duplicate: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Create agendamento
     const { data: agendamento, error: agErr } = await supabase
       .from("agendamentos")
@@ -48,9 +88,9 @@ serve(async (req) => {
 
     if (agErr) throw agErr;
 
-    // Format date for message
+    // Format date for message (sempre em America/Sao_Paulo)
     const dt = new Date(data_horario);
-    const dataFormatada = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+    const dataFormatada = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", timeZone: "America/Sao_Paulo" });
     const horaFormatada = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
 
     // NOTE: WhatsApp confirmation is sent by the AI in ai-triage (args.resposta).

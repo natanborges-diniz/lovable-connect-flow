@@ -1615,8 +1615,8 @@ serve(async (req) => {
       agendamentoCtx = "\n\n# AGENDAMENTOS DESTE CLIENTE\n";
       for (const ag of agendamentosAtivos) {
         const dt = new Date(ag.data_horario);
-        const dataStr = dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-        const horaStr = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const dataStr = dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+        const horaStr = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
         agendamentoCtx += `- ${ag.loja_nome} em ${dataStr} às ${horaStr} — Status: ${ag.status}${ag.observacoes ? ` (${ag.observacoes})` : ""}\n`;
       }
       const hasNoShow = agendamentosAtivos.some((a: any) => a.status === "no_show" || a.status === "recuperacao");
@@ -1855,8 +1855,8 @@ serve(async (req) => {
     if (agAtivoRecent?.data_horario) {
       try {
         const dt = new Date(agAtivoRecent.data_horario);
-        const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
-        const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+        const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
         agendamentoFmt = `${dataFmt} às ${horaFmt} na ${agAtivoRecent.loja_nome || "loja"}`;
       } catch { /* ignore */ }
     }
@@ -2217,6 +2217,18 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.log(`[RX-CORRECTION] Forcing consultar_lentes with corrected prescription`);
     }
 
+    // ── HINT ANTI-DUPLICAÇÃO: agendamento ativo + sem pedido explícito de mudança ──
+    {
+      const lastInLow = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
+      const explicitChange = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInLow);
+      if (hasAgendamentoAtivo && !explicitChange) {
+        messages.push({
+          role: "system",
+          content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja ou cancelar.`
+        });
+        console.log(`[GUARDRAIL-HINT] Agendamento ativo sem pedido de mudança — injetando hint anti-duplicação`);
+      }
+    }
 
     if (loopCheck.detected) {
       console.log(`[LOOP-DETECTOR] Loop detected — similarity=${(loopCheck.similarity * 100).toFixed(0)}%`);
@@ -2239,7 +2251,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           : forcedIntent.tool === "interpretar_receita"
           ? "[SISTEMA: LOOP DETECTADO + IMAGEM PENDENTE] Você está repetindo a mesma pergunta. O cliente já enviou uma imagem (provável receita) e pediu orçamento. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA usando a imagem do histórico. NÃO pergunte se pode analisar — analise."
           : forcedIntent.tool === "agendar_cliente_intent"
-          ? "[SISTEMA: LOOP DETECTADO + INTENT AGENDAR] Você está repetindo a mesma pergunta. O cliente quer agendar. Se já tem loja+data+hora, chame agendar_visita. Caso contrário, faça UMA pergunta objetiva pedindo o que falta — sem repetir o prompt anterior."
+          ? (hasAgendamentoAtivo
+              ? `[SISTEMA: LOOP DETECTADO + AGENDAMENTO JÁ ATIVO] O cliente JÁ tem agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS"}). NÃO chame agendar_visita. Apenas reafirme: "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga com comparativo/encerramento.`
+              : "[SISTEMA: LOOP DETECTADO + INTENT AGENDAR] Você está repetindo a mesma pergunta. O cliente quer agendar. Se já tem loja+data+hora, chame agendar_visita. Caso contrário, faça UMA pergunta objetiva pedindo o que falta — sem repetir o prompt anterior.")
           : "[SISTEMA: LOOP DETECTADO] Você está repetindo a mesma pergunta. Mude a abordagem — faça uma pergunta diferente OU execute uma ação concreta. NÃO repita a frase anterior.";
         messages.push({ role: "system", content: forceMsg });
         console.log(`[LOOP-DETECTOR] Forcing tool=${forcedIntent.tool} (${forcedIntent.reason})`);
@@ -2648,6 +2662,34 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           validatorFlags.push("lc_agendamento_bloqueado");
           continue;
         }
+        // ── GUARDRAIL ANTI-DUPLICAÇÃO: cliente já tem agendamento ativo ──
+        // Se já existe agendamento em "agendado/lembrete_enviado/confirmado" e o cliente
+        // NÃO pediu explicitamente remarcar/cancelar/mudar, NÃO criamos novo nem reconfirmamos
+        // como se fosse novo. Apenas reafirmamos o existente e seguimos com encerramento.
+        const lastInboundLowerForGuard = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
+        const explicitChangeRequest = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInboundLowerForGuard);
+        const existingActive = (agendamentosAtivos || []).find((a: any) => ["agendado","lembrete_enviado","confirmado"].includes(a.status));
+        if (fn === "agendar_visita" && existingActive && !explicitChangeRequest) {
+          console.log(`[GUARDRAIL] agendar_visita bloqueado — já existe agendamento ativo ${existingActive.id} sem pedido explícito de mudança`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "agendamento_duplicado_evitado",
+            descricao: `IA tentou agendar nova visita sem pedido explícito de mudança — bloqueado.`,
+            metadata: { tentativa: args, existente: existingActive, msg: lastInboundLowerForGuard.slice(0, 200) },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          // Reafirma o existente (sem bloco de "Agendamento confirmado" — já foi enviado antes).
+          const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+          resposta = agendamentoFmt
+            ? `Tudo certo${_nomePrim ? ", " + _nomePrim : ""}! Seu agendamento segue mantido — ${agendamentoFmt}. Posso te ajudar em mais alguma coisa antes de finalizar?`
+            : `Tudo certo${_nomePrim ? ", " + _nomePrim : ""}! Seu agendamento já está mantido. Posso te ajudar em mais alguma coisa antes de finalizar?`;
+          intencao = "agendamento_mantido";
+          pipeline_coluna = "Agendamento";
+          validatorFlags.push("agendamento_duplicado_bloqueado");
+          continue;
+        }
+
         resposta = args.resposta;
         intencao = "agendamento";
         pipeline_coluna = "Agendamento";
@@ -2667,8 +2709,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             .trim();
 
           const dt = new Date(args.data_horario);
-          const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
-          const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+          const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+          const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
 
           let bloco = `\n\n📍 *Agendamento confirmado*\n`;
           bloco += `🏬 Loja: ${args.loja_nome}\n`;
