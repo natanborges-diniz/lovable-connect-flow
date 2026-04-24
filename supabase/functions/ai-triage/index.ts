@@ -1777,11 +1777,60 @@ serve(async (req) => {
     const msgMencionaMarca = orcamentoBrandsList.some(b =>
       new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(currentMsg)
     );
-    const isDetalhamentoContext = !!recentOrcamento
+
+    // ── DETECTOR: oferta proativa de comparativo pendente nas últimas outbound ──
+    // Ex: "Posso já deixar separado um comparativo Essilor x ZEISS pra você ver?"
+    // Permite tratar respostas curtas SIM/NÃO do cliente como confirmação/dispensa.
+    const KNOWN_BRANDS_RE = /\b(Essilor|Zeiss|ZEISS|DNZ|Hoya|HOYA|Kodak|KODAK|DMAX|Solflex)\b/gi;
+    const ofertaCompRegex = /(comparativ|deixar separado|posso (te |já )?(mostrar|enviar|deixar|preparar|separar|trazer)[^?]{0,80}(diferen|comparativ|opç(ões|ao)|lado a lado)|quer que eu (detalhe|compare|envie|mostre|prepare)[^?]{0,80}(diferen|comparativ|opç))/i;
+    let pendingComparativoOffer: { marcas: string[]; rawOffer: string } | null = null;
+    for (const out of (recentOutbound || []).slice(-2).reverse()) {
+      const t = String(out || "");
+      if (!ofertaCompRegex.test(t)) continue;
+      const brandHits = [...new Set([...t.matchAll(KNOWN_BRANDS_RE)].map(m => m[1].toUpperCase().replace("ZEISS","Zeiss").replace("HOYA","Hoya").replace("KODAK","Kodak")))];
+      if (brandHits.length >= 2) {
+        pendingComparativoOffer = { marcas: brandHits.slice(0, 3), rawOffer: t };
+        break;
+      }
+    }
+
+    // Resposta curta SIM/NÃO à oferta pendente
+    const msgTrim = currentMsg.trim().toLowerCase().replace(/[!.…]+$/,"");
+    const isShortYes = !!pendingComparativoOffer && /^(sim|isso|pode|pode sim|claro|claro que sim|por favor|adoraria|vamos|bora|manda|manda ver|quero|quero ver|quero sim|show|massa|beleza|ok|tá|ta|tá bom|ta bom|perfeito|com certeza|👍|👌)$/i.test(msgTrim);
+    const isShortNo = !!pendingComparativoOffer && /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o)$/i.test(msgTrim);
+
+    // Detecta segunda negativa consecutiva à pergunta canônica "posso ajudar em mais alguma coisa"
+    const lastOutboundTxt = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+    const askedHelpMore = /posso (te )?ajudar em mais (alguma )?coisa|posso ajudar com mais|mais alguma coisa antes de finalizar/i.test(lastOutboundTxt);
+    const isShortNoToHelp = askedHelpMore && /^(n[aã]o|nao|tranquilo|tudo certo|tudo bem|por enquanto n[aã]o|t[oô] bem|sem mais|s[oó] isso|era s[oó] isso|sem necessidade|n|nn)$/i.test(msgTrim);
+
+    const isDetalhamentoContext = (!!recentOrcamento
       && (detalharIntentRegex.test(currentMsg) || msgMencionaMarca)
-      && currentMsg.length < 200;
+      && currentMsg.length < 200) || isShortYes;
+
+    // Se é SIM curto à oferta de comparativo, força marcas da oferta
+    if (isShortYes && pendingComparativoOffer) {
+      orcamentoBrandsList = pendingComparativoOffer.marcas;
+      console.log(`[OFERTA-COMP] Cliente confirmou comparativo. Marcas: ${orcamentoBrandsList.join(", ")}`);
+    }
+    if (isShortNo) {
+      console.log(`[OFERTA-COMP] Cliente dispensou comparativo. askedHelpMore=${askedHelpMore} → ${isShortNoToHelp ? "DESPEDIDA" : "OFERECER AJUDA"}`);
+    }
+
+    // Dados do agendamento mais recente para fechamento contextual
+    const agAtivoRecent = (agendamentosAtivos || []).find((a: any) => ["agendado","confirmado"].includes(a.status)) || (agendamentosAtivos || [])[0];
+    let agendamentoFmt = "";
+    if (agAtivoRecent?.data_horario) {
+      try {
+        const dt = new Date(agAtivoRecent.data_horario);
+        const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
+        const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        agendamentoFmt = `${dataFmt} às ${horaFmt} na ${agAtivoRecent.loja_nome || "loja"}`;
+      } catch { /* ignore */ }
+    }
+
     if (isDetalhamentoContext) {
-      console.log(`[DETALHAMENTO] Ativo. Marcas no orçamento: ${orcamentoBrandsList.join(",")} | msg=${currentMsg.slice(0,80)}`);
+      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
     }
 
     const messages: any[] = [
