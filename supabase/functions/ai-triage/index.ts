@@ -2777,7 +2777,7 @@ serve(async (req) => {
     // Se a resposta contém "dois caminhos" / "te mostrar opções ou montar um orçamento" e a mesma
     // frase já foi enviada antes, descarta e força o caminho correto. Caso Artur Borges (24/04):
     // IA repetiu 5× "Recebi sua receita aqui 😊… dois caminhos" sem nunca chamar interpretar_receita.
-    const respostaNorm = norm(resposta || "");
+    
     const hasDoisCaminhos = /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(resposta || "");
     const doisCaminhosJaEnviado = (recentOutbound || []).some((prev) =>
       /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(prev || "")
