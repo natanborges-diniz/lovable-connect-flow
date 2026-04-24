@@ -2694,7 +2694,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // NÃO pediu explicitamente remarcar/cancelar/mudar, NÃO criamos novo nem reconfirmamos
         // como se fosse novo. Apenas reafirmamos o existente e seguimos com encerramento.
         const lastInboundLowerForGuard = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
-        const explicitChangeRequest = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInboundLowerForGuard);
+        const explicitChangeRequest = isDiaDReschedule || /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInboundLowerForGuard);
         const existingActive = (agendamentosAtivos || []).find((a: any) => ["agendado","lembrete_enviado","confirmado"].includes(a.status));
         if (fn === "agendar_visita" && existingActive && !explicitChangeRequest) {
           console.log(`[GUARDRAIL] agendar_visita bloqueado — já existe agendamento ativo ${existingActive.id} sem pedido explícito de mudança`);
