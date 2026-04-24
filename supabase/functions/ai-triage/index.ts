@@ -3047,6 +3047,21 @@ serve(async (req) => {
     }
 
     // ── 10. SEND RESPONSE ──
+    // Guardrail intra-mensagem: na 1ª interação, garantir UMA única pergunta sobre o nome.
+    // Se o LLM duplicou ("Posso saber seu nome? Pode me dizer seu nome completo?"),
+    // reescreve para a frase modelo determinística.
+    if (inboundCount <= 1 && typeof resposta === "string" && resposta.trim().length > 0) {
+      const lower = resposta.toLowerCase();
+      const questionMarks = (resposta.match(/\?/g) || []).length;
+      const nomeMentions = (lower.match(/\bnome\b/g) || []).length;
+      const hasDuplicatedPunct = /\?\s*\.|\?\s*\?/.test(resposta);
+      const mencionaGael = lower.includes("gael");
+      if (mencionaGael && (questionMarks > 1 || nomeMentions > 1 || hasDuplicatedPunct)) {
+        const original = resposta;
+        resposta = "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?";
+        console.log(`[GUARDRAIL] Saudação duplicada corrigida. Original: "${original}"`);
+      }
+    }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
     // ── 10.1. AUDIO NUDGE — gently encourage text over audio ──
