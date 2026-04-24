@@ -1777,11 +1777,60 @@ serve(async (req) => {
     const msgMencionaMarca = orcamentoBrandsList.some(b =>
       new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(currentMsg)
     );
-    const isDetalhamentoContext = !!recentOrcamento
+
+    // ── DETECTOR: oferta proativa de comparativo pendente nas últimas outbound ──
+    // Ex: "Posso já deixar separado um comparativo Essilor x ZEISS pra você ver?"
+    // Permite tratar respostas curtas SIM/NÃO do cliente como confirmação/dispensa.
+    const KNOWN_BRANDS_RE = /\b(Essilor|Zeiss|ZEISS|DNZ|Hoya|HOYA|Kodak|KODAK|DMAX|Solflex)\b/gi;
+    const ofertaCompRegex = /(comparativ|deixar separado|posso (te |já )?(mostrar|enviar|deixar|preparar|separar|trazer)[^?]{0,80}(diferen|comparativ|opç(ões|ao)|lado a lado)|quer que eu (detalhe|compare|envie|mostre|prepare)[^?]{0,80}(diferen|comparativ|opç))/i;
+    let pendingComparativoOffer: { marcas: string[]; rawOffer: string } | null = null;
+    for (const out of (recentOutbound || []).slice(-2).reverse()) {
+      const t = String(out || "");
+      if (!ofertaCompRegex.test(t)) continue;
+      const brandHits = [...new Set([...t.matchAll(KNOWN_BRANDS_RE)].map(m => m[1].toUpperCase().replace("ZEISS","Zeiss").replace("HOYA","Hoya").replace("KODAK","Kodak")))];
+      if (brandHits.length >= 2) {
+        pendingComparativoOffer = { marcas: brandHits.slice(0, 3), rawOffer: t };
+        break;
+      }
+    }
+
+    // Resposta curta SIM/NÃO à oferta pendente
+    const msgTrim = currentMsg.trim().toLowerCase().replace(/[!.…]+$/,"");
+    const isShortYes = !!pendingComparativoOffer && /^(sim|isso|pode|pode sim|claro|claro que sim|por favor|adoraria|vamos|bora|manda|manda ver|quero|quero ver|quero sim|show|massa|beleza|ok|tá|ta|tá bom|ta bom|perfeito|com certeza|👍|👌)$/i.test(msgTrim);
+    const isShortNo = !!pendingComparativoOffer && /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o)$/i.test(msgTrim);
+
+    // Detecta segunda negativa consecutiva à pergunta canônica "posso ajudar em mais alguma coisa"
+    const lastOutboundTxt = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+    const askedHelpMore = /posso (te )?ajudar em mais (alguma )?coisa|posso ajudar com mais|mais alguma coisa antes de finalizar/i.test(lastOutboundTxt);
+    const isShortNoToHelp = askedHelpMore && /^(n[aã]o|nao|tranquilo|tudo certo|tudo bem|por enquanto n[aã]o|t[oô] bem|sem mais|s[oó] isso|era s[oó] isso|sem necessidade|n|nn)$/i.test(msgTrim);
+
+    const isDetalhamentoContext = (!!recentOrcamento
       && (detalharIntentRegex.test(currentMsg) || msgMencionaMarca)
-      && currentMsg.length < 200;
+      && currentMsg.length < 200) || isShortYes;
+
+    // Se é SIM curto à oferta de comparativo, força marcas da oferta
+    if (isShortYes && pendingComparativoOffer) {
+      orcamentoBrandsList = pendingComparativoOffer.marcas;
+      console.log(`[OFERTA-COMP] Cliente confirmou comparativo. Marcas: ${orcamentoBrandsList.join(", ")}`);
+    }
+    if (isShortNo) {
+      console.log(`[OFERTA-COMP] Cliente dispensou comparativo. askedHelpMore=${askedHelpMore} → ${isShortNoToHelp ? "DESPEDIDA" : "OFERECER AJUDA"}`);
+    }
+
+    // Dados do agendamento mais recente para fechamento contextual
+    const agAtivoRecent = (agendamentosAtivos || []).find((a: any) => ["agendado","confirmado"].includes(a.status)) || (agendamentosAtivos || [])[0];
+    let agendamentoFmt = "";
+    if (agAtivoRecent?.data_horario) {
+      try {
+        const dt = new Date(agAtivoRecent.data_horario);
+        const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
+        const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        agendamentoFmt = `${dataFmt} às ${horaFmt} na ${agAtivoRecent.loja_nome || "loja"}`;
+      } catch { /* ignore */ }
+    }
+
     if (isDetalhamentoContext) {
-      console.log(`[DETALHAMENTO] Ativo. Marcas no orçamento: ${orcamentoBrandsList.join(",")} | msg=${currentMsg.slice(0,80)}`);
+      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
     }
 
     const messages: any[] = [
@@ -1837,16 +1886,26 @@ CONHECIMENTO DAS MARCAS (use para escrever a comparação):
 REGRAS DE FORMATO:
 1) Escreva 1 parágrafo curto por marca solicitada (3–4 linhas), destacando 2–3 diferenciais técnicos/comerciais relevantes. Use **negrito** apenas no nome da família/lente (formato WhatsApp *texto*).
 2) Use os DADOS DO ORÇAMENTO acima (índice, tratamento, preço) — não invente valor, não troque marca, não some/desconte.
-3) Termine com UMA pergunta clara entre: "fechar com a [marca A]", "ir com a [marca B]", ou "agendar visita pra ver na loja". Sem outras opções genéricas.
+3) ${agendamentoFmt
+  ? `Cliente JÁ AGENDOU visita (${agendamentoFmt}). NÃO pergunte "quer fechar?" nem ofereça novo agendamento. FECHE com algo natural tipo: "Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar." Sem outras perguntas.`
+  : `Termine com UMA pergunta clara entre: "fechar com a [marca A]", "ir com a [marca B]", ou "agendar visita pra ver na loja". Sem outras opções genéricas.`}
 4) PROIBIDO chamar tool consultar_lentes de novo (já foi feito). Use a tool responder.
-5) PROIBIDO escalar para humano por essa pergunta.
+5) PROIBIDO escalar para humano por essa pergunta.${isShortYes ? "\n6) O cliente apenas respondeu \"sim\" à SUA oferta de comparativo — vá DIRETO ao comparativo das marcas listadas, sem reapresentar o orçamento e sem perguntar de novo se ele quer." : ""}
 
 EXEMPLO DE TOM (Essilor vs Zeiss):
 "A *Essilor Eyezen Boost 0.6* é da francesa Essilor, líder global. Foi desenhada pra quem usa muita tela — tem zonas de relaxamento que reduzem fadiga visual. Vem com Crizal Prevencia: antirreflexo + filtro de luz azul + UV.
 
 A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada ao seu rosto e armação, garantindo visão periférica perfeita. Tem DuraVision Platinum UV (antirreflexo super resistente) + BlueGuard, que é filtro azul integrado no material da lente.
 
-Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"`,
+${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.` : "Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"}"`,
+          }]
+        : []),
+      ...((isShortNo || isShortNoToHelp)
+        ? [{
+            role: "system",
+            content: isShortNoToHelp
+              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente já dispensou ajuda adicional. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "Combinado${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
+              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta de comparativo. NÃO insista no comparativo, NÃO repita a oferta. Responda CURTO e caloroso oferecendo ajuda final: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". É UMA pergunta só, sem listar opções. Use a tool responder.`,
           }]
         : []),
     ];
@@ -2883,11 +2942,18 @@ Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alem
         && resposta.length > 120
         && orcamentoBrandsList.some(b => new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(resposta));
 
-      if (detalhamentoBypass) {
-        console.log(`[VALIDATOR] BYPASS detalhamento: aceitando resposta apesar de ${validation.reason}`);
-        validatorFlags.push("detalhamento_bypass");
+      // BYPASS: respostas curtas de dispensa/despedida não devem ser bloqueadas pelo validador
+      // (são canônicas e podem repetir termos como nome da loja/data).
+      const dispensaBypass = (isShortNo || isShortNoToHelp)
+        && !validation.valid
+        && resposta.length > 20
+        && resposta.length < 240;
+
+      if (detalhamentoBypass || dispensaBypass) {
+        console.log(`[VALIDATOR] BYPASS ${detalhamentoBypass ? "detalhamento" : "dispensa-comparativo"}: aceitando resposta apesar de ${validation.reason}`);
+        validatorFlags.push(detalhamentoBypass ? "detalhamento_bypass" : "dispensa_bypass");
       } else if (!validation.valid) {
-        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext} | isDetalhamento=${isDetalhamentoContext}`);
+        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext} | isDetalhamento=${isDetalhamentoContext} | isShortNo=${isShortNo}`);
         validatorFlags.push(`rejected:${validation.reason}`);
 
         // IMAGE CONTEXT: NEVER use generic fallback — always use image-specific response
@@ -2952,10 +3018,24 @@ Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alem
                 resposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". O que precisa?";
                 validatorFlags.push("retry_appended_question");
                 console.log("[VALIDATOR] Retry response kept with appended question");
+              } else if (isShortNoToHelp) {
+                const nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+                resposta = `Combinado${nomePrim ? ", " + nomePrim : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar.`;
+                validatorFlags.push("despedida_pos_agendamento_fallback");
+                intencao = "encerramento_pos_agendamento";
+                console.log("[VALIDATOR] Despedida pós-agendamento fallback");
+              } else if (isShortNo) {
+                const nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+                resposta = `Tranquilo${nomePrim ? ", " + nomePrim : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?`;
+                validatorFlags.push("dispensa_comparativo_fallback");
+                console.log("[VALIDATOR] Dispensa comparativo fallback");
               } else if (isDetalhamentoContext) {
                 resposta = detalhamentoFallback(recentOrcamento, orcamentoBrandsList, currentMsg);
                 validatorFlags.push("detalhamento_deterministic_fallback");
                 intencao = "orcamento";
+                if (agendamentoFmt) {
+                  resposta = resposta.replace(/Quer fechar com.*$/i, `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`);
+                }
                 console.log("[VALIDATOR] Using detalhamento deterministic fallback");
               } else {
                 const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
@@ -2976,8 +3056,22 @@ Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alem
                 }
               }
             }
+          } else if (isShortNoToHelp) {
+            const nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+            resposta = `Combinado${nomePrim ? ", " + nomePrim : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar.`;
+            validatorFlags.push("despedida_pos_agendamento_fallback");
+            intencao = "encerramento_pos_agendamento";
+            console.log("[VALIDATOR] Despedida pós-agendamento fallback (no retry)");
+          } else if (isShortNo) {
+            const nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+            resposta = `Tranquilo${nomePrim ? ", " + nomePrim : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?`;
+            validatorFlags.push("dispensa_comparativo_fallback");
+            console.log("[VALIDATOR] Dispensa comparativo fallback (no retry)");
           } else if (isDetalhamentoContext) {
             resposta = detalhamentoFallback(recentOrcamento, orcamentoBrandsList, currentMsg);
+            if (agendamentoFmt) {
+              resposta = resposta.replace(/Quer fechar com.*$/i, `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`);
+            }
             validatorFlags.push("detalhamento_deterministic_fallback");
             intencao = "orcamento";
             console.log("[VALIDATOR] Using detalhamento deterministic fallback (no retry)");
