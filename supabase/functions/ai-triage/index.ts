@@ -2942,11 +2942,18 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         && resposta.length > 120
         && orcamentoBrandsList.some(b => new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(resposta));
 
-      if (detalhamentoBypass) {
-        console.log(`[VALIDATOR] BYPASS detalhamento: aceitando resposta apesar de ${validation.reason}`);
-        validatorFlags.push("detalhamento_bypass");
+      // BYPASS: respostas curtas de dispensa/despedida não devem ser bloqueadas pelo validador
+      // (são canônicas e podem repetir termos como nome da loja/data).
+      const dispensaBypass = (isShortNo || isShortNoToHelp)
+        && !validation.valid
+        && resposta.length > 20
+        && resposta.length < 240;
+
+      if (detalhamentoBypass || dispensaBypass) {
+        console.log(`[VALIDATOR] BYPASS ${detalhamentoBypass ? "detalhamento" : "dispensa-comparativo"}: aceitando resposta apesar de ${validation.reason}`);
+        validatorFlags.push(detalhamentoBypass ? "detalhamento_bypass" : "dispensa_bypass");
       } else if (!validation.valid) {
-        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext} | isDetalhamento=${isDetalhamentoContext}`);
+        console.log(`[VALIDATOR] REJECTED: ${validation.reason} — isImageContext=${isImageContext} | isDetalhamento=${isDetalhamentoContext} | isShortNo=${isShortNo}`);
         validatorFlags.push(`rejected:${validation.reason}`);
 
         // IMAGE CONTEXT: NEVER use generic fallback — always use image-specific response
