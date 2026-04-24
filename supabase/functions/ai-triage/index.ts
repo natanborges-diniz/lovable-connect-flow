@@ -346,12 +346,14 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
   }
 
   // If image context, use dedicated image fallback pool
+  // IMPORTANTE: nunca devolver "dois caminhos" — isso virou frase de loop quando o modelo
+  // se recusa a chamar interpretar_receita. Sempre indicar que está analisando.
   if (isImageContext || /\[image\]|\[document\]/.test(n)) {
     const recentNorm = (recentOutbound || []).slice(-10).map(norm);
     const receitaPool = [
-      "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos: te mostrar opções de lentes compatíveis ou montar um orçamento inicial. Qual você prefere?",
-      "Recebi sua imagem! Parece ser uma receita. Quer que eu leia e te passe opções de lentes? 😊",
-      "Vi que enviou uma imagem. Se for receita, eu consigo analisar e já te mostrar as melhores opções de lente!",
+      "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções certinhas, um instante…",
+      "Peguei a imagem da receita aqui 😊 Tô lendo os valores pra montar seu orçamento, só um momento…",
+      "Recebi! Tô analisando sua receita pra te mandar as opções compatíveis em seguida 👍",
     ];
     for (const fb of receitaPool) {
       const fbNorm = norm(fb);
