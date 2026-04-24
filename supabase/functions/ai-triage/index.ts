@@ -1780,11 +1780,11 @@ serve(async (req) => {
 
     // ── DETECTOR: oferta proativa de comparativo pendente nas últimas outbound ──
     // Ex: "Posso já deixar separado um comparativo Essilor x ZEISS pra você ver?"
-    // Permite tratar respostas curtas SIM/NÃO do cliente como confirmação/dispensa.
+    // Janela ampla (6 outbound) pra sobreviver a rodadas de pergunta de ajuda intermediária.
     const KNOWN_BRANDS_RE = /\b(Essilor|Zeiss|ZEISS|DNZ|Hoya|HOYA|Kodak|KODAK|DMAX|Solflex)\b/gi;
     const ofertaCompRegex = /(comparativ|deixar separado|posso (te |já )?(mostrar|enviar|deixar|preparar|separar|trazer)[^?]{0,80}(diferen|comparativ|opç(ões|ao)|lado a lado)|quer que eu (detalhe|compare|envie|mostre|prepare)[^?]{0,80}(diferen|comparativ|opç))/i;
     let pendingComparativoOffer: { marcas: string[]; rawOffer: string } | null = null;
-    for (const out of (recentOutbound || []).slice(-2).reverse()) {
+    for (const out of (recentOutbound || []).slice(-6).reverse()) {
       const t = String(out || "");
       if (!ofertaCompRegex.test(t)) continue;
       const brandHits = [...new Set([...t.matchAll(KNOWN_BRANDS_RE)].map(m => m[1].toUpperCase().replace("ZEISS","Zeiss").replace("HOYA","Hoya").replace("KODAK","Kodak")))];
@@ -1794,15 +1794,47 @@ serve(async (req) => {
       }
     }
 
-    // Resposta curta SIM/NÃO à oferta pendente
+    // ── Normalização da mensagem do cliente (remove pontuação interna + agradecimentos sufixos) ──
     const msgTrim = currentMsg.trim().toLowerCase().replace(/[!.…]+$/,"");
-    const isShortYes = !!pendingComparativoOffer && /^(sim|isso|pode|pode sim|claro|claro que sim|por favor|adoraria|vamos|bora|manda|manda ver|quero|quero ver|quero sim|show|massa|beleza|ok|tá|ta|tá bom|ta bom|perfeito|com certeza|👍|👌)$/i.test(msgTrim);
-    const isShortNo = !!pendingComparativoOffer && /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o)$/i.test(msgTrim);
+    // msgTrim2: remove pontuação interna e agradecimentos (obg/obrigado/valeu/vlw/tks/thx/brigado)
+    const msgTrim2 = msgTrim
+      .replace(/[.,!…]+/g, " ")
+      .replace(/\b(obg|obrigad[oa]|valeu|vlw|brigad[oa]|tks|thx)\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Detecta agradecimento puro (ex: "obg", "obrigado", "valeu", "ok obrigado")
+    const isThanksOnly = /^(obg|obrigad[oa]|valeu|vlw|brigad[oa]|tks|thx|muito obrigad[oa]|ok obrigad[oa]|t[aá] bom obrigad[oa])$/i.test(msgTrim);
+
+    // Resposta curta SIM/NÃO à oferta pendente (usa msgTrim2 para tolerar "Não. Obg.")
+    const SHORT_YES_RE = /^(sim|isso|pode|pode sim|claro|claro que sim|por favor|adoraria|vamos|bora|manda|manda ver|quero|quero ver|quero sim|show|massa|beleza|ok|tá|ta|tá bom|ta bom|perfeito|com certeza|👍|👌)$/i;
+    const SHORT_NO_RE = /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o|s[oó] isso|era s[oó] isso|sem mais)$/i;
+
+    // Aceite afirmativo com cauda: "pode deixar o comparativo aqui", "manda o comparativo", "quero ver as opções"
+    const LONG_YES_RE = /^(pode|quero|claro|manda|vamos|bora|ok|sim|adoraria|t[aá] bom|beleza)\b.{0,80}\b(comparativ|opç|diferen|ver|aqui|mostra|envia|prepara|deixa|deixar|separa|aceito)/i;
+    const isLongYes = !!pendingComparativoOffer && LONG_YES_RE.test(msgTrim2);
+
+    const isShortYes = (!!pendingComparativoOffer && SHORT_YES_RE.test(msgTrim2)) || isLongYes;
+
+    // Detecta agendamento ativo
+    const agAtivoRecentEarly = (agendamentosAtivos || []).find((a: any) => ["agendado","confirmado"].includes(a.status)) || (agendamentosAtivos || [])[0];
+    const hasAgendamentoAtivo = !!agAtivoRecentEarly?.data_horario;
 
     // Detecta segunda negativa consecutiva à pergunta canônica "posso ajudar em mais alguma coisa"
     const lastOutboundTxt = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
     const askedHelpMore = /posso (te )?ajudar em mais (alguma )?coisa|posso ajudar com mais|mais alguma coisa antes de finalizar/i.test(lastOutboundTxt);
-    const isShortNoToHelp = askedHelpMore && /^(n[aã]o|nao|tranquilo|tudo certo|tudo bem|por enquanto n[aã]o|t[oô] bem|sem mais|s[oó] isso|era s[oó] isso|sem necessidade|n|nn)$/i.test(msgTrim);
+
+    // isShortNo agora é INDEPENDENTE de pendingComparativoOffer:
+    // basta haver oferta pendente OU pergunta de ajuda OU agendamento ativo (cliente está em pós-fechamento).
+    const noContextEligible = !!pendingComparativoOffer || askedHelpMore || hasAgendamentoAtivo;
+    const isShortNo = noContextEligible && SHORT_NO_RE.test(msgTrim2);
+
+    // Despedida final: já dispensou ajuda E veio nova negativa OU agradecimento puro pós-agendamento
+    const isShortNoToHelp = (askedHelpMore && SHORT_NO_RE.test(msgTrim2))
+      || (hasAgendamentoAtivo && isThanksOnly && !pendingComparativoOffer);
+
+    // Agradecimento direto ao final, sem "não" antes (ex: cliente diz "Obg" depois do agendamento)
+    const isThanksClose = hasAgendamentoAtivo && isThanksOnly && !askedHelpMore;
 
     const isDetalhamentoContext = (!!recentOrcamento
       && (detalharIntentRegex.test(currentMsg) || msgMencionaMarca)
@@ -1817,8 +1849,8 @@ serve(async (req) => {
       console.log(`[OFERTA-COMP] Cliente dispensou comparativo. askedHelpMore=${askedHelpMore} → ${isShortNoToHelp ? "DESPEDIDA" : "OFERECER AJUDA"}`);
     }
 
-    // Dados do agendamento mais recente para fechamento contextual
-    const agAtivoRecent = (agendamentosAtivos || []).find((a: any) => ["agendado","confirmado"].includes(a.status)) || (agendamentosAtivos || [])[0];
+    // Dados do agendamento mais recente para fechamento contextual (reusa agAtivoRecentEarly)
+    const agAtivoRecent = agAtivoRecentEarly;
     let agendamentoFmt = "";
     if (agAtivoRecent?.data_horario) {
       try {
@@ -1830,7 +1862,10 @@ serve(async (req) => {
     }
 
     if (isDetalhamentoContext) {
-      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
+      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | longYes=${isLongYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
+    }
+    if (isThanksClose || isShortNoToHelp) {
+      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} → DESPEDIDA forçada`);
     }
 
     const messages: any[] = [
@@ -1900,12 +1935,12 @@ A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada a
 ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.` : "Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"}"`,
           }]
         : []),
-      ...((isShortNo || isShortNoToHelp)
+      ...((isShortNo || isShortNoToHelp || isThanksClose)
         ? [{
             role: "system",
-            content: isShortNoToHelp
-              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente já dispensou ajuda adicional. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "Combinado${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
-              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta de comparativo. NÃO insista no comparativo, NÃO repita a oferta. Responda CURTO e caloroso oferecendo ajuda final: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". É UMA pergunta só, sem listar opções. Use a tool responder.`,
+            content: (isShortNoToHelp || isThanksClose)
+              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente ${isThanksClose ? "agradeceu após o agendamento confirmado" : "já dispensou ajuda adicional"}. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "${isThanksClose ? "De nada" : "Combinado"}${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
+              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta. NÃO insista, NÃO repita a oferta, NÃO faça mais de uma pergunta. Responda EXATAMENTE: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". Sem listar opções. Sem segunda pergunta. Use a tool responder.`,
           }]
         : []),
     ];
@@ -2931,6 +2966,26 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     // ── 9. POST-LLM VALIDATION (Phase 3) ──
     if (resposta && !precisa_humano) {
+      // ── OVERRIDE DETERMINÍSTICO: para fluxos canônicos curtos, ignoramos a saída do LLM
+      // e injetamos a frase canônica. O LLM frequentemente adiciona segunda pergunta ou
+      // varia o texto além do permitido nesses contextos de encerramento.
+      const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      if (isThanksClose && agendamentoFmt) {
+        resposta = `De nada${_nomePrim ? ", " + _nomePrim : ""}! Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`;
+        intencao = "encerramento_pos_agendamento";
+        validatorFlags.push("override_thanks_close");
+        console.log("[OVERRIDE] thanks_close → despedida pós-agendamento");
+      } else if (isShortNoToHelp) {
+        resposta = `Combinado${_nomePrim ? ", " + _nomePrim : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar.`;
+        intencao = "encerramento_pos_agendamento";
+        validatorFlags.push("override_short_no_to_help");
+        console.log("[OVERRIDE] short_no_to_help → despedida pós-agendamento");
+      } else if (isShortNo && !isDetalhamentoContext) {
+        resposta = `Tranquilo${_nomePrim ? ", " + _nomePrim : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?`;
+        validatorFlags.push("override_short_no");
+        console.log("[OVERRIDE] short_no → dispensa comparativo");
+      }
+
       const validation = validateResponse(resposta, recentOutbound);
 
       // BYPASS: no contexto de detalhamento, similaridade alta é esperada (reuso de
