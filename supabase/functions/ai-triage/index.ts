@@ -3043,6 +3043,27 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         intencao = "encerramento_pos_agendamento";
         validatorFlags.push("override_short_no_to_help");
         console.log("[OVERRIDE] short_no_to_help → despedida pós-agendamento");
+      } else if (isDiaDConfirm && agDiaD) {
+        resposta = `Maravilha${_nomePrim ? ", " + _nomePrim : ""}! 🙌 Nosso consultor já fica te aguardando com muito entusiasmo. Até daqui a pouco!`;
+        intencao = "confirmacao_dia_d";
+        validatorFlags.push("override_dia_d_confirm");
+        console.log("[OVERRIDE] dia_d_confirm → despedida calorosa");
+        try {
+          const md = (agDiaD.metadata || {}) as Record<string, any>;
+          await supabase.from("agendamentos").update({
+            status: "confirmado",
+            metadata: { ...md, confirmado_pelo_cliente_at: new Date().toISOString() },
+          }).eq("id", agDiaD.id);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "agendamento_confirmado_cliente",
+            descricao: "Cliente confirmou presença respondendo ao lembrete dia-D",
+            referencia_id: agDiaD.id,
+            referencia_tipo: "agendamento",
+          });
+        } catch (e) {
+          console.error("[DIA-D] erro ao marcar confirmado:", e);
+        }
       } else if (isShortNo && !isDetalhamentoContext) {
         resposta = `Tranquilo${_nomePrim ? ", " + _nomePrim : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?`;
         validatorFlags.push("override_short_no");
