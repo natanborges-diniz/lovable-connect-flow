@@ -1861,11 +1861,32 @@ serve(async (req) => {
       } catch { /* ignore */ }
     }
 
-    if (isDetalhamentoContext) {
-      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | longYes=${isLongYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
-    }
+    // ── LEMBRETE DIA-D: detectar resposta do cliente ──
+    // Se o agendamento foi lembrado hoje (metadata.lembrete_dia_d_at < 24h),
+    // tratamos confirmação e remarcação de forma determinística.
+    let isDiaDConfirm = false;
+    let isDiaDReschedule = false;
+    let agDiaD: any = null;
+    try {
+      const horaLimite = Date.now() - 24 * 60 * 60 * 1000;
+      agDiaD = (agendamentosAtivos || []).find((a: any) => {
+        const ts = a?.metadata?.lembrete_dia_d_at ? new Date(a.metadata.lembrete_dia_d_at).getTime() : 0;
+        return ts > horaLimite && ["agendado", "lembrete_enviado", "confirmado"].includes(a.status);
+      });
+      if (agDiaD) {
+        const txt = String(currentMsg || "").toLowerCase().trim();
+        const CONFIRM_RE = /\b(sim|confirmo|confirmado|vou|vou sim|t[oô] indo|tou indo|estou indo|estarei|ok|combinado|beleza|pode deixar|fechado|tudo certo|tô a caminho|to a caminho|chegando|👍|👌|✅)\b/i;
+        const RESCHED_RE = /\b(remarcar|reagendar|mudar|trocar|outro dia|outro hor[aá]rio|n[aã]o (vou|consigo|posso)|cancelar|adiar|antecipar|imprevisto)\b/i;
+        if (RESCHED_RE.test(txt)) isDiaDReschedule = true;
+        else if (CONFIRM_RE.test(txt) || /^(sim|s|👍|👌|✅|ok)$/i.test(txt)) isDiaDConfirm = true;
+      }
+    } catch { /* ignore */ }
+
     if (isThanksClose || isShortNoToHelp) {
       console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} → DESPEDIDA forçada`);
+    }
+    if (isDiaDConfirm || isDiaDReschedule) {
+      console.log(`[DIA-D] resposta detectada confirm=${isDiaDConfirm} resched=${isDiaDReschedule} ag=${agDiaD?.id}`);
     }
 
     const messages: any[] = [
