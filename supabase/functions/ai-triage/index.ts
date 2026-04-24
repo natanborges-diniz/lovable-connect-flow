@@ -1904,8 +1904,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         ? [{
             role: "system",
             content: isShortNoToHelp
-              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente já dispensou ajuda adicional. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "Combinado${contato?.nome ? ", " + String(contato.nome).split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
-              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta de comparativo. NÃO insista no comparativo, NÃO repita a oferta. Responda CURTO e caloroso oferecendo ajuda final: "Tranquilo${contato?.nome ? ", " + String(contato.nome).split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". É UMA pergunta só, sem listar opções. Use a tool responder.`,
+              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente já dispensou ajuda adicional. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "Combinado${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
+              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta de comparativo. NÃO insista no comparativo, NÃO repita a oferta. Responda CURTO e caloroso oferecendo ajuda final: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". É UMA pergunta só, sem listar opções. Use a tool responder.`,
           }]
         : []),
     ];
