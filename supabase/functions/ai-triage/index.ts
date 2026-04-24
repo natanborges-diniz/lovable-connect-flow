@@ -1935,12 +1935,12 @@ A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada a
 ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.` : "Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"}"`,
           }]
         : []),
-      ...((isShortNo || isShortNoToHelp)
+      ...((isShortNo || isShortNoToHelp || isThanksClose)
         ? [{
             role: "system",
-            content: isShortNoToHelp
-              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente já dispensou ajuda adicional. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "Combinado${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
-              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta de comparativo. NÃO insista no comparativo, NÃO repita a oferta. Responda CURTO e caloroso oferecendo ajuda final: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". É UMA pergunta só, sem listar opções. Use a tool responder.`,
+            content: (isShortNoToHelp || isThanksClose)
+              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente ${isThanksClose ? "agradeceu após o agendamento confirmado" : "já dispensou ajuda adicional"}. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "${isThanksClose ? "De nada" : "Combinado"}${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
+              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta. NÃO insista, NÃO repita a oferta, NÃO faça mais de uma pergunta. Responda EXATAMENTE: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". Sem listar opções. Sem segunda pergunta. Use a tool responder.`,
           }]
         : []),
     ];
