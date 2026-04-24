@@ -2976,6 +2976,11 @@ Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alem
                 }
               }
             }
+          } else if (isDetalhamentoContext) {
+            resposta = detalhamentoFallback(recentOrcamento, orcamentoBrandsList, currentMsg);
+            validatorFlags.push("detalhamento_deterministic_fallback");
+            intencao = "orcamento";
+            console.log("[VALIDATOR] Using detalhamento deterministic fallback (no retry)");
           } else {
             const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
               ? null
