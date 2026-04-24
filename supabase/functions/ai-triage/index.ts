@@ -1518,7 +1518,7 @@ serve(async (req) => {
       supabase.from("pipeline_colunas").select("id, nome, setor_id").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
-      supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
+      supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes, metadata").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "lembrete_enviado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
       supabase.from("contatos").select("metadata, tipo, nome").eq("id", contatoId).single(),
     ]);
 
