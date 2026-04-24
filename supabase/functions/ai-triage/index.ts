@@ -3018,10 +3018,24 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 resposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". O que precisa?";
                 validatorFlags.push("retry_appended_question");
                 console.log("[VALIDATOR] Retry response kept with appended question");
+              } else if (isShortNoToHelp) {
+                const nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+                resposta = `Combinado${nomePrim ? ", " + nomePrim : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar.`;
+                validatorFlags.push("despedida_pos_agendamento_fallback");
+                intencao = "encerramento_pos_agendamento";
+                console.log("[VALIDATOR] Despedida pós-agendamento fallback");
+              } else if (isShortNo) {
+                const nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+                resposta = `Tranquilo${nomePrim ? ", " + nomePrim : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?`;
+                validatorFlags.push("dispensa_comparativo_fallback");
+                console.log("[VALIDATOR] Dispensa comparativo fallback");
               } else if (isDetalhamentoContext) {
                 resposta = detalhamentoFallback(recentOrcamento, orcamentoBrandsList, currentMsg);
                 validatorFlags.push("detalhamento_deterministic_fallback");
                 intencao = "orcamento";
+                if (agendamentoFmt) {
+                  resposta = resposta.replace(/Quer fechar com.*$/i, `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`);
+                }
                 console.log("[VALIDATOR] Using detalhamento deterministic fallback");
               } else {
                 const fb = /receita|grau|prescri[cç][aã]o|\[image\]|enviei minha receita|recebeu minha receita/i.test(currentMsg)
