@@ -206,17 +206,46 @@ function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: 
 // ── Forced intent → tool mapping ──
 // When the customer responds with clear keywords to a previous AI question,
 // forces the corresponding tool execution to break out of repetitive prompts.
+//
+// `fechamento_lc`: cliente em contexto de LENTES DE CONTATO já com receita
+// salva escolheu uma marca/modelo OU pediu reservar/fechar o pedido.
+// LC NÃO requer visita à loja para "tirar medidas" — a finalização é feita
+// por um Consultor humano (que envia link de pagamento e define a loja de
+// retirada). Por isso esse intent NÃO mapeia para `agendar_visita`.
+const LC_BRAND_REGEX = /\b(acuvue|oasys|biofinity|air\s*optix|solflex|sol[oó]tica|dnz|biomedics|focus|frequency|freshlook|proclear|purevision|softlens|hydron|mioflex|aviator|naturale|colors?)\b/i;
+const RESERVE_VERBS_REGEX = /\b(quero\s+(reservar|fechar|pedir|levar|essa|esse|comprar|fechar|essa op[cç][aã]o)|vou\s+(querer|levar|de|com)|fica\s+(com|essa|esse)|pode\s+(reservar|pedir|fechar|mandar)|fechar\s+(pedido|essa|esse|com)|fechar\b|reserva[r]?\b|comprar\s+essa)/i;
+
 function detectForcedToolIntent(
   lastInboundText: string,
   hasReceitas: boolean,
   hasUnparsedImage: boolean,
+  isLCContext = false,
+  hasLCQuotePresented = false,
 ): { tool: string; reason: string } | null {
   const t = norm(lastInboundText);
   if (!t) return null;
 
+  // ── FECHAMENTO LC: cliente escolheu marca OU pediu reservar em contexto LC ──
+  // Só dispara se: (a) há receita salva, (b) contexto é LC, (c) já apresentamos
+  // opções OU o texto é inequívoco (tem marca + verbo de reserva).
+  // Guardrail: NUNCA cair em agendar_visita aqui — LC não exige visita à loja.
+  if (hasReceitas && isLCContext) {
+    const hasBrand = LC_BRAND_REGEX.test(lastInboundText);
+    const hasReserveVerb = RESERVE_VERBS_REGEX.test(lastInboundText);
+    // Marca + verbo de reserva em qualquer ordem = fechamento.
+    // Verbo de reserva isolado também conta se já apresentamos opções.
+    // Marca isolada conta se já apresentamos opções (ex.: "Acuvue").
+    if (hasBrand && hasReserveVerb) {
+      return { tool: "fechamento_lc", reason: "cliente escolheu marca + pediu reservar (LC)" };
+    }
+    if (hasLCQuotePresented && (hasBrand || hasReserveVerb)) {
+      return { tool: "fechamento_lc", reason: hasBrand ? "cliente escolheu marca após orçamento LC" : "cliente pediu reservar após orçamento LC" };
+    }
+  }
+
   // Quote / pricing keywords
   if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
-    const isLC = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
+    const isLC = isLCContext || /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
     if (hasReceitas) return { tool: isLC ? "consultar_lentes_contato" : "consultar_lentes", reason: `cliente pediu orçamento${isLC ? " de LC" : ""} e há receita salva` };
     if (hasUnparsedImage) return { tool: "interpretar_receita", reason: "cliente pediu orçamento e há imagem pendente" };
     return { tool: "responder_pedindo_receita", reason: "cliente pediu orçamento mas não há receita" };
@@ -233,7 +262,13 @@ function detectForcedToolIntent(
   }
 
   // Scheduling keywords
+  // ⚠️ Em contexto LC com receita salva, "reservar" = fechar pedido (humano), NÃO agendar visita.
+  // Esse caso já é capturado acima como fechamento_lc; aqui ignoramos "reservar" se LC+receita.
   if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|essa semana|pode marcar|pode agendar|reservar)\b/.test(t)) {
+    if (hasReceitas && isLCContext) {
+      // LC + receita: "reservar/marcar" também vira fechamento humano, NUNCA agendamento de visita.
+      return { tool: "fechamento_lc", reason: "cliente pediu reservar/marcar em contexto LC com receita" };
+    }
     return { tool: "agendar_cliente_intent", reason: "cliente quer agendar" };
   }
 
