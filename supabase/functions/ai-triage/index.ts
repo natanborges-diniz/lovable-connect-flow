@@ -222,6 +222,16 @@ function detectForcedToolIntent(
     return { tool: "responder_pedindo_receita", reason: "cliente pediu orçamento mas não há receita" };
   }
 
+  // Análise direta da receita: "analise", "leia", "lê pra mim", "pode ler", "vê pra mim", "dá uma olhada"
+  // ou confirmação curta após IA perguntar "quer que eu analise/leia?": "sim", "pode", "manda ver", "é uma receita"
+  if (hasUnparsedImage && !hasReceitas) {
+    if (/\b(analis[ae]|analisar|le[ia]|ler|l[eê]\b|olha[rd]?|v[eê]\b|d[aá] uma olhada|interpreta[rd]?|verifica[rd]?)\b/.test(t)
+        || /\b(sim|pode|claro|isso|manda ver|por favor|pfv|beleza|ok|tá|tudo bem)\b/.test(t)
+        || /\b[ée]\s+(uma\s+)?receita\b|^receita$|minha receita/.test(t)) {
+      return { tool: "interpretar_receita", reason: "cliente confirmou/pediu análise da receita pendente" };
+    }
+  }
+
   // Scheduling keywords
   if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|essa semana|pode marcar|pode agendar|reservar)\b/.test(t)) {
     return { tool: "agendar_cliente_intent", reason: "cliente quer agendar" };
