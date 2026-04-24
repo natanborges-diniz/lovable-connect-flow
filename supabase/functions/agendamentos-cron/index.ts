@@ -69,6 +69,11 @@ serve(async (req) => {
     await processLembreteRetry(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_REENVIO_LEMBRETE);
 
     // ═══════════════════════════════════════════
+    // B2) LEMBRETE DIA-D às 08:00 (America/Sao_Paulo)
+    // ═══════════════════════════════════════════
+    await processLembreteDiaD(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
+
+    // ═══════════════════════════════════════════
     // C) COBRANÇA À LOJA — horário do agendamento passou
     // ═══════════════════════════════════════════
     await processFirstStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
