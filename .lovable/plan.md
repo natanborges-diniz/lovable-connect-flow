@@ -1,25 +1,24 @@
-
-
-## Fran não aparece em "Nova conversa" — corrigir cache de profiles
+## Adicionar Fran Borges como cliente no CRM
 
 ### Diagnóstico
-- Fran Borges existe em `profiles` (`ativo = true`, criada hoje).
-- O hook em `src/pages/Mensagens.tsx` busca `profiles-ativos` sem `staleTime` e sem refetch ao abrir o popover. Como a aba ficou aberta antes da Fran ser criada, o React Query mantém o resultado antigo em cache.
-- Resultado: usuários novos só aparecem após reload manual.
+- Fran Borges existe em `profiles` (usuária do sistema), mas **não existe** em `contatos` (CRM).
+- Para ela aparecer na lista de Contatos / Pipeline CRM como cliente, é preciso inserir um registro novo em `public.contatos`.
 
-### Correção
-Em `src/pages/Mensagens.tsx`, ajustar a query `profiles-ativos`:
-
-- Adicionar `staleTime: 0` e `refetchOnWindowFocus: true`.
-- Expor `refetch` e chamá-lo no `onOpenChange` do Popover de "Nova conversa" (sempre que o usuário abrir, busca a lista atualizada).
-- Ordenar por `nome` para a lista ficar estável.
-
-Isso garante que qualquer novo usuário criado pelo fluxo de "Novo usuário" apareça imediatamente sem precisar recarregar a página.
+### Ação
+Inserir um registro em `contatos` com:
+- `nome`: "Fran Borges"
+- `tipo`: `cliente`
+- `estagio`: `lead` (padrão de entrada no funil)
+- `ativo`: `true`
+- `email` / `telefone` / `documento`: vazios por enquanto (posso preencher depois se você passar os dados)
 
 ### Validação
-- Abrir Mensagens → clicar no botão "+" de Nova conversa → "Fran Borges" deve aparecer na lista.
-- Criar outro usuário pelo fluxo admin e confirmar que ele aparece sem reload.
+- Abrir **Contatos** no menu → ela aparece com badge "Cliente".
+- Abrir **CRM** → ela aparece como novo lead na coluna inicial do pipeline.
+
+### Observações
+- Se você já tem **e-mail, telefone ou CPF/CNPJ** dela, me passe que eu já cadastro junto na inserção. Caso contrário, crio com os campos em branco e você edita depois pelo botão de editar contato.
+- Não há mudança de schema nem de código — somente inserção de dado.
 
 ### Arquivos afetados
-- `src/pages/Mensagens.tsx` (somente a definição da query + handler do Popover).
-
+- Nenhum. Apenas operação de dado (INSERT em `contatos`).
