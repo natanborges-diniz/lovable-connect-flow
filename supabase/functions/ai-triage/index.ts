@@ -206,17 +206,46 @@ function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: 
 // ── Forced intent → tool mapping ──
 // When the customer responds with clear keywords to a previous AI question,
 // forces the corresponding tool execution to break out of repetitive prompts.
+//
+// `fechamento_lc`: cliente em contexto de LENTES DE CONTATO já com receita
+// salva escolheu uma marca/modelo OU pediu reservar/fechar o pedido.
+// LC NÃO requer visita à loja para "tirar medidas" — a finalização é feita
+// por um Consultor humano (que envia link de pagamento e define a loja de
+// retirada). Por isso esse intent NÃO mapeia para `agendar_visita`.
+const LC_BRAND_REGEX = /\b(acuvue|oasys|biofinity|air\s*optix|solflex|sol[oó]tica|dnz|biomedics|focus|frequency|freshlook|proclear|purevision|softlens|hydron|mioflex|aviator|naturale|colors?)\b/i;
+const RESERVE_VERBS_REGEX = /\b(quero\s+(reservar|fechar|pedir|levar|essa|esse|comprar|fechar|essa op[cç][aã]o)|vou\s+(querer|levar|de|com)|fica\s+(com|essa|esse)|pode\s+(reservar|pedir|fechar|mandar)|fechar\s+(pedido|essa|esse|com)|fechar\b|reserva[r]?\b|comprar\s+essa)/i;
+
 function detectForcedToolIntent(
   lastInboundText: string,
   hasReceitas: boolean,
   hasUnparsedImage: boolean,
+  isLCContext = false,
+  hasLCQuotePresented = false,
 ): { tool: string; reason: string } | null {
   const t = norm(lastInboundText);
   if (!t) return null;
 
+  // ── FECHAMENTO LC: cliente escolheu marca OU pediu reservar em contexto LC ──
+  // Só dispara se: (a) há receita salva, (b) contexto é LC, (c) já apresentamos
+  // opções OU o texto é inequívoco (tem marca + verbo de reserva).
+  // Guardrail: NUNCA cair em agendar_visita aqui — LC não exige visita à loja.
+  if (hasReceitas && isLCContext) {
+    const hasBrand = LC_BRAND_REGEX.test(lastInboundText);
+    const hasReserveVerb = RESERVE_VERBS_REGEX.test(lastInboundText);
+    // Marca + verbo de reserva em qualquer ordem = fechamento.
+    // Verbo de reserva isolado também conta se já apresentamos opções.
+    // Marca isolada conta se já apresentamos opções (ex.: "Acuvue").
+    if (hasBrand && hasReserveVerb) {
+      return { tool: "fechamento_lc", reason: "cliente escolheu marca + pediu reservar (LC)" };
+    }
+    if (hasLCQuotePresented && (hasBrand || hasReserveVerb)) {
+      return { tool: "fechamento_lc", reason: hasBrand ? "cliente escolheu marca após orçamento LC" : "cliente pediu reservar após orçamento LC" };
+    }
+  }
+
   // Quote / pricing keywords
   if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
-    const isLC = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
+    const isLC = isLCContext || /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
     if (hasReceitas) return { tool: isLC ? "consultar_lentes_contato" : "consultar_lentes", reason: `cliente pediu orçamento${isLC ? " de LC" : ""} e há receita salva` };
     if (hasUnparsedImage) return { tool: "interpretar_receita", reason: "cliente pediu orçamento e há imagem pendente" };
     return { tool: "responder_pedindo_receita", reason: "cliente pediu orçamento mas não há receita" };
@@ -233,7 +262,13 @@ function detectForcedToolIntent(
   }
 
   // Scheduling keywords
+  // ⚠️ Em contexto LC com receita salva, "reservar" = fechar pedido (humano), NÃO agendar visita.
+  // Esse caso já é capturado acima como fechamento_lc; aqui ignoramos "reservar" se LC+receita.
   if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|essa semana|pode marcar|pode agendar|reservar)\b/.test(t)) {
+    if (hasReceitas && isLCContext) {
+      // LC + receita: "reservar/marcar" também vira fechamento humano, NUNCA agendamento de visita.
+      return { tool: "fechamento_lc", reason: "cliente pediu reservar/marcar em contexto LC com receita" };
+    }
     return { tool: "agendar_cliente_intent", reason: "cliente quer agendar" };
   }
 
@@ -889,7 +924,16 @@ function buildLentesContatoKnowledgeBlock(): string {
 ## Apresentação de orçamento
 - Sempre apresente: produto, descarte, valor por caixa, plano sugerido (caixas + duração) e o combo 3+1 quando aplicável.
 - Para tóricas, deixe claro o aviso de encomenda.
-- Termine convidando à visita à loja para concluir o pedido (presencial fecha melhor).`;
+- Termine perguntando a região do cliente para indicar a loja mais próxima — NÃO ofereça visita para "tirar medidas" (LC não exige isso).
+
+## 🚫 FECHAMENTO DE LENTES DE CONTATO — REGRA DURA
+- LENTES DE CONTATO **NUNCA** exigem visita à loja para "tirar medidas". A receita do cliente já é suficiente.
+- PROIBIDO usar a tool agendar_visita para LC. PROIBIDO escrever "tirar medidas", "posso te receber", "vir até a loja para finalizar", "qual dia/horário" no contexto de LC.
+- Quando o cliente escolher uma marca/modelo OU disser "quero reservar/fechar/pedir/levar":
+  1. Confirme a escolha em 1 frase (ex.: "Perfeito — anotei a Acuvue 👌").
+  2. Se for tórica/multifocal, lembre que é sob encomenda e que o pagamento confirma a reserva.
+  3. Encaminhe para o Consultor humano fechar o pedido — a loja de retirada é escolhida no fechamento, NÃO agora.
+  4. Não pergunte dia/horário. Não ofereça visita. Não tente agendar nada.`;
 }
 
 function buildSystemPromptFromCompiled(opts: {
@@ -1907,11 +1951,85 @@ serve(async (req) => {
     // Runs BEFORE the LLM call so it can override the prompt and prevent the
     // model from generating yet another semantically-identical response.
     const loopCheck = detectLoop(recentOutbound);
+
+    // Detecta se já apresentamos opções de LC nas últimas saídas (sinal "preço/caixa/descarte/marca").
+    const hasLCQuotePresented = (recentOutbound || []).some((m: string) =>
+      typeof m === "string" && /\b(R\$|caixa[s]?|descarte|di[aá]ria|quinzenal|mensal|t[oó]rica|acuvue|biofinity|dnz|air\s*optix|solflex|sol[oó]tica)\b/i.test(m),
+    );
+
     const forcedIntent = detectForcedToolIntent(
       lastInboundText,
       receitas.length > 0,
       hasRecentUnparsedPrescriptionImage && receitas.length === 0,
+      isLCContextGlobal,
+      hasLCQuotePresented,
     );
+
+    // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
+    // LC NÃO requer visita à loja. Cliente escolheu marca / pediu reservar:
+    // confirmamos a escolha, avisamos que o Consultor humano dá continuidade
+    // (e que a loja de retirada é definida no fechamento), e escalamos.
+    if (forcedIntent?.tool === "fechamento_lc") {
+      console.log(`[FECHAMENTO-LC] ${forcedIntent.reason}`);
+
+      // Tenta extrair marca mencionada para personalizar a confirmação
+      const brandMatch = lastInboundText.match(LC_BRAND_REGEX);
+      const marcaEcho = brandMatch ? brandMatch[0].replace(/\b\w/g, (c) => c.toUpperCase()) : null;
+      const nomePrim = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+      const saudacao = nomePrim ? `Perfeito, ${nomePrim}` : "Perfeito";
+      const linhaEscolha = marcaEcho
+        ? `${saudacao} — anotei sua escolha: *${marcaEcho}* 👌`
+        : `${saudacao} — anotei sua escolha 👌`;
+      const fechamentoMsg = [
+        linhaEscolha,
+        "Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido — com ele você confirma o modelo certo da sua receita, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝",
+      ].join("\n\n");
+
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, fechamentoMsg);
+
+      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+
+      await supabase.from("eventos_crm").insert({
+        contato_id: contatoId,
+        tipo: "fechamento_lc_escalado",
+        descricao: `Cliente escolheu LC — encaminhado para fechamento humano${marcaEcho ? ` (marca: ${marcaEcho})` : ""}`,
+        metadata: {
+          marca_escolhida: marcaEcho,
+          last_inbound: lastInboundText.substring(0, 200),
+          had_lc_quote_presented: hasLCQuotePresented,
+          reason: forcedIntent.reason,
+        },
+        referencia_tipo: "atendimento",
+        referencia_id: atendimento_id,
+      });
+
+      // Resumo para o humano
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/summarize-atendimento`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ atendimento_id }),
+        });
+      } catch (_) { /* best-effort */ }
+
+      // Limpa lock de debounce
+      try {
+        const lockMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+        delete lockMeta.ia_lock;
+        await supabase.from("atendimentos").update({ metadata: lockMeta }).eq("id", atendimento_id);
+      } catch (_) { /* ignore */ }
+
+      return jsonResponse({
+        status: "ok",
+        tools_used: ["fechamento_lc_escalado"],
+        intencao: "fechamento_lc",
+        precisa_humano: true,
+        pipeline_coluna_sugerida: null,
+        modo: "humano",
+        validator_flags: ["fechamento_lc_short_circuit"],
+      });
+    }
+
 
     // If a correction was applied, force consultar_lentes regardless of loop state
     if (correctionApplied) {
@@ -2329,6 +2447,30 @@ serve(async (req) => {
           }
         }
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
+        // ── GUARDRAIL LC: lente de contato NÃO requer visita à loja ──
+        // Se o contexto é LC + receita salva, agendar_visita está PROIBIDO
+        // (cliente não vai à loja "tirar medidas" — fechamento é com humano,
+        // que define a loja de retirada no momento do pagamento).
+        if (isLCContextGlobal && receitas.length > 0) {
+          console.log(`[GUARDRAIL-LC] Blocked ${fn} in LC context — converting to fechamento_lc`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "lc_agendamento_bloqueado",
+            descricao: `IA tentou ${fn} em contexto de lentes de contato — bloqueado e convertido em fechamento humano.`,
+            metadata: { tool: fn, args, motivo: "LC não requer visita para tirar medidas" },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          const nomePrim = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+          const saudacao = nomePrim ? `Perfeito, ${nomePrim}` : "Perfeito";
+          resposta = `${saudacao}! Pra lente de contato você não precisa vir até a loja tirar medidas — sua receita já basta 😉 Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido: com ele você confirma o modelo, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝`;
+          intencao = "fechamento_lc";
+          pipeline_coluna = "Novo Contato"; // mantém na coluna atual
+          precisa_humano = true;
+          setor_sugerido = "";
+          validatorFlags.push("lc_agendamento_bloqueado");
+          continue;
+        }
         resposta = args.resposta;
         intencao = "agendamento";
         pipeline_coluna = "Agendamento";
