@@ -1,66 +1,61 @@
-## Diagnóstico
+## O que aconteceu na conversa do Artur
 
-A IA travou em loop no caso do Artur Borges porque **a receita nunca foi interpretada** — `metadata.receitas` do contato está vazio. Sem receita salva, todos os guardrails que forçam `consultar_lentes_contato` ficam inativos (eles dependem de `hasReceitas = true`).
+Hoje (24/04, 15:13) o Artur enviou a foto da receita. A IA respondeu **"Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções certinhas, um instante…"** e parou. Nunca mais respondeu.
 
-Cronologia confirmada no banco:
+A frase parece um "aguarde", mas na verdade é o **fim da execução**. Não há nenhum mecanismo que continue depois dela.
 
-1. Cliente enviou imagem (`tipo_conteudo = image`, com `media_url` válida) → 12:54.
-2. IA respondeu "dois caminhos" sem chamar `interpretar_receita` — **falha #1**.
-3. Cliente respondeu "As opções de lentes compatíveis" → IA voltou a perguntar "Quer que eu leia?" — **falha #2**.
-4. Cliente disse "Sim", "É uma receita", "Analise para mim" — IA continuou em loop sem chamar a tool.
+## Causa raiz
 
-### Por que `interpretar_receita` não foi chamada
+Na correção anterior (caso Artur Borges das 12:54), criamos o guardrail anti-loop que substitui a frase "dois caminhos" por "Já estou analisando…". O problema:
 
-O bloco `[PRIORIDADE MÁXIMA — RECEITA PENDENTE]` (linhas 1700–1707) só é injetado quando `hasUnparsedImage` é detectado. Pelo log de mensagens, a imagem chegou como `tipo_conteudo = image` — então o sistema identificou como imagem inbound. Mas o modelo respondeu com texto genérico ("Recebi sua receita aqui 😊… dois caminhos") em vez de chamar a tool, e a partir daí cada nova mensagem do cliente passou a ser texto curto ("Sim", "É uma receita", "Analise para mim") — o modelo continuou ecoando a frase em vez de chamar a tool.
+1. **A frase de "analisando" virou um beco sem saída.** Quando o modelo se recusa a chamar `interpretar_receita` e devolve qualquer texto, o guardrail troca esse texto pela frase tranquilizadora — mas a Edge Function termina logo depois (`sendWhatsApp` + `return`). Não dispara a tool, não agenda retry, não faz follow-up.
+2. **Não há "segundo turno" automático.** Como o cliente não envia uma nova mensagem (afinal, a IA disse "um instante…"), o `ai-triage` nunca mais é chamado. A receita nunca é interpretada. A conversa morre.
+3. **Mesmo o `[PRIORIDADE MÁXIMA — RECEITA PENDENTE]` injetado no prompt** não garante a chamada da tool — é só uma instrução. Quando o modelo ignora, não há plano B server-side que force a execução de `interpretar_receita`.
 
-Causas-raiz:
+Resumindo: trocamos um loop infinito por uma parada silenciosa. O cliente fica esperando uma resposta que não vem.
 
-1. **Não há fallback determinístico que force `interpretar_receita`** quando o modelo recusa a tool. Existe fallback determinístico para `consultar_lentes`/`consultar_lentes_contato` (que requer receita salva), mas para `interpretar_receita` o sistema apenas injeta um hint textual e confia que o modelo vai obedecer.
+## Correção proposta
 
-2. **A frase "Recebi sua receita aqui… dois caminhos" está hard-coded** em `deterministicIntentFallback` (linhas 352 e 378) e é a resposta padrão quando há contexto de imagem mas a receita ainda não foi salva. Ou seja: a própria função fallback que deveria proteger contra esse cenário **devolve exatamente a frase do loop**.
+Tornar `interpretar_receita` **server-side enforceable**: quando há imagem pendente e o modelo devolve texto sem chamar a tool, o próprio `ai-triage` chama a tool diretamente (sem depender do modelo) e segue o fluxo.
 
-3. **A detecção de loop não cobre o caso "imagem pendente + cliente pedindo análise"**. Quando o cliente diz "Analise para mim" (mensagem clara de intent), o `forcedIntent` para `interpretar_receita` exige `hasUnparsedImage`, mas a janela de checagem ou a heurística podem estar perdendo a imagem após várias trocas de texto.
+### Alterações em `supabase/functions/ai-triage/index.ts`
 
-## Correções
+1. **Retry forçado com `tool_choice` específico**
+   - Detectar: `hasUnparsedImage === true` + `receitas.length === 0` + resposta sem tool_call.
+   - Antes de aceitar a resposta de texto, fazer uma **segunda chamada ao modelo** com `tool_choice: { type: "function", function: { name: "interpretar_receita" } }` — força a tool.
+   - Se o segundo turno também falhar, executar `interpretar_receita` **diretamente** (sem modelo) usando a `media_url` da última imagem inbound, e em seguida chamar `consultar_lentes_contato` (ou `consultar_lentes`) para devolver opções na mesma resposta.
 
-Vou alterar `supabase/functions/ai-triage/index.ts`:
+2. **Guardrail "Já estou analisando" deixa de ser terminal**
+   - Quando o guardrail troca a resposta para "Já estou analisando…", marcar uma flag `requiresFollowUp = true`.
+   - Após `sendWhatsApp`, se a flag estiver setada, executar imediatamente o pipeline `interpretar_receita → consultar_lentes_contato` e enviar uma segunda mensagem com as opções (5–10s depois, para parecer natural).
+   - Assim a frase tranquilizadora cumpre a promessa: o cliente recebe as opções logo em seguida.
 
-### 1. Forçar `interpretar_receita` server-side quando o modelo se recusa
+3. **Watchdog de imagem pendente sem follow-up**
+   - Adicionar verificação no `watchdog-loop-ia` (ou similar): se a última outbound contém "estou analisando" / "um instante" e há imagem inbound não interpretada há mais de 60s, disparar `ai-triage` com hint forçado para processar a receita.
+   - Garante recuperação mesmo se o retry inline falhar por timeout.
 
-Hoje, se o modelo retorna texto em vez de chamar `interpretar_receita`, a Edge Function aceita e envia. Vou adicionar:
+4. **Log e telemetria**
+   - Adicionar `validatorFlags.push("forced_interpretar_receita_retry")` e `("inline_followup_after_analyzing")` para conseguirmos rastrear quantas vezes o modelo recusa a tool.
 
-- Se houver imagem inbound não interpretada nas últimas 5 mensagens **E** receitas vazias **E** o cliente pediu análise/orçamento (intent claro: "analise", "lê pra mim", "opções", "orçamento", "sim"/"é uma receita" como resposta a "quer que eu analise"), e o modelo retornou texto sem chamar a tool, **forçar uma segunda chamada ao modelo** com mensagem `tool_choice` específica para `interpretar_receita` (ou injetar mensagem de sistema ainda mais agressiva).
+### Memória atualizada
 
-### 2. Trocar o fallback hard-coded "dois caminhos"
-
-Substituir as duas ocorrências da frase "Recebi sua receita aqui 😊 Se você quiser, eu posso seguir por dois caminhos…" no `deterministicIntentFallback` por:
-
-- Quando há imagem pendente: `"Já estou analisando sua receita aqui 👀 Um instante…"` + marcar para retry com `interpretar_receita` na próxima execução (ou simplesmente NÃO devolver fallback de texto e sim retornar erro para o orquestrador chamar a tool).
-
-### 3. Detector de loop com a frase "dois caminhos"
-
-Adicionar guardrail no momento do output: se a resposta gerada pelo modelo contém a substring "dois caminhos" **E** a mesma frase já apareceu em `recentOutbound`, descartar a resposta e:
-- Se há imagem pendente: forçar `interpretar_receita`.
-- Se há receita salva + LC: forçar `consultar_lentes_contato`.
-
-### 4. Ampliar `hasRecentUnparsedPrescriptionImage`
-
-Hoje olha as últimas 5 inbound. Quando há ping-pong de "Sim/É uma receita/Analise" depois da imagem, a imagem ainda está nas últimas 5 inbound — ok. Mas o intent textual "analise/lê/opções/sim" combinado com imagem pendente deveria **disparar `forcedIntent = interpretar_receita` mesmo sem o cliente repetir "orçamento"**. Hoje `detectForcedToolIntent` só dispara `interpretar_receita` quando há imagem + pedido de orçamento. Vou expandir os triggers.
+Adicionar ao `mem://ia/lentes-de-contato-orcamento` o caso "Artur Borges 24/04 15:13" como **regressão da correção anterior** — documentar que a frase "Já estou analisando" só pode existir se houver follow-up garantido.
 
 ## Validação
 
-Após as alterações:
-
-1. Reproduzir cenário do Artur: cliente envia imagem → IA chama `interpretar_receita` na primeira ou segunda mensagem (não na quinta).
-2. Se modelo recusar a tool e responder texto, fallback server-side dispara `interpretar_receita` automaticamente.
-3. Frase "dois caminhos" nunca pode aparecer 2× seguidas — se aparecer, é descartada e substituída pela tool correta.
-4. Após interpretar a receita, segue o fluxo já existente: `consultar_lentes_contato` → 2-3 opções → região → agendar.
+Reproduzir o cenário Artur:
+1. Cliente envia receita pela primeira vez → IA chama `interpretar_receita` direto (sem cair em "analisando…").
+2. Se cair em "Já estou analisando…", uma segunda mensagem com opções de lente chega em até 10s.
+3. O watchdog cobre o caso de falha do retry inline (segunda camada de proteção).
 
 ## Arquivos afetados
 
-- `supabase/functions/ai-triage/index.ts` (única alteração — função de orquestração da IA)
+- `supabase/functions/ai-triage/index.ts` (retry forçado + follow-up inline)
+- `supabase/functions/watchdog-loop-ia/index.ts` (detecção de "analisando" órfão) — opcional, depende se o watchdog inline já cobrir
+- `.lovable/memory/ia/lentes-de-contato-orcamento.md` (documentar regressão)
 
 ## Observações
 
-- Nenhuma mudança de schema ou de UI.
-- Vou também atualizar `mem://ia/lentes-de-contato-orcamento` adicionando o caso "Artur Borges" como regressão documentada e a nova proteção contra loop em `interpretar_receita`.
+- Sem mudança de schema.
+- Sem mudança de UI.
+- Custo extra: até 1 chamada adicional ao modelo por mensagem com imagem pendente (apenas quando o primeiro turno falha em chamar a tool).
