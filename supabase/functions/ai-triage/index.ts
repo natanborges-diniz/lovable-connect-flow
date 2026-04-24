@@ -1942,11 +1942,85 @@ serve(async (req) => {
     // Runs BEFORE the LLM call so it can override the prompt and prevent the
     // model from generating yet another semantically-identical response.
     const loopCheck = detectLoop(recentOutbound);
+
+    // Detecta se já apresentamos opções de LC nas últimas saídas (sinal "preço/caixa/descarte/marca").
+    const hasLCQuotePresented = (recentOutbound || []).some((m: string) =>
+      typeof m === "string" && /\b(R\$|caixa[s]?|descarte|di[aá]ria|quinzenal|mensal|t[oó]rica|acuvue|biofinity|dnz|air\s*optix|solflex|sol[oó]tica)\b/i.test(m),
+    );
+
     const forcedIntent = detectForcedToolIntent(
       lastInboundText,
       receitas.length > 0,
       hasRecentUnparsedPrescriptionImage && receitas.length === 0,
+      isLCContextGlobal,
+      hasLCQuotePresented,
     );
+
+    // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
+    // LC NÃO requer visita à loja. Cliente escolheu marca / pediu reservar:
+    // confirmamos a escolha, avisamos que o Consultor humano dá continuidade
+    // (e que a loja de retirada é definida no fechamento), e escalamos.
+    if (forcedIntent?.tool === "fechamento_lc") {
+      console.log(`[FECHAMENTO-LC] ${forcedIntent.reason}`);
+
+      // Tenta extrair marca mencionada para personalizar a confirmação
+      const brandMatch = lastInboundText.match(LC_BRAND_REGEX);
+      const marcaEcho = brandMatch ? brandMatch[0].replace(/\b\w/g, (c) => c.toUpperCase()) : null;
+      const nomePrim = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+      const saudacao = nomePrim ? `Perfeito, ${nomePrim}` : "Perfeito";
+      const linhaEscolha = marcaEcho
+        ? `${saudacao} — anotei sua escolha: *${marcaEcho}* 👌`
+        : `${saudacao} — anotei sua escolha 👌`;
+      const fechamentoMsg = [
+        linhaEscolha,
+        "Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido — com ele você confirma o modelo certo da sua receita, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝",
+      ].join("\n\n");
+
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, fechamentoMsg);
+
+      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+
+      await supabase.from("eventos_crm").insert({
+        contato_id: contatoId,
+        tipo: "fechamento_lc_escalado",
+        descricao: `Cliente escolheu LC — encaminhado para fechamento humano${marcaEcho ? ` (marca: ${marcaEcho})` : ""}`,
+        metadata: {
+          marca_escolhida: marcaEcho,
+          last_inbound: lastInboundText.substring(0, 200),
+          had_lc_quote_presented: hasLCQuotePresented,
+          reason: forcedIntent.reason,
+        },
+        referencia_tipo: "atendimento",
+        referencia_id: atendimento_id,
+      });
+
+      // Resumo para o humano
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/summarize-atendimento`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ atendimento_id }),
+        });
+      } catch (_) { /* best-effort */ }
+
+      // Limpa lock de debounce
+      try {
+        const lockMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+        delete lockMeta.ia_lock;
+        await supabase.from("atendimentos").update({ metadata: lockMeta }).eq("id", atendimento_id);
+      } catch (_) { /* ignore */ }
+
+      return jsonResponse({
+        status: "ok",
+        tools_used: ["fechamento_lc_escalado"],
+        intencao: "fechamento_lc",
+        precisa_humano: true,
+        pipeline_coluna_sugerida: null,
+        modo: "humano",
+        validator_flags: ["fechamento_lc_short_circuit"],
+      });
+    }
+
 
     // If a correction was applied, force consultar_lentes regardless of loop state
     if (correctionApplied) {
