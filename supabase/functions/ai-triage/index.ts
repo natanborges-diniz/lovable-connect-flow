@@ -2966,6 +2966,26 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     // ── 9. POST-LLM VALIDATION (Phase 3) ──
     if (resposta && !precisa_humano) {
+      // ── OVERRIDE DETERMINÍSTICO: para fluxos canônicos curtos, ignoramos a saída do LLM
+      // e injetamos a frase canônica. O LLM frequentemente adiciona segunda pergunta ou
+      // varia o texto além do permitido nesses contextos de encerramento.
+      const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      if (isThanksClose && agendamentoFmt) {
+        resposta = `De nada${_nomePrim ? ", " + _nomePrim : ""}! Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`;
+        intencao = "encerramento_pos_agendamento";
+        validatorFlags.push("override_thanks_close");
+        console.log("[OVERRIDE] thanks_close → despedida pós-agendamento");
+      } else if (isShortNoToHelp) {
+        resposta = `Combinado${_nomePrim ? ", " + _nomePrim : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar.`;
+        intencao = "encerramento_pos_agendamento";
+        validatorFlags.push("override_short_no_to_help");
+        console.log("[OVERRIDE] short_no_to_help → despedida pós-agendamento");
+      } else if (isShortNo && !isDetalhamentoContext) {
+        resposta = `Tranquilo${_nomePrim ? ", " + _nomePrim : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?`;
+        validatorFlags.push("override_short_no");
+        console.log("[OVERRIDE] short_no → dispensa comparativo");
+      }
+
       const validation = validateResponse(resposta, recentOutbound);
 
       // BYPASS: no contexto de detalhamento, similaridade alta é esperada (reuso de
