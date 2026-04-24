@@ -1886,16 +1886,26 @@ CONHECIMENTO DAS MARCAS (use para escrever a comparação):
 REGRAS DE FORMATO:
 1) Escreva 1 parágrafo curto por marca solicitada (3–4 linhas), destacando 2–3 diferenciais técnicos/comerciais relevantes. Use **negrito** apenas no nome da família/lente (formato WhatsApp *texto*).
 2) Use os DADOS DO ORÇAMENTO acima (índice, tratamento, preço) — não invente valor, não troque marca, não some/desconte.
-3) Termine com UMA pergunta clara entre: "fechar com a [marca A]", "ir com a [marca B]", ou "agendar visita pra ver na loja". Sem outras opções genéricas.
+3) ${agendamentoFmt
+  ? `Cliente JÁ AGENDOU visita (${agendamentoFmt}). NÃO pergunte "quer fechar?" nem ofereça novo agendamento. FECHE com algo natural tipo: "Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar." Sem outras perguntas.`
+  : `Termine com UMA pergunta clara entre: "fechar com a [marca A]", "ir com a [marca B]", ou "agendar visita pra ver na loja". Sem outras opções genéricas.`}
 4) PROIBIDO chamar tool consultar_lentes de novo (já foi feito). Use a tool responder.
-5) PROIBIDO escalar para humano por essa pergunta.
+5) PROIBIDO escalar para humano por essa pergunta.${isShortYes ? "\n6) O cliente apenas respondeu \"sim\" à SUA oferta de comparativo — vá DIRETO ao comparativo das marcas listadas, sem reapresentar o orçamento e sem perguntar de novo se ele quer." : ""}
 
 EXEMPLO DE TOM (Essilor vs Zeiss):
 "A *Essilor Eyezen Boost 0.6* é da francesa Essilor, líder global. Foi desenhada pra quem usa muita tela — tem zonas de relaxamento que reduzem fadiga visual. Vem com Crizal Prevencia: antirreflexo + filtro de luz azul + UV.
 
 A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada ao seu rosto e armação, garantindo visão periférica perfeita. Tem DuraVision Platinum UV (antirreflexo super resistente) + BlueGuard, que é filtro azul integrado no material da lente.
 
-Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"`,
+${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.` : "Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"}"`,
+          }]
+        : []),
+      ...((isShortNo || isShortNoToHelp)
+        ? [{
+            role: "system",
+            content: isShortNoToHelp
+              ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente já dispensou ajuda adicional. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "Combinado${contato?.nome ? ", " + String(contato.nome).split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
+              : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta de comparativo. NÃO insista no comparativo, NÃO repita a oferta. Responda CURTO e caloroso oferecendo ajuda final: "Tranquilo${contato?.nome ? ", " + String(contato.nome).split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". É UMA pergunta só, sem listar opções. Use a tool responder.`,
           }]
         : []),
     ];
