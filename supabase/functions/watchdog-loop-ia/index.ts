@@ -164,6 +164,7 @@ serve(async (req) => {
           console.error("[WATCHDOG] Falha ao enviar aviso fora-horário:", e);
         }
       }
+      escalated++;
       details.push({ atendimento_id: at.id, similarity: sim });
     }
 
