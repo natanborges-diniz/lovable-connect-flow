@@ -34,6 +34,35 @@ function similarity(a: string, b: string): number {
   return overlap / Math.max(wa.size, wb.size);
 }
 
+// ── Horário comercial humano (America/Sao_Paulo) ──
+function spNow() {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo", weekday: "short",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const parts = fmt.formatToParts(new Date());
+  const get = (t: string) => parts.find(p => p.type === t)?.value || "";
+  const wkMap: Record<string, number> = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
+  return { dow: wkMap[get("weekday")] ?? 0, hour: parseInt(get("hour"),10), minute: parseInt(get("minute"),10) };
+}
+function isHorarioHumano(): boolean {
+  const { dow, hour, minute } = spNow();
+  const t = hour * 60 + minute;
+  if (dow >= 1 && dow <= 5) return t >= 9 * 60 && t < 18 * 60;
+  if (dow === 6) return t >= 8 * 60 && t < 12 * 60;
+  return false;
+}
+function proximaAberturaHumana(): string {
+  const { dow, hour, minute } = spNow();
+  const t = hour * 60 + minute;
+  if (dow >= 1 && dow <= 5 && t < 9 * 60) return "hoje às 09:00";
+  if (dow === 6 && t < 8 * 60) return "hoje às 08:00";
+  if (dow === 0) return "amanhã às 09:00";
+  if (dow === 6) return "segunda às 09:00";
+  if (dow === 5) return "amanhã às 08:00";
+  return "amanhã às 09:00";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -122,6 +151,19 @@ serve(async (req) => {
         referencia_id: at.id,
       });
 
+      // Fora do horário humano: avisa o cliente que o time retorna no próximo expediente
+      if (!isHorarioHumano()) {
+        try {
+          const aviso = `Pra te ajudar melhor, vou acionar nossa equipe humana 🙌 Nosso time atende de seg a sex das 09h às 18h e sábado das 08h às 12h. Como estamos fora do horário, assim que abrir o próximo expediente (${proximaAberturaHumana()}) eles te respondem por aqui 😉`;
+          await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ atendimento_id: at.id, texto: aviso }),
+          });
+        } catch (e) {
+          console.error("[WATCHDOG] Falha ao enviar aviso fora-horário:", e);
+        }
+      }
       escalated++;
       details.push({ atendimento_id: at.id, similarity: sim });
     }

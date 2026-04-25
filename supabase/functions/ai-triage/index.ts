@@ -8,6 +8,58 @@ const corsHeaders = {
 };
 
 // ═══════════════════════════════════════════
+// HORÁRIO COMERCIAL — ESCALADA HUMANA
+// ═══════════════════════════════════════════
+// Seg-Sex 09:00–18:00 / Sáb 08:00–12:00 (America/Sao_Paulo). Domingo fechado.
+// Aplica-se SOMENTE no momento da escalada para humano. Gael responde 24/7.
+
+function getNowInSP(): { dow: number; hour: number; minute: number; date: Date } {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const parts = fmt.formatToParts(new Date());
+  const get = (t: string) => parts.find(p => p.type === t)?.value || "";
+  const wkMap: Record<string, number> = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
+  const dow = wkMap[get("weekday")] ?? 0;
+  const hour = parseInt(get("hour"), 10);
+  const minute = parseInt(get("minute"), 10);
+  return { dow, hour, minute, date: new Date() };
+}
+
+function isHorarioHumano(): boolean {
+  const { dow, hour, minute } = getNowInSP();
+  const t = hour * 60 + minute;
+  if (dow >= 1 && dow <= 5) return t >= 9 * 60 && t < 18 * 60;        // Seg-Sex 09-18
+  if (dow === 6) return t >= 8 * 60 && t < 12 * 60;                   // Sábado 08-12
+  return false;                                                        // Domingo
+}
+
+function proximaAberturaHumana(): string {
+  const { dow, hour, minute } = getNowInSP();
+  const t = hour * 60 + minute;
+  // hoje ainda abre?
+  if (dow >= 1 && dow <= 5 && t < 9 * 60) return "hoje às 09:00";
+  if (dow === 6 && t < 8 * 60) return "hoje às 08:00";
+  // próximo dia útil
+  // após sábado meio-dia ou domingo → segunda 09:00
+  if (dow === 6 || dow === 0) return dow === 0 ? "amanhã às 09:00" : "segunda às 09:00";
+  // sexta após 18 → sábado 08:00
+  if (dow === 5) return "amanhã às 08:00";
+  // seg-qui após 18 → amanhã 09:00
+  return "amanhã às 09:00";
+}
+
+function mensagemEscaladaForaHorario(nomePrim: string): string {
+  const saud = nomePrim ? `, ${nomePrim}` : "";
+  return `Vou acionar nossa equipe pra você${saud}! 🙌 Só um detalhe: nosso time humano atende de seg a sex das 09h às 18h e sábado das 08h às 12h. Como estamos fora do horário agora, assim que abrir o próximo expediente (${proximaAberturaHumana()}), eles te respondem por aqui. Pode deixar registrado o que precisa que já encaminho 😉`;
+}
+
+// ═══════════════════════════════════════════
 // PHASE 2 — PRE-LLM DETERMINISTIC ROUTER
 // ═══════════════════════════════════════════
 
@@ -3410,6 +3462,25 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         resposta = "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?";
         console.log(`[GUARDRAIL] Saudação duplicada corrigida. Original: "${original}"`);
       }
+    }
+    // ── 9.99. OVERRIDE: escalada fora do horário comercial humano ──
+    // Quando vai escalar para humano e estamos fora do expediente, troca a mensagem
+    // pra avisar que o time humano retorna no próximo expediente. Card vai pra fila normalmente.
+    if (precisa_humano && !isHorarioHumano()) {
+      const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      resposta = mensagemEscaladaForaHorario(_np);
+      validatorFlags.push("escalada_fora_horario");
+      console.log("[HORARIO-HUMANO] Escalada fora do expediente — mensagem ajustada");
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "escalada_fora_horario",
+          descricao: `Escalada para humano fora do expediente — próxima abertura: ${proximaAberturaHumana()}`,
+          metadata: { proxima_abertura: proximaAberturaHumana() },
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+        });
+      } catch (_) { /* noop */ }
     }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
