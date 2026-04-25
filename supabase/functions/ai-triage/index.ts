@@ -2813,9 +2813,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         }
 
         // ── Coerência horário tool ↔ resposta ──
-        // Extrai a primeira hora citada na resposta do LLM (ex.: "às 17h", "17:00") e
-        // compara com a hora de args.data_horario em SP. Se divergir, aborta a criação,
-        // pede confirmação ao cliente e loga evento.
+        // Extrai a primeira hora citada na resposta do LLM e compara com a hora de
+        // args.data_horario em SP. Se divergir, aborta a criação e pede confirmação.
+        let horarioDivergente = false;
         try {
           const dtArg = new Date(args.data_horario);
           const hSP = Number(dtArg.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "America/Sao_Paulo" }).match(/\d+/)?.[0] ?? "-1");
@@ -2834,55 +2834,44 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 metadata: { args, hora_resposta: hResp, hora_arg: hSP },
               });
               resposta = `Só pra eu não confundir: foi às *${hResp}h* ou *${hSP}h*? Me confirma o horário exato que eu já registro 🙏`;
-              // Sai do bloco sem criar agendamento
-              break;
+              horarioDivergente = true;
             }
           }
         } catch (e) {
           console.error("[TOOL] coerência horário falhou:", e);
         }
 
-        // Check for duplicate: same contact + same store + same date
-        const targetDate = (args.data_horario || "").substring(0, 10);
-        const jaExiste = agendamentosAtivos.some((a: any) =>
-          a.loja_nome?.toLowerCase() === (args.loja_nome || "").toLowerCase() &&
-          (a.data_horario || "").substring(0, 10) === targetDate &&
-          (a.status === "agendado" || a.status === "confirmado")
-        );
+        if (!horarioDivergente) {
+          // Check for duplicate: same contact + same store + same date
+          const targetDate = (args.data_horario || "").substring(0, 10);
+          const jaExiste = agendamentosAtivos.some((a: any) =>
+            a.loja_nome?.toLowerCase() === (args.loja_nome || "").toLowerCase() &&
+            (a.data_horario || "").substring(0, 10) === targetDate &&
+            (a.status === "agendado" || a.status === "confirmado")
+          );
 
-        if (jaExiste) {
-          console.log(`[TOOL] Duplicate agendamento detected for ${args.loja_nome} on ${targetDate} — skipping creation`);
-        } else {
-          // Create new agendamento via agendar-cliente function
-          try {
-            await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                contato_id: contatoId,
-                atendimento_id,
-                loja_nome: args.loja_nome,
-                loja_telefone: lojaMatch?.telefone || null,
-                data_horario: args.data_horario,
-                observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
-              }),
-            });
-          } catch (e) {
-            console.error("[TOOL] agendar-cliente call failed:", e);
+          if (jaExiste) {
+            console.log(`[TOOL] Duplicate agendamento detected for ${args.loja_nome} on ${targetDate} — skipping creation`);
+          } else {
+            // Create new agendamento via agendar-cliente function
+            try {
+              await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  contato_id: contatoId,
+                  atendimento_id,
+                  loja_nome: args.loja_nome,
+                  loja_telefone: lojaMatch?.telefone || null,
+                  data_horario: args.data_horario,
+                  observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
+                }),
+              });
+            } catch (e) {
+              console.error("[TOOL] agendar-cliente call failed:", e);
+            }
           }
         }
-
-        await supabase.from("eventos_crm").insert({
-          contato_id: contatoId,
-          tipo: fn === "reagendar_visita" ? "reagendamento_visita" : "agendamento_visita",
-          descricao: `${fn === "reagendar_visita" ? "Reagendamento" : "Agendamento"}: ${args.loja_nome} em ${args.data_horario}`,
-          metadata: args,
-          referencia_tipo: "atendimento",
-          referencia_id: atendimento_id,
-        });
-      } else if (fn === "agendar_lembrete") {
-        resposta = args.resposta;
-        intencao = "lembrete";
 
         try {
           await supabase.from("lembretes").insert({
