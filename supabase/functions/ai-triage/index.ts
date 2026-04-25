@@ -3050,7 +3050,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         validatorFlags.push("override_short_no_to_help");
         console.log("[OVERRIDE] short_no_to_help → despedida pós-agendamento");
       } else if (isDiaDConfirm && agDiaD) {
-        resposta = `Maravilha${_nomePrim ? ", " + _nomePrim : ""}! 🙌 Nosso consultor já fica te aguardando com muito entusiasmo. Até daqui a pouco!`;
+        resposta = `Maravilha${_nomePrim ? ", " + _nomePrim : ""}! 🙌 Nosso consultor estará te aguardando! Até daqui a pouco!`;
         intencao = "confirmacao_dia_d";
         validatorFlags.push("override_dia_d_confirm");
         console.log("[OVERRIDE] dia_d_confirm → despedida calorosa");
