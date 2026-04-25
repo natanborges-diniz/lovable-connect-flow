@@ -1518,7 +1518,7 @@ serve(async (req) => {
       supabase.from("pipeline_colunas").select("id, nome, setor_id").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
-      supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
+      supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes, metadata").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "lembrete_enviado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
       supabase.from("contatos").select("metadata, tipo, nome").eq("id", contatoId).single(),
     ]);
 
@@ -1861,11 +1861,32 @@ serve(async (req) => {
       } catch { /* ignore */ }
     }
 
-    if (isDetalhamentoContext) {
-      console.log(`[DETALHAMENTO] Ativo. Marcas: ${orcamentoBrandsList.join(",")} | shortYes=${isShortYes} | longYes=${isLongYes} | hasAg=${!!agendamentoFmt} | msg=${currentMsg.slice(0,80)}`);
-    }
+    // ── LEMBRETE DIA-D: detectar resposta do cliente ──
+    // Se o agendamento foi lembrado hoje (metadata.lembrete_dia_d_at < 24h),
+    // tratamos confirmação e remarcação de forma determinística.
+    let isDiaDConfirm = false;
+    let isDiaDReschedule = false;
+    let agDiaD: any = null;
+    try {
+      const horaLimite = Date.now() - 24 * 60 * 60 * 1000;
+      agDiaD = (agendamentosAtivos || []).find((a: any) => {
+        const ts = a?.metadata?.lembrete_dia_d_at ? new Date(a.metadata.lembrete_dia_d_at).getTime() : 0;
+        return ts > horaLimite && ["agendado", "lembrete_enviado", "confirmado"].includes(a.status);
+      });
+      if (agDiaD) {
+        const txt = String(currentMsg || "").toLowerCase().trim();
+        const CONFIRM_RE = /\b(sim|confirmo|confirmado|vou|vou sim|t[oô] indo|tou indo|estou indo|estarei|ok|combinado|beleza|pode deixar|fechado|tudo certo|tô a caminho|to a caminho|chegando|👍|👌|✅)\b/i;
+        const RESCHED_RE = /\b(remarcar|reagendar|mudar|trocar|outro dia|outro hor[aá]rio|n[aã]o (vou|consigo|posso)|cancelar|adiar|antecipar|imprevisto)\b/i;
+        if (RESCHED_RE.test(txt)) isDiaDReschedule = true;
+        else if (CONFIRM_RE.test(txt) || /^(sim|s|👍|👌|✅|ok)$/i.test(txt)) isDiaDConfirm = true;
+      }
+    } catch { /* ignore */ }
+
     if (isThanksClose || isShortNoToHelp) {
       console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} → DESPEDIDA forçada`);
+    }
+    if (isDiaDConfirm || isDiaDReschedule) {
+      console.log(`[DIA-D] resposta detectada confirm=${isDiaDConfirm} resched=${isDiaDReschedule} ag=${agDiaD?.id}`);
     }
 
     const messages: any[] = [
@@ -1941,6 +1962,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             content: (isShortNoToHelp || isThanksClose)
               ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente ${isThanksClose ? "agradeceu após o agendamento confirmado" : "já dispensou ajuda adicional"}. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "${isThanksClose ? "De nada" : "Combinado"}${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
               : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta. NÃO insista, NÃO repita a oferta, NÃO faça mais de uma pergunta. Responda EXATAMENTE: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". Sem listar opções. Sem segunda pergunta. Use a tool responder.`,
+          }]
+        : []),
+      ...(isDiaDReschedule && agDiaD
+        ? [{
+            role: "system",
+            content: `[FLUXO REAGENDAMENTO PÓS-LEMBRETE-DIA-D] O cliente recebeu o lembrete da visita de hoje e PEDIU PARA REMARCAR. AÇÕES OBRIGATÓRIAS: 1) Reconheça com calor humano ("Sem problema, ${contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : ""}, vamos ajustar"). 2) Ofereça 2-3 opções concretas de dia/horário próximas (próximos 3 dias úteis, em horários comerciais 10h–19h) na MESMA loja (${agDiaD.loja_nome || "a loja já escolhida"}), a menos que o cliente peça outra unidade. 3) Pergunte qual encaixa melhor. NÃO chame agendar_visita ainda — espere a escolha do cliente. Quando ele escolher, AÍ SIM chame agendar_visita (a tool é idempotente, vai atualizar o agendamento existente). PROIBIDO responder "mantemos ou cancelamos?" — ele JÁ DISSE que quer remarcar.`,
           }]
         : []),
     ];
@@ -2667,7 +2694,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // NÃO pediu explicitamente remarcar/cancelar/mudar, NÃO criamos novo nem reconfirmamos
         // como se fosse novo. Apenas reafirmamos o existente e seguimos com encerramento.
         const lastInboundLowerForGuard = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
-        const explicitChangeRequest = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInboundLowerForGuard);
+        const explicitChangeRequest = isDiaDReschedule || /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInboundLowerForGuard);
         const existingActive = (agendamentosAtivos || []).find((a: any) => ["agendado","lembrete_enviado","confirmado"].includes(a.status));
         if (fn === "agendar_visita" && existingActive && !explicitChangeRequest) {
           console.log(`[GUARDRAIL] agendar_visita bloqueado — já existe agendamento ativo ${existingActive.id} sem pedido explícito de mudança`);
@@ -3022,6 +3049,27 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         intencao = "encerramento_pos_agendamento";
         validatorFlags.push("override_short_no_to_help");
         console.log("[OVERRIDE] short_no_to_help → despedida pós-agendamento");
+      } else if (isDiaDConfirm && agDiaD) {
+        resposta = `Maravilha${_nomePrim ? ", " + _nomePrim : ""}! 🙌 Nosso consultor já fica te aguardando com muito entusiasmo. Até daqui a pouco!`;
+        intencao = "confirmacao_dia_d";
+        validatorFlags.push("override_dia_d_confirm");
+        console.log("[OVERRIDE] dia_d_confirm → despedida calorosa");
+        try {
+          const md = (agDiaD.metadata || {}) as Record<string, any>;
+          await supabase.from("agendamentos").update({
+            status: "confirmado",
+            metadata: { ...md, confirmado_pelo_cliente_at: new Date().toISOString() },
+          }).eq("id", agDiaD.id);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "agendamento_confirmado_cliente",
+            descricao: "Cliente confirmou presença respondendo ao lembrete dia-D",
+            referencia_id: agDiaD.id,
+            referencia_tipo: "agendamento",
+          });
+        } catch (e) {
+          console.error("[DIA-D] erro ao marcar confirmado:", e);
+        }
       } else if (isShortNo && !isDetalhamentoContext) {
         resposta = `Tranquilo${_nomePrim ? ", " + _nomePrim : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?`;
         validatorFlags.push("override_short_no");

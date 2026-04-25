@@ -1,35 +1,65 @@
-## Plano
+## Objetivo
 
-1. Blindar o fluxo quando já existir agendamento ativo
-- Ajustar `supabase/functions/ai-triage/index.ts` para tratar `agendado`/`confirmado` como contexto prioritário.
-- Se o cliente já tiver visita ativa e mandar algo genérico como “Agendar”, “manter”, “ok”, “confirmado” ou encerrar a conversa, a IA não poderá abrir novo fluxo de marcação.
-- Só permitir novo fluxo quando houver intenção explícita de alteração, como remarcar, mudar horário, trocar loja ou cancelar.
+No dia do agendamento, às **8h (America/Sao_Paulo)**, retomar o WhatsApp do cliente com um lembrete amigável da visita. Se o cliente confirmar, responder com mensagem de boas-vindas (sem novas perguntas). Se pedir para remarcar, oferecer novas datas/horários e reabrir o fluxo de agendamento.
 
-2. Tornar a criação de agendamento idempotente
-- Reforçar `supabase/functions/agendar-cliente/index.ts` para não inserir novo registro se o contato já tiver um agendamento ativo equivalente, retornando o existente.
-- Endurecer também o guard em `ai-triage` para não chamar a criação novamente em cenários de reconfirmação.
-- Objetivo: mesmo que a IA escorregue, a camada de persistência ainda impede duplicidade.
+---
 
-3. Corrigir o pós-agendamento e encerramento
-- Ajustar o pós-agendamento em `ai-triage` para que, depois da confirmação, o assistente:
-  - envie comparativo quando o cliente aceitar,
-  - finalize quando o cliente disser “não”, “obg”, “encerro por aqui”,
-  - não pergunte “mantemos ou cancela?” sem pedido explícito do cliente.
-- Manter respostas determinísticas curtas nesse trecho para evitar loop e reabertura do agendamento.
+## O que muda
 
-4. Padronizar data/hora no fuso de São Paulo
-- Corrigir a formatação em `ai-triage` e `agendar-cliente` para impedir discrepâncias como 17:00 virar 20:00 na mensagem enviada ao cliente.
-- Aplicar a mesma regra no bloco “Agendamento confirmado” e no texto de fechamento com dados do agendamento.
+### 1. Novo estágio de lembrete: `lembrete_dia_d` (08h)
 
-## Resultado esperado
-- Um cliente já agendado não gera novo agendamento ao repetir “Agendar”.
-- Confirmações e agradecimentos apenas mantêm o agendamento existente e encerram corretamente.
-- O comparativo continua funcionando sem reabrir a marcação.
-- Loja, data e horário aparecem consistentes na resposta final.
+O cron `agendamentos-cron` hoje só dispara um lembrete genérico ~24h antes (status `lembrete_enviado`) e depois cobra a loja. Vou adicionar um **novo bloco** que, entre 08:00–08:14 horário de São Paulo, varre agendamentos ativos do dia e envia uma mensagem padronizada via WhatsApp ao cliente.
 
-## Detalhes técnicos
-- Arquivos a ajustar:
-  - `supabase/functions/ai-triage/index.ts`
-  - `supabase/functions/agendar-cliente/index.ts`
-- Não preciso alterar tabelas, RLS nem autenticação; a correção é de lógica e formatação sobre a estrutura atual de `agendamentos`.
-- Vou preservar o comportamento atual de `reagendar_visita` para casos explícitos de remarcação e no-show.
+- Janela: roda de hora em hora; só dispara se hora SP == 8 e ainda não houve lembrete-do-dia.
+- Filtro: `data_horario` cai no dia de hoje (SP), `status` ∈ `agendado | lembrete_enviado | confirmado`, `loja_confirmou_presenca IS NULL`.
+- Idempotência: usar `metadata.lembrete_dia_d_at` no agendamento para não reenviar.
+- Envio via `send-whatsapp` reusando o `atendimento_id` do agendamento. Se não houver atendimento aberto, pular silenciosamente (sem reabrir conversa fora da janela 24h da Meta — caso comum porque o atendimento foi encerrado: então usar template HSM `lembrete_visita_dia` se existir; senão registrar evento e pular).
+
+**Mensagem (texto livre, quando atendimento aberto):**
+> "Bom dia, {primeiro_nome}! 👋 Passando pra lembrar da sua visita hoje às {hora} na *Diniz {loja}*. Posso confirmar que você vem? Se preferir remarcar, é só me dizer 😉"
+
+### 2. Tratamento das respostas em `ai-triage`
+
+Adicionar na camada de pré-LLM (já existe a detecção de "agendamento ativo"):
+
+- Se houver `metadata.lembrete_dia_d_at` recente (< 24h) E o último inbound contiver confirmação (`sim|confirmo|vou|tô indo|ok|combinado|beleza|pode deixar|estarei`), responder de forma determinística:
+  > "Maravilha, {nome}! 🙌 Nosso consultor já fica te aguardando com muito entusiasmo. Até daqui a pouco!"
+  E marcar `agendamentos.status = 'confirmado'` + `metadata.confirmado_pelo_cliente_at`.
+
+- Se o inbound contiver pedido de remarcação (`remarcar|reagendar|mudar|outro dia|outro horário|não vou conseguir|não consigo|cancelar`), **suspender o guardrail anti-duplicação** já existente para este turno e devolver controle ao LLM com hint: *"Cliente pediu para remarcar. Ofereça 2-3 opções de dia/horário próximas e use a tool agendar_visita após a confirmação."* O `agendar-cliente` já é idempotente; quando criar novo agendamento ele atualiza o existente em vez de duplicar (regra atual: mesmo contato + janela ±24h ≠ → considerado novo).
+
+- Caso a mensagem seja ambígua, deixar o LLM responder com o hint padrão de "lembrete-do-dia em curso".
+
+### 3. Documentar na memória
+
+Atualizar `mem://agendamentos/fluxo-e-automacoes-temporais` adicionando o passo "Lembrete D-Day 08:00" e suas regras de resposta.
+
+---
+
+## Arquivos a alterar
+
+- `supabase/functions/agendamentos-cron/index.ts` — novo helper `processLembreteDiaD()` e chamada no fluxo principal.
+- `supabase/functions/ai-triage/index.ts` — bloco de detecção de "lembrete-do-dia respondido" antes do LLM.
+- `.lovable/memory/ia/agendamento-ativo-anti-duplicacao.md` — adicionar exceção para "remarcar após lembrete-do-dia".
+- `mem://agendamentos/fluxo-e-automacoes-temporais` — adicionar etapa.
+
+Sem mudanças de schema — uso `agendamentos.metadata` (jsonb) que já existe.
+
+---
+
+## Casos cobertos
+
+| Situação | Comportamento |
+|---|---|
+| Cliente confirma ("sim/vou") | Resposta automática de boas-vindas + status → `confirmado` |
+| Cliente pede para remarcar | LLM oferece novas datas; ao escolher, `agendar_visita` atualiza o agendamento |
+| Cliente não responde | Fluxo segue normal (cobrança da loja após horário) |
+| Atendimento já encerrado / janela 24h Meta expirou | Pular envio livre; registrar evento `lembrete_dia_d_skip_window` (futuro: usar template HSM) |
+| Já enviado hoje | `metadata.lembrete_dia_d_at` impede reenvio |
+
+---
+
+## Não vou fazer agora
+
+- Criar template HSM novo na Meta (`lembrete_visita_dia`) — quando o atendimento estiver fora da janela de 24h, hoje só registramos evento. Posso criar em seguida se você quiser.
+- Mudar o lembrete D-1 (24h antes) existente — segue como está.
