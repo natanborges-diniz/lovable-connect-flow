@@ -1,38 +1,46 @@
-## Ajustes nas mensagens do lembrete D-Day
+## Janela de horário humano (escalonamento fora do expediente)
 
-Dois pequenos retoques de texto, sem mudar fluxo nem lógica.
+Gael continua atendendo 24/7 normalmente. A regra entra em ação **apenas no momento da escalada para humano**: se for fora do horário comercial, o cliente recebe aviso de que o humano retornará no próximo expediente.
 
-### 1. Mensagem do lembrete (cron)
+### Regra de negócio
 
-Arquivo: `supabase/functions/agendamentos-cron/index.ts` (linha 438)
+**Horário humano (timezone America/Sao_Paulo):**
+- Segunda a sexta: 09:00 – 18:00
+- Sábado: 08:00 – 12:00
+- Domingo: fechado
 
-Hoje:
-> Bom dia, {nome}! 👋 Passando pra lembrar da sua visita hoje às *{hora}* na {loja}. Posso confirmar que você vem? **Se preferir remarcar, é só me dizer 😉**
+**Comportamento na escalada (`atendimento.modo` → `humano`):**
 
-Novo (sem mencionar remarcação — só pergunta se confirma):
-> Bom dia, {nome}! 👋 Passando pra lembrar da sua visita hoje às *{hora}* na {loja}. Posso confirmar que você vem?
+- **Dentro do horário** → fluxo atual (mensagem padrão de transferência, fila humana absorve).
+- **Fora do horário** → mensagem específica:
+  > "Vou acionar nossa equipe pra você! 🙌 Só um detalhe: nosso time humano atende {dias_horario}. Como estamos fora do horário agora, assim que abrir o próximo expediente ({proxima_abertura}), eles te respondem por aqui. Pode deixar registrado o que precisa que já encaminho. 😉"
+  
+  - `{proxima_abertura}` calculado dinamicamente (ex.: "amanhã às 09:00", "segunda às 09:00", "hoje às 09:00" se for madrugada de dia útil).
+  - Card vai pra fila humana normalmente — só muda a comunicação ao cliente.
 
-A oferta de remarcar continua existindo no fluxo, mas só dispara se o cliente **não confirmar** / pedir para remarcar (a detecção de `isDiaDReschedule` no `ai-triage` permanece igual, já trata "remarcar / não consigo / outro dia").
+### Onde aplicar
 
-### 2. Mensagem de confirmação (ai-triage)
+**1. `supabase/functions/ai-triage/index.ts`**
+- Criar helper `isHorarioHumano()` e `proximaAberturaHumana()` (puro, em America/Sao_Paulo).
+- No ponto onde `precisa_humano = true` ativa a escalada (e onde o cliente pede humano explicitamente), checar horário:
+  - Se dentro: comportamento atual.
+  - Se fora: substituir a mensagem de transferência pela versão "fora de expediente" com a próxima abertura calculada.
+- Registrar evento `eventos_crm` com tipo `escalada_fora_horario` para visibilidade.
 
-Arquivo: `supabase/functions/ai-triage/index.ts` (linha 3053)
+**2. `supabase/functions/watchdog-loop-ia/index.ts`**
+- Quando o watchdog escalar por loop, também enviar uma mensagem discreta ao cliente; aplicar a mesma regra de horário (dentro = silencioso como hoje; fora = pequeno aviso de que humano responde no próximo expediente).
 
-Hoje:
-> Maravilha, {nome}! 🙌 Nosso consultor já fica te aguardando **com muito entusiasmo**. Até daqui a pouco!
+### Não muda
 
-Novo (remove "entusiasmo", ajusta verbo):
-> Maravilha, {nome}! 🙌 Nosso consultor estará te aguardando! Até daqui a pouco!
-
-A atualização do agendamento para status `confirmado` + log `agenda_confirmado` já acontece logo após essa resposta — permanece como está.
-
-### Deploy
-
-Após os ajustes, redeploy de `agendamentos-cron` e `ai-triage`.
+- Bot-lojas (corporativo) — segue 24/7.
+- IA segue respondendo normalmente em qualquer horário.
+- Lembretes D-Day, agendamentos-cron, recuperação — sem alteração.
+- Coluna do CRM / fila humana — sem alteração; card aparece igual.
 
 ### Memória
 
-Atualizar `mem://agendamentos/fluxo-e-automacoes-temporais` para registrar:
-- Lembrete D-Day **não menciona remarcação** proativamente.
-- Oferta de remarcar é **reativa** (somente se cliente sinalizar não-confirmação).
-- Mensagem padrão de confirmação fixada (sem "entusiasmo").
+Atualizar `mem://atendimento/modos-operacionais-ia-humano-hibrido` adicionando a janela de expediente humano e o comportamento de escalada fora do horário. Criar `mem://atendimento/horario-comercial-humano` com os horários canônicos.
+
+### Deploy
+
+Após edição: redeploy de `ai-triage` e `watchdog-loop-ia`.
