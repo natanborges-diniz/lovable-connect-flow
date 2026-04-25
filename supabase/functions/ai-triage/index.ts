@@ -2812,6 +2812,36 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           }
         }
 
+        // ── Coerência horário tool ↔ resposta ──
+        // Extrai a primeira hora citada na resposta do LLM (ex.: "às 17h", "17:00") e
+        // compara com a hora de args.data_horario em SP. Se divergir, aborta a criação,
+        // pede confirmação ao cliente e loga evento.
+        try {
+          const dtArg = new Date(args.data_horario);
+          const hSP = Number(dtArg.toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "America/Sao_Paulo" }).match(/\d+/)?.[0] ?? "-1");
+          const respText = String(args.resposta || "");
+          const m = respText.match(/\b(\d{1,2})\s*(?:h|:)\s*(\d{0,2})\b/i);
+          if (m) {
+            const hResp = Number(m[1]);
+            if (Number.isFinite(hResp) && hResp >= 0 && hResp <= 23 && hResp !== hSP) {
+              console.error(`[TOOL] Horário divergente: resposta diz ${hResp}h mas data_horario é ${hSP}h. Abortando criação.`);
+              await supabase.from("eventos_crm").insert({
+                contato_id: contatoId,
+                tipo: "agendamento_horario_divergente",
+                descricao: `IA tentou agendar ${hSP}h mas mencionou ${hResp}h na resposta. Pedindo confirmação ao cliente.`,
+                referencia_tipo: "atendimento",
+                referencia_id: atendimento_id,
+                metadata: { args, hora_resposta: hResp, hora_arg: hSP },
+              });
+              resposta = `Só pra eu não confundir: foi às *${hResp}h* ou *${hSP}h*? Me confirma o horário exato que eu já registro 🙏`;
+              // Sai do bloco sem criar agendamento
+              break;
+            }
+          }
+        } catch (e) {
+          console.error("[TOOL] coerência horário falhou:", e);
+        }
+
         // Check for duplicate: same contact + same store + same date
         const targetDate = (args.data_horario || "").substring(0, 10);
         const jaExiste = agendamentosAtivos.some((a: any) =>
