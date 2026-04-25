@@ -435,7 +435,7 @@ async function processLembreteDiaD(
     const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
     const lojaTxt = ag.loja_nome ? `*Diniz ${ag.loja_nome}*` : "*Diniz*";
 
-    const msg = `Bom dia${firstName ? ", " + firstName : ""}! 👋 Passando pra lembrar da sua visita hoje às *${hora}* na ${lojaTxt}. Posso confirmar que você vem? Se preferir remarcar, é só me dizer 😉`;
+    const msg = `Bom dia${firstName ? ", " + firstName : ""}! 👋 Passando pra lembrar da sua visita hoje às *${hora}* na ${lojaTxt}. Posso confirmar que você vem?`;
 
     const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
       method: "POST",
