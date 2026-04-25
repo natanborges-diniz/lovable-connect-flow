@@ -151,7 +151,19 @@ serve(async (req) => {
         referencia_id: at.id,
       });
 
-      escalated++;
+      // Fora do horário humano: avisa o cliente que o time retorna no próximo expediente
+      if (!isHorarioHumano()) {
+        try {
+          const aviso = `Pra te ajudar melhor, vou acionar nossa equipe humana 🙌 Nosso time atende de seg a sex das 09h às 18h e sábado das 08h às 12h. Como estamos fora do horário, assim que abrir o próximo expediente (${proximaAberturaHumana()}) eles te respondem por aqui 😉`;
+          await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ atendimento_id: at.id, texto: aviso }),
+          });
+        } catch (e) {
+          console.error("[WATCHDOG] Falha ao enviar aviso fora-horário:", e);
+        }
+      }
       details.push({ atendimento_id: at.id, similarity: sim });
     }
 
