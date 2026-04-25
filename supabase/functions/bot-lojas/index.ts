@@ -630,7 +630,7 @@ serve(async (req) => {
                 resposta = "⚠️ Número inválido. Escolha uma opção da lista ou *0* para voltar.";
               } else {
                 const displayValue = selected.tipo === "loja" ? `${selected.nome} (${selected.cod_empresa})` : selected.nome;
-                const newDados = { ...dados as Record<string, any>, [currentEtapa.campo]: displayValue };
+                const newDados: Record<string, any> = { ...dados as Record<string, any>, [currentEtapa.campo]: displayValue };
                 delete newDados._loja_setor_opcoes;
                 if (selected.cod_empresa) {
                   newDados.loja_ou_setor_cod = selected.cod_empresa;
@@ -780,7 +780,7 @@ serve(async (req) => {
     });
   } catch (e) {
     console.error("bot-lojas error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
+    return new Response(JSON.stringify({ error: (e as any) instanceof Error ? (e as Error).message : "Unknown error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

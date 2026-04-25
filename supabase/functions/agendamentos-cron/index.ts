@@ -112,7 +112,7 @@ serve(async (req) => {
     // ═══════════════════════════════════════════
     const { data: emRecuperacao } = await supabase
       .from("agendamentos")
-      .select("id, contato_id, tentativas_recuperacao, updated_at, atendimento_id")
+      .select("id, contato_id, tentativas_recuperacao, updated_at, atendimento_id, status")
       .in("status", ["no_show", "recuperacao"]);
 
     for (const ag of emRecuperacao || []) {

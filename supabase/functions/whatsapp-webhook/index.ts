@@ -589,7 +589,7 @@ serve(async (req) => {
           media_url: storedMediaUrl,
           mime_type: storedMediaMimeType,
           inline_base64: inlineMediaBase64,
-          is_transcribed_audio: isTranscribedAudio,
+          is_transcribed_audio: !!isTranscribedAudio,
         }).catch(
           (e) => console.error("AI triage trigger failed:", e)
         )
@@ -826,6 +826,8 @@ async function routeDemandaResposta(
   mediaUrl: string | null,
   mediaMime: string | null
 ): Promise<{ handled: boolean; demandaId?: string; numeroCurto?: number; action?: string }> {
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const cleanPhone = phone.replace(/\D/g, "");
   const variants = brPhoneCandidates(phone).map((v) => v.replace(/\D/g, ""));
   const phoneMatches = (other: string) => {
