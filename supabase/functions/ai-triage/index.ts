@@ -2873,6 +2873,18 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           }
         }
 
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: fn === "reagendar_visita" ? "reagendamento_visita" : "agendamento_visita",
+          descricao: `${fn === "reagendar_visita" ? "Reagendamento" : "Agendamento"}: ${args.loja_nome} em ${args.data_horario}`,
+          metadata: args,
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+        });
+      } else if (fn === "agendar_lembrete") {
+        resposta = args.resposta;
+        intencao = "lembrete";
+
         try {
           await supabase.from("lembretes").insert({
             contato_id: contatoId,
