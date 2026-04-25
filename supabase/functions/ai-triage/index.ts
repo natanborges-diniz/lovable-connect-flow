@@ -3463,6 +3463,25 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         console.log(`[GUARDRAIL] Saudação duplicada corrigida. Original: "${original}"`);
       }
     }
+    // ── 9.99. OVERRIDE: escalada fora do horário comercial humano ──
+    // Quando vai escalar para humano e estamos fora do expediente, troca a mensagem
+    // pra avisar que o time humano retorna no próximo expediente. Card vai pra fila normalmente.
+    if (precisa_humano && !isHorarioHumano()) {
+      const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      resposta = mensagemEscaladaForaHorario(_np);
+      validatorFlags.push("escalada_fora_horario");
+      console.log("[HORARIO-HUMANO] Escalada fora do expediente — mensagem ajustada");
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "escalada_fora_horario",
+          descricao: `Escalada para humano fora do expediente — próxima abertura: ${proximaAberturaHumana()}`,
+          metadata: { proxima_abertura: proximaAberturaHumana() },
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+        });
+      } catch (_) { /* noop */ }
+    }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
     // ── 10.1. AUDIO NUDGE — gently encourage text over audio ──
