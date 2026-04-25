@@ -100,13 +100,15 @@ serve(async (req) => {
       if (!res.ok) {
         const metaError = (data && data.error) ? data.error : data;
         const isCollision = String(metaError?.error_subcode || "") === "2388024";
+        // Retorna 200 em colisão para que supabase.functions.invoke entregue
+        // o body ao cliente (FunctionsHttpError em não-2xx esconde o JSON).
         return jsonRes({
           status: isCollision ? "name_language_collision" : "meta_error",
           error: isCollision ? "template_name_language_already_exists" : "meta_request_failed",
           error_code: metaError?.code ?? null,
           error_subcode: metaError?.error_subcode ?? null,
           meta_error: metaError,
-        }, isCollision ? 409 : 400);
+        }, isCollision ? 200 : 400);
       }
       return jsonRes({ status: "created", data });
     }
