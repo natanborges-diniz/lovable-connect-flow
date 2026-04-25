@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
         .eq("id", user_id)
         .maybeSingle();
       console.log(
-        `[admin-reset-password] admin=${userData.user.email} resetou senha de user_id=${user_id} (${targetProfile?.nome ?? "?"})`,
+        `[admin-reset-password] reset senha user_id=${user_id} (${targetProfile?.nome ?? "?"}) internal=${isInternalCall}`,
       );
     } catch (_) {}
 
