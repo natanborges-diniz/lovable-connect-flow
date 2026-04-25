@@ -168,12 +168,25 @@ serve(async (req) => {
 });
 
 // ═══════════════════════════════════════════
+// Helper: Janela de comunicação outbound ao cliente (08:00–21:00 SP)
+// Lembretes/cobranças automáticas só saem dentro dessa janela.
+// ═══════════════════════════════════════════
+function dentroDeJanelaComunicacaoCliente(now: Date): boolean {
+  const sp = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const h = sp.getHours();
+  return h >= 8 && h < 21;
+}
+
+// ═══════════════════════════════════════════
 // Helper: Reenvio de lembrete ao cliente
 // ═══════════════════════════════════════════
 async function processLembreteRetry(
   supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[],
   horasReenvio: number
 ) {
+  // Guard de janela: nunca dispara lembrete fora de 08:00–21:00 SP.
+  if (!dentroDeJanelaComunicacaoCliente(now)) return;
+
   const { data: pendentes } = await supabase
     .from("agendamentos")
     .select("id, contato_id, atendimento_id, data_horario, updated_at, loja_nome")
