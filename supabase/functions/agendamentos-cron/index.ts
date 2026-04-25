@@ -442,10 +442,69 @@ async function processLembreteDiaD(
       continue;
     }
 
-    const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
-    const firstName = contato?.nome?.split(" ")[0] || "";
+    // ── Validação de horário do agendamento vs. expediente da loja ──
+    // Se o horário marcado está fora do expediente, não envia lembrete automático
+    // (o agendamento provavelmente foi gravado com horário errado pela IA).
     const dt = new Date(ag.data_horario);
     const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const dtSP = new Date(dt.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+    const dow = dtSP.getDay();
+    const minutosAg = dtSP.getHours() * 60 + dtSP.getMinutes();
+
+    const { data: lojaInfo } = await supabase
+      .from("telefones_lojas")
+      .select("horario_abertura, horario_fechamento")
+      .ilike("nome_loja", `%${ag.loja_nome}%`)
+      .eq("ativo", true)
+      .limit(1)
+      .maybeSingle();
+
+    const abertura = (lojaInfo?.horario_abertura || "08:00").split(":").map(Number);
+    const fechamento = (lojaInfo?.horario_fechamento || "19:00").split(":").map(Number);
+    const minutosAbertura = (abertura[0] || 8) * 60 + (abertura[1] || 0);
+    const minutosFechamento = (fechamento[0] || 19) * 60 + (fechamento[1] || 0);
+
+    const lojaFechadaDomingo = dow === 0;
+    const foraExpediente = minutosAg < minutosAbertura || minutosAg >= minutosFechamento;
+
+    if (lojaFechadaDomingo || foraExpediente) {
+      console.warn(`[lembrete-dia-d] Agendamento ${ag.id} fora do expediente (loja=${ag.loja_nome}, hora=${hora}, dow=${dow}). Não envia lembrete.`);
+      // Marca como skip pra não tentar de novo hoje + escala para humano
+      await supabase.from("agendamentos").update({
+        metadata: { ...md, lembrete_dia_d_skipped_at: new Date().toISOString(), skip_motivo: "horario_invalido" },
+      }).eq("id", ag.id);
+      await supabase.from("eventos_crm").insert({
+        contato_id: ag.contato_id,
+        tipo: "agendamento_horario_invalido",
+        descricao: `Lembrete dia-D NÃO enviado: horário ${hora} fora do expediente da loja ${ag.loja_nome} (dow=${dow}). Revisar manualmente.`,
+        referencia_id: ag.id,
+        referencia_tipo: "agendamento",
+      });
+      // Passa atendimento para humano para revisão
+      if (ag.atendimento_id) {
+        await supabase.from("atendimentos").update({ modo: "humano", updated_at: new Date().toISOString() }).eq("id", ag.atendimento_id);
+      }
+      continue;
+    }
+
+    // ── Lock atômico: marca lembrete_dia_d_at ANTES do envio ──
+    // Se outro worker concorrente já marcou, este pula. Evita duplicação.
+    const stampNow = new Date().toISOString();
+    const { data: locked } = await supabase
+      .from("agendamentos")
+      .update({ metadata: { ...md, lembrete_dia_d_at: stampNow } })
+      .eq("id", ag.id)
+      .is("metadata->>lembrete_dia_d_at", null)
+      .select("id")
+      .maybeSingle();
+
+    if (!locked) {
+      console.log(`[lembrete-dia-d] ${ag.id} já foi marcado por outro worker — pulando.`);
+      continue;
+    }
+
+    const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
+    const firstName = contato?.nome?.split(" ")[0] || "";
     const lojaTxt = ag.loja_nome ? `*Diniz ${ag.loja_nome}*` : "*Diniz*";
 
     const msg = `Bom dia${firstName ? ", " + firstName : ""}! 👋 Passando pra lembrar da sua visita hoje às *${hora}* na ${lojaTxt}. Posso confirmar que você vem?`;
@@ -458,8 +517,9 @@ async function processLembreteDiaD(
 
     const sentOk = sendRes.ok;
 
+    // Atualiza só o ok flag (timestamp já gravado no lock)
     await supabase.from("agendamentos").update({
-      metadata: { ...md, lembrete_dia_d_at: new Date().toISOString(), lembrete_dia_d_ok: sentOk },
+      metadata: { ...md, lembrete_dia_d_at: stampNow, lembrete_dia_d_ok: sentOk },
     }).eq("id", ag.id);
 
     await supabase.from("eventos_crm").insert({
