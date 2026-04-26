@@ -488,7 +488,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
-  if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor|barato|caro|mais em conta|econom/.test(n)) {
+  if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor|barato|caro|mais em conta|econom|quantos?\b|qto|qnto|biofinity|acuvue|oasys|solflex|sol[oó]tica|dnz|air\s*optix|hidrocor/.test(n)) {
     return {
       resposta:
         "Boa! Me manda uma foto da sua receita que eu já te passo os valores certinhos. Se ainda não tem receita, posso te orientar também 😉",
