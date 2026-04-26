@@ -64,6 +64,11 @@ Se `confidence < 0.6` ou `needs_human_review=true` ou eyes vazios: pedir valores
 - Flags: `forced_interpretar_receita_retry_ok` / `forced_interpretar_receita_low_confidence`.
 - Princípio: a frase "Já estou analisando…" só pode existir se houver follow-up garantido na mesma execução.
 
+**Leticia (5511947839586, 25-04-2026) — pergunta de preço por marca específica:** Após receber orçamento de LC, cliente perguntou "quantos está a Biofinity". IA respondeu com fallback genérico ("Sobre o que a gente estava falando…") porque (a) regex de preço em `detectForcedToolIntent` exigia `\bquanto\b` e não casava com "quantos" (plural/typo); (b) `LC_BRAND_REGEX` só era usado em fechamento_lc, nunca como sinal de pergunta de preço; (c) `deterministicIntentFallback` também não tinha marcas no regex de orçamento. Correções:
+- Regex de preço ampliado: `quantos?|qto|qnto|custa|sai por|fica por|tabela`.
+- Novo branch em `detectForcedToolIntent`: se `isLCContext && hasReceitas && LC_BRAND_REGEX.test(...)` → força `consultar_lentes_contato` com reason "cliente perguntou sobre marca específica de LC".
+- `deterministicIntentFallback` regex de orçamento agora inclui `biofinity|acuvue|oasys|solflex|sol[oó]tica|dnz|air optix|hidrocor` + variações de "quanto".
+
 
 ## Regra desativada
 `lentes_de_contato` em `ia_regras_proibidas` foi desativada (id 489cef81-bbc9-4d87-b1f3-0a785afcca21).
