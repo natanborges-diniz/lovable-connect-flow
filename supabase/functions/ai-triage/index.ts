@@ -295,12 +295,19 @@ function detectForcedToolIntent(
     }
   }
 
-  // Quote / pricing keywords
-  if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
+  // Quote / pricing keywords (aceita variações: quanto/quantos/qto/qnto, custa/sai/fica)
+  if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quantos?|qto|qnto|custa|sai\s+por|fica\s+por|tabela|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
     const isLC = isLCContext || /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
     if (hasReceitas) return { tool: isLC ? "consultar_lentes_contato" : "consultar_lentes", reason: `cliente pediu orçamento${isLC ? " de LC" : ""} e há receita salva` };
     if (hasUnparsedImage) return { tool: "interpretar_receita", reason: "cliente pediu orçamento e há imagem pendente" };
     return { tool: "responder_pedindo_receita", reason: "cliente pediu orçamento mas não há receita" };
+  }
+
+  // Pergunta sobre marca específica de LC = pedido de preço/disponibilidade implícito.
+  // Cobre casos como "quantos está a Biofinity", "tem Acuvue?", "Solflex serve pra mim?".
+  // Só dispara em contexto LC + receita salva pra evitar falso positivo em conversas iniciais.
+  if (isLCContext && hasReceitas && LC_BRAND_REGEX.test(lastInboundText)) {
+    return { tool: "consultar_lentes_contato", reason: "cliente perguntou sobre marca específica de LC" };
   }
 
   // Análise direta da receita: "analise", "leia", "lê pra mim", "pode ler", "vê pra mim", "dá uma olhada"
@@ -481,7 +488,7 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
-  if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor|barato|caro|mais em conta|econom/.test(n)) {
+  if (/lente|oculos|óculos|arma[çc]|comprar|or[çc]amento|pre[çc]o|valor|barato|caro|mais em conta|econom|quantos?\b|qto|qnto|biofinity|acuvue|oasys|solflex|sol[oó]tica|dnz|air\s*optix|hidrocor/.test(n)) {
     return {
       resposta:
         "Boa! Me manda uma foto da sua receita que eu já te passo os valores certinhos. Se ainda não tem receita, posso te orientar também 😉",
