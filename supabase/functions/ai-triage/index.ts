@@ -327,9 +327,30 @@ function detectForcedToolIntent(
   hasUnparsedImage: boolean,
   isLCContext = false,
   hasLCQuotePresented = false,
+  lastOutboundText = "",
 ): { tool: string; reason: string } | null {
   const t = norm(lastInboundText);
   if (!t) return null;
+
+  // ── REGIÃO PÓS-RECEITA: cliente respondeu região logo após IA prometer orçamento ──
+  // Caso Paulo Henrique 2026-04-27: IA leu receita + perguntou região; cliente disse
+  // "Osasco centro" → IA escalou para humano em vez de chamar consultar_lentes.
+  // Se a última saída da IA pediu região/bairro E há receita válida E o inbound atual
+  // contém um indicador de região (cidade, bairro, CEP), forçamos consultar_lentes.
+  if (hasReceitas && !isLCContext && lastOutboundText) {
+    const askedRegion = /\b(regi[aã]o|bairro|cidade|cep|onde voc[eê] (est[aá]|mora|fica)|qual\s+(bairro|cidade|regi[aã]o))\b/i.test(lastOutboundText);
+    const looksLikeRegionAnswer =
+      /\b\d{5}-?\d{3}\b/.test(lastInboundText) ||
+      /\b(osasco|carapicu[ií]ba|barueri|cotia|itapevi|jandira|santana de parna[ií]ba|alphaville|s[aã]o paulo|sp\b|capital|zona\s+(sul|norte|leste|oeste)|centro|jardim|vila|parque|jd\.?\s|vl\.?\s|pq\.?\s)/i.test(lastInboundText) ||
+      // resposta curta tipo "Osasco centro", "Centro", "Vila Yara" — 1 a 4 palavras sem verbos
+      (lastInboundText.trim().split(/\s+/).length <= 4 &&
+       !/[?!]/.test(lastInboundText) &&
+       /^[A-Za-zÀ-ÿ\s]+$/.test(lastInboundText.trim()) &&
+       !/\b(sim|n[aã]o|ok|claro|tudo|bom|boa|oi|ol[aá]|obrigado?|valeu)\b/i.test(t));
+    if (askedRegion && looksLikeRegionAnswer) {
+      return { tool: "consultar_lentes", reason: "cliente respondeu região após IA prometer orçamento" };
+    }
+  }
 
   // ── FECHAMENTO LC: cliente escolheu marca OU pediu reservar em contexto LC ──
   // Só dispara se: (a) há receita salva, (b) contexto é LC, (c) já apresentamos
@@ -2123,7 +2144,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             role: "system",
             content: isLCContextGlobal
               ? "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO — LENTES DE CONTATO] Já existe receita interpretada e o contexto é LENTES DE CONTATO. PROIBIDO responder com 'posso seguir por dois caminhos?', 'quer opções ou orçamento?' ou pedir confirmação genérica. PROIBIDO escalar para humano nesse cenário. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes_contato AGORA com os valores da receita mais recente (NÃO consultar_lentes — esse é para óculos), 2) apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta, priorizando DNZ quando compatível, 3) se cliente mencionou esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva) MAS sem omitir quinzenal/mensal — o cliente decide, 4) finalize perguntando a região/bairro pra indicar a loja mais próxima e sugerir agendamento. NUNCA encerre pedindo só marca/tipo se já há receita."
-              : "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente, 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
+              : "[SISTEMA: FLUXO PÓS-RECEITA OBRIGATÓRIO] Já existe receita interpretada (ver RECEITAS JÁ INTERPRETADAS). PROIBIDO responder com 'posso te mostrar uma base?', 'quer que eu mostre opções?' ou qualquer pedido de confirmação genérica. PROIBIDO escalar para humano com frases como 'vou encaminhar para um Consultor', 'para esse grau específico vou passar para alguém da equipe', 'um Consultor pode detalhar melhor' — receita com esférico até ±10 e cilíndrico até ±4 é trivial e tem orçamento automático. Escalar SÓ se: (a) consultar_lentes retornou ZERO opções, (b) cliente pediu humano explicitamente, ou (c) reclamação grave. AÇÃO OBRIGATÓRIA: 1) chame consultar_lentes AGORA com os valores da receita mais recente, 2) apresente 2-3 opções de orçamento (DNZ entrada / DMAX custo-benefício / HOYA premium) com os valores retornados, 3) pergunte a região/bairro do cliente (se ainda não perguntou), 4) sugira agendamento na loja mais próxima. Confirmação dos valores SÓ se a receita estiver marcada com confiança baixa — neste caso mostre 'OD X,XX / OE Y,YY, confere?' explicitamente. NUNCA repita a mesma pergunta de confirmação 2× — isso configura loop e será escalado.",
           }]
         : []),
       ...(isDetalhamentoContext
@@ -2365,12 +2386,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       typeof m === "string" && /\b(R\$|caixa[s]?|descarte|di[aá]ria|quinzenal|mensal|t[oó]rica|acuvue|biofinity|dnz|air\s*optix|solflex|sol[oó]tica)\b/i.test(m),
     );
 
+    const lastOutboundForIntent = (recentOutbound || []).slice(-1)[0] || "";
     const forcedIntent = detectForcedToolIntent(
       lastInboundText,
       hasValidReceitas,
       hasRecentUnparsedPrescriptionImage && !hasValidReceitas,
       isLCContextGlobal,
       hasLCQuotePresented,
+      lastOutboundForIntent,
     );
 
     // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
@@ -2742,16 +2765,19 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           metadata: rxData, referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
-        // ── AUTO-CHAIN: se a receita ficou válida E há intent claro de orçamento
-        // (texto recente do cliente menciona orçamento/preço/lentes), gera o quote
-        // imediatamente em vez de só dizer "li sua receita". Caso André 2026-04-27.
+        // ── AUTO-CHAIN: pós-OCR válido em contexto de óculos, encadeia consultar_lentes
+        // POR PADRÃO. Casos André + Paulo Henrique 2026-04-27: regex anterior exigia
+        // keyword explícita ("orçamento/preço") e a IA gastava 1 turno extra só dizendo
+        // "vou separar opções" → cliente desistia. Agora só pulamos o auto-chain se o
+        // cliente sinalizou explicitamente outra intenção (guardar receita / depois).
         const rxJustValid = isReceitaValida(rxWithLabel);
         const recentInboundJoined = inboundMsgs.slice(-5).map((m: any) => String(m.conteudo || "")).join(" | ").toLowerCase();
-        const wantsQuote = /\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|op[cç][oõ]es?|lentes?\s+compat|cota[cç][aã]o|s[oó]\s+preciso\s+das?\s+lentes?)\b/i.test(recentInboundJoined);
         const isLCRecent = /\b(lente[s]?\s+de\s+contato|\blc\b|di[aá]ria|quinzenal|mensal|t[oó]rica|gelatinosa)\b/i.test(recentInboundJoined);
+        const explicitOptOut = /\b(s[oó]\s+(quero|queria|gostaria)\s+(que\s+)?(voc[eê]\s+)?guarde|guarda?r?\s+(a\s+)?receita|depois\s+(eu\s+)?(te\s+)?falo|n[aã]o\s+quero\s+or[cç]amento|s[oó]\s+(uma|tirando)\s+d[uú]vida)\b/i.test(recentInboundJoined);
+        const shouldAutoChain = rxJustValid && !isLCRecent && !explicitOptOut;
 
-        if (rxJustValid && wantsQuote && !isLCRecent) {
-          console.log(`[AUTO-CHAIN] OCR válido + intent orçamento → encadeando consultar_lentes (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%)`);
+        if (shouldAutoChain) {
+          console.log(`[AUTO-CHAIN] OCR válido + óculos (sem opt-out) → encadeando consultar_lentes (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%)`);
           const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, {});
           resposta = quoteResult.resposta;
           intencao = "orcamento";
@@ -2763,7 +2789,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         } else {
           resposta = args.resposta;
         }
-        console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${rxJustValid && wantsQuote ? "auto-chained" : "waiting for client direction"}`);
+        console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${shouldAutoChain ? "auto-chained" : (explicitOptOut ? "client opted-out" : (isLCRecent ? "LC context" : "no chain"))}`);
 
       } else if (fn === "consultar_lentes") {
         // ── QUOTE ENGINE: triggered by client interest ──
