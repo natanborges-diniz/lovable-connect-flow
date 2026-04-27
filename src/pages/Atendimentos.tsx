@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
 import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
+import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
