@@ -2386,12 +2386,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       typeof m === "string" && /\b(R\$|caixa[s]?|descarte|di[aá]ria|quinzenal|mensal|t[oó]rica|acuvue|biofinity|dnz|air\s*optix|solflex|sol[oó]tica)\b/i.test(m),
     );
 
+    const lastOutboundForIntent = (recentOutbound || []).slice(-1)[0] || "";
     const forcedIntent = detectForcedToolIntent(
       lastInboundText,
       hasValidReceitas,
       hasRecentUnparsedPrescriptionImage && !hasValidReceitas,
       isLCContextGlobal,
       hasLCQuotePresented,
+      lastOutboundForIntent,
     );
 
     // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
