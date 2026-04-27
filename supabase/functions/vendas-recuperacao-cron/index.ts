@@ -134,7 +134,9 @@ async function processContato(
   supabase: any, SUPABASE_URL: string, SUPABASE_SERVICE_ROLE_KEY: string,
   contato: any, colunas: any[], perdidosCol: any, now: Date,
   DELAY_HOURS: number[], FINAL_WAIT_HOURS: number, MAX_TENTATIVAS: number,
-  INACTIVITY_THRESHOLDS: Record<string, number>
+  INACTIVITY_THRESHOLDS: Record<string, number>,
+  HUMANO_DELAY_HOURS: number[], HUMANO_FINAL_WAIT_HOURS: number,
+  HUMANO_MAX_TENTATIVAS: number, HUMANO_COOLDOWN_HORAS: number
 ) {
   const result = { processed: 0, movedToPerdidos: 0, inactivityAlerts: 0 };
   const meta = (contato.metadata as any) || {};
@@ -146,7 +148,7 @@ async function processContato(
 
   const { data: atendimento } = await supabase
     .from("atendimentos")
-    .select("id, created_at, modo")
+    .select("id, created_at, modo, metadata")
     .eq("contato_id", contato.id)
     .eq("canal", "whatsapp")
     .neq("status", "encerrado")
@@ -156,42 +158,16 @@ async function processContato(
 
   if (!atendimento) return result;
 
-  // Skip contacts in human mode
+  // ─────────────────────────────────────────────────────────────
+  // MODO HUMANO/HÍBRIDO — cadência via templates Meta (>24h janela)
+  // ─────────────────────────────────────────────────────────────
   if (atendimento.modo === "humano" || atendimento.modo === "hibrido") {
-    // Inactivity alerts for human-mode
-    const { data: lastInbound } = await supabase
-      .from("mensagens")
-      .select("created_at")
-      .eq("atendimento_id", atendimento.id)
-      .eq("direcao", "inbound")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (lastInbound) {
-      const hoursSinceInbound = (now.getTime() - new Date(lastInbound.created_at).getTime()) / (1000 * 60 * 60);
-      const threshold = INACTIVITY_THRESHOLDS[colNome] || INACTIVITY_THRESHOLDS.default;
-      if (hoursSinceInbound >= threshold) {
-        const { data: existingNotif } = await supabase
-          .from("notificacoes")
-          .select("id")
-          .eq("referencia_id", contato.id)
-          .eq("tipo", "inatividade_humano")
-          .gte("created_at", new Date(now.getTime() - threshold * 60 * 60 * 1000).toISOString())
-          .limit(1);
-
-        if (!existingNotif?.length) {
-          await supabase.from("notificacoes").insert({
-            titulo: `⚠ Inatividade: ${contato.nome}`,
-            mensagem: `Contato em "${colNome}" aguardando atendimento humano há ${Math.round(hoursSinceInbound)}h`,
-            tipo: "inatividade_humano",
-            referencia_id: contato.id,
-          });
-          result.inactivityAlerts++;
-        }
-      }
-    }
-    return result;
+    return await processHumano(
+      supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+      contato, atendimento, colNome, perdidosCol, now,
+      HUMANO_DELAY_HOURS, HUMANO_FINAL_WAIT_HOURS, HUMANO_MAX_TENTATIVAS,
+      HUMANO_COOLDOWN_HORAS, INACTIVITY_THRESHOLDS, result
+    );
   }
 
   // Find last inbound message time
