@@ -1151,6 +1151,11 @@ function buildSystemPromptFromCompiled(opts: {
     s.push(buildProhibitionsBlock(opts.regrasProibidas));
   }
 
+  // Inject location context (CEP/região do cliente) — alta prioridade contra repetição de pergunta
+  if ((opts as any).locationCtx) {
+    s.push((opts as any).locationCtx);
+  }
+
   // Inject prescription context
   if (opts.receitaCtx) {
     s.push(opts.receitaCtx);
