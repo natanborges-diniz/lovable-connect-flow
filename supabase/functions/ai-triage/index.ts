@@ -440,9 +440,9 @@ function detectPrescriptionCorrection(text: string): {
     const r = new RegExp(`(?:od|oe|os)?\\s*${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?`, "i");
     const mm = block.match(r);
     if (mm) {
-      if (eye.sphere == null) eye.sphere = parseNum(mm[1]);
-      if (eye.cylinder == null) eye.cylinder = parseNum(mm[2]);
-      if (eye.axis == null) eye.axis = parseNum(mm[3]);
+      if (eye.sphere == null) eye.sphere = parseDiopter(mm[1]);
+      if (eye.cylinder == null) eye.cylinder = parseDiopter(mm[2]);
+      if (eye.axis == null) eye.axis = parseAxis(mm[3]);
     }
   };
   if (longeMatch && od.sphere == null) eyeFromBlock(longeMatch[1], od);
