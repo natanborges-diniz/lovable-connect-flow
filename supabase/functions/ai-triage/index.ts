@@ -1899,7 +1899,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         nomeWhatsapp: nomePerfilWhatsapp,
         nomeAtual: contatoNomeAtual,
         nomeConfirmado,
-      });
+        locationCtx,
+      } as any);
 
       console.log(`[CONTEXT] Using COMPILED prompt (${compiledPrompt.length}ch) with slot replacement`);
     } else {
