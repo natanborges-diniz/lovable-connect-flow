@@ -2695,8 +2695,11 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           const cylValues = [od.cylinder, oe.cylinder].filter((v: any) => typeof v === "number") as number[];
           const addValues = [od.add, oe.add].filter((v: any) => typeof v === "number") as number[];
 
-          if (rxType === "unknown" || sphereValues.length === 0) {
-            resposta = args.resposta_fallback || "Não consegui identificar o grau completo da receita. Pode me enviar outra foto mais nítida?";
+          // Receita parcial/incompleta → pede dados objetivos em vez de culpar "grau"
+          const sphereLooksAbsurd = sphereValues.some((v: number) => Math.abs(v) > 25);
+          if (rxType === "unknown" || sphereValues.length === 0 || sphereLooksAbsurd) {
+            resposta = "Pra montar o orçamento certinho, me confirma os valores da receita por texto, por favor?\n• OD: esférico / cilíndrico / eixo\n• OE: esférico / cilíndrico / eixo\n(Se tiver adição pra perto, manda também 😊)";
+            console.log(`[QUOTE] Prescription incomplete (rxType=${rxType}, sphereCount=${sphereValues.length}, absurd=${sphereLooksAbsurd}) — asking structured values`);
           } else {
             const worstSphere = sphereValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0);
             const worstCylinder = cylValues.length > 0 ? cylValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0) : 0;
