@@ -327,9 +327,30 @@ function detectForcedToolIntent(
   hasUnparsedImage: boolean,
   isLCContext = false,
   hasLCQuotePresented = false,
+  lastOutboundText = "",
 ): { tool: string; reason: string } | null {
   const t = norm(lastInboundText);
   if (!t) return null;
+
+  // ── REGIÃO PÓS-RECEITA: cliente respondeu região logo após IA prometer orçamento ──
+  // Caso Paulo Henrique 2026-04-27: IA leu receita + perguntou região; cliente disse
+  // "Osasco centro" → IA escalou para humano em vez de chamar consultar_lentes.
+  // Se a última saída da IA pediu região/bairro E há receita válida E o inbound atual
+  // contém um indicador de região (cidade, bairro, CEP), forçamos consultar_lentes.
+  if (hasReceitas && !isLCContext && lastOutboundText) {
+    const askedRegion = /\b(regi[aã]o|bairro|cidade|cep|onde voc[eê] (est[aá]|mora|fica)|qual\s+(bairro|cidade|regi[aã]o))\b/i.test(lastOutboundText);
+    const looksLikeRegionAnswer =
+      /\b\d{5}-?\d{3}\b/.test(lastInboundText) ||
+      /\b(osasco|carapicu[ií]ba|barueri|cotia|itapevi|jandira|santana de parna[ií]ba|alphaville|s[aã]o paulo|sp\b|capital|zona\s+(sul|norte|leste|oeste)|centro|jardim|vila|parque|jd\.?\s|vl\.?\s|pq\.?\s)/i.test(lastInboundText) ||
+      // resposta curta tipo "Osasco centro", "Centro", "Vila Yara" — 1 a 4 palavras sem verbos
+      (lastInboundText.trim().split(/\s+/).length <= 4 &&
+       !/[?!]/.test(lastInboundText) &&
+       /^[A-Za-zÀ-ÿ\s]+$/.test(lastInboundText.trim()) &&
+       !/\b(sim|n[aã]o|ok|claro|tudo|bom|boa|oi|ol[aá]|obrigado?|valeu)\b/i.test(t));
+    if (askedRegion && looksLikeRegionAnswer) {
+      return { tool: "consultar_lentes", reason: "cliente respondeu região após IA prometer orçamento" };
+    }
+  }
 
   // ── FECHAMENTO LC: cliente escolheu marca OU pediu reservar em contexto LC ──
   // Só dispara se: (a) há receita salva, (b) contexto é LC, (c) já apresentamos
