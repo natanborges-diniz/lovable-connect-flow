@@ -2403,6 +2403,24 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       lastOutboundForIntent,
     );
 
+    // ── REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR ──
+    // Caso Paulo Henrique 2026-04-27 16:49: cliente disse "Quero orçamento da 1 e 2 por favor"
+    // referenciando opções do orçamento que o operador já enviou. IA não tinha esse contexto
+    // como intent → caiu no fallback "vou encaminhar para Consultor". Detecta a referência
+    // explícita a número de opção e injeta hint pra IA recapitular SEM rodar consultar_lentes
+    // de novo (que poderia trazer opções diferentes).
+    const referenciaOpcao = /\b(op[cç][aã]o\s*\d+|n[uú]mero\s*\d+|da\s*\d+(\s*[ee]\s*\d+)?\s+(por favor|pf|pfv)?|a\s+\d+(\s*[ee]\s*\d+)?\b)\b/i;
+    const ultimoOutboundComOrcamento = (recentOutbound || []).slice(-3).some((m: string) =>
+      typeof m === "string" && /R\$\s*[\d.,]+/i.test(m) && /\b(1\.|2\.|3\.|💚|💛|💎|opç|DNZ|DMAX|HOYA|ESSILOR|ZEISS)/i.test(m)
+    );
+    if (referenciaOpcao.test(lastInboundText) && ultimoOutboundComOrcamento) {
+      messages.push({
+        role: "system",
+        content: "[SISTEMA: REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR] O cliente está pedindo detalhes ou confirmação de opções específicas (ex: 'da 1 e 2', 'a opção 2') referenciando um orçamento que JÁ foi enviado nas últimas mensagens (procure por R$ e nomes de marcas como DNZ/DMAX/HOYA/ESSILOR no histórico outbound recente). AÇÃO OBRIGATÓRIA: 1) recapitule SOMENTE as opções que ele pediu (com nome e valor exatos do que foi enviado antes — NÃO invente novos valores nem rode consultar_lentes de novo, isso pode trazer opções diferentes); 2) pergunte se quer agendar pra ver na loja. PROIBIDO escalar para humano. PROIBIDO ignorar a referência."
+      });
+      console.log(`[REFERENCIA-OPCAO] Cliente referenciou opção do orçamento anterior — injetando hint`);
+    }
+
     // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
     // LC NÃO requer visita à loja. Cliente escolheu marca / pediu reservar:
     // confirmamos a escolha, avisamos que o Consultor humano dá continuidade
