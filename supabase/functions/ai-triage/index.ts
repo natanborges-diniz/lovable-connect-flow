@@ -2445,9 +2445,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       const linhaEscolha = marcaEcho
         ? `${saudacao} — anotei sua escolha: *${marcaEcho}* 👌`
         : `${saudacao} — anotei sua escolha 👌`;
+      const fechamentoLinhaConsultor = isHorarioHumano()
+        ? "Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido — com ele você confirma o modelo certo da sua receita, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝"
+        : `Já registrei sua escolha pra um Consultor finalizar o pedido (confirmação do modelo, escolha da loja de retirada e link de pagamento). Nosso time humano atende seg-sex das 09h às 18h e sábado das 08h às 12h — assim que abrir o próximo expediente (${proximaAberturaHumana()}) ele te chama por aqui 🤝`;
       const fechamentoMsg = [
         linhaEscolha,
-        "Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido — com ele você confirma o modelo certo da sua receita, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝",
+        fechamentoLinhaConsultor,
       ].join("\n\n");
 
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, fechamentoMsg);
