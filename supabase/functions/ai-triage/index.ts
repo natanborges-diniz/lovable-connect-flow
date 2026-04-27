@@ -3879,16 +3879,34 @@ async function runConsultarLentes(
   const midIndex = Math.floor(lenses.length / 2);
   const mid = lenses.length >= 3 ? lenses[midIndex] : null;
 
+  // Gap-aware: se a "premium" é >2× o preço da econômica, esconde faixa cara
+  // (evita o efeito DNZ R$520 + ZEISS R$1.949 lado a lado, que parece esquisito).
+  // Mostra só as econômicas próximas e oferece detalhamento sob demanda.
+  const economyPrice = Number(economy.price_brl);
+  const premiumPrice = Number(premium.price_brl);
+  const hasBigGap = premiumPrice > economyPrice * 2 && lenses.length >= 2;
+
   const formatLens = (l: any, label: string) =>
     `${label}: *${l.brand} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
 
   let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
-  quoteMsg += formatLens(economy, "💚 Econômica");
-  if (mid && mid.id !== economy.id && mid.id !== premium.id) {
-    quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
-  }
-  if (premium.id !== economy.id) {
-    quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+
+  if (hasBigGap) {
+    // Pega até 2 lentes na faixa de entrada (até 2× o preço da econômica).
+    const entryBand = lenses.filter((l: any) => Number(l.price_brl) <= economyPrice * 2).slice(0, 2);
+    quoteMsg += formatLens(entryBand[0], "🟢 Mais em conta");
+    if (entryBand.length > 1) {
+      quoteMsg += "\n" + formatLens(entryBand[1], "🟡 Um passo acima");
+    }
+    quoteMsg += `\n\n📌 Temos opções premium a partir de R$ ${premiumPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (filtro azul, marcas top como ZEISS/ESSILOR) — quer que eu detalhe alguma ou prefere ver pessoalmente na loja?`;
+  } else {
+    quoteMsg += formatLens(economy, "💚 Econômica");
+    if (mid && mid.id !== economy.id && mid.id !== premium.id) {
+      quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
+    }
+    if (premium.id !== economy.id) {
+      quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+    }
   }
   quoteMsg += "\n\nPosso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊";
 
