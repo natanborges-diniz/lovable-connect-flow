@@ -2413,12 +2413,18 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     const ultimoOutboundComOrcamento = (recentOutbound || []).slice(-3).some((m: string) =>
       typeof m === "string" && /R\$\s*[\d.,]+/i.test(m) && /\b(1\.|2\.|3\.|💚|💛|💎|opç|DNZ|DMAX|HOYA|ESSILOR|ZEISS)/i.test(m)
     );
+    // Quando essa detecção dispara, FORÇAMOS tool_choice=responder no gateway.
+    // Hint sozinho já se mostrou insuficiente (caso Paulo Henrique 16:49-16:52, IA
+    // ignorou e rodou consultar_lentes de novo trazendo Eyezen/ZEISS R$1985-2190
+    // em vez de recapitular DNZ/DMAX/HOYA do orçamento humano anterior).
+    let forceResponderTool = false;
     if (referenciaOpcao.test(lastInboundText) && ultimoOutboundComOrcamento) {
       messages.push({
         role: "system",
-        content: "[SISTEMA: REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR] O cliente está pedindo detalhes ou confirmação de opções específicas (ex: 'da 1 e 2', 'a opção 2') referenciando um orçamento que JÁ foi enviado nas últimas mensagens (procure por R$ e nomes de marcas como DNZ/DMAX/HOYA/ESSILOR no histórico outbound recente). AÇÃO OBRIGATÓRIA: 1) recapitule SOMENTE as opções que ele pediu (com nome e valor exatos do que foi enviado antes — NÃO invente novos valores nem rode consultar_lentes de novo, isso pode trazer opções diferentes); 2) pergunte se quer agendar pra ver na loja. PROIBIDO escalar para humano. PROIBIDO ignorar a referência."
+        content: "[SISTEMA: REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR] O cliente está pedindo detalhes ou confirmação de opções específicas (ex: 'da 1 e 2', 'a opção 2') referenciando um orçamento que JÁ foi enviado nas últimas mensagens (procure por R$ e nomes de marcas como DNZ/DMAX/HOYA/ESSILOR no histórico outbound recente). AÇÃO OBRIGATÓRIA: use a tool *responder* (NÃO consultar_lentes — você está bloqueado de chamar consultar_lentes nesse turno). Recapitule SOMENTE as opções que ele pediu, com nome e valor exatos do que foi enviado antes (NÃO invente novos valores). Pergunte se quer agendar pra ver na loja. PROIBIDO escalar para humano. PROIBIDO ignorar a referência."
       });
-      console.log(`[REFERENCIA-OPCAO] Cliente referenciou opção do orçamento anterior — injetando hint`);
+      forceResponderTool = true;
+      console.log(`[REFERENCIA-OPCAO] Cliente referenciou opção do orçamento anterior — forçando tool_choice=responder`);
     }
 
     // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
