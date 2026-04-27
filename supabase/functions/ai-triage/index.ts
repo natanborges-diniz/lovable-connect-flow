@@ -2543,20 +2543,41 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         messages.push({ role: "system", content: forceMsg });
         console.log(`[LOOP-DETECTOR] Forcing tool=${forcedIntent.tool} (${forcedIntent.reason})`);
       } else {
-        console.log(`[LOOP-DETECTOR] No clear intent — escalating to human`);
-        await supabase.from("eventos_crm").insert({
-          contato_id: contatoId, tipo: "loop_ia_escalado",
-          descricao: `Loop sem intent claro — escalado para humano (similaridade ${(loopCheck.similarity * 100).toFixed(0)}%)`,
-          metadata: { similarity: loopCheck.similarity, last_inbound: lastInboundText.substring(0, 200) },
-          referencia_tipo: "atendimento", referencia_id: atendimento_id,
-        });
-        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
-        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id,
-          "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊");
-        return jsonResponse({
-          status: "ok", tools_used: ["loop_escalation"], intencao: "outro",
-          precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: "humano",
-        });
+        // ── Antes de escalar: detectar refinamento por marca após orçamento ──
+        // Ex.: cliente recebeu DNZ/HOYA e pergunta "Tem Varilux?" → re-consultar com filtro de marca
+        const BRAND_REFINEMENT_RE = /\b(varilux|essilor|eyezen|crizal|zeiss|hoya|kodak|dnz|dmax|transitions|stellest)\b/i;
+        const brandMatch = lastInboundText.match(BRAND_REFINEMENT_RE);
+        const hasOrcamentoOculosRecente = !!recentOrcamento && /(DNZ|DMAX|HOYA|ESSILOR|ZEISS|VARILUX|EYEZEN|KODAK|R\$\s*\d)/i.test(recentOrcamento);
+        if (brandMatch && hasValidReceitas && hasOrcamentoOculosRecente) {
+          const marca = brandMatch[1].toLowerCase();
+          // Map family→brand quando aplicável
+          const brandFilter = /varilux|eyezen|crizal|stellest/i.test(marca) ? "ESSILOR"
+            : /transitions/i.test(marca) ? "ESSILOR"
+            : marca.toUpperCase();
+          messages.push({
+            role: "system",
+            content: `[SISTEMA: REFINAMENTO POR MARCA APÓS ORÇAMENTO] O cliente JÁ recebeu um orçamento de óculos e agora está perguntando se temos a marca "${brandMatch[1]}" (filtro/refinamento — NÃO é loop nem ambiguidade). AÇÃO OBRIGATÓRIA: chame consultar_lentes AGORA passando preferencia_marca="${brandFilter}" e os valores da receita mais recente. Apresente 2-3 opções dessa marca com nome da família (ex: Varilux Comfort, Varilux XR Design) e valores. Se não houver opções compatíveis dessa marca para o grau, diga isso explicitamente e ofereça alternativas equivalentes em outra marca premium. PROIBIDO escalar para humano. PROIBIDO repetir o orçamento anterior.`,
+          });
+          console.log(`[LOOP-DETECTOR] Brand refinement intercepted (${brandFilter}) — forcing consultar_lentes instead of escalation`);
+        } else {
+          console.log(`[LOOP-DETECTOR] No clear intent — escalating to human`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId, tipo: "loop_ia_escalado",
+            descricao: `Loop sem intent claro — escalado para humano (similaridade ${(loopCheck.similarity * 100).toFixed(0)}%)`,
+            metadata: { similarity: loopCheck.similarity, last_inbound: lastInboundText.substring(0, 200) },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+          const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+          const escMsg = isHorarioHumano()
+            ? "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊"
+            : mensagemEscaladaForaHorario(_np);
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, escMsg);
+          return jsonResponse({
+            status: "ok", tools_used: ["loop_escalation"], intencao: "outro",
+            precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: "humano",
+          });
+        }
       }
     } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita")) {
       const hint = forcedIntent.tool === "consultar_lentes"
