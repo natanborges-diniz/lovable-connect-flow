@@ -2271,8 +2271,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     const forcedIntent = detectForcedToolIntent(
       lastInboundText,
-      receitas.length > 0,
-      hasRecentUnparsedPrescriptionImage && receitas.length === 0,
+      hasValidReceitas,
+      hasRecentUnparsedPrescriptionImage && !hasValidReceitas,
       isLCContextGlobal,
       hasLCQuotePresented,
     );
