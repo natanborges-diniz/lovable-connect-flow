@@ -1862,7 +1862,7 @@ serve(async (req) => {
     const pendingIntent = detectPendingIntent(
       recentInboundTexts,
       hasRecentUnparsedPrescriptionImage,
-      receitas.length > 0,
+      hasValidReceitas,
     );
     const isLCContextGlobal = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/i.test(recentInboundTexts.join(" | ").toLowerCase());
     if (isDevolucaoHumanoIA) {
