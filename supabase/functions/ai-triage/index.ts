@@ -3501,6 +3501,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         });
       } catch (_) { /* noop */ }
     }
+    if (!resposta || !String(resposta).trim()) {
+      console.log("[SEND] resposta vazia — silenciando para evitar mensagem fora de contexto");
+      return new Response(JSON.stringify({ success: true, skipped: "empty_response" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
     // ── 10.1. AUDIO NUDGE — gently encourage text over audio ──
