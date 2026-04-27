@@ -1,108 +1,97 @@
 
-# Corrigir IA: leu receita, perguntou região e escalou em vez de orçar
+# Por que a IA não enviou o valor das lentes (caso Paulo Henrique 16:48–16:52)
 
-## O que aconteceu (caso Paulo Henrique, atendimento `26464d89`)
+## O que aconteceu de fato
+
+Reli o histórico completo do atendimento `26464d89` direto no banco:
 
 ```
-IA  → "Consegui ler sua receita: OD esf 0.00 cil -2.00 / OE esf 0.00 cil -2.50.
-       Já vou separar opções. Em qual região você está?"   ← falhou aqui (1)
-Cliente → "Osasco centro"
-IA  → "Para esse grau específico, vou encaminhar para um Consultor..."  ← falhou aqui (2)
-Cliente → "Pode"
-IA  → "Conta pra mim com mais detalhes..."  ← perdeu o contexto
+16:47  Paulo: "Aguardando orçamento"
+16:48  Operador (manual): orçamento DNZ/DMAX/HOYA + endereço Osasco
+16:48  IA  : "Beleza! Já vou te mandar as opções..."             ← prometeu, não rodou tool
+16:49  Paulo: "Quero orçamento da 1 e 2 por favor"
+16:49  IA  : "Para esse grau específico, vou encaminhar para
+              um Consultor que pode detalhar..."                  ← FALLBACK hardcoded
+16:51  Paulo: "Ol"
+16:52  Paulo: "Ol" / "Ol"
+16:52  IA  : opções *ESSILOR Eyezen + ZEISS SmartLife*
+              "Vou encaminhar pra um Consultor confirmar a
+               disponibilidade da sua armação..."                 ← TEMPLATE hardcoded
+16:53  IA  : "Me explica melhor a sua necessidade..." ×3          ← VALIDATOR_FAILED_POOL em loop
+       → atendimento terminou em modo=humano, status=aguardando
 ```
 
-Receita salva no banco está **válida** (`rx_type=single_vision`, OD -2.00 / OE -2.50, conf 0.9). Não há nenhuma justificativa técnica para escalar — é exatamente o cenário em que o motor de orçamento (`consultar_lentes`) deveria rodar.
+A correção anterior (André/Paulo Henrique 1ª rodada) atacou o **prompt** mas **3 textos fixos no código** continuaram vencendo o hint:
 
-## Diagnóstico (2 falhas em sequência no `ai-triage`)
+## As 3 falhas reais
 
-### Falha 1 — Auto-chain pós-OCR não disparou
-Em `supabase/functions/ai-triage/index.ts` ~linha 2750:
-
+### 1. `runConsultarLentes` linha 3859 — escalada embutida no template
+A função que devolve o orçamento concatena à força:
 ```ts
-const wantsQuote = /\b(or[cç]amento|...|preço|valor|quanto|opções|...)\b/i.test(recentInboundJoined);
-if (rxJustValid && wantsQuote && !isLCRecent) {
-  // encadeia consultar_lentes no MESMO turno
-}
+quoteMsg += "\n\nVou encaminhar pra um Consultor confirmar a disponibilidade da sua armação na loja e te ajudar a fechar 🤝 Em qual região você está?";
 ```
+Por isso o orçamento ESSILOR/ZEISS de 16:52 saiu já com a frase de escalada. O hint "PROIBIDO escalar" é ignorado porque o texto é montado em código, não pelo LLM.
 
-A regex `wantsQuote` exige que o cliente tenha dito explicitamente "orçamento/preço/valor/opções". Quando o cliente só envia a foto da receita (sem texto, ou texto neutro tipo "minha receita"), o auto-chain **não dispara** e a IA limita-se a anunciar "vou separar as opções". Resultado: gasta um turno extra perguntando a região antes de orçar.
+### 2. `runConsultarLentes` linha 3840 — fallback hardcoded
+Quando o filtro não casa nenhuma lente (categoria errada, range fora, etc.) a função retorna:
+```ts
+"Para esse grau específico, vou encaminhar para um Consultor que pode detalhar as melhores opções."
+```
+Foi exatamente isso que saiu às 16:49 quando o cliente disse "Quero orçamento da 1 e 2". A IA tentou rodar `consultar_lentes` referenciando "1 e 2" do orçamento humano anterior, o argumento veio sem categoria correta → zero resultados → fallback de escalada.
 
-### Falha 2 — IA escalou para humano com receita válida + região respondida
-No turno seguinte, `currentMsg = "Osasco centro"` não bate nenhum keyword de orçamento, então `detectForcedToolIntent` retorna `null` — não força `consultar_lentes`. O hint "FLUXO PÓS-RECEITA OBRIGATÓRIO" (linha 2126) está ativo, mas:
+### 3. Categoria errada no orçamento de 16:52
+Receita -2.00 / -2.50 sem adição → deveria ser `single_vision`. O orçamento que saiu é de **progressivas Eyezen** (lentes para perto/computador) — sinal de que o LLM passou `category` incorreta ou a busca casou com adição zero. Resultado: opções caríssimas (R$1.985–2.190) e desalinhadas com o orçamento manual do operador (DNZ/DMAX/HOYA).
 
-- Proíbe "posso te mostrar uma base?" e "quer que eu mostre opções?"
-- **Não proíbe explicitamente escalar para humano** quando há receita válida + grau dentro do range comercial.
-
-O modelo escolheu "Para esse grau específico, vou encaminhar para um Consultor" — escalada injustificada (grau -2.00/-2.50 é trivial, dentro do range de qualquer linha do catálogo).
+### 4. `VALIDATOR_FAILED_POOL` não escala
+Quando o cliente bate "Ol", "Ol", "Ol" o validador rejeita e o pool de fallback genérico ("Me explica melhor...") foi enviado 3× seguidas — pickFallback dedupa por similaridade mas o relógio do debounce + corridas paralelas deixaram passar.
 
 ## Correções
 
-### 1. Auto-chain: incluir gatilho "leia/interprete a receita" + qualquer foto sem texto neutro
+### A. `supabase/functions/ai-triage/index.ts` linha 3859
+Trocar a frase "Vou encaminhar pra um Consultor..." por encerramento orientado a venda local:
+```
+"Posso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está?"
+```
+Sem mencionar "Consultor". O fechamento é feito na loja, não escalando humano.
 
-`supabase/functions/ai-triage/index.ts` ~linha 2750 — relaxar `wantsQuote` para também encadear quando:
-- Receita é válida (`rxJustValid`)
-- Não há texto contraditório (cliente não pediu só "guarde a receita" ou "depois")
-- O contexto é óculos (sem `isLCRecent`)
+### B. linha 3840 — fallback de "zero opções"
+Substituir por mensagem que reconhece o gap **sem escalar**:
+```
+"Pra esses graus específicos preciso confirmar disponibilidade na loja antes de te passar o valor exato. Em qual região/bairro você está? Já te indico a unidade mais próxima pra você ver as opções pessoalmente."
+```
+Mantém o cliente engajado e empurra pra loja em vez de descartar pra humano.
 
-Nova condição: encadeia `consultar_lentes` por padrão pós-OCR válido para óculos, salvo se o último inbound do cliente indicar explicitamente outra intenção (ex.: "só queria que você guardasse", "depois te falo"). Isso elimina o turno desperdiçado "vou separar opções → pergunta região". A pergunta de região passa a ir junto com o orçamento (já é parte do template do `runConsultarLentes`).
+### C. linha 1300 — instrução do prompt
+Remover a sugestão "Vou encaminhar para um Consultor especializado" do bloco MODO RESTRITO. Substituir por: "Se não souber: peça mais detalhes ou sugira agendamento na loja mais próxima."
 
-### 2. Forçar `consultar_lentes` quando cliente responde região logo após receita interpretada
+### D. `consultar_lentes` — passar categoria explícita pós-OCR
+No auto-chain (linha ~2768) e no force-tool, passar explicitamente `category: rxType === "progressive" ? "progressive" : "single_vision"` em vez de deixar o LLM decidir. Isso evita o caso de retornar Eyezen para uma receita simples de miopia.
 
-Em `detectForcedToolIntent` (~linha 324) — adicionar detecção:
-- Se a última mensagem outbound da IA terminou perguntando região/bairro
-- E a mensagem inbound atual responde com nome de cidade/bairro/CEP
-- E há receita válida salva
+### E. Detectar "quero orçamento da 1 e 2" como referência ao orçamento anterior
+Em `detectForcedToolIntent`, quando o cliente referencia números/itens (`/\b(op[cç][aã]o\s*\d|da\s*\d\s*e\s*\d|n[uú]mero\s*\d)\b/i`) e a última outbound (humano OU IA) contém um orçamento já formatado (com "R$"), retornar `{ tool: "responder", reason: "cliente referenciou opção do orçamento anterior" }` com hint:
+```
+"O cliente está pedindo detalhes/preço de opções específicas do orçamento que você (ou um operador) já enviou. Recapitule SOMENTE as opções pedidas (1, 2, etc.) com nome e valor + pergunte se quer agendar pra ver na loja. NÃO rode consultar_lentes de novo, NÃO escale, NÃO mande nova lista completa."
+```
 
-→ retorna `{ tool: "consultar_lentes", reason: "cliente respondeu região após IA prometer orçamento" }`
+### F. `VALIDATOR_FAILED_POOL` — escala após 1 fallback consecutivo
+Mudar `pickFallback` para retornar `null` (escala) já no segundo fallback consecutivo, não no exaure-pool. Hoje permite 5 fallbacks antes de escalar; reduzir para 1 evita o loop de "Me explica melhor..." 3× visto às 16:53.
 
-### 3. Reforçar hint pós-receita contra escalonamento injustificado
+### G. Recuperação manual do Paulo
+Atendimento `26464d89` está em `modo=humano, status=aguardando` há ~1h. Não tocar — operador já está na fila humana. Apenas registrar evento `eventos_crm` documentando o caso para auditoria.
 
-Linha 2126 — adicionar à lista de PROIBIDOS:
-> "PROIBIDO escalar para humano com mensagens tipo 'vou encaminhar para um Consultor', 'para esse grau específico vou passar para alguém da equipe' quando a receita está dentro do range comercial (esférico até ±10, cilíndrico até ±4). Escalada só é permitida se: (a) o motor `consultar_lentes` retornou ZERO opções, (b) cliente pediu humano explicitamente, ou (c) há reclamação grave."
-
-### 4. Nova regra proibida no banco (`ia_regras_proibidas`)
-
-Categoria `comportamento`:
-> "Nunca escalar para humano logo após interpretar receita com grau dentro do range comercial. Sempre rodar `consultar_lentes` primeiro e mostrar 2-3 opções. Escalada só após o orçamento ser entregue."
-
-### 5. Novo exemplo modelo em `ia_exemplos`
-
-Categoria `pos_receita_fluxo`:
-- Pergunta: cliente envia foto da receita + "queria um orçamento"
-- Resposta ideal: IA chama `interpretar_receita` → `consultar_lentes` no mesmo turno → entrega 3 opções (DNZ / DMAX / HOYA) com valores + pergunta região no final.
-
-### 6. Recuperação manual do Paulo Henrique
-
-Atendimento `26464d89-d906-4b51-aad5-379ddf4131c8` ficou parado às 15:58 com a IA pedindo "conta mais detalhes". Disparar manualmente:
-
-a. Mensagem de desculpa + retomada via template (atendimento já está fora de risco da janela 24h, ainda dentro):
-   > "Paulo, desculpa a demora! Aqui estão as opções pra sua receita (OD -2.00 / OE -2.50): [3 opções]. Em Osasco centro temos a loja [endereço]. Quer agendar pra ver pessoalmente?"
-
-b. Resetar `atendimentos.modo` para `ia` (já está) e marcar a coluna do pipeline como "Orçamento" para o cron de recuperação não interferir.
+### H. Atualizar memória
+`mem://ia/auto-receita-e-anti-loop` — adicionar 4ª seção "Caso Paulo Henrique 2ª rodada (templates hardcoded)" documentando que correções de prompt não bastam quando há texto fixo no código.
 
 ## Arquivos afetados
 
-- `supabase/functions/ai-triage/index.ts` — alterar `detectForcedToolIntent`, relaxar `wantsQuote` no auto-chain pós-OCR, reforçar hint pós-receita.
-- `ia_regras_proibidas` (insert via migration) — nova regra de comportamento.
-- `ia_exemplos` (insert via migration) — novo exemplo `pos_receita_fluxo`.
-- Mensagem manual de recuperação para o atendimento `26464d89`.
-- Atualizar memória `mem://ia/auto-receita-e-anti-loop` documentando o caso Paulo + as duas falhas (auto-chain seletivo demais + escalada injustificada).
+- `supabase/functions/ai-triage/index.ts` — A, B, C, D, E, F
+- `.lovable/memory/ia/auto-receita-e-anti-loop.md` — H
+- `eventos_crm` — insert auditoria do caso
 
 ## Resultado esperado
 
-Próxima vez que um cliente enviar receita comum:
-
-```
-Cliente → [foto da receita] + "queria um orçamento"
-IA  → [interpretar_receita + consultar_lentes encadeados]
-       "Sua receita: OD -2.00 / OE -2.50. Aqui as opções:
-        1. DNZ HDI 1.59 antirreflexo — R$ X
-        2. DMAX 1.60 BlueGuard — R$ Y
-        3. HOYA Hi-Vision 1.67 — R$ Z
-        Em qual região você está pra eu indicar a loja mais próxima?"
-Cliente → "Osasco centro"
-IA  → [responder com endereço da loja Osasco + sugerir agendamento]
-```
-
-Sem turno extra, sem escalada injustificada.
+Próxima vez que o cliente pedir "Quero orçamento da 1 e 2":
+- IA detecta referência → recapitula só as 2 opções com nome/valor → pergunta se quer agendar.
+- Se rodar `consultar_lentes` para receita -2.00/-2.50, retorna DNZ/DMAX/HOYA single_vision (não Eyezen) e termina perguntando região, sem mencionar Consultor.
+- Se filtro não casar nada, encaminha pra loja física, não escala humano.
+- "Ol" repetido escala em 1 fallback, não em 3.
