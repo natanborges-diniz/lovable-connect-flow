@@ -1,45 +1,71 @@
 ---
-name: Recuperação IA anti-abandono — cadência rápida
-description: vendas-recuperacao-cron monitora inatividade no CRM. Cadência atual 1h → 24h → despedida 1h depois → Perdidos. Sem 3ª tentativa.
+name: Recuperação anti-abandono — cadência IA + cadência Humano
+description: vendas-recuperacao-cron monitora inatividade no CRM. Cadência IA 1h→24h→despedida. Cadência humano 24h→48h→despedida via templates Meta, com cooldown de 24h se consultor ativo.
 type: feature
 ---
 
 # Recuperação anti-abandono (CRM Vendas)
 
-`vendas-recuperacao-cron` varre periodicamente cards do CRM em colunas elegíveis (Novo Contato, Lead, Orçamento, Qualificado, Retorno) e dispara retomadas contextuais quando o cliente para de responder.
+`vendas-recuperacao-cron` varre periodicamente cards do CRM em colunas elegíveis (Novo Contato, Lead, Orçamento, Qualificado, Retorno) e dispara retomadas contextuais quando o cliente para de responder. Trata **dois fluxos paralelos** conforme o `atendimento.modo`.
 
-## Cadência (atualizada)
+## Fluxo IA (modo='ia')
 
 | Fase | Quando | Ação |
 |---|---|---|
-| 1ª retomada | **1h** sem resposta do cliente | IA dispara retomada via `responder-solicitacao` (modo recuperacao) |
-| 2ª retomada | **24h** após a 1ª (sem resposta) | IA dispara retomada com tom mais direto (`is_final=true`) |
-| Despedida final | **1h** após a 2ª (sem resposta) | Mensagem fixa de agradecimento + encerra atendimento + move para Perdidos |
+| 1ª retomada | **1h** sem resposta | IA via `responder-solicitacao` modo recuperacao |
+| 2ª retomada | **24h** após a 1ª | IA com `is_final=true` |
+| Despedida | **1h** após a 2ª | Mensagem fixa via `send-whatsapp` + Perdidos |
 
-Total: ~26h do silêncio até Perdidos. Não há 3ª tentativa de IA.
+Total: ~26h. Contador em `contatos.metadata.recuperacao_vendas`.
 
-## Mensagem fixa de despedida
+## Fluxo Humano (modo='humano' ou 'hibrido')
 
-> "Olá {primeiro_nome}! 😊 Agradeço muito o seu contato com as Óticas Diniz Osasco. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨"
+Disparado quando cliente fica inerte após handoff para humano. Como tipicamente está fora da janela de 24h da Meta, **usa exclusivamente templates aprovados** (`retomada_contexto_1`, `retomada_contexto_2`, `retomada_despedida`).
 
-- Enviada via `send-whatsapp` (Evolution, mantém continuidade do canal — não usa template Meta).
-- Remetente: "Gael".
-- NÃO passa pela IA — é texto fixo determinístico para garantir tom de encerramento educado.
-- Registra evento `lead_despedida_final` em `eventos_crm` com a mensagem.
+| Fase | Quando | Ação | Canal |
+|---|---|---|---|
+| Alerta interno | 6h sem resposta | Notificação in-app ao operador | in-app |
+| 1ª retomada | **24h** sem resposta E sem outbound humano nas últimas 24h | Template `retomada_contexto_1` | WhatsApp Meta |
+| 2ª retomada | **48h** após a 1ª | Template `retomada_contexto_2` | WhatsApp Meta |
+| Despedida | **24h** após a 2ª | Template `retomada_despedida` + encerra atendimento (modo→ia) + Perdidos | WhatsApp Meta |
 
-## Defaults no código (`vendas-recuperacao-cron/index.ts`)
+Total: ~96h. Contador em `atendimentos.metadata.recuperacao_humano` (separado do contador IA).
+
+### Cooldown anti-interferência (humano)
+Se houve outbound de remetente humano (não-Gael/IA/Sistema/Bot/Template) nas últimas **24h**, o cron pula a retomada — assume que o consultor está conduzindo. Configurável via `humano_cooldown_horas`.
+
+### Inferência do tópico ({{2}})
+Função `inferirTopico` analisa últimas 5 outbound humanas em busca de palavras-chave:
+- "lentes de contato" → `"as lentes de contato"`
+- "orçamento/preço/valor" → `"seu orçamento"`
+- "agendar/visita/horário" → `"sua visita à loja"`
+- "receita/grau/exame" → `"sua receita"`
+- "armação/óculos/modelo" → `"seus óculos"`
+- "multifocal/progressivo" → `"suas lentes multifocais"`
+- fallback → `"seu atendimento"`
+
+### Fallback manual
+O componente `ReconectarTemplateButton.tsx` permite ao operador disparar template manualmente a qualquer momento depois das 24h. A automação cobre o caso "operador esqueceu".
+
+## Defaults configuráveis (`vendas-recuperacao-cron/index.ts`)
 
 ```ts
-DELAY_HOURS = [1, 24]            // 1ª e 2ª tentativa
-FINAL_WAIT_HOURS = 1             // despedida 1h após 2ª
-MAX_TENTATIVAS = 2               // só 2 retomadas IA
+// IA
+DELAY_HOURS = [1, 24]
+FINAL_WAIT_HOURS = 1
+MAX_TENTATIVAS = 2
+
+// Humano
+HUMANO_DELAY_HOURS = [24, 48]
+HUMANO_FINAL_WAIT_HOURS = 24
+HUMANO_MAX_TENTATIVAS = 2
+HUMANO_COOLDOWN_HORAS = 24
 ```
 
-Todos overridáveis via payload do cron em **Configurações → Agendamentos Automáticos**.
+Todos overridáveis via payload do cron em **Configurações → Agendamentos Automáticos** (`humano_delay_primeira`, `humano_delay_segunda`, `humano_espera_final`, `humano_max_tentativas`, `humano_cooldown_horas`).
 
-## Modo humano/híbrido
-Pulado: cron não dispara IA nesses modos, apenas gera notificação de inatividade após threshold (default 48h, "Reclamações" 24h).
-
-## Histórico
-- Antes: 48h → 72h → 72h → espera 72h → Perdidos (~192h+).
-- Agora: 1h → 24h → 1h despedida → Perdidos (~26h). Tom final positivo abre porta para retorno espontâneo.
+## Eventos registrados em `eventos_crm`
+- `recuperacao_tentativa` (IA)
+- `lead_despedida_final` (IA)
+- `recuperacao_humano_tentativa` (Humano) — com template e tópico no metadata
+- `lead_despedida_humano` (Humano)
