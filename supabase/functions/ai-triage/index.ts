@@ -267,6 +267,25 @@ function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: 
 const LC_BRAND_REGEX = /\b(acuvue|oasys|biofinity|air\s*optix|solflex|sol[oó]tica|dnz|biomedics|focus|frequency|freshlook|proclear|purevision|softlens|hydron|mioflex|aviator|naturale|colors?)\b/i;
 const RESERVE_VERBS_REGEX = /\b(quero\s+(reservar|fechar|pedir|levar|essa|esse|comprar|fechar|essa op[cç][aã]o)|vou\s+(querer|levar|de|com)|fica\s+(com|essa|esse)|pode\s+(reservar|pedir|fechar|mandar)|fechar\s+(pedido|essa|esse|com)|fechar\b|reserva[r]?\b|comprar\s+essa)/i;
 
+// ── Validação de receita ──
+// Considera receita válida APENAS quando há esfera/cilindro útil em pelo menos
+// um olho E rx_type não é "unknown". Receita salva como `unknown` com olhos
+// vazios (caso Jardel) NÃO conta como receita — força nova interpretação.
+function isReceitaValida(rx: any): boolean {
+  if (!rx || typeof rx !== "object") return false;
+  const rxType = String(rx.rx_type || "").toLowerCase();
+  if (!rxType || rxType === "unknown") return false;
+  const od = rx.eyes?.od || {};
+  const oe = rx.eyes?.oe || {};
+  const hasUsefulEye = (e: any) =>
+    typeof e?.sphere === "number" || typeof e?.cylinder === "number";
+  return hasUsefulEye(od) || hasUsefulEye(oe);
+}
+
+function hasReceitasValidas(receitas: any[]): boolean {
+  return Array.isArray(receitas) && receitas.some(isReceitaValida);
+}
+
 function detectForcedToolIntent(
   lastInboundText: string,
   hasReceitas: boolean,
@@ -346,7 +365,8 @@ function detectPrescriptionCorrection(text: string): {
   raw: string;
 } | null {
   if (!text || text.length < 8) return null;
-  const t = text.toLowerCase();
+  // Normaliza espaço entre sinal e número: "- 425" → "-425", "+ 200" → "+200"
+  let t = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2");
 
   // Strong signals: must contain at least 2 of these markers
   const markers = [
@@ -361,17 +381,41 @@ function detectPrescriptionCorrection(text: string): {
   const markerHits = markers.filter((r) => r.test(t)).length;
   if (markerHits < 2 || numericPairs < 2) return null;
 
-  // Helper: parse a number like "-9,25" / "+0.50" / "0.00"
-  const parseNum = (s: string | undefined): number | null => {
+  // Helper: parse a number como dioptria.
+  // - Aceita "-9,25", "+0.50", "0.00".
+  // - Normaliza shorthand óptico SEM separador decimal: "400" → 4.00, "425" → 4.25,
+  //   "175" → 1.75 (3 dígitos sem ponto/vírgula). 4 dígitos viram 2 casas decimais.
+  // - Eixo (0–180) NÃO usa esta normalização — é parseado à parte.
+  const parseDiopter = (s: string | undefined): number | null => {
+    if (!s) return null;
+    const raw = s.replace(/\s/g, "");
+    if (/[.,]/.test(raw)) {
+      const n = parseFloat(raw.replace(",", "."));
+      return Number.isFinite(n) ? n : null;
+    }
+    const sign = raw.startsWith("-") ? -1 : 1;
+    const digits = raw.replace(/^[+\-]/, "");
+    if (!/^\d+$/.test(digits)) return null;
+    let value: number;
+    if (digits.length >= 3) {
+      // 3+ dígitos sem decimal → últimos 2 viram fração
+      value = parseInt(digits.slice(0, -2), 10) + parseInt(digits.slice(-2), 10) / 100;
+    } else {
+      value = parseInt(digits, 10);
+    }
+    return Number.isFinite(value) ? sign * value : null;
+  };
+  const parseAxis = (s: string | undefined): number | null => {
     if (!s) return null;
     const n = parseFloat(s.replace(",", "."));
-    return Number.isFinite(n) ? n : null;
+    return Number.isFinite(n) && n >= 0 && n <= 180 ? n : null;
   };
 
   // Try to extract values per eye. Patterns supported:
   //   "OD 0.00 com -2,25 eixo 180"
   //   "OD: esf -9 cil -2,75 eixo 180 add +2,00"
   //   "LONGE: OD 0.00 com -2,25"  /  "PERTO: -0,25 com -2,00"
+  //   "Od -400 / Oe -425"   (shorthand sem decimal)
   const num = "([+-]?\\d+[.,]?\\d*)";
   const buildEye = () => ({ sphere: null as number | null, cylinder: null as number | null, axis: null as number | null, add: null as number | null });
   const od = buildEye();
@@ -382,10 +426,10 @@ function detectPrescriptionCorrection(text: string): {
   let m: RegExpExecArray | null;
   while ((m = reA.exec(t)) !== null) {
     const eye = m[1].toLowerCase() === "od" ? od : oe;
-    if (eye.sphere == null) eye.sphere = parseNum(m[2]);
-    if (eye.cylinder == null) eye.cylinder = parseNum(m[3]);
-    if (eye.axis == null) eye.axis = parseNum(m[4]);
-    if (eye.add == null) eye.add = parseNum(m[5]);
+    if (eye.sphere == null) eye.sphere = parseDiopter(m[2]);
+    if (eye.cylinder == null) eye.cylinder = parseDiopter(m[3]);
+    if (eye.axis == null) eye.axis = parseAxis(m[4]);
+    if (eye.add == null) eye.add = parseDiopter(m[5]);
   }
 
   // Pattern B: longe/perto blocks (when client splits longe/perto with single eye line each)
@@ -396,9 +440,9 @@ function detectPrescriptionCorrection(text: string): {
     const r = new RegExp(`(?:od|oe|os)?\\s*${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?`, "i");
     const mm = block.match(r);
     if (mm) {
-      if (eye.sphere == null) eye.sphere = parseNum(mm[1]);
-      if (eye.cylinder == null) eye.cylinder = parseNum(mm[2]);
-      if (eye.axis == null) eye.axis = parseNum(mm[3]);
+      if (eye.sphere == null) eye.sphere = parseDiopter(mm[1]);
+      if (eye.cylinder == null) eye.cylinder = parseDiopter(mm[2]);
+      if (eye.axis == null) eye.axis = parseAxis(mm[3]);
     }
   };
   if (longeMatch && od.sphere == null) eyeFromBlock(longeMatch[1], od);
@@ -1637,8 +1681,13 @@ serve(async (req) => {
     const lastIsImage = (lastInbound?.tipo_conteudo || "text") === "image"
       || /\[image\]|\[document\]/.test(currentMsg)
       || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+    // Receita salva mas vazia/`unknown` (caso Jardel) NÃO conta — força nova OCR.
+    const hasValidReceitas = hasReceitasValidas(receitas);
     const isImageContext = lastIsImage
-      || (hasRecentUnparsedPrescriptionImage && receitas.length === 0);
+      || (hasRecentUnparsedPrescriptionImage && !hasValidReceitas);
+    if (receitas.length > 0 && !hasValidReceitas) {
+      console.log(`[RX-VALID] Receita salva existe mas é INVÁLIDA (rx_type/eyes vazios) — tratando como sem receita`);
+    }
 
     // ── 5. BUILD CONTEXT ──
     const sentTopics = extractSentTopics(recentOutbound);
@@ -1813,7 +1862,7 @@ serve(async (req) => {
     const pendingIntent = detectPendingIntent(
       recentInboundTexts,
       hasRecentUnparsedPrescriptionImage,
-      receitas.length > 0,
+      hasValidReceitas,
     );
     const isLCContextGlobal = /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/i.test(recentInboundTexts.join(" | ").toLowerCase());
     if (isDevolucaoHumanoIA) {
@@ -1967,13 +2016,13 @@ serve(async (req) => {
 - Se as últimas mensagens forem vagas e nenhuma intenção for clara, responda CURTO e contextual ("Voltei pra te ajudar — em que posso continuar?") em vez de escalar.${pendingIntent ? `\n\nINTENÇÃO PENDENTE DETECTADA: ${pendingIntent.intent.toUpperCase()} — ${pendingIntent.hint}` : ""}`,
           }]
         : []),
-      ...(hasRecentUnparsedPrescriptionImage && receitas.length === 0
+      ...(hasRecentUnparsedPrescriptionImage && !hasValidReceitas
         ? [{
             role: "system",
-            content: "[SISTEMA: PRIORIDADE MÁXIMA — RECEITA PENDENTE] O cliente enviou uma imagem (provável receita) nas últimas mensagens e ela AINDA NÃO foi interpretada (RECEITAS JÁ INTERPRETADAS está vazio). REGRAS: 1) Você DEVE chamar a tool interpretar_receita usando a imagem mais recente entregue no histórico, ANTES de qualquer outra ação (não escale, não peça reenvio, não responda genericamente). 2) Se a imagem foi entregue ao modelo, use-a — mesmo que a última mensagem do cliente seja curta ('ok', 'então?', 'cadê'). 3) Só peça reenvio se o sistema avisar explicitamente que a imagem NÃO foi entregue. 4) Só escale para humano se a imagem estiver claramente ilegível APÓS a tentativa de interpretação.]",
+            content: "[SISTEMA: PRIORIDADE MÁXIMA — RECEITA PENDENTE] O cliente enviou uma imagem (provável receita) nas últimas mensagens e ela AINDA NÃO foi interpretada com sucesso (RECEITAS JÁ INTERPRETADAS está vazio ou inválido). REGRAS: 1) Você DEVE chamar a tool interpretar_receita usando a imagem mais recente entregue no histórico, ANTES de qualquer outra ação (não escale, não peça reenvio, não responda genericamente). 2) Se a imagem foi entregue ao modelo, use-a — mesmo que a última mensagem do cliente seja curta ('ok', 'então?', 'cadê'). 3) Só peça reenvio se o sistema avisar explicitamente que a imagem NÃO foi entregue. 4) Só escale para humano se a imagem estiver claramente ilegível APÓS a tentativa de interpretação.]",
           }]
         : []),
-      ...(receitas.length > 0
+      ...(hasValidReceitas
         ? [{
             role: "system",
             content: isLCContextGlobal
@@ -2222,8 +2271,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     const forcedIntent = detectForcedToolIntent(
       lastInboundText,
-      receitas.length > 0,
-      hasRecentUnparsedPrescriptionImage && receitas.length === 0,
+      hasValidReceitas,
+      hasRecentUnparsedPrescriptionImage && !hasValidReceitas,
       isLCContextGlobal,
       hasLCQuotePresented,
     );
@@ -2646,8 +2695,11 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           const cylValues = [od.cylinder, oe.cylinder].filter((v: any) => typeof v === "number") as number[];
           const addValues = [od.add, oe.add].filter((v: any) => typeof v === "number") as number[];
 
-          if (rxType === "unknown" || sphereValues.length === 0) {
-            resposta = args.resposta_fallback || "Não consegui identificar o grau completo da receita. Pode me enviar outra foto mais nítida?";
+          // Receita parcial/incompleta → pede dados objetivos em vez de culpar "grau"
+          const sphereLooksAbsurd = sphereValues.some((v: number) => Math.abs(v) > 25);
+          if (rxType === "unknown" || sphereValues.length === 0 || sphereLooksAbsurd) {
+            resposta = "Pra montar o orçamento certinho, me confirma os valores da receita por texto, por favor?\n• OD: esférico / cilíndrico / eixo\n• OE: esférico / cilíndrico / eixo\n(Se tiver adição pra perto, manda também 😊)";
+            console.log(`[QUOTE] Prescription incomplete (rxType=${rxType}, sphereCount=${sphereValues.length}, absurd=${sphereLooksAbsurd}) — asking structured values`);
           } else {
             const worstSphere = sphereValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0);
             const worstCylinder = cylValues.length > 0 ? cylValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0) : 0;
@@ -3358,7 +3410,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // Caso Artur Borges 24/04 15:13: modelo retornou texto ("Recebi sua receita 👀 Já estou analisando…")
     // sem chamar interpretar_receita. Sem retry, a conversa morre — cliente fica esperando indefinidamente.
     const interpretouReceitaNesteTurno = (toolCalls || []).some((tc: any) => tc.function?.name === "interpretar_receita");
-    const precisaForcarInterpretacao = isImageContext && receitas.length === 0 && !interpretouReceitaNesteTurno && !precisa_humano;
+    const precisaForcarInterpretacao = isImageContext && !hasValidReceitas && !interpretouReceitaNesteTurno && !precisa_humano;
 
     if (precisaForcarInterpretacao) {
       console.log("[FORCE-INTERPRETAR] Imagem pendente sem chamada de interpretar_receita — forçando retry");
