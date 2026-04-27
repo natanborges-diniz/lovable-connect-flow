@@ -286,6 +286,41 @@ function hasReceitasValidas(receitas: any[]): boolean {
   return Array.isArray(receitas) && receitas.some(isReceitaValida);
 }
 
+// ── Detecta CEP e/ou regiões da Grande SP fora da nossa cobertura ──
+// Cobertura: Osasco, Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville.
+// Fora disso (Zona Sul/Norte/Leste/Oeste de SP, ABC, capital, etc.) é "fora de área".
+function detectClienteLocation(textoAcumulado: string): {
+  cep: string | null;
+  regiaoTexto: string | null;
+  foraDeArea: boolean;
+  dentroDeArea: boolean;
+} {
+  const t = String(textoAcumulado || "").toLowerCase();
+
+  const cepMatch = t.match(/\b(\d{5})-?(\d{3})\b/);
+  const cep = cepMatch ? `${cepMatch[1]}-${cepMatch[2]}` : null;
+
+  const foraRegex = /\b(zona\s*(sul|norte|leste|oeste)|s[aã]o\s*paulo\b(?!\s*-\s*osasco)|sp\s*capital|capital paulista|abc\s*paulista|santo\s*andr[eé]|s[aã]o\s*bernardo|s[aã]o\s*caetano|diadema|guarulhos|mau[aá]|tabo[aã]o\s*da\s*serra|embu)\b/i;
+  const regiaoForaMatch = t.match(foraRegex);
+
+  const dentroRegex = /\b(osasco|carapicu[ií]ba|barueri|cotia|itapevi|jandira|santana\s+de\s+parna[ií]ba|alphaville)\b/i;
+  const regiaoDentroMatch = t.match(dentroRegex);
+
+  // Heurística por CEP: Osasco/região = 06000–06999; capital SP = 01000–05999 e 08000–08999; ABC = 09000–09999.
+  let foraPorCep = false;
+  let dentroPorCep = false;
+  if (cepMatch) {
+    const prefix = parseInt(cepMatch[1], 10);
+    if (prefix >= 6000 && prefix <= 6999) dentroPorCep = true;
+    else if ((prefix >= 1000 && prefix <= 5999) || (prefix >= 8000 && prefix <= 9999)) foraPorCep = true;
+  }
+
+  const foraDeArea = (!!regiaoForaMatch || foraPorCep) && !regiaoDentroMatch && !dentroPorCep;
+  const dentroDeArea = !!regiaoDentroMatch || dentroPorCep;
+  const regiaoTexto = regiaoForaMatch?.[0] || regiaoDentroMatch?.[0] || null;
+  return { cep, regiaoTexto, foraDeArea, dentroDeArea };
+}
+
 function detectForcedToolIntent(
   lastInboundText: string,
   hasReceitas: boolean,
@@ -542,6 +577,20 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
+  // Distingue PRAZO DE CONFECÇÃO (compra nova) de STATUS DE PEDIDO existente.
+  // Confecção: "prazo de entrega/confecção/fabricação", "quanto tempo demora/leva", "quando fica pronto"
+  //   SEM menção a "minha OS / meu pedido / já comprei / fiz o pedido".
+  const isPrazoConfeccao = /\b(prazo|quanto tempo|quanto demora|quanto leva|em quantos dias|quando fica pronto|tempo de (entrega|confec[cç][aã]o|fabrica[cç][aã]o|produ[cç][aã]o))\b/.test(n)
+    && !/\b(minha os|meu pedido|j[aá] comprei|fiz o pedido|comprei (no |dia )|t[aá] pronto|j[aá] chegou|status do (meu )?pedido)\b/.test(n);
+  if (isPrazoConfeccao) {
+    return {
+      resposta: "O prazo de confecção das lentes depende da fabricante e do tipo de tratamento — normalmente entre **7 e 15 dias úteis** após a confirmação do pagamento. Tóricas e lentes especiais podem levar um pouco mais. Quer que eu te direcione pra loja mais próxima pra fechar?",
+      intencao: "orcamento",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
+
   if (/status|pedido|entrega|retirada|retirar|pronto/.test(n)) {
     return {
       resposta: "Vou verificar pra você! Me passa seu nome completo ou o número da OS que eu consulto aqui rapidinho.",
@@ -569,14 +618,29 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
-  // For híbrido or generic cases, use rotating pool to avoid repetition
+  // For híbrido or generic cases, use rotating pool to avoid repetition.
+  // ⚠️ Suprime o pool genérico quando a última outbound já é uma resposta substantiva
+  // (orçamento, opções, escalação confirmada) — evita "amnésia" logo após o orçamento.
+  const lastOutboundRaw = String((recentOutbound || []).slice(-1)[0] || "");
+  const substantiveOutboundRecent = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎|prazo de confec|7 e 15 dias|Acionei um Consultor|Consultor.*entra em contato|opções de lentes)/i.test(lastOutboundRaw);
+
   const genericPool = [
-    "Sobre o que a gente estava falando — quer que eu retome o orçamento ou te ajudo com outra coisa?",
     "Pode me explicar melhor o que precisa? Quero te dar um retorno certeiro!",
     "Me diz com mais detalhes o que tá buscando que eu resolvo pra você 😊",
     "Pra eu te ajudar certinho, preciso entender melhor — pode elaborar?",
     "Me conta: é sobre lentes, agendamento, ou outro assunto?",
   ];
+
+  if (substantiveOutboundRecent) {
+    console.log("[FALLBACK-GENERIC] suprimido — última outbound é substantiva:", lastOutboundRaw.slice(0, 80));
+    // Devolve null-equivalente: classifica como "outro" sem mensagem nova (caller decide silenciar).
+    return {
+      resposta: "",
+      intencao: "outro",
+      pipeline_coluna: "Novo Contato",
+      precisa_humano: false,
+    };
+  }
 
   const recentNorm = (recentOutbound || []).slice(-10).map(norm);
   for (const msg of genericPool) {
@@ -1085,6 +1149,11 @@ function buildSystemPromptFromCompiled(opts: {
   // Inject prohibition block even if slot was missing (safety)
   if (!opts.compiledPrompt.includes("{{PROIBICOES}}") && opts.regrasProibidas.length > 0) {
     s.push(buildProhibitionsBlock(opts.regrasProibidas));
+  }
+
+  // Inject location context (CEP/região do cliente) — alta prioridade contra repetição de pergunta
+  if ((opts as any).locationCtx) {
+    s.push((opts as any).locationCtx);
   }
 
   // Inject prescription context
@@ -1655,6 +1724,32 @@ serve(async (req) => {
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
+
+    // ── DETECTA REGIÃO/CEP do cliente nas últimas 5 inbound ──
+    const inboundTextsForLoc = allMsgs
+      .filter((m: any) => m.direcao === "inbound")
+      .slice(-5)
+      .map((m: any) => String(m.conteudo || ""))
+      .join(" | ");
+    const clienteLoc = detectClienteLocation(inboundTextsForLoc + " " + (mensagem_texto || ""));
+    if (clienteLoc.cep || clienteLoc.regiaoTexto) {
+      console.log(`[REGION] cep=${clienteLoc.cep || "-"} regiao=${clienteLoc.regiaoTexto || "-"} fora=${clienteLoc.foraDeArea} dentro=${clienteLoc.dentroDeArea}`);
+    }
+    let locationCtx = "";
+    if (clienteLoc.foraDeArea) {
+      locationCtx = `# 📍 LOCALIZAÇÃO DO CLIENTE — FORA DA ÁREA
+O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região fora de Osasco"}${clienteLoc.cep ? ` (CEP ${clienteLoc.cep})` : ""}** — fora da nossa cobertura (Osasco e região).
+- ⛔ NUNCA pergunte "em qual região/bairro você está?" — você JÁ sabe.
+- Aplique a ESCADA DE PERSUASÃO LOCAL:
+  1ª) Convide com carinho para uma das lojas em Osasco mencionando diferenciais, atendimento personalizado e condições especiais. NÃO envie link de Maps ainda.
+  2ª) Se insistir, reforce acesso fácil (transporte, estacionamento) e benefícios de fechar presencialmente.
+  3ª) Se irredutível pela TERCEIRA vez, envie o Google Maps da loja mais próxima e classifique a coluna como "Perdidos".`;
+    } else if (clienteLoc.dentroDeArea) {
+      locationCtx = `# 📍 LOCALIZAÇÃO DO CLIENTE — DENTRO DA ÁREA
+O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atendida"}${clienteLoc.cep ? ` (CEP ${clienteLoc.cep})` : ""}**.
+- ⛔ NUNCA pergunte "em qual região/bairro você está?" — você JÁ sabe.
+- Indique a loja MAIS PRÓXIMA dessa região (use a lista LOJAS DISPONÍVEIS) e siga para agendamento/fechamento.`;
+    }
     // Compute latestInboundImageIndex RELATIVE to the context window (last 20), not allMsgs
     const contextWindowOffset = Math.max(0, allMsgs.length - 20);
     const latestInboundImageIndex = [...allMsgs]
@@ -1804,7 +1899,8 @@ serve(async (req) => {
         nomeWhatsapp: nomePerfilWhatsapp,
         nomeAtual: contatoNomeAtual,
         nomeConfirmado,
-      });
+        locationCtx,
+      } as any);
 
       console.log(`[CONTEXT] Using COMPILED prompt (${compiledPrompt.length}ch) with slot replacement`);
     } else {
@@ -1834,7 +1930,7 @@ serve(async (req) => {
 
       systemPrompt = buildSystemPrompt({
         businessRules,
-        knowledge: knowledgeStr + agendamentoCtx + receitaCtx,
+        knowledge: (locationCtx ? locationCtx + "\n\n" : "") + knowledgeStr + agendamentoCtx + receitaCtx,
         examples: examplesStr,
         antiExamples: antiStr,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
@@ -3471,6 +3567,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           referencia_id: atendimento_id,
         });
       } catch (_) { /* noop */ }
+    }
+    if (!resposta || !String(resposta).trim()) {
+      console.log("[SEND] resposta vazia — silenciando para evitar mensagem fora de contexto");
+      return new Response(JSON.stringify({ success: true, skipped: "empty_response" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 

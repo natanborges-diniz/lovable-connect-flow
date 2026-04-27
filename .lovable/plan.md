@@ -1,78 +1,71 @@
 ## Objetivo
-Corrigir o fluxo para que, quando o cliente já pediu orçamento e a receita é lida com sucesso, o sistema envie automaticamente 2–3 opções de lentes com preços, sem cair em respostas contraditórias ou pedir a receita novamente.
+Resolver 3 falhas evidenciadas na conversa da Cileia:
 
-## Diagnóstico confirmado
-O caso do André mostra 3 falhas combinadas:
+1. A IA ignorou completamente o CEP enviado (04381-001) e a "Zona Sul", repetindo "em qual região você está?" duas vezes.
+2. A IA enviou uma mensagem genérica fora de contexto ("Sobre o que a gente estava falando…") logo depois de ter mandado o orçamento.
+3. Quando o cliente perguntou "qual prazo de confecção?", a IA tratou como consulta de pedido pronto e pediu CPF/OS, em vez de responder o prazo padrão de confecção de lentes.
 
-1. Duplicidade de processamento no inbound
-- A mesma conversa recebeu múltiplos envios/reprocessamentos de imagem e nome em segundos.
-- O webhook salva mensagens inbound repetidas com o mesmo `whatsapp_message_id` e dispara o `ai-triage` de novo.
-- Isso explica a sequência de respostas conflitantes e repetidas.
+## Diagnóstico
 
-2. OCR bem-sucedido não encadeou orçamento de forma determinística
-- Às 13:38:35 a receita válida foi salva como `single_vision` com confiança 0.82.
-- Mesmo assim, a resposta enviada foi apenas a leitura da receita (`Li sua receita...`) e não o orçamento.
-- O fluxo pós-receita está descrito no prompt, mas a execução do tool `interpretar_receita` ainda depende do `args.resposta` e não força a continuação para `consultar_lentes` quando já existe intenção explícita de orçamento.
+### 1. CEP/Zona Sul ignorados
+- O cliente respondeu "Zona Sul" + CEP "04381-001" logo após a IA pedir a região.
+- O fluxo atual só pergunta região, mas **não há nenhum trecho que processe CEP nem região para casar com `telefones_lojas`** e indicar a loja mais próxima.
+- Como Osasco/região não cobre a Zona Sul de SP, o caso deveria entrar na "escada de persuasão" definida em `mem://ia/diretrizes-triagem-e-persuasao-local` (`ai-triage/index.ts` linhas 969–974). Mas o sinal nunca chega ao prompt como "cliente fora de área", então o LLM segue ignorando.
 
-3. `consultar_lentes` pode pegar a receita errada quando há receitas duplicadas com o mesmo label
-- O log recente mostra `consultar_lentes: {"receita_label":"cliente"}`.
-- O código usa `find(...)` por label, o que retorna a primeira receita `cliente` salva.
-- No caso do André, a primeira receita `cliente` era a leitura inválida (`rx_type=unknown`), então o orçamento cai no fallback pedindo os valores por texto, mesmo havendo uma leitura válida mais recente.
+### 2. Mensagem fora de contexto
+- A frase "Sobre o que a gente estava falando — quer que eu retome o orçamento ou te ajudo com outra coisa?" vem do `genericPool` em `ai-triage/index.ts` linhas 572–593.
+- Esse pool é usado como fallback genérico, mas no caso da Cileia foi disparado **logo após o orçamento ter sido enviado**, criando a sensação de "amnésia". O fallback não está checando se acabamos de mandar uma resposta substantiva (orçamento) antes de soltar o genérico.
+
+### 3. "Prazo de confecção" tratado como "status de pedido"
+- O regex em `ai-triage/index.ts` linha 545 captura "entrega" e dispara: *"Me passa seu nome completo ou o número da OS que eu consulto aqui rapidinho."*
+- Esse regex não distingue entre:
+  - Cliente pedindo **prazo de confecção** de uma compra nova (resposta correta: prazo padrão "depende da fabricante, normalmente 7–15 dias úteis após o pagamento", conforme `mem://ia/regras-de-terminologia-e-produto` e linha 1021 do prompt).
+  - Cliente pedindo **status de OS já existente** (aí sim: pedir nome/CPF/OS).
+- No contexto dela ela acabou de receber orçamento e nunca mencionou pedido pronto — deveria cair no primeiro caso.
 
 ## Plano de correção
 
-1. Blindar duplicidade no `whatsapp-webhook`
-- Antes de inserir uma inbound em `mensagens`, verificar se já existe o mesmo `whatsapp_message_id` no atendimento.
-- Se já existir, ignorar a inserção e não disparar o `ai-triage` novamente.
-- Aplicar isso a texto e mídia para cortar a cascata de respostas repetidas.
+### A. Detectar e usar região/CEP
+1. No `ai-triage`, ao detectar **CEP** (regex `\d{5}-?\d{3}`) ou termos de região da Grande SP ("Zona Sul/Norte/Leste/Oeste", "São Paulo", "SP capital", bairros conhecidos fora de Osasco) na mensagem inbound, montar um sinal `clienteForaDeArea = true` e injetar no prompt um bloco do tipo:
+   > [SISTEMA] Cliente sinalizou localização **fora de Osasco e região** (CEP/região: X). Aplique a ESCADA DE PERSUASÃO (1ª insistência: convidar carinhosamente para loja em Osasco; 2ª: reforçar acesso fácil; 3ª: enviar Maps + classificar Perdidos). NUNCA repita "em qual região você está?" — você JÁ sabe.
+2. Para regiões/CEPs **dentro** da área (Osasco, Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville), injetar no prompt o trecho com endereço/horário/Maps das `telefones_lojas` mais próximas e instruir: "indique a loja mais próxima — não pergunte região de novo."
 
-2. Tornar o pós-OCR determinístico quando já houver pedido de orçamento
-- No branch `interpretar_receita` do `ai-triage`, detectar se o cliente já pediu preço/orçamento/opções antes ou junto da leitura.
-- Se a receita ficou válida e a intenção pendente for orçamento de óculos, encadear imediatamente a lógica de `consultar_lentes` na mesma execução.
-- Resultado esperado: ao invés de só dizer “li sua receita”, já responder com opções e preços.
+### B. Bloquear o fallback genérico após resposta substantiva
+- No bloco `genericPool` (linhas 572–593), antes de selecionar uma frase do pool, checar se a **última mensagem outbound** já é uma resposta substantiva recente (< 90s) — orçamento, opções, escalonamento confirmado etc. Se sim, **não emitir** nada do pool e apenas seguir o pipeline normal (deixar o LLM ou o validador decidir; ou silenciar).
+- Adicionalmente: remover/refrasar a opção "Sobre o que a gente estava falando — quer que eu retome o orçamento…" do pool, porque ela transmite amnésia mesmo quando aplicável.
 
-3. Corrigir seleção da receita em `consultar_lentes`
-- Quando `receita_label` existir em múltiplas receitas, escolher a mais recente e válida, não a primeira encontrada.
-- Se houver receita inválida mais antiga e válida mais nova com o mesmo label, sempre usar a válida mais recente.
-- Reaproveitar `isReceitaValida` / `hasReceitasValidas` para centralizar a regra.
+### C. Separar "prazo de confecção" de "status de pedido"
+- Refinar o regex/classificador em `triage` (linha 545):
+  - **Prazo de confecção / fabricação** → palavras-chave: `prazo de (entrega|confecção|fabricação|produção)`, `quanto tempo (demora|leva)`, `quando fica pronto` **sem** menção a "minha OS / meu pedido / já comprei". Resposta padrão:
+    > "O prazo de confecção das lentes depende da fabricante e do tipo de tratamento — normalmente entre **7 e 15 dias úteis** após a confirmação do pagamento. Tóricas e lentes especiais podem levar um pouco mais. Quer que eu te direcione pra loja mais próxima pra fechar?"
+  - **Status de pedido existente** → palavras-chave: `minha OS|meu pedido|já comprei|comprei dia|fiz o pedido|tá pronto?|já chegou` → pedir nome/CPF/OS (mantém o atual).
+- O caso da Cileia ("qual prazo de confecção?") cairia agora no primeiro ramo, sem pedir CPF.
 
-4. Remover fallback enganoso após OCR válido
-- Ajustar o fluxo para não mandar “me confirma os valores por texto” quando a receita válida recém-lida já contém dados suficientes para cotação.
-- Só pedir texto quando a receita realmente estiver incompleta ou tecnicamente insuficiente para consulta.
+### D. Observabilidade mínima
+Logar:
+- `[REGION] cep=X regiao=Y foraDeArea=true|false` quando detectado.
+- `[FALLBACK-GENERIC] suprimido por resposta substantiva recente`.
+- `[PRAZO] tipo=confeccao|status` na classificação.
 
-5. Adicionar observabilidade mínima para evitar regressão
-- Logar explicitamente:
-  - quando um inbound duplicado for descartado;
-  - qual receita foi escolhida para orçamento (`label`, timestamp, validade);
-  - quando o pós-OCR fizer auto-chain para orçamento.
-- Isso facilita confirmar em produção que o caso do André ficou coberto.
-
-## Resultado esperado
-Após a correção, o fluxo ideal passa a ser:
+## Resultado esperado para o cenário da Cileia
 
 ```text
-cliente pede orçamento
-→ envia receita
-→ sistema interpreta
-→ se a leitura for válida e já houver intenção de orçamento
-→ sistema consulta pricing_table_lentes na mesma execução
-→ envia 2–3 opções com preço
-→ pergunta região/bairro para indicar a loja
+Cileia: "estou na Zona Sul" + CEP 04381-001
+→ sistema detecta CEP fora de Osasco
+→ IA aplica escada de persuasão (1ª investida): "Leia, nossa rede fica em Osasco e região. Atendemos clientes da Zona Sul que vêm aqui pelas nossas condições — quer que eu te conte os diferenciais e como chegar?"
+→ NÃO repete "qual sua região?"
+
+Cileia: "qual prazo de confecção?"
+→ classificador detecta prazo de fabricação (sem menção a OS existente)
+→ IA responde: "O prazo de confecção depende da fabricante, normalmente 7 a 15 dias úteis após o pagamento. Quer fechar pra eu te direcionar à loja?"
+→ NÃO pede CPF/OS
 ```
 
-No caso do André, a resposta correta passaria a ser algo no formato:
-- confirmação curta da leitura;
-- 2–3 opções de lentes compatíveis com preço;
-- aviso de que a armação será validada com o consultor / disponibilidade na loja, se aplicável.
+## Arquivos a editar
+- `supabase/functions/ai-triage/index.ts` — pontos A, B, C, D (regex de prazo, detecção de CEP/região, supressão do fallback genérico, injeção de contexto de fora-de-área no prompt).
 
-## Detalhes técnicos
-Arquivos principais:
-- `supabase/functions/whatsapp-webhook/index.ts`
-- `supabase/functions/ai-triage/index.ts`
+## Memória a criar (após implementação)
+- `mem://ia/prazo-confeccao-vs-status-pedido` — distinção entre "prazo de confecção" (padrão 7–15 dias úteis) e "status de OS" (pede CPF/OS).
+- `mem://ia/cep-e-regiao-fora-de-area` — detecção de CEP/região da Grande SP e disparo automático da escada de persuasão sem repetir a pergunta.
 
-Pontos exatos já identificados:
-- `whatsapp-webhook`: insert inbound + trigger do `ai-triage` sem dedupe por `whatsapp_message_id`
-- `ai-triage` branch `interpretar_receita`: hoje salva RX e responde, mas não encadeia cotação de forma garantida
-- `ai-triage` branch `consultar_lentes`: usa `find(...)` por `receita_label`, favorecendo receita antiga inválida
-
-Se você aprovar, eu implemento essas correções e deixo esse cenário protegido para próximos atendimentos.
+Se aprovar, implemento as 4 correções e crio as duas memórias.
