@@ -2541,6 +2541,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           ? "[SISTEMA: LOOP DETECTADO + INTENT CLARO — LENTES DE CONTATO] Você está repetindo a mesma pergunta. O cliente JÁ pediu orçamento de LENTES DE CONTATO e há receita salva. AÇÃO OBRIGATÓRIA: chame consultar_lentes_contato AGORA (NÃO consultar_lentes) com os valores da receita mais recente, apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias: diária + quinzenal/mensal), priorize DNZ quando compatível, e termine perguntando a região pra indicar a loja. PROIBIDO escalar para humano nesse cenário. PROIBIDO repetir 'posso seguir por dois caminhos'."
           : forcedIntent.tool === "interpretar_receita"
           ? "[SISTEMA: LOOP DETECTADO + IMAGEM PENDENTE] Você está repetindo a mesma pergunta. O cliente já enviou uma imagem (provável receita) e pediu orçamento. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA usando a imagem do histórico. NÃO pergunte se pode analisar — analise."
+          : forcedIntent.tool === "responder_pedindo_receita"
+          ? `[SISTEMA: LOOP DETECTADO + ORÇAMENTO SEM RECEITA UTILIZÁVEL] Cliente pediu orçamento ${isLCContextGlobal ? "de LENTES DE CONTATO" : "de óculos"} mas NÃO há receita válida salva (${receitas.length > 0 ? "última leitura ficou ilegível/incompleta" : "nenhuma foto enviada ainda"}). PROIBIDO escalar para humano. PROIBIDO chamar consultar_lentes/consultar_lentes_contato sem receita. AÇÃO OBRIGATÓRIA: use a tool *responder* com mensagem CURTA pedindo nova foto da receita ${isLCContextGlobal ? "de lentes de contato" : ""} mais nítida (luz boa, receita inteira no enquadramento) E ofereça caminho alternativo: "Se preferir, posso te indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto na compra." NÃO repita orçamento anterior. NÃO diga "tô montando opções" se a receita não está pronta.`
           : forcedIntent.tool === "agendar_cliente_intent"
           ? (hasAgendamentoAtivo
               ? `[SISTEMA: LOOP DETECTADO + AGENDAMENTO JÁ ATIVO] O cliente JÁ tem agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS"}). NÃO chame agendar_visita. Apenas reafirme: "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga com comparativo/encerramento.`
@@ -2585,12 +2587,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           });
         }
       }
-    } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita")) {
+    } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita" || forcedIntent.tool === "responder_pedindo_receita")) {
       const hint = forcedIntent.tool === "consultar_lentes"
         ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere."
         : forcedIntent.tool === "consultar_lentes_contato"
         ? "[SISTEMA: INTENT CLARO — LENTES DE CONTATO] Cliente pediu orçamento de LENTES DE CONTATO e há receita salva. Use consultar_lentes_contato AGORA (NÃO consultar_lentes — esse é para óculos), apresente 2-3 opções com descartes VARIADOS (diária + quinzenal/mensal), priorize DNZ, e termine perguntando a região. PROIBIDO repetir 'posso seguir por dois caminhos'. PROIBIDO escalar para humano."
-        : "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há imagem pendente. Use interpretar_receita AGORA — não pergunte se pode analisar.";
+        : forcedIntent.tool === "interpretar_receita"
+        ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há imagem pendente. Use interpretar_receita AGORA — não pergunte se pode analisar."
+        : `[SISTEMA: INTENT CLARO — ORÇAMENTO SEM RECEITA UTILIZÁVEL] Cliente pediu orçamento ${isLCContextGlobal ? "de LENTES DE CONTATO" : ""} mas não há receita válida salva. PROIBIDO escalar. PROIBIDO chamar consultar_lentes/consultar_lentes_contato. AÇÃO: use *responder* pedindo nova foto da receita ${isLCContextGlobal ? "de lentes de contato" : ""} mais nítida E ofereça clínica parceira: "Se preferir, posso indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto." NÃO diga que está montando opções.`;
       messages.push({ role: "system", content: hint });
       console.log(`[INTENT-FORCE] Hinting ${forcedIntent.tool} (no loop, but clear intent)`);
     }
@@ -3597,23 +3601,26 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(prev || "")
     );
     if (hasDoisCaminhos && doisCaminhosJaEnviado) {
-      console.log(`[GUARDRAIL-DOIS-CAMINHOS] Detectado loop. hasReceitas=${receitas.length > 0} | isImageContext=${isImageContext} | isLC=${isLCContextGlobal}`);
+      console.log(`[GUARDRAIL-DOIS-CAMINHOS] Detectado loop. hasValidReceitas=${hasValidReceitas} | receitas.length=${receitas.length} | isImageContext=${isImageContext} | isLC=${isLCContextGlobal}`);
       validatorFlags.push("anti_loop_dois_caminhos");
-      if (receitas.length === 0 && isImageContext) {
+      if (!hasValidReceitas && isImageContext) {
         // Imagem pendente sem receita interpretada → analisando
         resposta = "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções compatíveis em seguida, um instante…";
         intencao = "receita_oftalmologica";
         pipeline_coluna = "Orçamento";
-      } else if (receitas.length > 0 && isLCContextGlobal) {
+      } else if (hasValidReceitas && isLCContextGlobal) {
         resposta = "Beleza! Já tô montando aqui as opções de lentes de contato com base na sua receita 😊 Em qual região/bairro você está pra eu indicar a loja mais próxima?";
         intencao = "orcamento_lc";
         pipeline_coluna = "Orçamento";
-      } else if (receitas.length > 0) {
+      } else if (hasValidReceitas) {
         resposta = "Beleza! Já vou te mandar as opções compatíveis com a sua receita 😊 Em qual região você está? Assim já te indico a loja mais próxima.";
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
       } else {
-        resposta = "Pra te passar os valores certinhos, me manda a foto da sua receita atualizada por aqui 📸 Se ainda não tiver, posso te orientar também 😉";
+        // Sem receita válida (mesmo que receitas.length>0 com unknown/vazia) → pedir foto + oferecer clínica
+        resposta = isLCContextGlobal
+          ? "Pra te passar os valores certinhos de lentes de contato, preciso de uma foto nítida da sua receita 📸 (com luz boa e a receita inteira). Se ainda não tiver, posso te indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto na compra 😉"
+          : "Pra te passar os valores certinhos, me manda a foto da sua receita atualizada por aqui 📸 (precisa estar nítida, com a receita inteira no enquadramento). Se ainda não tiver, posso te indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto 😉";
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
       }
