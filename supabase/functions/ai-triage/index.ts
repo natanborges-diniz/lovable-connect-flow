@@ -3837,7 +3837,8 @@ async function runConsultarLentes(
 
   if (!lenses || lenses.length === 0) {
     console.log(`[QUOTE] No matching lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
-    return { resposta: args?.resposta_fallback || "Para esse grau específico, vou encaminhar para um Consultor que pode detalhar as melhores opções. Posso fazer isso agora?" };
+    // ⚠️ NUNCA escalar para "Consultor" aqui. Encaminha pra loja física, mantém engajamento.
+    return { resposta: args?.resposta_fallback || "Pra esses graus específicos preciso confirmar a disponibilidade direto na loja antes de te passar o valor exato 😊 Em qual região/bairro você está? Já te indico a unidade mais próxima pra você ver as opções pessoalmente." };
   }
 
   const economy = lenses[0];
