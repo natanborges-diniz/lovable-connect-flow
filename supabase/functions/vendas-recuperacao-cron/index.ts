@@ -332,6 +332,206 @@ async function processContato(
   return result;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Cadência de retomada para atendimentos em modo HUMANO/HÍBRIDO
+// (cliente sem resposta após handoff). Usa templates Meta aprovados
+// pois normalmente está fora da janela de 24h. Respeita cooldown
+// quando o consultor responde manualmente.
+// ─────────────────────────────────────────────────────────────────────
+async function processHumano(
+  supabase: any, SUPABASE_URL: string, SUPABASE_SERVICE_ROLE_KEY: string,
+  contato: any, atendimento: any, colNome: string, perdidosCol: any, now: Date,
+  DELAY_HOURS: number[], FINAL_WAIT_HOURS: number, MAX_TENTATIVAS: number,
+  COOLDOWN_HORAS: number, INACTIVITY_THRESHOLDS: Record<string, number>,
+  result: { processed: number; movedToPerdidos: number; inactivityAlerts: number }
+) {
+  const atMeta = (atendimento.metadata as any) || {};
+  const recH = atMeta.recuperacao_humano || { tentativas: 0 };
+  const tentativas = recH.tentativas || 0;
+
+  const { data: lastInbound } = await supabase
+    .from("mensagens")
+    .select("created_at, conteudo")
+    .eq("atendimento_id", atendimento.id)
+    .eq("direcao", "inbound")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!lastInbound) return result;
+
+  const lastInboundAt = new Date(lastInbound.created_at);
+  const hoursSinceInbound = (now.getTime() - lastInboundAt.getTime()) / (1000 * 60 * 60);
+
+  // Alerta interno em ALERTA_HORAS (default da coluna ou 6h fallback humano)
+  const ALERTA_HORAS = INACTIVITY_THRESHOLDS[colNome] || 6;
+  if (hoursSinceInbound >= ALERTA_HORAS) {
+    const { data: existingNotif } = await supabase
+      .from("notificacoes")
+      .select("id")
+      .eq("referencia_id", contato.id)
+      .eq("tipo", "inatividade_humano")
+      .gte("created_at", new Date(now.getTime() - 24 * 3600 * 1000).toISOString())
+      .limit(1);
+    if (!existingNotif?.length) {
+      await supabase.from("notificacoes").insert({
+        titulo: `⚠ Inatividade humano: ${contato.nome}`,
+        mensagem: `Cliente em "${colNome}" sem resposta há ${Math.round(hoursSinceInbound)}h após handoff`,
+        tipo: "inatividade_humano",
+        referencia_id: contato.id,
+      });
+      result.inactivityAlerts++;
+    }
+  }
+
+  // Cooldown: se houve outbound humano nas últimas N horas, suspende retomada
+  const { data: lastOutbound } = await supabase
+    .from("mensagens")
+    .select("created_at, remetente_nome, conteudo")
+    .eq("atendimento_id", atendimento.id)
+    .eq("direcao", "outbound")
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (lastOutbound?.length) {
+    const humanOut = lastOutbound.find((m: any) => {
+      const nome = String(m.remetente_nome || "").toLowerCase();
+      return nome && !/gael|sistema|template|bot|ia\b/i.test(nome);
+    });
+    if (humanOut) {
+      const sinceOut = (now.getTime() - new Date(humanOut.created_at).getTime()) / (1000 * 3600);
+      if (sinceOut < COOLDOWN_HORAS) {
+        console.log(`[HUMANO-COOLDOWN] ${contato.nome}: consultor respondeu há ${Math.round(sinceOut)}h (<${COOLDOWN_HORAS}h)`);
+        return result;
+      }
+    }
+  }
+
+  // Despedida final: já atingiu MAX e passou FINAL_WAIT_HOURS desde a última tentativa
+  if (tentativas >= MAX_TENTATIVAS) {
+    const lastAttemptAt = recH.ultima_tentativa_at ? new Date(recH.ultima_tentativa_at) : lastInboundAt;
+    const hoursSince = (now.getTime() - lastAttemptAt.getTime()) / (1000 * 3600);
+    if (hoursSince < FINAL_WAIT_HOURS) return result;
+
+    const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
+    const topico = inferirTopico(lastOutbound) || "seu atendimento";
+
+    try {
+      await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contato_id: contato.id,
+          template_name: "retomada_despedida",
+          template_params: [firstName, topico],
+          language: "pt_BR",
+        }),
+      });
+    } catch (e) {
+      console.error(`[HUMANO-DESPEDIDA] template falhou para ${contato.id}:`, e);
+    }
+
+    await supabase.from("atendimentos").update({
+      status: "encerrado",
+      modo: "ia",
+      fim_at: now.toISOString(),
+      metadata: { ...atMeta, recuperacao_humano: { ...recH, status: "perdido_humano", despedida_at: now.toISOString() } },
+    }).eq("id", atendimento.id);
+
+    await supabase.from("contatos").update({
+      pipeline_coluna_id: perdidosCol.id,
+    }).eq("id", contato.id);
+
+    await supabase.from("eventos_crm").insert({
+      contato_id: contato.id,
+      tipo: "lead_despedida_humano",
+      descricao: `Despedida via template enviada após ${MAX_TENTATIVAS} retomadas humano sem resposta. Movido para Perdidos.`,
+      metadata: { topico, tentativas },
+    });
+
+    result.movedToPerdidos++;
+    console.log(`[HUMANO-DESPEDIDA] ${contato.nome} → Perdidos`);
+    return result;
+  }
+
+  // Disparo de retomada
+  const requiredDelay = DELAY_HOURS[tentativas] ?? DELAY_HOURS[DELAY_HOURS.length - 1] ?? 24;
+  const referenceTime = tentativas === 0
+    ? lastInboundAt
+    : (recH.ultima_tentativa_at ? new Date(recH.ultima_tentativa_at) : lastInboundAt);
+  const hoursSinceRef = (now.getTime() - referenceTime.getTime()) / (1000 * 3600);
+  if (hoursSinceRef < requiredDelay) return result;
+
+  const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
+  const topico = inferirTopico(lastOutbound) || "seu atendimento";
+  const TEMPLATES = ["retomada_contexto_1", "retomada_contexto_2"];
+  const templateName = TEMPLATES[tentativas] || TEMPLATES[TEMPLATES.length - 1];
+
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contato_id: contato.id,
+        template_name: templateName,
+        template_params: [firstName, topico],
+        language: "pt_BR",
+      }),
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text();
+      console.warn(`[HUMANO-RETOMADA] template ${templateName} falhou para ${contato.id}: ${txt}`);
+      return result;
+    }
+
+    await supabase.from("atendimentos").update({
+      metadata: {
+        ...atMeta,
+        recuperacao_humano: {
+          tentativas: tentativas + 1,
+          ultima_tentativa_at: now.toISOString(),
+          template_usado: templateName,
+          topico,
+        },
+      },
+    }).eq("id", atendimento.id);
+
+    await supabase.from("eventos_crm").insert({
+      contato_id: contato.id,
+      tipo: "recuperacao_humano_tentativa",
+      descricao: `Retomada humano ${tentativas + 1}/${MAX_TENTATIVAS} via template ${templateName} (tópico: ${topico})`,
+      metadata: { tentativa: tentativas + 1, template: templateName, topico },
+    });
+
+    result.processed++;
+    console.log(`[HUMANO-RETOMADA] ${contato.nome}: ${templateName} (tentativa ${tentativas + 1}/${MAX_TENTATIVAS}) tópico="${topico}"`);
+  } catch (e) {
+    console.error(`[HUMANO-RETOMADA] erro para ${contato.id}:`, e);
+  }
+
+  return result;
+}
+
+// Infere tópico ({{2}} do template) das últimas mensagens outbound humanas
+function inferirTopico(outbound: any[] | null): string | null {
+  if (!outbound?.length) return null;
+  const humanos = outbound.filter((m: any) => {
+    const nome = String(m.remetente_nome || "").toLowerCase();
+    return nome && !/gael|sistema|template|bot|ia\b/i.test(nome);
+  }).slice(0, 5);
+  const texto = humanos.map((m: any) => String(m.conteudo || "")).join(" ").toLowerCase();
+  if (!texto) return null;
+
+  if (/lentes? de contato|lente diária|lente mensal/.test(texto)) return "as lentes de contato";
+  if (/orçamento|orcamento|preço|preco|valor/.test(texto)) return "seu orçamento";
+  if (/agendar|agendamento|visita|horário|horario/.test(texto)) return "sua visita à loja";
+  if (/receita|grau|exame/.test(texto)) return "sua receita";
+  if (/armaç|armac|óculos|oculos|modelo/.test(texto)) return "seus óculos";
+  if (/multifocal|progressiv/.test(texto)) return "suas lentes multifocais";
+  return null;
+}
+
 // ── Generate summary ──
 async function generateSummary(
   supabase: any, SUPABASE_URL: string, SUPABASE_SERVICE_ROLE_KEY: string,
