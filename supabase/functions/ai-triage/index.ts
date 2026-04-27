@@ -365,7 +365,8 @@ function detectPrescriptionCorrection(text: string): {
   raw: string;
 } | null {
   if (!text || text.length < 8) return null;
-  const t = text.toLowerCase();
+  // Normaliza espaço entre sinal e número: "- 425" → "-425", "+ 200" → "+200"
+  let t = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2");
 
   // Strong signals: must contain at least 2 of these markers
   const markers = [
@@ -380,17 +381,41 @@ function detectPrescriptionCorrection(text: string): {
   const markerHits = markers.filter((r) => r.test(t)).length;
   if (markerHits < 2 || numericPairs < 2) return null;
 
-  // Helper: parse a number like "-9,25" / "+0.50" / "0.00"
-  const parseNum = (s: string | undefined): number | null => {
+  // Helper: parse a number como dioptria.
+  // - Aceita "-9,25", "+0.50", "0.00".
+  // - Normaliza shorthand óptico SEM separador decimal: "400" → 4.00, "425" → 4.25,
+  //   "175" → 1.75 (3 dígitos sem ponto/vírgula). 4 dígitos viram 2 casas decimais.
+  // - Eixo (0–180) NÃO usa esta normalização — é parseado à parte.
+  const parseDiopter = (s: string | undefined): number | null => {
+    if (!s) return null;
+    const raw = s.replace(/\s/g, "");
+    if (/[.,]/.test(raw)) {
+      const n = parseFloat(raw.replace(",", "."));
+      return Number.isFinite(n) ? n : null;
+    }
+    const sign = raw.startsWith("-") ? -1 : 1;
+    const digits = raw.replace(/^[+\-]/, "");
+    if (!/^\d+$/.test(digits)) return null;
+    let value: number;
+    if (digits.length >= 3) {
+      // 3+ dígitos sem decimal → últimos 2 viram fração
+      value = parseInt(digits.slice(0, -2), 10) + parseInt(digits.slice(-2), 10) / 100;
+    } else {
+      value = parseInt(digits, 10);
+    }
+    return Number.isFinite(value) ? sign * value : null;
+  };
+  const parseAxis = (s: string | undefined): number | null => {
     if (!s) return null;
     const n = parseFloat(s.replace(",", "."));
-    return Number.isFinite(n) ? n : null;
+    return Number.isFinite(n) && n >= 0 && n <= 180 ? n : null;
   };
 
   // Try to extract values per eye. Patterns supported:
   //   "OD 0.00 com -2,25 eixo 180"
   //   "OD: esf -9 cil -2,75 eixo 180 add +2,00"
   //   "LONGE: OD 0.00 com -2,25"  /  "PERTO: -0,25 com -2,00"
+  //   "Od -400 / Oe -425"   (shorthand sem decimal)
   const num = "([+-]?\\d+[.,]?\\d*)";
   const buildEye = () => ({ sphere: null as number | null, cylinder: null as number | null, axis: null as number | null, add: null as number | null });
   const od = buildEye();
@@ -401,10 +426,10 @@ function detectPrescriptionCorrection(text: string): {
   let m: RegExpExecArray | null;
   while ((m = reA.exec(t)) !== null) {
     const eye = m[1].toLowerCase() === "od" ? od : oe;
-    if (eye.sphere == null) eye.sphere = parseNum(m[2]);
-    if (eye.cylinder == null) eye.cylinder = parseNum(m[3]);
-    if (eye.axis == null) eye.axis = parseNum(m[4]);
-    if (eye.add == null) eye.add = parseNum(m[5]);
+    if (eye.sphere == null) eye.sphere = parseDiopter(m[2]);
+    if (eye.cylinder == null) eye.cylinder = parseDiopter(m[3]);
+    if (eye.axis == null) eye.axis = parseAxis(m[4]);
+    if (eye.add == null) eye.add = parseDiopter(m[5]);
   }
 
   // Pattern B: longe/perto blocks (when client splits longe/perto with single eye line each)
