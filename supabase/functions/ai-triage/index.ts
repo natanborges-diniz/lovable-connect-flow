@@ -2585,7 +2585,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           model: "openai/gpt-5",
           messages: callMessages,
           tools: TOOLS,
-          tool_choice: "required",
+          tool_choice: forceResponderTool
+            ? { type: "function", function: { name: "responder" } }
+            : "required",
           max_completion_tokens: 2500,
         }),
       });
