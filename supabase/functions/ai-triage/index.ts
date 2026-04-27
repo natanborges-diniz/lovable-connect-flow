@@ -583,14 +583,29 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
-  // For híbrido or generic cases, use rotating pool to avoid repetition
+  // For híbrido or generic cases, use rotating pool to avoid repetition.
+  // ⚠️ Suprime o pool genérico quando a última outbound já é uma resposta substantiva
+  // (orçamento, opções, escalação confirmada) — evita "amnésia" logo após o orçamento.
+  const lastOutboundRaw = String((recentOutbound || []).slice(-1)[0] || "");
+  const substantiveOutboundRecent = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎|prazo de confec|7 e 15 dias|Acionei um Consultor|Consultor.*entra em contato|opções de lentes)/i.test(lastOutboundRaw);
+
   const genericPool = [
-    "Sobre o que a gente estava falando — quer que eu retome o orçamento ou te ajudo com outra coisa?",
     "Pode me explicar melhor o que precisa? Quero te dar um retorno certeiro!",
     "Me diz com mais detalhes o que tá buscando que eu resolvo pra você 😊",
     "Pra eu te ajudar certinho, preciso entender melhor — pode elaborar?",
     "Me conta: é sobre lentes, agendamento, ou outro assunto?",
   ];
+
+  if (substantiveOutboundRecent) {
+    console.log("[FALLBACK-GENERIC] suprimido — última outbound é substantiva:", lastOutboundRaw.slice(0, 80));
+    // Devolve null-equivalente: classifica como "outro" sem mensagem nova (caller decide silenciar).
+    return {
+      resposta: "",
+      intencao: "outro",
+      pipeline_coluna: "Novo Contato",
+      precisa_humano: false,
+    };
+  }
 
   const recentNorm = (recentOutbound || []).slice(-10).map(norm);
   for (const msg of genericPool) {
