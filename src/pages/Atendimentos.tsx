@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
 import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
+import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
@@ -336,6 +337,18 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
               <DemandaLojaPanel atendimentoId={id} modo={(atendimento as any)?.modo || "ia"} />
             </PopoverContent>
           </Popover>
+
+          {atendimento?.canal === "whatsapp" && atendimento?.contato_id && (
+            <ReconectarTemplateButton
+              atendimentoId={id}
+              contatoId={atendimento.contato_id}
+              contatoNome={atendimento.contato?.nome}
+              ultimoInboundAt={
+                mensagens?.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.created_at ?? null
+              }
+              topicoPadrao={atendimento.solicitacao?.assunto || "seu atendimento"}
+            />
+          )}
         </div>
       </div>
 
