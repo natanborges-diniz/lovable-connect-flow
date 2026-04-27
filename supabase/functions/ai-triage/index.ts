@@ -1719,6 +1719,32 @@ serve(async (req) => {
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
+
+    // ── DETECTA REGIÃO/CEP do cliente nas últimas 5 inbound ──
+    const inboundTextsForLoc = allMsgs
+      .filter((m: any) => m.direcao === "inbound")
+      .slice(-5)
+      .map((m: any) => String(m.conteudo || ""))
+      .join(" | ");
+    const clienteLoc = detectClienteLocation(inboundTextsForLoc + " " + (mensagem_texto || ""));
+    if (clienteLoc.cep || clienteLoc.regiaoTexto) {
+      console.log(`[REGION] cep=${clienteLoc.cep || "-"} regiao=${clienteLoc.regiaoTexto || "-"} fora=${clienteLoc.foraDeArea} dentro=${clienteLoc.dentroDeArea}`);
+    }
+    let locationCtx = "";
+    if (clienteLoc.foraDeArea) {
+      locationCtx = `# 📍 LOCALIZAÇÃO DO CLIENTE — FORA DA ÁREA
+O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região fora de Osasco"}${clienteLoc.cep ? ` (CEP ${clienteLoc.cep})` : ""}** — fora da nossa cobertura (Osasco e região).
+- ⛔ NUNCA pergunte "em qual região/bairro você está?" — você JÁ sabe.
+- Aplique a ESCADA DE PERSUASÃO LOCAL:
+  1ª) Convide com carinho para uma das lojas em Osasco mencionando diferenciais, atendimento personalizado e condições especiais. NÃO envie link de Maps ainda.
+  2ª) Se insistir, reforce acesso fácil (transporte, estacionamento) e benefícios de fechar presencialmente.
+  3ª) Se irredutível pela TERCEIRA vez, envie o Google Maps da loja mais próxima e classifique a coluna como "Perdidos".`;
+    } else if (clienteLoc.dentroDeArea) {
+      locationCtx = `# 📍 LOCALIZAÇÃO DO CLIENTE — DENTRO DA ÁREA
+O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atendida"}${clienteLoc.cep ? ` (CEP ${clienteLoc.cep})` : ""}**.
+- ⛔ NUNCA pergunte "em qual região/bairro você está?" — você JÁ sabe.
+- Indique a loja MAIS PRÓXIMA dessa região (use a lista LOJAS DISPONÍVEIS) e siga para agendamento/fechamento.`;
+    }
     // Compute latestInboundImageIndex RELATIVE to the context window (last 20), not allMsgs
     const contextWindowOffset = Math.max(0, allMsgs.length - 20);
     const latestInboundImageIndex = [...allMsgs]
