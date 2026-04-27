@@ -2001,7 +2001,9 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // (b) há orçamento recente nas últimas 3 outbound, (c) cliente menciona
     // pelo menos 1 marca/categoria do orçamento (ou pediu genericamente).
     const detalharIntentRegex = /\b(detalh[ae]r?|detalhe|me\s+explica|explic[ae]r?|diferen[çc]a|compar[ae]r?|compare|qual\s+a\s+melhor|por\s*qu[eê]\s+a|porque\s+a|vantage(m|ns)|prós?\s+e\s+contras?)\b/i;
-    const orcamentoOutboundRegex = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎)/i;
+    // Cobre formatos atuais: "🔍 *Opções", "Econômica:/Intermediária:/Premium:", "💚/💛/💎",
+    // e o layout novo de orçamento: "🟢 Mais em conta:" / "🟡 Um passo acima:" / "📌 Temos opções premium"
+    const orcamentoOutboundRegex = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎|🟢\s*Mais em conta|🟡\s*Um passo acima|📌\s*Temos opções premium)/i;
     const recentOrcamento = (recentOutbound || []).slice(-3).find((t: string) => orcamentoOutboundRegex.test(t || "")) || "";
     let orcamentoBrandsList: string[] = [];
     if (recentOrcamento) {
