@@ -2413,12 +2413,18 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     const ultimoOutboundComOrcamento = (recentOutbound || []).slice(-3).some((m: string) =>
       typeof m === "string" && /R\$\s*[\d.,]+/i.test(m) && /\b(1\.|2\.|3\.|💚|💛|💎|opç|DNZ|DMAX|HOYA|ESSILOR|ZEISS)/i.test(m)
     );
+    // Quando essa detecção dispara, FORÇAMOS tool_choice=responder no gateway.
+    // Hint sozinho já se mostrou insuficiente (caso Paulo Henrique 16:49-16:52, IA
+    // ignorou e rodou consultar_lentes de novo trazendo Eyezen/ZEISS R$1985-2190
+    // em vez de recapitular DNZ/DMAX/HOYA do orçamento humano anterior).
+    let forceResponderTool = false;
     if (referenciaOpcao.test(lastInboundText) && ultimoOutboundComOrcamento) {
       messages.push({
         role: "system",
-        content: "[SISTEMA: REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR] O cliente está pedindo detalhes ou confirmação de opções específicas (ex: 'da 1 e 2', 'a opção 2') referenciando um orçamento que JÁ foi enviado nas últimas mensagens (procure por R$ e nomes de marcas como DNZ/DMAX/HOYA/ESSILOR no histórico outbound recente). AÇÃO OBRIGATÓRIA: 1) recapitule SOMENTE as opções que ele pediu (com nome e valor exatos do que foi enviado antes — NÃO invente novos valores nem rode consultar_lentes de novo, isso pode trazer opções diferentes); 2) pergunte se quer agendar pra ver na loja. PROIBIDO escalar para humano. PROIBIDO ignorar a referência."
+        content: "[SISTEMA: REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR] O cliente está pedindo detalhes ou confirmação de opções específicas (ex: 'da 1 e 2', 'a opção 2') referenciando um orçamento que JÁ foi enviado nas últimas mensagens (procure por R$ e nomes de marcas como DNZ/DMAX/HOYA/ESSILOR no histórico outbound recente). AÇÃO OBRIGATÓRIA: use a tool *responder* (NÃO consultar_lentes — você está bloqueado de chamar consultar_lentes nesse turno). Recapitule SOMENTE as opções que ele pediu, com nome e valor exatos do que foi enviado antes (NÃO invente novos valores). Pergunte se quer agendar pra ver na loja. PROIBIDO escalar para humano. PROIBIDO ignorar a referência."
       });
-      console.log(`[REFERENCIA-OPCAO] Cliente referenciou opção do orçamento anterior — injetando hint`);
+      forceResponderTool = true;
+      console.log(`[REFERENCIA-OPCAO] Cliente referenciou opção do orçamento anterior — forçando tool_choice=responder`);
     }
 
     // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
@@ -2579,7 +2585,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           model: "openai/gpt-5",
           messages: callMessages,
           tools: TOOLS,
-          tool_choice: "required",
+          tool_choice: forceResponderTool
+            ? { type: "function", function: { name: "responder" } }
+            : "required",
           max_completion_tokens: 2500,
         }),
       });
@@ -3871,16 +3879,34 @@ async function runConsultarLentes(
   const midIndex = Math.floor(lenses.length / 2);
   const mid = lenses.length >= 3 ? lenses[midIndex] : null;
 
+  // Gap-aware: se a "premium" é >2× o preço da econômica, esconde faixa cara
+  // (evita o efeito DNZ R$520 + ZEISS R$1.949 lado a lado, que parece esquisito).
+  // Mostra só as econômicas próximas e oferece detalhamento sob demanda.
+  const economyPrice = Number(economy.price_brl);
+  const premiumPrice = Number(premium.price_brl);
+  const hasBigGap = premiumPrice > economyPrice * 2 && lenses.length >= 2;
+
   const formatLens = (l: any, label: string) =>
     `${label}: *${l.brand} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
 
   let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
-  quoteMsg += formatLens(economy, "💚 Econômica");
-  if (mid && mid.id !== economy.id && mid.id !== premium.id) {
-    quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
-  }
-  if (premium.id !== economy.id) {
-    quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+
+  if (hasBigGap) {
+    // Pega até 2 lentes na faixa de entrada (até 2× o preço da econômica).
+    const entryBand = lenses.filter((l: any) => Number(l.price_brl) <= economyPrice * 2).slice(0, 2);
+    quoteMsg += formatLens(entryBand[0], "🟢 Mais em conta");
+    if (entryBand.length > 1) {
+      quoteMsg += "\n" + formatLens(entryBand[1], "🟡 Um passo acima");
+    }
+    quoteMsg += `\n\n📌 Temos opções premium a partir de R$ ${premiumPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (filtro azul, marcas top como ZEISS/ESSILOR) — quer que eu detalhe alguma ou prefere ver pessoalmente na loja?`;
+  } else {
+    quoteMsg += formatLens(economy, "💚 Econômica");
+    if (mid && mid.id !== economy.id && mid.id !== premium.id) {
+      quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
+    }
+    if (premium.id !== economy.id) {
+      quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+    }
   }
   quoteMsg += "\n\nPosso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊";
 

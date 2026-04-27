@@ -1,6 +1,6 @@
 ---
 name: Auto-OCR + Anti-Loop + Fluxo Pós-Receita
-description: Image+quote intent triggers automatic interpretar_receita; loop detector forces tool execution or escalates; post-receita flow forces consultar_lentes → opções → região → agendamento; templates de tools NUNCA contêm escalada hardcoded
+description: Image+quote intent triggers automatic interpretar_receita; loop detector forces tool execution or escalates; post-receita flow forces consultar_lentes → opções → região → agendamento; templates de tools NUNCA contêm escalada hardcoded; referência a opção FORÇA tool_choice=responder; template é gap-aware (esconde premium >2× se houver salto)
 type: feature
 ---
 
@@ -66,3 +66,14 @@ Operador mandou orçamento manual (DNZ/DMAX/HOYA). IA disse "vou separar as opç
 - Watchdog ignora outbounds humanas.
 - Loop detector só age com ≥3 outbound recentes.
 - Eventos detalhados em `eventos_crm` para auditoria.
+
+### Paulo Henrique 3ª rodada (2026-04-27 16:48-16:53) — hint REFERÊNCIA-OPÇÃO ignorado + gap de catálogo
+Operador mandou às 16:48 três marcas (DNZ HDI / DMAX BlueGuard / HOYA Hi-Vision) sem valores. Cliente: "Quero orçamento da 1 e 2". Hint REFERENCIA-OPCAO foi injetado mas a IA chamou `consultar_lentes` mesmo assim — devolveu **ESSILOR Eyezen Start R$1.985 + Eyezen Boost R$2.135 + ZEISS SmartLife R$2.190**, opções que nem estavam no orçamento humano. Loop "Me explica melhor..." 3× depois.
+
+**Causa dupla:**
+1. **Hint sozinho não basta** quando há tool_choice=required — LLM ainda escolhe `consultar_lentes` porque a intent original era "orçamento". Fix: quando detector REFERENCIA-OPCAO dispara, sobrescreve `tool_choice` para `{ type: "function", function: { name: "responder" } }`. LLM fica fisicamente impedido de chamar `consultar_lentes`.
+2. **Gap real no catálogo**: pra OD 0/-2 OE 0/-2.50 single_vision o catálogo tem DNZ R$520, DNZ Free Form R$690, depois pula direto pra ZEISS R$1.490+ e ESSILOR R$1.985+. Não há DMAX nem HOYA single_vision; nem fotossensível nessa faixa. Tool retornava as 3 opções (econômica/mid/premium) misturando entrada DNZ com ZEISS/ESSILOR caríssimos. Fix: template "gap-aware" — se `premium > economy * 2`, mostra só faixa de entrada (até 2× a econômica) e oferece detalhar premium sob demanda. Evita o efeito "DNZ R$520 ao lado de ZEISS R$1.949".
+
+**Gap operacional pendente** (não corrigido em código): popular `pricing_table_lentes` com DMAX BlueGuard 1.60 single_vision, HOYA Hi-Vision LongLife 1.67, e ao menos 1 fotossensível Transitions entry. Sem isso operadores continuarão citando marcas que a tool não conhece.
+
+**Recuperação Paulo:** atendimento `26464d89` — operador enviou DNZ HDI R$520 + DNZ Free Form R$690 + esclareceu fotossensível, marcado modo=humano. Auditoria em `eventos_crm` (`recuperacao_manual_lentes`).
