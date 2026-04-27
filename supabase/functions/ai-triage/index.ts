@@ -678,8 +678,11 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
   }
 
   // All pool exhausted — escalate to human (keep current column, flag modo=humano)
+  const escResposta = isHorarioHumano()
+    ? "Vou chamar um Consultor especializado pra te ajudar melhor, tá? Ele já entra em contato!"
+    : mensagemEscaladaForaHorario("");
   return {
-    resposta: "Vou chamar um Consultor especializado pra te ajudar melhor, tá? Ele já entra em contato!",
+    resposta: escResposta,
     intencao: "outro",
     pipeline_coluna: "Novo Contato",
     precisa_humano: true,
