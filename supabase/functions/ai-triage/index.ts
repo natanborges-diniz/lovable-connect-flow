@@ -1449,12 +1449,19 @@ const VALIDATOR_FAILED_POOL = [
 
 function pickFallback(recentOutbound: string[]): string | null {
   const recentNorm = recentOutbound.slice(-10).map(norm);
+  // ⚠️ Se já mandamos QUALQUER fallback genérico recentemente, escala (retorna null).
+  // Caso Paulo Henrique 2026-04-27: 3× "Me explica melhor..." em loop.
+  const sentAnyFallback = VALIDATOR_FAILED_POOL.some((fb) => {
+    const fbNorm = norm(fb);
+    return recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
+  });
+  if (sentAnyFallback) return null;
+  // Primeiro fallback: pega o primeiro do pool não usado.
   for (const fb of VALIDATOR_FAILED_POOL) {
     const fbNorm = norm(fb);
     const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
     if (!alreadySent) return fb;
   }
-  // All fallbacks exhausted — return null to escalate
   return null;
 }
 
