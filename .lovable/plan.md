@@ -1,108 +1,49 @@
-## Diagnóstico (caso Jorge — 558488766851)
+## Problema observado (caso Loren)
 
-Olhando as mensagens reais no banco:
+Após receber orçamento (DNZ/HOYA), a cliente perguntou **"Tem Varilux?"** — que é um filtro/refinamento de marca dentro do mesmo intent (orçamento de multifocal). A IA, em vez de re-chamar `consultar_lentes` filtrando por Essilor/Varilux (que existe no catálogo: Comfort, XR Design, XR Lite, Physio Extensee, etc.), caiu no **loop-detector** (`ai-triage/index.ts` linha ~2546) que escalou para humano com a frase fixa:
 
-```
-21:00:29.055  outbound  Sistema  [Template: retomada_contexto_1] Params: Jorge, seu atendimento
-21:00:29.130  outbound  Sistema  [Template: retomada_contexto_1] Params: Jorge, seu atendimento   ← 75ms depois
-21:36:46      inbound   558...   Gostaria de um orçamento                                          ← sem resposta
-```
+> "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊"
 
-Atendimento está em `modo='humano'` desde 19/04, sem `atendente_nome` (órfão na fila humana).
+Dois defeitos somados:
 
-### Problema 1 — Template duplicado (75ms de diferença)
-`vendas-recuperacao-cron` está agendado a cada 1 min e a função `processHumano` lê `recuperacao_humano.tentativas=0`, dispara o template e só depois grava `tentativas=1`. Duas execuções concorrentes (ou retry interno do pg_cron quando a anterior demora) leem o mesmo zero, ambas enviam.
+1. **Refinamento de marca não é loop**: o detector não reconheceu que a pergunta era um intent claro de re-orçamento filtrado, e tratou como ambiguidade → escalada.
+2. **Texto fixo ignora horário comercial**: 19:02 SP é fora do expediente humano (Seg-Sex 09-18, Sáb 08-12). A mensagem deveria avisar a cliente que o time só responde no próximo expediente, igual ao que o `watchdog-loop-ia` já faz com `isHorarioHumano()` + `proximaAberturaHumana()`.
 
-Não há lock de idempotência: nada compara `ultima_tentativa_at` antes de disparar (só compara depois pra calcular delay, mas com `tentativas=0` o `referenceTime` cai em `lastInboundAt`, que é antigo, então a janela passa nas duas execuções).
+## Mudanças propostas
 
-### Problema 2 — Cliente respondeu e nada aconteceu
-`whatsapp-webhook/index.ts:605` só dispara `ai-triage` quando `atendimento.modo` é `ia` ou `hibrido`. Como o atendimento do Jorge ficou em `humano` (handoff de 19/04 que nunca foi encerrado), a mensagem "Gostaria de um orçamento" foi gravada mas **não foi para a IA nem para humano nenhum** — ninguém olha aquela fila pra esse contato.
+### 1. Detectar refinamento por marca antes do loop-escalation (`ai-triage/index.ts`)
 
-O fato de a IA ter acabado de mandar um template de retomada e o cliente ter respondido prova que o cliente ainda quer atendimento. Ignorar essa resposta é o pior cenário.
+No bloco do loop-detector (~linha 2530), antes de cair no `else { escalating to human }`, adicionar uma checagem:
 
-## Solução
+- Se o último inbound do cliente bate com regex de marca conhecida (`/varilux|essilor|zeiss|hoya|kodak|dnz|dmax/i`) **E** existe receita salva **E** o histórico recente contém um orçamento de óculos (presença de `🔍 Opções|R$|DNZ|HOYA|ESSILOR|ZEISS` em outbound recente), forçar `consultar_lentes` com `preferencia_marca = <marca detectada>` em vez de escalar.
+- Adicionar hint do sistema: "Cliente está pedindo a mesma família de produto filtrada por marca X — re-execute consultar_lentes com preferencia_marca=X. NÃO escale."
 
-### Correção 1 — Idempotência da retomada humano (`vendas-recuperacao-cron`)
+Isso aproveita o parâmetro `preferencia_marca` que já existe em `consultar_lentes` (linha 3867).
 
-Em `processHumano` (linhas 457-486), adicionar guard antes de disparar o template:
+### 2. Mensagem de escalada sensível ao horário (`ai-triage/index.ts`)
 
-```ts
-// Idempotência: se já tentou nas últimas N horas, pula (evita duplicação por race do cron)
-if (recH.ultima_tentativa_at) {
-  const minIntervaloMs = 60 * 60 * 1000; // 1h mínimo entre tentativas
-  const desde = now.getTime() - new Date(recH.ultima_tentativa_at).getTime();
-  if (desde < minIntervaloMs) {
-    console.log(`[HUMANO-DEDUPE] ${contato.nome}: tentativa já feita há ${Math.round(desde/60000)}min`);
-    return result;
-  }
-}
-```
+Extrair as helpers `spNow()`, `isHorarioHumano()` e `proximaAberturaHumana()` (já existentes em `watchdog-loop-ia/index.ts`) e replicá-las em `ai-triage/index.ts` (ou mover para um util compartilhado se já houver — caso contrário, duplicar é aceitável dado padrão atual de Edge Functions sem subpastas).
 
-Adicionalmente, fazer o `update` do contador **antes** do `fetch` do template (lock otimista) e reverter se falhar — ou usar `update ... where metadata->'recuperacao_humano'->>'ultima_tentativa_at' is distinct from <novo_valor>` pra garantir que só uma execução ganha.
+Substituir as mensagens fixas de escalada por uma função `mensagemEscaladaHumano()` que retorna:
+- **Dentro do expediente**: "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊"
+- **Fora do expediente**: "Vou acionar nossa equipe humana 🙌 Como já passamos do nosso horário (Seg-Sex 09h-18h, Sáb 08h-12h), assim que abrir o próximo expediente (`{proximaAberturaHumana()}`) eles te respondem por aqui 😉"
 
-Implementação prática mais simples e robusta: **gravar `ultima_tentativa_at = now` ANTES do fetch**. Se duas execuções rodam, a segunda lê o valor recém-escrito e cai no guard acima. Em caso de falha do fetch, fica registrado como tentativa "perdida" — preferível a duplicar.
+Aplicar nos pontos de escalada com texto fixo identificados:
+- Linha ~2555 (loop-detector)
+- Linha ~2447 (fechamento LC → consultor)
+- Linha ~682 (pool exhausted)
+- Qualquer outro `sendWhatsApp` que use frases tipo "vou chamar/acionar Consultor".
 
-### Correção 2 — Reativar IA quando cliente responde a template de retomada (`whatsapp-webhook`)
+### 3. Memória
 
-Em `whatsapp-webhook/index.ts` (logo após salvar a mensagem inbound, antes do bloco ~605 que decide o roteamento), adicionar:
-
-```ts
-// Auto-reativação IA: se o atendimento está em modo='humano' SEM atendente_nome
-// (órfão na fila) E a última outbound foi um template de retomada do Sistema/IA,
-// significa que o handoff humano foi abandonado. Reativa IA pra responder o cliente.
-if (atendimentoModo === "humano") {
-  const { data: at } = await supabase
-    .from("atendimentos")
-    .select("atendente_nome, metadata")
-    .eq("id", atendimentoId)
-    .single();
-
-  const semAtendente = !at?.atendente_nome;
-  const recH = at?.metadata?.recuperacao_humano;
-  const teveRetomadaRecente = recH?.ultima_tentativa_at &&
-    (Date.now() - new Date(recH.ultima_tentativa_at).getTime()) < 7 * 24 * 3600 * 1000;
-
-  if (semAtendente && teveRetomadaRecente) {
-    await supabase.from("atendimentos")
-      .update({ modo: "hibrido", updated_at: new Date().toISOString() })
-      .eq("id", atendimentoId);
-    atendimentoModo = "hibrido"; // cai no branch da IA logo abaixo
-    await supabase.from("eventos_crm").insert({
-      contato_id: contato.id,
-      tipo: "reativacao_ia_pos_retomada",
-      descricao: "Cliente respondeu após template de retomada — IA reativada (modo híbrido)",
-      metadata: { template_anterior: recH.template_usado },
-    });
-    console.log(`[REATIVACAO-IA] ${contato.id}: humano órfão → híbrido após resposta a ${recH.template_usado}`);
-  }
-}
-```
-
-Por que `híbrido` e não `ia`? Mantém o card visível na fila humana caso o operador queira retomar, mas a IA já processa e responde — alinhado com a regra "Continuity After Handoff" da memória.
-
-### Correção 3 — Limpar metadata `recuperacao_humano` quando cliente responde
-
-Quando o cliente envia inbound, o ciclo de retomada deve resetar (a próxima vez que ele ficar em silêncio, conta de novo do zero):
-
-```ts
-if (atendimentoModo === "humano" && recH?.tentativas) {
-  await supabase.from("atendimentos").update({
-    metadata: { ...(at?.metadata || {}), recuperacao_humano: null }
-  }).eq("id", atendimentoId);
-}
-```
-
-Aplicar em conjunto com a correção 2.
+Atualizar `mem://atendimento/horario-comercial-humano` para registrar que **TODA** mensagem de escalada para humano (ai-triage + watchdogs) deve passar pela helper de horário, evitando regressões futuras.
 
 ## Arquivos a editar
 
-- `supabase/functions/vendas-recuperacao-cron/index.ts` — guard de idempotência em `processHumano` (~linha 457) + gravar `ultima_tentativa_at` antes do envio.
-- `supabase/functions/whatsapp-webhook/index.ts` — reativar IA + limpar contador de retomada humano antes do roteamento (~linha 600).
-- `.lovable/memory/crm/recuperacao-ia-anti-abandono.md` — documentar idempotência e auto-reativação pós-retomada.
+- `supabase/functions/ai-triage/index.ts` — adicionar helpers de horário, função `mensagemEscaladaHumano()`, branch de refinamento por marca no loop-detector.
+- `.lovable/memory/atendimento/horario-comercial-humano.md` — documentar regra unificada.
 
-Sem mudanças de schema. Sem novos templates.
+## Resultado esperado
 
-## Resultado esperado no caso Jorge
-
-1. Próxima execução do cron não duplica template (guard de 1h).
-2. Quando ele responde "Gostaria de um orçamento", o webhook detecta atendimento humano órfão com retomada recente → flipa para `hibrido` → IA dispara, lê o histórico (tem receita salva, tópico = orçamento de lentes de contato) e responde com a tool `consultar_lentes_contato`.
+- "Tem Varilux?" após orçamento → IA re-consulta com filtro Essilor e devolve 2-3 opções Varilux com preços, sem escalar.
+- Quando a escalada for genuinamente necessária fora do expediente, a cliente recebe aviso explícito do próximo horário de retorno em vez de ficar sem resposta.
