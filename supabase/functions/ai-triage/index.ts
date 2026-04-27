@@ -542,6 +542,20 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
+  // Distingue PRAZO DE CONFECÇÃO (compra nova) de STATUS DE PEDIDO existente.
+  // Confecção: "prazo de entrega/confecção/fabricação", "quanto tempo demora/leva", "quando fica pronto"
+  //   SEM menção a "minha OS / meu pedido / já comprei / fiz o pedido".
+  const isPrazoConfeccao = /\b(prazo|quanto tempo|quanto demora|quanto leva|em quantos dias|quando fica pronto|tempo de (entrega|confec[cç][aã]o|fabrica[cç][aã]o|produ[cç][aã]o))\b/.test(n)
+    && !/\b(minha os|meu pedido|j[aá] comprei|fiz o pedido|comprei (no |dia )|t[aá] pronto|j[aá] chegou|status do (meu )?pedido)\b/.test(n);
+  if (isPrazoConfeccao) {
+    return {
+      resposta: "O prazo de confecção das lentes depende da fabricante e do tipo de tratamento — normalmente entre **7 e 15 dias úteis** após a confirmação do pagamento. Tóricas e lentes especiais podem levar um pouco mais. Quer que eu te direcione pra loja mais próxima pra fechar?",
+      intencao: "orcamento",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
+
   if (/status|pedido|entrega|retirada|retirar|pronto/.test(n)) {
     return {
       resposta: "Vou verificar pra você! Me passa seu nome completo ou o número da OS que eu consulto aqui rapidinho.",
