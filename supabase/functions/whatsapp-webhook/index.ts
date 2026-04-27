@@ -569,6 +569,54 @@ serve(async (req) => {
       console.error("[PONTE CHECK] Error:", ponteErr);
     }
 
+    // ── REATIVAÇÃO IA pós-template de retomada ──
+    // Se o atendimento está em modo='humano' SEM atendente assumido E houve template
+    // de retomada nas últimas 7 dias, isso significa handoff humano abandonado +
+    // cliente respondeu ao template. Reativa IA (modo híbrido) pra não perder o lead.
+    // Caso Jorge 27/04: humano órfão de 19/04 + template enviado 21:00 + resposta 21:36 ignorada.
+    if (
+      !ponteAtivaOverride &&
+      !isCorporate &&
+      atendimentoModo === "humano"
+    ) {
+      try {
+        const { data: atFull } = await supabase
+          .from("atendimentos")
+          .select("atendente_nome, metadata")
+          .eq("id", atendimentoId)
+          .maybeSingle();
+        const semAtendente = !atFull?.atendente_nome;
+        const recH = (atFull?.metadata as any)?.recuperacao_humano;
+        const ultTentativaAt = recH?.ultima_tentativa_at ? new Date(recH.ultima_tentativa_at).getTime() : 0;
+        const teveRetomadaRecente = ultTentativaAt > 0 &&
+          (Date.now() - ultTentativaAt) < 7 * 24 * 3600 * 1000;
+
+        if (semAtendente && teveRetomadaRecente) {
+          await supabase.from("atendimentos").update({
+            modo: "hibrido",
+            metadata: { ...(atFull?.metadata as any || {}), recuperacao_humano: null },
+            updated_at: new Date().toISOString(),
+          }).eq("id", atendimentoId);
+          atendimentoModo = "hibrido"; // cai no branch da IA logo abaixo
+          await supabase.from("eventos_crm").insert({
+            contato_id: contato.id,
+            tipo: "reativacao_ia_pos_retomada",
+            descricao: "Cliente respondeu após template de retomada — IA reativada (modo híbrido)",
+            metadata: { template_anterior: recH?.template_usado, topico: recH?.topico },
+          });
+          console.log(`[REATIVACAO-IA] ${contato.id}: humano órfão → híbrido após resposta a ${recH?.template_usado || "retomada"}`);
+        } else if (recH?.tentativas) {
+          // Cliente respondeu mas há atendente humano ativo: apenas zera o contador
+          // pra próxima vez que ficar em silêncio começar do zero.
+          await supabase.from("atendimentos").update({
+            metadata: { ...(atFull?.metadata as any || {}), recuperacao_humano: null },
+          }).eq("id", atendimentoId);
+        }
+      } catch (reativErr) {
+        console.error("[REATIVACAO-IA] erro:", reativErr);
+      }
+    }
+
     if (shouldSkipBot) {
       console.log(`Homologação: phone ${phone} not in whitelist, skipping bot/AI`);
     } else if (ponteAtivaOverride) {

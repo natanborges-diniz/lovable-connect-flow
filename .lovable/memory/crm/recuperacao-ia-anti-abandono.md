@@ -34,6 +34,17 @@ Total: ~96h. Contador em `atendimentos.metadata.recuperacao_humano` (separado do
 ### Cooldown anti-interferência (humano)
 Se houve outbound de remetente humano (não-Gael/IA/Sistema/Bot/Template) nas últimas **24h**, o cron pula a retomada — assume que o consultor está conduzindo. Configurável via `humano_cooldown_horas`.
 
+### Idempotência (anti-duplicação por race do cron)
+Antes de disparar o template, `processHumano` verifica `recuperacao_humano.ultima_tentativa_at`: se foi gravada nos últimos 60min, pula. Logo em seguida, **grava o novo `ultima_tentativa_at` ANTES do `fetch`** (lock otimista), garantindo que duas execuções concorrentes do cron não disparem o template duas vezes (caso Jorge 27/04 — duplicado em 75ms).
+
+### Reativação automática IA pós-retomada (`whatsapp-webhook`)
+Quando o cliente responde a um template de retomada estando o atendimento em `modo='humano'` órfão (sem `atendente_nome`), o webhook automaticamente:
+1. Flipa `modo` para `hibrido` (mantém card visível na fila humana, mas IA processa).
+2. Limpa `recuperacao_humano` do metadata.
+3. Roteia o inbound para `ai-triage` no mesmo request.
+
+Critérios: `atendimento.modo='humano'` + `atendente_nome IS NULL` + `recuperacao_humano.ultima_tentativa_at` nos últimos 7 dias. Registra evento `reativacao_ia_pos_retomada` em `eventos_crm`. Se houver atendente humano ativo, apenas zera o contador.
+
 ### Inferência do tópico ({{2}})
 Função `inferirTopico` analisa últimas 5 outbound humanas em busca de palavras-chave:
 - "lentes de contato" → `"as lentes de contato"`

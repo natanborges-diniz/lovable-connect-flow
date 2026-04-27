@@ -462,6 +462,31 @@ async function processHumano(
   const hoursSinceRef = (now.getTime() - referenceTime.getTime()) / (1000 * 3600);
   if (hoursSinceRef < requiredDelay) return result;
 
+  // ── IDEMPOTÊNCIA: bloqueia disparo duplicado por race do cron ──
+  // Cron roda a cada 1min; duas execuções concorrentes liam tentativas=0
+  // simultaneamente e disparavam o template duas vezes em ~75ms (caso Jorge 27/04).
+  if (recH.ultima_tentativa_at) {
+    const desdeMs = now.getTime() - new Date(recH.ultima_tentativa_at).getTime();
+    if (desdeMs < 60 * 60 * 1000) {
+      console.log(`[HUMANO-DEDUPE] ${contato.nome}: tentativa há ${Math.round(desdeMs/60000)}min — pulando`);
+      return result;
+    }
+  }
+
+  // Lock otimista: grava ultima_tentativa_at ANTES do fetch.
+  // A 2ª execução concorrente cai no guard acima na próxima leitura.
+  await supabase.from("atendimentos").update({
+    metadata: {
+      ...atMeta,
+      recuperacao_humano: {
+        ...recH,
+        tentativas: tentativas + 1,
+        ultima_tentativa_at: now.toISOString(),
+        lock_pending: true,
+      },
+    },
+  }).eq("id", atendimento.id);
+
   const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
   const topico = inferirTopico(lastOutbound) || "seu atendimento";
   const TEMPLATES = ["retomada_contexto_1", "retomada_contexto_2"];
