@@ -2587,12 +2587,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           });
         }
       }
-    } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita")) {
+    } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita" || forcedIntent.tool === "responder_pedindo_receita")) {
       const hint = forcedIntent.tool === "consultar_lentes"
         ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere."
         : forcedIntent.tool === "consultar_lentes_contato"
         ? "[SISTEMA: INTENT CLARO — LENTES DE CONTATO] Cliente pediu orçamento de LENTES DE CONTATO e há receita salva. Use consultar_lentes_contato AGORA (NÃO consultar_lentes — esse é para óculos), apresente 2-3 opções com descartes VARIADOS (diária + quinzenal/mensal), priorize DNZ, e termine perguntando a região. PROIBIDO repetir 'posso seguir por dois caminhos'. PROIBIDO escalar para humano."
-        : "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há imagem pendente. Use interpretar_receita AGORA — não pergunte se pode analisar.";
+        : forcedIntent.tool === "interpretar_receita"
+        ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há imagem pendente. Use interpretar_receita AGORA — não pergunte se pode analisar."
+        : `[SISTEMA: INTENT CLARO — ORÇAMENTO SEM RECEITA UTILIZÁVEL] Cliente pediu orçamento ${isLCContextGlobal ? "de LENTES DE CONTATO" : ""} mas não há receita válida salva. PROIBIDO escalar. PROIBIDO chamar consultar_lentes/consultar_lentes_contato. AÇÃO: use *responder* pedindo nova foto da receita ${isLCContextGlobal ? "de lentes de contato" : ""} mais nítida E ofereça clínica parceira: "Se preferir, posso indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto." NÃO diga que está montando opções.`;
       messages.push({ role: "system", content: hint });
       console.log(`[INTENT-FORCE] Hinting ${forcedIntent.tool} (no loop, but clear intent)`);
     }
