@@ -1930,7 +1930,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
       systemPrompt = buildSystemPrompt({
         businessRules,
-        knowledge: knowledgeStr + agendamentoCtx + receitaCtx,
+        knowledge: (locationCtx ? locationCtx + "\n\n" : "") + knowledgeStr + agendamentoCtx + receitaCtx,
         examples: examplesStr,
         antiExamples: antiStr,
         regrasProibidas: regrasProibidas as { regra: string; categoria: string }[],
