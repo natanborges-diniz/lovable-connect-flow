@@ -1297,8 +1297,8 @@ Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assun
     s.push(`# MODO RESTRITO (BASE VAZIA)
 Sem dados detalhados de produtos. Use APENAS valores das REGRAS DE ATENDIMENTO.
 Sugira envio de foto da receita. NUNCA responda sobre produtos com endereço de loja.
-Se não souber responder: "Vou encaminhar para um Consultor especializado que pode detalhar isso."
-→ Use escalar_consultor se o tema exigir informações que você não tem.`);
+Se não souber responder com precisão: peça mais detalhes ao cliente OU sugira agendamento na loja mais próxima pra ver pessoalmente.
+PROIBIDO usar frases como "vou encaminhar para um Consultor", "para esse grau específico vou passar pra alguém da equipe" — escalada só via tool escalar_consultor em cenários graves (reclamação, pedido humano explícito, ZERO opções no catálogo).`);
   }
 
   if (opts.examples) s.push(`# EXEMPLOS CORRETOS\n${opts.examples}`);
@@ -1449,12 +1449,19 @@ const VALIDATOR_FAILED_POOL = [
 
 function pickFallback(recentOutbound: string[]): string | null {
   const recentNorm = recentOutbound.slice(-10).map(norm);
+  // ⚠️ Se já mandamos QUALQUER fallback genérico recentemente, escala (retorna null).
+  // Caso Paulo Henrique 2026-04-27: 3× "Me explica melhor..." em loop.
+  const sentAnyFallback = VALIDATOR_FAILED_POOL.some((fb) => {
+    const fbNorm = norm(fb);
+    return recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
+  });
+  if (sentAnyFallback) return null;
+  // Primeiro fallback: pega o primeiro do pool não usado.
   for (const fb of VALIDATOR_FAILED_POOL) {
     const fbNorm = norm(fb);
     const alreadySent = recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
     if (!alreadySent) return fb;
   }
-  // All fallbacks exhausted — return null to escalate
   return null;
 }
 
@@ -2395,6 +2402,24 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       hasLCQuotePresented,
       lastOutboundForIntent,
     );
+
+    // ── REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR ──
+    // Caso Paulo Henrique 2026-04-27 16:49: cliente disse "Quero orçamento da 1 e 2 por favor"
+    // referenciando opções do orçamento que o operador já enviou. IA não tinha esse contexto
+    // como intent → caiu no fallback "vou encaminhar para Consultor". Detecta a referência
+    // explícita a número de opção e injeta hint pra IA recapitular SEM rodar consultar_lentes
+    // de novo (que poderia trazer opções diferentes).
+    const referenciaOpcao = /\b(op[cç][aã]o\s*\d+|n[uú]mero\s*\d+|da\s*\d+(\s*[ee]\s*\d+)?\s+(por favor|pf|pfv)?|a\s+\d+(\s*[ee]\s*\d+)?\b)\b/i;
+    const ultimoOutboundComOrcamento = (recentOutbound || []).slice(-3).some((m: string) =>
+      typeof m === "string" && /R\$\s*[\d.,]+/i.test(m) && /\b(1\.|2\.|3\.|💚|💛|💎|opç|DNZ|DMAX|HOYA|ESSILOR|ZEISS)/i.test(m)
+    );
+    if (referenciaOpcao.test(lastInboundText) && ultimoOutboundComOrcamento) {
+      messages.push({
+        role: "system",
+        content: "[SISTEMA: REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR] O cliente está pedindo detalhes ou confirmação de opções específicas (ex: 'da 1 e 2', 'a opção 2') referenciando um orçamento que JÁ foi enviado nas últimas mensagens (procure por R$ e nomes de marcas como DNZ/DMAX/HOYA/ESSILOR no histórico outbound recente). AÇÃO OBRIGATÓRIA: 1) recapitule SOMENTE as opções que ele pediu (com nome e valor exatos do que foi enviado antes — NÃO invente novos valores nem rode consultar_lentes de novo, isso pode trazer opções diferentes); 2) pergunte se quer agendar pra ver na loja. PROIBIDO escalar para humano. PROIBIDO ignorar a referência."
+      });
+      console.log(`[REFERENCIA-OPCAO] Cliente referenciou opção do orçamento anterior — injetando hint`);
+    }
 
     // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
     // LC NÃO requer visita à loja. Cliente escolheu marca / pediu reservar:
@@ -3837,7 +3862,8 @@ async function runConsultarLentes(
 
   if (!lenses || lenses.length === 0) {
     console.log(`[QUOTE] No matching lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
-    return { resposta: args?.resposta_fallback || "Para esse grau específico, vou encaminhar para um Consultor que pode detalhar as melhores opções. Posso fazer isso agora?" };
+    // ⚠️ NUNCA escalar para "Consultor" aqui. Encaminha pra loja física, mantém engajamento.
+    return { resposta: args?.resposta_fallback || "Pra esses graus específicos preciso confirmar a disponibilidade direto na loja antes de te passar o valor exato 😊 Em qual região/bairro você está? Já te indico a unidade mais próxima pra você ver as opções pessoalmente." };
   }
 
   const economy = lenses[0];
@@ -3856,7 +3882,7 @@ async function runConsultarLentes(
   if (premium.id !== economy.id) {
     quoteMsg += "\n" + formatLens(premium, "💎 Premium");
   }
-  quoteMsg += "\n\nVou encaminhar pra um Consultor confirmar a disponibilidade da sua armação na loja e te ajudar a fechar 🤝 Em qual região você está? Já te indico a loja mais próxima.";
+  quoteMsg += "\n\nPosso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊";
 
   const quoteNorm = norm(quoteMsg);
   const recentNormQuote = (recentOutbound || []).slice(-3).map(norm);
