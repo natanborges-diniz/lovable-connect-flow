@@ -1,104 +1,78 @@
-## Diagnóstico encontrado
+## Objetivo
+Corrigir o fluxo para que, quando o cliente já pediu orçamento e a receita é lida com sucesso, o sistema envie automaticamente 2–3 opções de lentes com preços, sem cair em respostas contraditórias ou pedir a receita novamente.
 
-O problema não foi uma única falha; foram 3 falhas em sequência no fluxo da IA.
+## Diagnóstico confirmado
+O caso do André mostra 3 falhas combinadas:
 
-1. A primeira leitura da imagem aconteceu, mas voltou vazia
-   - No histórico do backend, a receita foi salva às 23:35 como:
-     - `rx_type: unknown`
-     - `confidence: 0.75`
-     - `eyes.od = {}`
-     - `eyes.oe = {}`
-     - `needs_human_review: true`
-   - Ou seja: a IA até tentou interpretar a foto, mas não extraiu nenhum grau útil.
+1. Duplicidade de processamento no inbound
+- A mesma conversa recebeu múltiplos envios/reprocessamentos de imagem e nome em segundos.
+- O webhook salva mensagens inbound repetidas com o mesmo `whatsapp_message_id` e dispara o `ai-triage` de novo.
+- Isso explica a sequência de respostas conflitantes e repetidas.
 
-2. Mesmo com a leitura vazia, o sistema passou a tratar isso como “já existe receita”
-   - A partir daí, o roteamento deixou de priorizar nova leitura da imagem.
-   - Em vez de insistir no `interpretar_receita`, o fluxo passou a agir como se já houvesse receita salva e começou a cair no orçamento / fallback.
-   - Isso explica respostas como:
-     - “Já estou analisando...”
-     - “Sobre o que a gente estava falando...”
-     - “Não consegui identificar o grau completo...”
+2. OCR bem-sucedido não encadeou orçamento de forma determinística
+- Às 13:38:35 a receita válida foi salva como `single_vision` com confiança 0.82.
+- Mesmo assim, a resposta enviada foi apenas a leitura da receita (`Li sua receita...`) e não o orçamento.
+- O fluxo pós-receita está descrito no prompt, mas a execução do tool `interpretar_receita` ainda depende do `args.resposta` e não força a continuação para `consultar_lentes` quando já existe intenção explícita de orçamento.
 
-3. A correção digitada pelo cliente também foi parseada de forma errada
-   - O cliente mandou: `Od -400 / Oe - 425`
-   - O sistema salvou apenas:
-     - `OD = -400`
-     - `OE = null`
-   - Então houve dois problemas adicionais:
-     - `-400` foi entendido literalmente, e não como `-4,00`
-     - `Oe - 425` não foi lido corretamente por causa do espaço após o sinal
-   - Resultado: o motor de orçamento tentou buscar lentes para um grau impossível (`-400`) e sem o OE completo, então não encontrou combinações automáticas.
-
-## Causa raiz no código
-
-### 1) Receita “inválida” conta como receita válida
-Arquivo: `supabase/functions/ai-triage/index.ts`
-- O roteador usa `hasReceitas` como critério simples.
-- Hoje, basta existir algo em `metadata.receitas` para o sistema parar de forçar `interpretar_receita`.
-- Isso é incorreto quando a receita salva está com:
-  - `rx_type = unknown`
-  - ambos os olhos vazios
-  - confiança baixa / revisão humana
-
-### 2) O parser de correção textual é frágil
-Arquivo: `supabase/functions/ai-triage/index.ts`
-- O regex atual não lida bem com formatos como:
-  - `- 425`
-  - `+ 200`
-- E não normaliza shorthand comum de óptica:
-  - `-400` deveria virar `-4.00`
-  - `-425` deveria virar `-4.25`
-
-### 3) O motor de orçamento não diferencia “receita parcialmente inválida” de “grau raro sem preço” 
-Arquivo: `supabase/functions/ai-triage/index.ts`
-- Quando recebe um grau mal interpretado, ele simplesmente tenta consultar a tabela de preços.
-- Como não acha resultado, responde como se o problema fosse indisponibilidade, quando na verdade o problema era parsing inválido.
+3. `consultar_lentes` pode pegar a receita errada quando há receitas duplicadas com o mesmo label
+- O log recente mostra `consultar_lentes: {"receita_label":"cliente"}`.
+- O código usa `find(...)` por label, o que retorna a primeira receita `cliente` salva.
+- No caso do André, a primeira receita `cliente` era a leitura inválida (`rx_type=unknown`), então o orçamento cai no fallback pedindo os valores por texto, mesmo havendo uma leitura válida mais recente.
 
 ## Plano de correção
 
-1. Blindar o conceito de “receita válida” no `ai-triage`
-   - Criar uma checagem de validade da receita salva.
-   - Só considerar “tem receita” quando houver pelo menos um olho com esfera/cilindro útil e `rx_type` coerente.
-   - Se a receita salva estiver vazia ou `unknown`, continuar priorizando nova interpretação da imagem.
+1. Blindar duplicidade no `whatsapp-webhook`
+- Antes de inserir uma inbound em `mensagens`, verificar se já existe o mesmo `whatsapp_message_id` no atendimento.
+- Se já existir, ignorar a inserção e não disparar o `ai-triage` novamente.
+- Aplicar isso a texto e mídia para cortar a cascata de respostas repetidas.
 
-2. Reabrir OCR quando a receita salva for fraca
-   - Se houver imagem recente e a receita salva estiver inválida ou com baixa qualidade, forçar `interpretar_receita` de novo em vez de seguir para orçamento.
-   - Isso evita o falso estado de “já li sua receita”.
+2. Tornar o pós-OCR determinístico quando já houver pedido de orçamento
+- No branch `interpretar_receita` do `ai-triage`, detectar se o cliente já pediu preço/orçamento/opções antes ou junto da leitura.
+- Se a receita ficou válida e a intenção pendente for orçamento de óculos, encadear imediatamente a lógica de `consultar_lentes` na mesma execução.
+- Resultado esperado: ao invés de só dizer “li sua receita”, já responder com opções e preços.
 
-3. Melhorar o parser de receita digitada
-   - Aceitar espaços entre sinal e número (`- 425`).
-   - Normalizar shorthand óptico:
-     - `400` → `4.00`
-     - `425` → `4.25`
-     - preservar formatos já corretos como `-4,25`.
-   - Garantir captura separada de OD e OE.
+3. Corrigir seleção da receita em `consultar_lentes`
+- Quando `receita_label` existir em múltiplas receitas, escolher a mais recente e válida, não a primeira encontrada.
+- Se houver receita inválida mais antiga e válida mais nova com o mesmo label, sempre usar a válida mais recente.
+- Reaproveitar `isReceitaValida` / `hasReceitasValidas` para centralizar a regra.
 
-4. Endurecer o fallback do orçamento
-   - Se a receita estiver parcial/inconsistente, pedir os dados em formato objetivo:
-     - `OD esf/cil/eixo`
-     - `OE esf/cil/eixo`
-   - Não responder “não localizei combinações” quando o erro real for leitura inválida.
+4. Remover fallback enganoso após OCR válido
+- Ajustar o fluxo para não mandar “me confirma os valores por texto” quando a receita válida recém-lida já contém dados suficientes para cotação.
+- Só pedir texto quando a receita realmente estiver incompleta ou tecnicamente insuficiente para consulta.
 
-5. Registrar essa regra na memória operacional da IA
-   - Documentar o caso do Jardel para evitar regressão futura em leituras vazias + correção textual shorthand.
+5. Adicionar observabilidade mínima para evitar regressão
+- Logar explicitamente:
+  - quando um inbound duplicado for descartado;
+  - qual receita foi escolhida para orçamento (`label`, timestamp, validade);
+  - quando o pós-OCR fizer auto-chain para orçamento.
+- Isso facilita confirmar em produção que o caso do André ficou coberto.
 
-## Resultado esperado após a correção
+## Resultado esperado
+Após a correção, o fluxo ideal passa a ser:
 
-No caso do Jardel, o comportamento correto passaria a ser:
-- a primeira leitura falha não “consome” a receita;
-- após o “Sim”, a IA tenta ler a imagem novamente;
-- se o cliente digitar `OD -400 / OE -425`, o sistema normaliza para `OD -4,00 / OE -4,25`;
-- com a receita válida, o orçamento segue normalmente ou pede apenas o dado faltante de forma objetiva.
+```text
+cliente pede orçamento
+→ envia receita
+→ sistema interpreta
+→ se a leitura for válida e já houver intenção de orçamento
+→ sistema consulta pricing_table_lentes na mesma execução
+→ envia 2–3 opções com preço
+→ pergunta região/bairro para indicar a loja
+```
+
+No caso do André, a resposta correta passaria a ser algo no formato:
+- confirmação curta da leitura;
+- 2–3 opções de lentes compatíveis com preço;
+- aviso de que a armação será validada com o consultor / disponibilidade na loja, se aplicável.
 
 ## Detalhes técnicos
+Arquivos principais:
+- `supabase/functions/whatsapp-webhook/index.ts`
+- `supabase/functions/ai-triage/index.ts`
 
-Trechos relevantes já identificados:
-- `detectForcedToolIntent(...)` bloqueia nova interpretação quando `hasReceitas = true`
-- `consultar_lentes` cai em fallback quando `rx_type === "unknown"` ou quando a busca não encontra combinações
-- `detectPrescriptionCorrection(...)` precisa aceitar shorthand e espaços no sinal
-- o caso do Jardel mostrou na base:
-  - leitura OCR inicial vazia
-  - correção textual parcial (`OD=-400`, `OE=null`)
-  - posterior escalada humana por ausência de combinações
+Pontos exatos já identificados:
+- `whatsapp-webhook`: insert inbound + trigger do `ai-triage` sem dedupe por `whatsapp_message_id`
+- `ai-triage` branch `interpretar_receita`: hoje salva RX e responde, mas não encadeia cotação de forma garantida
+- `ai-triage` branch `consultar_lentes`: usa `find(...)` por `receita_label`, favorecendo receita antiga inválida
 
-Se você aprovar, eu implemento essas correções no `ai-triage` e deixo esse cenário protegido para próximos atendimentos.
+Se você aprovar, eu implemento essas correções e deixo esse cenário protegido para próximos atendimentos.
