@@ -286,6 +286,41 @@ function hasReceitasValidas(receitas: any[]): boolean {
   return Array.isArray(receitas) && receitas.some(isReceitaValida);
 }
 
+// ── Detecta CEP e/ou regiões da Grande SP fora da nossa cobertura ──
+// Cobertura: Osasco, Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville.
+// Fora disso (Zona Sul/Norte/Leste/Oeste de SP, ABC, capital, etc.) é "fora de área".
+function detectClienteLocation(textoAcumulado: string): {
+  cep: string | null;
+  regiaoTexto: string | null;
+  foraDeArea: boolean;
+  dentroDeArea: boolean;
+} {
+  const t = String(textoAcumulado || "").toLowerCase();
+
+  const cepMatch = t.match(/\b(\d{5})-?(\d{3})\b/);
+  const cep = cepMatch ? `${cepMatch[1]}-${cepMatch[2]}` : null;
+
+  const foraRegex = /\b(zona\s*(sul|norte|leste|oeste)|s[aã]o\s*paulo\b(?!\s*-\s*osasco)|sp\s*capital|capital paulista|abc\s*paulista|santo\s*andr[eé]|s[aã]o\s*bernardo|s[aã]o\s*caetano|diadema|guarulhos|mau[aá]|tabo[aã]o\s*da\s*serra|embu)\b/i;
+  const regiaoForaMatch = t.match(foraRegex);
+
+  const dentroRegex = /\b(osasco|carapicu[ií]ba|barueri|cotia|itapevi|jandira|santana\s+de\s+parna[ií]ba|alphaville)\b/i;
+  const regiaoDentroMatch = t.match(dentroRegex);
+
+  // Heurística por CEP: Osasco/região = 06000–06999; capital SP = 01000–05999 e 08000–08999; ABC = 09000–09999.
+  let foraPorCep = false;
+  let dentroPorCep = false;
+  if (cepMatch) {
+    const prefix = parseInt(cepMatch[1], 10);
+    if (prefix >= 6000 && prefix <= 6999) dentroPorCep = true;
+    else if ((prefix >= 1000 && prefix <= 5999) || (prefix >= 8000 && prefix <= 9999)) foraPorCep = true;
+  }
+
+  const foraDeArea = (!!regiaoForaMatch || foraPorCep) && !regiaoDentroMatch && !dentroPorCep;
+  const dentroDeArea = !!regiaoDentroMatch || dentroPorCep;
+  const regiaoTexto = regiaoForaMatch?.[0] || regiaoDentroMatch?.[0] || null;
+  return { cep, regiaoTexto, foraDeArea, dentroDeArea };
+}
+
 function detectForcedToolIntent(
   lastInboundText: string,
   hasReceitas: boolean,
