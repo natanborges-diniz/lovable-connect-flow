@@ -1297,8 +1297,8 @@ Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assun
     s.push(`# MODO RESTRITO (BASE VAZIA)
 Sem dados detalhados de produtos. Use APENAS valores das REGRAS DE ATENDIMENTO.
 Sugira envio de foto da receita. NUNCA responda sobre produtos com endereço de loja.
-Se não souber responder: "Vou encaminhar para um Consultor especializado que pode detalhar isso."
-→ Use escalar_consultor se o tema exigir informações que você não tem.`);
+Se não souber responder com precisão: peça mais detalhes ao cliente OU sugira agendamento na loja mais próxima pra ver pessoalmente.
+PROIBIDO usar frases como "vou encaminhar para um Consultor", "para esse grau específico vou passar pra alguém da equipe" — escalada só via tool escalar_consultor em cenários graves (reclamação, pedido humano explícito, ZERO opções no catálogo).`);
   }
 
   if (opts.examples) s.push(`# EXEMPLOS CORRETOS\n${opts.examples}`);
@@ -3857,7 +3857,7 @@ async function runConsultarLentes(
   if (premium.id !== economy.id) {
     quoteMsg += "\n" + formatLens(premium, "💎 Premium");
   }
-  quoteMsg += "\n\nVou encaminhar pra um Consultor confirmar a disponibilidade da sua armação na loja e te ajudar a fechar 🤝 Em qual região você está? Já te indico a loja mais próxima.";
+  quoteMsg += "\n\nPosso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊";
 
   const quoteNorm = norm(quoteMsg);
   const recentNormQuote = (recentOutbound || []).slice(-3).map(norm);
