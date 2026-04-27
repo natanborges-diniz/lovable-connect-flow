@@ -104,7 +104,8 @@ serve(async (req) => {
         const result = await processContato(
           supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
           contato, colunas, perdidosCol, now,
-          DELAY_HOURS, FINAL_WAIT_HOURS, MAX_TENTATIVAS, INACTIVITY_THRESHOLDS
+          DELAY_HOURS, FINAL_WAIT_HOURS, MAX_TENTATIVAS, INACTIVITY_THRESHOLDS,
+          HUMANO_DELAY_HOURS, HUMANO_FINAL_WAIT_HOURS, HUMANO_MAX_TENTATIVAS, HUMANO_COOLDOWN_HORAS
         );
         processed += result.processed;
         movedToPerdidos += result.movedToPerdidos;
