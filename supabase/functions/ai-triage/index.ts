@@ -2646,135 +2646,35 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           metadata: rxData, referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
-        // DON'T auto-quote — wait for client direction
-        // Just confirm the prescription and let the AI ask what the client needs
-        if (needsHumanReview) {
+        // ── AUTO-CHAIN: se a receita ficou válida E há intent claro de orçamento
+        // (texto recente do cliente menciona orçamento/preço/lentes), gera o quote
+        // imediatamente em vez de só dizer "li sua receita". Caso André 2026-04-27.
+        const rxJustValid = isReceitaValida(rxWithLabel);
+        const recentInboundJoined = inboundMsgs.slice(-5).map((m: any) => String(m.conteudo || "")).join(" | ").toLowerCase();
+        const wantsQuote = /\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quanto|op[cç][oõ]es?|lentes?\s+compat|cota[cç][aã]o|s[oó]\s+preciso\s+das?\s+lentes?)\b/i.test(recentInboundJoined);
+        const isLCRecent = /\b(lente[s]?\s+de\s+contato|\blc\b|di[aá]ria|quinzenal|mensal|t[oó]rica|gelatinosa)\b/i.test(recentInboundJoined);
+
+        if (rxJustValid && wantsQuote && !isLCRecent) {
+          console.log(`[AUTO-CHAIN] OCR válido + intent orçamento → encadeando consultar_lentes (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%)`);
+          const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, {});
+          resposta = quoteResult.resposta;
+          intencao = "orcamento";
+          pipeline_coluna = "Orçamento";
+          validatorFlags.push("auto_chain_pos_ocr");
+        } else if (needsHumanReview) {
           resposta = "Consegui ler boa parte da sua receita, mas quero te passar a opção certinha. Posso te mostrar uma base e confirmar na loja? 😊";
           console.log(`[RX] Low confidence (${(confidence * 100).toFixed(0)}%) — cautious response`);
         } else {
           resposta = args.resposta;
         }
-        console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — waiting for client direction`);
+        console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${rxJustValid && wantsQuote ? "auto-chained" : "waiting for client direction"}`);
 
       } else if (fn === "consultar_lentes") {
         // ── QUOTE ENGINE: triggered by client interest ──
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
-
-        // Load saved prescriptions from contact metadata
-        const { data: contatoRx } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
-        const contatoRxMeta = (contatoRx?.metadata as Record<string, any>) || {};
-        
-        // Resolve which prescription to use
-        let allRx: any[] = [];
-        if (Array.isArray(contatoRxMeta.receitas) && contatoRxMeta.receitas.length > 0) {
-          allRx = contatoRxMeta.receitas;
-        } else if (contatoRxMeta.ultima_receita && contatoRxMeta.ultima_receita.eyes) {
-          allRx = [{ ...contatoRxMeta.ultima_receita, label: "cliente" }];
-        }
-        
-        // Select by label or use most recent
-        let rxMeta: any = null;
-        if (allRx.length > 0) {
-          if (args.receita_label) {
-            rxMeta = allRx.find((r: any) => norm(r.label || "") === norm(args.receita_label)) || allRx[allRx.length - 1];
-          } else {
-            rxMeta = allRx[allRx.length - 1]; // Most recent
-          }
-          console.log(`[QUOTE] Using prescription label="${rxMeta?.label}" from ${allRx.length} available`);
-        }
-
-        if (!rxMeta || !rxMeta.eyes) {
-          resposta = args.resposta_fallback || "Ainda não tenho sua receita. Me envia uma foto da receita que eu já busco as melhores opções pra você! 📸";
-          console.log("[QUOTE] No prescription found for contact");
-        } else {
-          const od = rxMeta.eyes.od || {};
-          const oe = rxMeta.eyes.oe || {};
-          const rxType = rxMeta.rx_type || "unknown";
-          const sphereValues = [od.sphere, oe.sphere].filter((v: any) => typeof v === "number") as number[];
-          const cylValues = [od.cylinder, oe.cylinder].filter((v: any) => typeof v === "number") as number[];
-          const addValues = [od.add, oe.add].filter((v: any) => typeof v === "number") as number[];
-
-          // Receita parcial/incompleta → pede dados objetivos em vez de culpar "grau"
-          const sphereLooksAbsurd = sphereValues.some((v: number) => Math.abs(v) > 25);
-          if (rxType === "unknown" || sphereValues.length === 0 || sphereLooksAbsurd) {
-            resposta = "Pra montar o orçamento certinho, me confirma os valores da receita por texto, por favor?\n• OD: esférico / cilíndrico / eixo\n• OE: esférico / cilíndrico / eixo\n(Se tiver adição pra perto, manda também 😊)";
-            console.log(`[QUOTE] Prescription incomplete (rxType=${rxType}, sphereCount=${sphereValues.length}, absurd=${sphereLooksAbsurd}) — asking structured values`);
-          } else {
-            const worstSphere = sphereValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0);
-            const worstCylinder = cylValues.length > 0 ? cylValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0) : 0;
-            const maxAdd = addValues.length > 0 ? Math.max(...addValues) : null;
-            const hasAddition = addValues.length > 0;
-
-            // Map rxType to compatible DB categories
-            const categoryMap: Record<string, string[]> = {
-              single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids"],
-              progressive: ["progressive", "occupational"],
-            };
-            const categories = categoryMap[rxType] || [rxType];
-
-            let query = supabase
-              .from("pricing_table_lentes")
-              .select("*")
-              .eq("active", true)
-              .in("category", categories)
-              .gt("price_brl", 0)
-              .lte("sphere_min", worstSphere)
-              .gte("sphere_max", worstSphere)
-              .lte("cylinder_min", worstCylinder)
-              .gte("cylinder_max", worstCylinder);
-
-            if (rxType === "progressive" && maxAdd !== null) {
-              query = query.lte("add_min", maxAdd).gte("add_max", maxAdd);
-            }
-
-            // Apply client preference filters
-            if (args.filtro_blue === true) query = query.eq("blue", true);
-            if (args.filtro_photo === true) query = query.eq("photo", true);
-            if (args.preferencia_marca) query = query.ilike("brand", `%${args.preferencia_marca}%`);
-
-            const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(20);
-
-            if (lenses && lenses.length > 0) {
-              const economy = lenses[0];
-              const premium = lenses[lenses.length - 1];
-              const midIndex = Math.floor(lenses.length / 2);
-              const mid = lenses.length >= 3 ? lenses[midIndex] : null;
-
-              const formatLens = (l: any, label: string) =>
-                `${label}: *${l.brand} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
-
-              let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
-              quoteMsg += formatLens(economy, "💚 Econômica");
-              if (mid && mid.id !== economy.id && mid.id !== premium.id) {
-                quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
-              }
-              if (premium.id !== economy.id) {
-                quoteMsg += "\n" + formatLens(premium, "💎 Premium");
-              }
-              quoteMsg += "\n\nQuer que eu detalhe alguma opção ou prefere agendar uma visita para conhecer nossas armações e fechar presencialmente?";
-
-              // ── DEDUPE: bloqueia reemissão idêntica do mesmo orçamento ──
-              const quoteNorm = norm(quoteMsg);
-              const recentNormQuote = (recentOutbound || []).slice(-3).map(norm);
-              const isDuplicate = recentNormQuote.some((prev) => {
-                if (!prev) return false;
-                if (prev === quoteNorm) return true;
-                return computeSimilarity(prev, quoteNorm) > 0.9;
-              });
-              if (isDuplicate) {
-                console.log(`[DEDUPE] consultar_lentes duplicado bloqueado — usando follow-up curto`);
-                resposta = "Já te mandei as opções acima 😊 Quer que eu detalhe alguma delas, ou prefere agendar uma visita pra ver as armações pessoalmente?";
-              } else {
-                resposta = quoteMsg;
-              }
-              console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
-            } else {
-              resposta = args.resposta_fallback || "Para esse grau específico, vou encaminhar para um Consultor que pode detalhar as melhores opções. Posso fazer isso agora?";
-              console.log(`[QUOTE] No matching lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
-            }
-          }
-        }
+        const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args);
+        resposta = quoteResult.resposta;
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
         // ── GUARDRAIL LC: lente de contato NÃO requer visita à loja ──
         // Se o contexto é LC + receita salva, agendar_visita está PROIBIDO
