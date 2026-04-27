@@ -3601,23 +3601,26 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       /dois caminhos|te mostrar op[cç][oõ]es.*ou montar um or[cç]amento/i.test(prev || "")
     );
     if (hasDoisCaminhos && doisCaminhosJaEnviado) {
-      console.log(`[GUARDRAIL-DOIS-CAMINHOS] Detectado loop. hasReceitas=${receitas.length > 0} | isImageContext=${isImageContext} | isLC=${isLCContextGlobal}`);
+      console.log(`[GUARDRAIL-DOIS-CAMINHOS] Detectado loop. hasValidReceitas=${hasValidReceitas} | receitas.length=${receitas.length} | isImageContext=${isImageContext} | isLC=${isLCContextGlobal}`);
       validatorFlags.push("anti_loop_dois_caminhos");
-      if (receitas.length === 0 && isImageContext) {
+      if (!hasValidReceitas && isImageContext) {
         // Imagem pendente sem receita interpretada → analisando
         resposta = "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções compatíveis em seguida, um instante…";
         intencao = "receita_oftalmologica";
         pipeline_coluna = "Orçamento";
-      } else if (receitas.length > 0 && isLCContextGlobal) {
+      } else if (hasValidReceitas && isLCContextGlobal) {
         resposta = "Beleza! Já tô montando aqui as opções de lentes de contato com base na sua receita 😊 Em qual região/bairro você está pra eu indicar a loja mais próxima?";
         intencao = "orcamento_lc";
         pipeline_coluna = "Orçamento";
-      } else if (receitas.length > 0) {
+      } else if (hasValidReceitas) {
         resposta = "Beleza! Já vou te mandar as opções compatíveis com a sua receita 😊 Em qual região você está? Assim já te indico a loja mais próxima.";
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
       } else {
-        resposta = "Pra te passar os valores certinhos, me manda a foto da sua receita atualizada por aqui 📸 Se ainda não tiver, posso te orientar também 😉";
+        // Sem receita válida (mesmo que receitas.length>0 com unknown/vazia) → pedir foto + oferecer clínica
+        resposta = isLCContextGlobal
+          ? "Pra te passar os valores certinhos de lentes de contato, preciso de uma foto nítida da sua receita 📸 (com luz boa e a receita inteira). Se ainda não tiver, posso te indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto na compra 😉"
+          : "Pra te passar os valores certinhos, me manda a foto da sua receita atualizada por aqui 📸 (precisa estar nítida, com a receita inteira no enquadramento). Se ainda não tiver, posso te indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto 😉";
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
       }
