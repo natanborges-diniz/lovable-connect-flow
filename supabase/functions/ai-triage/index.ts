@@ -1681,8 +1681,13 @@ serve(async (req) => {
     const lastIsImage = (lastInbound?.tipo_conteudo || "text") === "image"
       || /\[image\]|\[document\]/.test(currentMsg)
       || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+    // Receita salva mas vazia/`unknown` (caso Jardel) NÃO conta — força nova OCR.
+    const hasValidReceitas = hasReceitasValidas(receitas);
     const isImageContext = lastIsImage
-      || (hasRecentUnparsedPrescriptionImage && receitas.length === 0);
+      || (hasRecentUnparsedPrescriptionImage && !hasValidReceitas);
+    if (receitas.length > 0 && !hasValidReceitas) {
+      console.log(`[RX-VALID] Receita salva existe mas é INVÁLIDA (rx_type/eyes vazios) — tratando como sem receita`);
+    }
 
     // ── 5. BUILD CONTEXT ──
     const sentTopics = extractSentTopics(recentOutbound);
