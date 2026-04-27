@@ -419,6 +419,26 @@ serve(async (req) => {
       ? (isTranscribedAudio ? `🎤 ${text}` : (text || `[${mediaType}]`))
       : text;
 
+    // ── DEDUPE: ignora reentrega do mesmo whatsapp_message_id ──
+    // A Meta reentrega webhooks; sem dedupe a mesma mensagem entra 2-3× em segundos
+    // e o ai-triage dispara respostas conflitantes (caso André 2026-04-27).
+    if (messageId) {
+      const { data: jaExiste } = await supabase
+        .from("mensagens")
+        .select("id")
+        .eq("atendimento_id", atendimentoId)
+        .eq("direcao", "inbound")
+        .filter("metadata->>whatsapp_message_id", "eq", messageId)
+        .limit(1)
+        .maybeSingle();
+      if (jaExiste) {
+        console.log(`[DEDUPE-WEBHOOK] inbound duplicado ignorado messageId=${messageId} atendimento=${atendimentoId}`);
+        return new Response(JSON.stringify({ status: "ignored", reason: "duplicate_inbound", messageId }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     await supabase.from("mensagens").insert({
       atendimento_id: atendimentoId,
       direcao: "inbound",
