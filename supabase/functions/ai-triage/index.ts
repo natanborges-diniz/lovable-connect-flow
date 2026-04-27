@@ -267,6 +267,25 @@ function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: 
 const LC_BRAND_REGEX = /\b(acuvue|oasys|biofinity|air\s*optix|solflex|sol[oó]tica|dnz|biomedics|focus|frequency|freshlook|proclear|purevision|softlens|hydron|mioflex|aviator|naturale|colors?)\b/i;
 const RESERVE_VERBS_REGEX = /\b(quero\s+(reservar|fechar|pedir|levar|essa|esse|comprar|fechar|essa op[cç][aã]o)|vou\s+(querer|levar|de|com)|fica\s+(com|essa|esse)|pode\s+(reservar|pedir|fechar|mandar)|fechar\s+(pedido|essa|esse|com)|fechar\b|reserva[r]?\b|comprar\s+essa)/i;
 
+// ── Validação de receita ──
+// Considera receita válida APENAS quando há esfera/cilindro útil em pelo menos
+// um olho E rx_type não é "unknown". Receita salva como `unknown` com olhos
+// vazios (caso Jardel) NÃO conta como receita — força nova interpretação.
+function isReceitaValida(rx: any): boolean {
+  if (!rx || typeof rx !== "object") return false;
+  const rxType = String(rx.rx_type || "").toLowerCase();
+  if (!rxType || rxType === "unknown") return false;
+  const od = rx.eyes?.od || {};
+  const oe = rx.eyes?.oe || {};
+  const hasUsefulEye = (e: any) =>
+    typeof e?.sphere === "number" || typeof e?.cylinder === "number";
+  return hasUsefulEye(od) || hasUsefulEye(oe);
+}
+
+function hasReceitasValidas(receitas: any[]): boolean {
+  return Array.isArray(receitas) && receitas.some(isReceitaValida);
+}
+
 function detectForcedToolIntent(
   lastInboundText: string,
   hasReceitas: boolean,
