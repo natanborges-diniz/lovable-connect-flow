@@ -1,66 +1,104 @@
-## Problema
+## Diagnóstico encontrado
 
-A Leticia perguntou **"quantos está a Biofinity"** depois do orçamento inicial e a IA respondeu com a frase genérica *"Sobre o que a gente estava falando — quer que eu retome o orçamento ou te ajudo com outra coisa?"*. Ela ficou sem o preço.
+O problema não foi uma única falha; foram 3 falhas em sequência no fluxo da IA.
 
-A Biofinity existe no catálogo (`pricing_lentes_contato`):
-- Biofinity — R$ 285 (mensal, esférica)
-- Biofinity Energys — R$ 310
-- Biofinity Toric — R$ 390 (tórica, cyl ≥ 0.75)
-- Biofinity XR — R$ 310
-- Biofinity XR Toric — R$ 655
+1. A primeira leitura da imagem aconteceu, mas voltou vazia
+   - No histórico do backend, a receita foi salva às 23:35 como:
+     - `rx_type: unknown`
+     - `confidence: 0.75`
+     - `eyes.od = {}`
+     - `eyes.oe = {}`
+     - `needs_human_review: true`
+   - Ou seja: a IA até tentou interpretar a foto, mas não extraiu nenhum grau útil.
 
-Ou seja: a informação está no banco, o problema é que a IA não chegou a consultar.
+2. Mesmo com a leitura vazia, o sistema passou a tratar isso como “já existe receita”
+   - A partir daí, o roteamento deixou de priorizar nova leitura da imagem.
+   - Em vez de insistir no `interpretar_receita`, o fluxo passou a agir como se já houvesse receita salva e começou a cair no orçamento / fallback.
+   - Isso explica respostas como:
+     - “Já estou analisando...”
+     - “Sobre o que a gente estava falando...”
+     - “Não consegui identificar o grau completo...”
 
-## Causa raiz (no `ai-triage`)
+3. A correção digitada pelo cliente também foi parseada de forma errada
+   - O cliente mandou: `Od -400 / Oe - 425`
+   - O sistema salvou apenas:
+     - `OD = -400`
+     - `OE = null`
+   - Então houve dois problemas adicionais:
+     - `-400` foi entendido literalmente, e não como `-4,00`
+     - `Oe - 425` não foi lido corretamente por causa do espaço após o sinal
+   - Resultado: o motor de orçamento tentou buscar lentes para um grau impossível (`-400`) e sem o OE completo, então não encontrou combinações automáticas.
 
-A pergunta foi dropada em **dois pontos**:
+## Causa raiz no código
 
-1. **`detectForcedToolIntent` não disparou `consultar_lentes_contato`.** O regex de preço/quantidade exige `\bquanto\b`, mas a cliente escreveu **"quantos"** (com "s"). O `\b` final invalida o match. Resultado: nenhum forced intent, nenhum hint determinístico para o LLM.
+### 1) Receita “inválida” conta como receita válida
+Arquivo: `supabase/functions/ai-triage/index.ts`
+- O roteador usa `hasReceitas` como critério simples.
+- Hoje, basta existir algo em `metadata.receitas` para o sistema parar de forçar `interpretar_receita`.
+- Isso é incorreto quando a receita salva está com:
+  - `rx_type = unknown`
+  - ambos os olhos vazios
+  - confiança baixa / revisão humana
 
-2. **Não existe regra "marca mencionada = consultar preço daquela marca".** Hoje `LC_BRAND_REGEX` só é usado para *fechamento de pedido* (cliente já escolhendo marca depois de ver opções). Quando o cliente pergunta sobre uma marca específica fora desse fluxo, nada é acionado.
+### 2) O parser de correção textual é frágil
+Arquivo: `supabase/functions/ai-triage/index.ts`
+- O regex atual não lida bem com formatos como:
+  - `- 425`
+  - `+ 200`
+- E não normaliza shorthand comum de óptica:
+  - `-400` deveria virar `-4.00`
+  - `-425` deveria virar `-4.25`
 
-3. Sem forced intent, a resposta gerada caiu na **`deterministicIntentFallback`**, cujo regex de orçamento (`/lente|oculos|comprar|preço|valor|barato/`) também não casa com "quantos está a Biofinity" (não tem nenhuma dessas palavras). Fallback final → frase genérica do `genericPool`.
+### 3) O motor de orçamento não diferencia “receita parcialmente inválida” de “grau raro sem preço” 
+Arquivo: `supabase/functions/ai-triage/index.ts`
+- Quando recebe um grau mal interpretado, ele simplesmente tenta consultar a tabela de preços.
+- Como não acha resultado, responde como se o problema fosse indisponibilidade, quando na verdade o problema era parsing inválido.
 
-## Correção proposta
+## Plano de correção
 
-Edição única em `supabase/functions/ai-triage/index.ts`:
+1. Blindar o conceito de “receita válida” no `ai-triage`
+   - Criar uma checagem de validade da receita salva.
+   - Só considerar “tem receita” quando houver pelo menos um olho com esfera/cilindro útil e `rx_type` coerente.
+   - Se a receita salva estiver vazia ou `unknown`, continuar priorizando nova interpretação da imagem.
 
-### 1. Aceitar variações de "quanto"
-No regex de preço dentro de `detectForcedToolIntent` (linha ~299), trocar `\bquanto\b` por `\bquantos?\b|\bqto\b|\bqnto\b` para cobrir "quanto/quantos/qto/qnto".
+2. Reabrir OCR quando a receita salva for fraca
+   - Se houver imagem recente e a receita salva estiver inválida ou com baixa qualidade, forçar `interpretar_receita` de novo em vez de seguir para orçamento.
+   - Isso evita o falso estado de “já li sua receita”.
 
-### 2. Detectar pergunta de preço por marca de LC
-Logo antes do bloco de preço/orçamento atual, adicionar um detector novo: se o texto contém uma marca do `LC_BRAND_REGEX` (ex.: "biofinity", "acuvue", "solflex", "dnz") **e** o atendimento já está em contexto LC (`isLCContext`) **e** já há receita salva, forçar `consultar_lentes_contato` com `reason: "cliente perguntou sobre marca específica de LC"`. Isso cobre "quantos está a Biofinity", "tem Acuvue?", "valor da Solflex", etc., independente de typo.
+3. Melhorar o parser de receita digitada
+   - Aceitar espaços entre sinal e número (`- 425`).
+   - Normalizar shorthand óptico:
+     - `400` → `4.00`
+     - `425` → `4.25`
+     - preservar formatos já corretos como `-4,25`.
+   - Garantir captura separada de OD e OE.
 
-### 3. Reforçar o `deterministicIntentFallback`
-Adicionar `biofinity|acuvue|oasys|solflex|dnz|solótica|air optix` ao regex genérico de orçamento (linha ~484), para que mesmo se o forced intent falhar, o fallback responda algo coerente em vez do "Sobre o que a gente estava falando".
+4. Endurecer o fallback do orçamento
+   - Se a receita estiver parcial/inconsistente, pedir os dados em formato objetivo:
+     - `OD esf/cil/eixo`
+     - `OE esf/cil/eixo`
+   - Não responder “não localizei combinações” quando o erro real for leitura inválida.
 
-### 4. Hint reforçado no prompt do LLM
-Quando o forced intent for `consultar_lentes_contato` por causa de marca, injetar um hint específico: *"Cliente perguntou preço de uma marca específica de LC. Chame `consultar_lentes_contato` AGORA filtrando pela marca mencionada e responda com o preço dela e 1-2 alternativas próximas."*
+5. Registrar essa regra na memória operacional da IA
+   - Documentar o caso do Jardel para evitar regressão futura em leituras vazias + correção textual shorthand.
 
-## Resposta imediata para a Leticia (manual, agora)
+## Resultado esperado após a correção
 
-Enquanto o ajuste vai pra produção, mandar pelo `send-whatsapp` no atendimento dela:
-
-> Oi Leticia! 👋 Sobre a **Biofinity** (Coopervision, mensal):
-> - **Biofinity** esférica: **R$ 285/caixa**
-> - **Biofinity Energys** (conforto digital, telas): **R$ 310/caixa**
->
-> Pra sua receita (-0.75 esf, -0.50 cil), como o cilíndrico é -0.50 (abaixo de 0.75), a esférica comum atende. Combo 3+1 vale: 4 caixas = ~12 meses pelo preço de 3.
->
-> Quer que eu reserve a Biofinity ou prefere comparar com a DNZ Mensal (R$ 204,99)?
-
-E registrar nota interna no atendimento `bbd9d1cd-fe27-4963-8967-111ac5b890b0` documentando o gap corrigido.
+No caso do Jardel, o comportamento correto passaria a ser:
+- a primeira leitura falha não “consome” a receita;
+- após o “Sim”, a IA tenta ler a imagem novamente;
+- se o cliente digitar `OD -400 / OE -425`, o sistema normaliza para `OD -4,00 / OE -4,25`;
+- com a receita válida, o orçamento segue normalmente ou pede apenas o dado faltante de forma objetiva.
 
 ## Detalhes técnicos
 
-**Arquivo:** `supabase/functions/ai-triage/index.ts`
+Trechos relevantes já identificados:
+- `detectForcedToolIntent(...)` bloqueia nova interpretação quando `hasReceitas = true`
+- `consultar_lentes` cai em fallback quando `rx_type === "unknown"` ou quando a busca não encontra combinações
+- `detectPrescriptionCorrection(...)` precisa aceitar shorthand e espaços no sinal
+- o caso do Jardel mostrou na base:
+  - leitura OCR inicial vazia
+  - correção textual parcial (`OD=-400`, `OE=null`)
+  - posterior escalada humana por ausência de combinações
 
-- Linha ~267: `LC_BRAND_REGEX` já existe — reaproveitar.
-- Linha ~270 (`detectForcedToolIntent`): adicionar branch novo de "marca de LC + contexto LC + receita salva" antes do bloco de orçamento.
-- Linha ~299: ampliar regex de "quanto".
-- Linha ~484 (`deterministicIntentFallback`): incluir marcas de LC no regex de orçamento.
-- Linha ~2329/2358: hints do `forcedIntent === "consultar_lentes_contato"` já existem; estender mensagem para o caso "pergunta de preço por marca".
-
-**Memória a atualizar:** `mem://ia/lentes-de-contato-orcamento.md` — adicionar caso "Leticia (abr/2026)" na seção de regressões e a nova regra de detecção por marca.
-
-**Validação:** após deploy, testar via `curl_edge_functions` o `ai-triage` simulando inbound "quantos está a Biofinity" no atendimento de teste, conferir que `consultar_lentes_contato` é chamada e a resposta traz o preço.
+Se você aprovar, eu implemento essas correções no `ai-triage` e deixo esse cenário protegido para próximos atendimentos.
