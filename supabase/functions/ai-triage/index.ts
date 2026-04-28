@@ -427,9 +427,14 @@ function detectPrescriptionCorrection(text: string): {
   rx_type: "single_vision" | "progressive";
   raw: string;
 } | null {
-  if (!text || text.length < 8) return null;
+  if (!text || text.length < 4) return null;
   // Normaliza espaço entre sinal e número: "- 425" → "-425", "+ 200" → "+200"
   let t = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2");
+  // Convenções ópticas: pl/plano/neutro/zerado/sc → 0.00 (substitui por "0" pra entrar no parser numérico)
+  t = t.replace(/-\s*(pl|plano|neutro|zerado|zero)\b/g, "0");
+  t = t.replace(/\b(pl|plano|neutro|zerado)\b/g, "0");
+  // "sc" (sem cilindro) → some
+  t = t.replace(/\bsc\b/g, "");
 
   // Strong signals: must contain at least 2 of these markers
   const markers = [
@@ -442,7 +447,9 @@ function detectPrescriptionCorrection(text: string): {
   ];
   const numericPairs = (t.match(/[+-]?\d+[.,]?\d*/g) || []).length;
   const markerHits = markers.filter((r) => r.test(t)).length;
-  if (markerHits < 2 || numericPairs < 2) return null;
+  // Aceita 1 marcador + 1 número quando há OD ou OE explícito (caso esf-only "Od -4.50 / Oe 0")
+  const hasOdOe = /\bod\b/.test(t) && /\boe\b/.test(t);
+  if (!(markerHits >= 2 && numericPairs >= 1) && !(hasOdOe && numericPairs >= 1)) return null;
 
   // Helper: parse a number como dioptria.
   // - Aceita "-9,25", "+0.50", "0.00".
