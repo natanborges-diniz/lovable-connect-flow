@@ -2557,7 +2557,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     }
 
-    if (loopCheck.detected) {
+    if (loopCheck.detected && !correctionApplied) {
       console.log(`[LOOP-DETECTOR] Loop detected — similarity=${(loopCheck.similarity * 100).toFixed(0)}%`);
       await supabase.from("eventos_crm").insert({
         contato_id: contatoId, tipo: "loop_ia_detectado_pre_llm",
