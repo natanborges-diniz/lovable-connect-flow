@@ -33,17 +33,46 @@ Deno.serve(async (req) => {
     const { email, redirect_to } = await req.json().catch(() => ({}));
     if (!email || typeof email !== "string") return json({ error: "email obrigatório" }, 400);
 
+    // Use the caller's origin so the magic link redirects back to the same app
+    // (preview vs published) the admin is using.
+    const originHeader = req.headers.get("origin") || req.headers.get("referer") || "";
+    let inferredOrigin = "";
+    try {
+      if (originHeader) inferredOrigin = new URL(originHeader).origin;
+    } catch {
+      inferredOrigin = "";
+    }
+    const finalRedirect = redirect_to || inferredOrigin || "https://atrium-link.lovable.app";
+
     const { data, error } = await admin.auth.admin.generateLink({
       type: "magiclink",
       email: email.trim().toLowerCase(),
       options: {
-        redirectTo: redirect_to || "https://atrium-link.lovable.app",
+        redirectTo: finalRedirect,
       },
     });
 
-    if (error) return json({ error: error.message }, 400);
-    return json({ url: (data as any)?.properties?.action_link });
+    if (error) {
+      console.error("[admin-magic-link] generateLink error", error);
+      return json({ error: error.message }, 400);
+    }
+
+    const props = (data as any)?.properties ?? {};
+    const url: string | undefined = props.action_link;
+
+    console.log("[admin-magic-link] gerado para", email, {
+      hasUrl: !!url,
+      redirect: finalRedirect,
+      keys: Object.keys(props),
+    });
+
+    if (!url) {
+      return json({ error: "Supabase não retornou action_link", debug: props }, 500);
+    }
+
+    return json({ url, redirect_to: finalRedirect });
   } catch (e: any) {
+    console.error("[admin-magic-link] exception", e);
     return json({ error: e?.message ?? "Erro interno" }, 500);
   }
 });
