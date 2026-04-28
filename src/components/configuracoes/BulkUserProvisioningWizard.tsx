@@ -267,6 +267,7 @@ export function BulkUserProvisioningWizard({ open, onOpenChange, onComplete }: P
       const all: ResultRow[] = [];
       for (const chunk of chunks) {
         const payload = {
+          default_password: defaultPassword || undefined,
           candidates: chunk.map((c) => ({
             email: c.email.trim().toLowerCase(),
             nome: c.nome,
