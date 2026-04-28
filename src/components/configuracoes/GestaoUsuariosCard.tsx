@@ -789,6 +789,63 @@ export function GestaoUsuariosCard() {
         onOpenChange={setBulkWizardOpen}
         onComplete={invalidateAll}
       />
+
+      {/* Diálogo do magic link — funciona mesmo quando clipboard automático é bloqueado pelo iframe */}
+      <Dialog
+        open={!!magicLinkDialog}
+        onOpenChange={(o) => { if (!o) setMagicLinkDialog(null); }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Link de acesso — InFoco Messenger</DialogTitle>
+            <DialogDescription>
+              {magicLinkDialog?.email
+                ? `Envie este link para ${magicLinkDialog.email}. Válido por 1 hora, uso único.`
+                : "Link válido por 1 hora, uso único."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label>URL</Label>
+            <Input
+              readOnly
+              value={magicLinkDialog?.url ?? ""}
+              onFocus={(e) => e.currentTarget.select()}
+              autoFocus
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              Selecione o texto e copie manualmente caso o botão "Copiar" não funcione no seu navegador.
+            </p>
+          </div>
+
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (!magicLinkDialog) return;
+                const ok = await copyToClipboard(magicLinkDialog.url);
+                if (ok) toast.success("Link copiado!");
+                else toast.error("Não consegui copiar — selecione e copie manualmente.");
+              }}
+            >
+              Copiar link
+            </Button>
+            <Button
+              onClick={() => {
+                if (!magicLinkDialog) return;
+                window.open(magicLinkDialog.url, "_blank", "noopener,noreferrer");
+              }}
+            >
+              Abrir no Messenger
+            </Button>
+            <Button variant="ghost" onClick={() => setMagicLinkDialog(null)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </TooltipProvider>
   );
 }
