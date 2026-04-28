@@ -218,7 +218,11 @@ Deno.serve(async (req) => {
           status: exists ? "exists" : "created",
           user_id: userId,
           invite_url,
-          message: exists ? "Já existia — atualizado tipo/role" : "Criado com convite",
+          message: exists
+            ? "Já existia — atualizado tipo/role"
+            : defaultPassword
+            ? "Criado com senha padrão"
+            : "Criado com convite",
         });
       } catch (e: any) {
         results.push({
