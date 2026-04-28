@@ -83,6 +83,7 @@ export function BulkUserProvisioningWizard({ open, onOpenChange, onComplete }: P
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState<ResultRow[]>([]);
+  const [defaultPassword, setDefaultPassword] = useState<string>("Atrium@2026");
 
   const reset = () => {
     setStep(1);
