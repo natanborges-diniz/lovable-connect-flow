@@ -242,6 +242,17 @@ export function TelefonesLojasCard() {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">{getSubInfo(t)}</TableCell>
                   <TableCell>
+                    {cadastrado ? (
+                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-[10px]">
+                        ✓ Cadastrado
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        Pendente
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Switch checked={t.ativo ?? true} onCheckedChange={(v) => toggleAtivo.mutate({ id: t.id, ativo: v })} />
                   </TableCell>
                   <TableCell>
@@ -255,7 +266,8 @@ export function TelefonesLojasCard() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         )}
