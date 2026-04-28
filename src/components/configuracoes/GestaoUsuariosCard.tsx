@@ -208,8 +208,19 @@ export function GestaoUsuariosCard() {
       return (data as any)?.url as string;
     },
     onSuccess: (url) => {
-      navigator.clipboard.writeText(url);
-      toast.success("Link de acesso copiado para a área de transferência");
+      if (!url || !url.startsWith("http")) {
+        toast.error("Link inválido recebido do servidor");
+        console.error("[magic-link] url inválida:", url);
+        return;
+      }
+      navigator.clipboard.writeText(url).catch(() => {
+        // clipboard pode falhar em iframe sem permissão — mostramos no toast pra copiar manual
+      });
+      toast.success("Link copiado!", {
+        description: url,
+        duration: 15000,
+      });
+      console.log("[magic-link] gerado:", url);
     },
     onError: (e: any) => toast.error(e.message ?? "Falha ao gerar link"),
   });
