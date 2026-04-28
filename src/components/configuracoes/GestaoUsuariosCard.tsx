@@ -130,6 +130,22 @@ export function GestaoUsuariosCard() {
   const [novoRole, setNovoRole] = useState<AppRole>("setor_usuario");
   const [novoLojaNome, setNovoLojaNome] = useState<string>("");
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [bulkWizardOpen, setBulkWizardOpen] = useState(false);
+
+  const updateTipoUsuario = useMutation({
+    mutationFn: async ({ userId, tipo }: { userId: string; tipo: TipoUsuario }) => {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ tipo_usuario: tipo })
+        .eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Tipo atualizado");
+      queryClient.invalidateQueries({ queryKey: ["admin-profiles"] });
+    },
+    onError: (e: any) => toast.error(e.message ?? "Falha ao atualizar tipo"),
+  });
 
   const createUser = useMutation({
     mutationFn: async () => {
