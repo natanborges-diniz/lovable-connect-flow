@@ -212,23 +212,43 @@ export function GestaoUsuariosCard() {
       if ((data as any)?.error) throw new Error((data as any).error);
       return (data as any)?.url as string;
     },
-    onSuccess: (url) => {
+    onSuccess: (url, email) => {
       if (!url || !url.startsWith("http")) {
         toast.error("Link inválido recebido do servidor");
         console.error("[magic-link] url inválida:", url);
         return;
       }
-      navigator.clipboard.writeText(url).catch(() => {
-        // clipboard pode falhar em iframe sem permissão — mostramos no toast pra copiar manual
-      });
-      toast.success("Link de acesso ao InFoco Messenger copiado!", {
-        description: url,
-        duration: 15000,
-      });
       console.log("[magic-link] gerado:", url);
+      setMagicLinkDialog({ url, email });
     },
     onError: (e: any) => toast.error(e.message ?? "Falha ao gerar link"),
   });
+
+  // Helper de cópia com fallback execCommand (funciona em iframes sem clipboard-write)
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // cai no fallback
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
 
   const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
   const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
