@@ -359,6 +359,16 @@ function detectForcedToolIntent(
     }
   }
 
+  // ── PRIORIDADE MÁXIMA: cliente quer ir à loja ──
+  // Frases como "me encaminhe pra loja", "manda pra loja X", "quero ir na loja",
+  // "loja mais próxima", "vou aí", "passo aí" SEMPRE viram agendar_cliente_intent,
+  // mesmo em contexto LC com receita. Objetivo do assistente é levar pessoas às lojas.
+  // Esse bloco precede o fechamento_lc para evitar curto-circuito errado.
+  const STORE_VISIT_REGEX = /\b(encaminh[ae]r?|encaminha|me\s+manda|me\s+encaminha|pra\s+loja|para\s+a?\s*loja|na\s+loja|[aà]\s+loja|loja\s+mais\s+pr[oó]xima|unidade\s+mais\s+pr[oó]xima|qual\s+(a\s+)?loja|qual\s+endere[cç]o|onde\s+fica|vou\s+a[ií]|passo\s+a[ií]|posso\s+ir|quero\s+ir|ir\s+(at[eé]\s+)?(a\s+|na\s+|n?[ao]\s+)?loja)\b/i;
+  if (STORE_VISIT_REGEX.test(lastInboundText)) {
+    return { tool: "agendar_cliente_intent", reason: "cliente quer ir à loja — prioriza agendamento sobre fechamento LC" };
+  }
+
   // ── FECHAMENTO LC: cliente escolheu marca OU pediu reservar em contexto LC ──
   // Só dispara se: (a) há receita salva, (b) contexto é LC, (c) já apresentamos
   // opções OU o texto é inequívoco (tem marca + verbo de reserva).

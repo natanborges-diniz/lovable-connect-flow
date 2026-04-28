@@ -14,6 +14,11 @@ Lentes de contato **não exigem visita à loja para "tirar medidas"** — a rece
 
 A loja de retirada é escolhida pelo cliente **no fechamento, com o humano** — não na triagem.
 
+## ⚠️ EXCEÇÃO — cliente pede para ir à loja
+Se o cliente diz "me encaminhe pra loja", "manda pra loja X", "quero ir na loja", "loja mais próxima", "vou aí", "passo aí", "qual endereço", "onde fica" — **mesmo em contexto LC com receita salva** — a IA SEMPRE dispara `agendar_cliente_intent`, NUNCA `fechamento_lc`. Objetivo principal do assistente é levar pessoas às lojas; orçamento/conhecimento existe para suportar isso, não para substituir. Implementado via `STORE_VISIT_REGEX` no topo de `detectForcedToolIntent`, antes do bloco LC.
+
+**Caso Gabriela Fernandes (28-04-2026):** após orçamento de óculos+LC, cliente disse "Me encaminhe para a loja". `RESERVE_VERBS_REGEX` casou em "encaminhe" e disparou `fechamento_lc` → escalou para humano em vez de agendar. Correção: `STORE_VISIT_REGEX` agora prioriza intent de visita.
+
 ## Implementação em `ai-triage/index.ts`
 
 ### 1. `detectForcedToolIntent` — novo intent `fechamento_lc`
