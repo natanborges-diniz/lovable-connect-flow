@@ -23,6 +23,10 @@ import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
 
+// URL pública do app InFoco Messenger (mesmo backend Supabase, app distinto).
+// Magic links gerados aqui devem redirecionar para esse domínio.
+const INFOCO_MESSENGER_URL = "https://desktop-joy-app.lovable.app";
+
 type AppRole = "admin" | "operador" | "setor_usuario";
 type TipoUsuario = "loja" | "colaborador" | "setor_operador" | "admin";
 
@@ -200,7 +204,7 @@ export function GestaoUsuariosCard() {
       const accessToken = sessionData?.session?.access_token;
       if (!accessToken) throw new Error("Sessão expirada");
       const { data, error } = await supabase.functions.invoke("admin-magic-link", {
-        body: { email },
+        body: { email, redirect_to: INFOCO_MESSENGER_URL },
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (error) throw error;
@@ -216,7 +220,7 @@ export function GestaoUsuariosCard() {
       navigator.clipboard.writeText(url).catch(() => {
         // clipboard pode falhar em iframe sem permissão — mostramos no toast pra copiar manual
       });
-      toast.success("Link copiado!", {
+      toast.success("Link de acesso ao InFoco Messenger copiado!", {
         description: url,
         duration: 15000,
       });
