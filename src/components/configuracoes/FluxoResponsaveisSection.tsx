@@ -185,20 +185,6 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
         </div>
         );
       })}
-          <Switch
-            checked={r.ativo}
-            onCheckedChange={(v) => toggleAtivo.mutate({ id: r.id, ativo: v })}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-destructive hover:text-destructive"
-            onClick={() => removeResponsavel.mutate(r.id)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ))}
 
       {!isLoading && !responsaveis?.length && (
         <p className="text-xs text-muted-foreground text-center py-2">Nenhum responsável cadastrado</p>
