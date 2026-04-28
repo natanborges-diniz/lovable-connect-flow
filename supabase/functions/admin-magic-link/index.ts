@@ -33,8 +33,8 @@ Deno.serve(async (req) => {
     const { email, redirect_to } = await req.json().catch(() => ({}));
     if (!email || typeof email !== "string") return json({ error: "email obrigatório" }, 400);
 
-    // Use the caller's origin so the magic link redirects back to the same app
-    // (preview vs published) the admin is using.
+    // Prioriza redirect_to explícito enviado pelo front (ex.: InFoco Messenger).
+    // Fallback: origem do chamador (Atrium) se nenhum destino for informado.
     const originHeader = req.headers.get("origin") || req.headers.get("referer") || "";
     let inferredOrigin = "";
     try {
@@ -42,7 +42,10 @@ Deno.serve(async (req) => {
     } catch {
       inferredOrigin = "";
     }
-    const finalRedirect = redirect_to || inferredOrigin || "https://atrium-link.lovable.app";
+    const finalRedirect =
+      (typeof redirect_to === "string" && redirect_to.startsWith("http") ? redirect_to : "") ||
+      inferredOrigin ||
+      "https://desktop-joy-app.lovable.app";
 
     const { data, error } = await admin.auth.admin.generateLink({
       type: "magiclink",
