@@ -126,6 +126,57 @@ serve(async (req) => {
       const sim = similarity(outbounds[outbounds.length - 1].conteudo, outbounds[outbounds.length - 2].conteudo);
       if (sim <= 0.7) continue;
 
+      // ── RESGATE OCR: se o loop é "estou analisando" / "recebi sua receita" e ainda
+      // não há receita válida salva, em vez de escalar pedimos os valores por texto.
+      // Caso Renata 2026-04-28 04:50: 2× "Recebi sua receita" → watchdog escalava direto.
+      const ANALISANDO_RE = /recebi sua receita|peguei a imagem|t[oôó]\s*lendo|estou analisando|analisando aqui/i;
+      const last2OutboundsAnalisando = outbounds.slice(-2).every((o) => ANALISANDO_RE.test(String(o.conteudo || "")));
+      if (last2OutboundsAnalisando) {
+        // Confere se já pedimos texto antes (qualquer das últimas 5 outbound)
+        const PEDIDO_TEXTO_RE = /me passar por texto|valores por texto|esf[eé]rico\s*\/\s*cil[ií]ndrico|n[aã]o estou conseguindo ler/i;
+        const jaPediuTexto = outbounds.some((o) => PEDIDO_TEXTO_RE.test(String(o.conteudo || "")));
+
+        // Confere se o contato tem receita válida salva
+        const { data: contato } = await supabase
+          .from("contatos")
+          .select("metadata")
+          .eq("id", at.contato_id)
+          .single();
+        const meta = (contato?.metadata as Record<string, any>) || {};
+        const receitas = Array.isArray(meta.receitas) ? meta.receitas : [];
+        const hasReceitaValida = receitas.some((rx: any) => {
+          if (!rx || !rx.eyes) return false;
+          if (!rx.rx_type || rx.rx_type === "unknown") return false;
+          const od = rx.eyes.od || {};
+          const oe = rx.eyes.oe || {};
+          return [od.sphere, od.cylinder, oe.sphere, oe.cylinder].some((v: any) => typeof v === "number");
+        });
+
+        if (!hasReceitaValida && !jaPediuTexto) {
+          const aviso = "Tô tendo dificuldade de ler os valores na foto 😅 Pode me passar por texto, por favor?\n\nPreciso de:\n• *OD* (olho direito): esférico / cilíndrico / eixo (e adição se tiver)\n• *OE* (olho esquerdo): esférico / cilíndrico / eixo (e adição se tiver)\n\nEx: *OD -2,00 cil -0,75 eixo 180* / *OE -1,75 cil -0,50 eixo 170*\n\nSe preferir, mande outra foto com a receita inteira no enquadramento e boa iluminação 📸";
+          try {
+            await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ atendimento_id: at.id, texto: aviso }),
+            });
+            await supabase.from("eventos_crm").insert({
+              contato_id: at.contato_id,
+              tipo: "loop_ia_resgate_pedindo_texto",
+              descricao: `Watchdog detectou loop "analisando" sem receita válida — pediu valores por texto em vez de escalar (sim ${(sim * 100).toFixed(0)}%)`,
+              metadata: { similarity: sim },
+              referencia_tipo: "atendimento",
+              referencia_id: at.id,
+            });
+            console.log(`[WATCHDOG] Resgate OCR no atendimento ${at.id} — pedido de texto enviado, sem escalar`);
+          } catch (e) {
+            console.error("[WATCHDOG] Falha no resgate OCR:", e);
+          }
+          details.push({ atendimento_id: at.id, similarity: sim, action: "resgate_ocr_pedindo_texto" });
+          continue; // não escala
+        }
+      }
+
       // ── ESCALATE ──
       console.log(`[WATCHDOG] Escalating atendimento ${at.id} — similarity=${(sim * 100).toFixed(0)}%`);
 

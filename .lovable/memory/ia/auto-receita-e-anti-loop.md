@@ -17,6 +17,14 @@ Quando `interpretar_receita` retorna receita válida em contexto de óculos, enc
 
 **PROIBIDO ESCALAR:** receita com esférico até ±10 e cilíndrico até ±4 é trivial. Escalar só se: (a) `consultar_lentes` retornou ZERO opções, (b) cliente pediu humano, (c) reclamação grave.
 
+## OCR ilegível → pedir digitação (caso Renata 2026-04-28)
+Quando OCR falha (modelo não lê valores OU `rxType=unknown` OU receita totalmente vazia), a IA NÃO pode repetir "estou analisando" nem escalar — deve pedir os valores por texto. Constante `MSG_PEDIR_RECEITA_TEXTO` em `ai-triage/index.ts` é a frase canônica (OD/OE esf/cil/eixo/add com exemplo). Aplicada em 3 pontos:
+1. **Pool de imagem** (`pickFallback`): se já mandou "analisando" antes, próxima resposta = pedir texto.
+2. **Auto-chain pós-OCR** (`needsHumanReview` + `rxType==="unknown"` ou sem sphere/cyl): pede texto em vez de "consegui ler boa parte".
+3. **`watchdog-loop-ia`**: antes de escalar, se as 2 últimas outbound batem em `MSG_ANALISANDO_RE` e o contato não tem receita válida, manda pedido de texto via `send-whatsapp`, loga `loop_ia_resgate_pedindo_texto` e NÃO escala. Só escala se já pediu texto antes e o loop persiste.
+
+Parser `detectPrescriptionCorrection` (memory: `ia/correcao-receita-por-texto`) aceita os valores digitados e força `consultar_lentes`.
+
 ## ⚠️ Templates de tool NUNCA contêm escalada hardcoded
 **Lição Paulo Henrique 2ª rodada (2026-04-27 16:48):** mesmo com hint pós-receita reforçado, a IA continuou dizendo "vou encaminhar pra um Consultor" porque a string estava **dentro do template de `runConsultarLentes`** (linha 3859). Hint do prompt não vence texto fixo de tool. Regra: nenhum template de resposta de tool pode conter "Consultor", "vou encaminhar", "passar para alguém da equipe". Se quiser orientar à loja, use frase como "Posso te indicar a loja mais próxima pra você ver pessoalmente?".
 
