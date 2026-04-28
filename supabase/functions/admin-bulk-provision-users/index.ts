@@ -52,16 +52,21 @@ Deno.serve(async (req) => {
 
     if (!isInternalCall) {
       const authHeader = req.headers.get("Authorization");
-      if (!authHeader) return json({ error: "Não autorizado" }, 401);
+      if (!authHeader?.startsWith("Bearer ")) {
+        return json({ error: "Não autorizado" }, 401);
+      }
+      const token = authHeader.replace("Bearer ", "");
 
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: userData, error: userErr } = await userClient.auth.getUser();
-      if (userErr || !userData.user) return json({ error: "Sessão inválida" }, 401);
+      const userClient = createClient(SUPABASE_URL, ANON_KEY);
+      const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
+      const userId = claimsData?.claims?.sub as string | undefined;
+      if (claimsErr || !userId) {
+        console.error("[bulk-provision] auth failed:", claimsErr?.message);
+        return json({ error: "Sessão inválida" }, 401);
+      }
 
       const { data: isAdminData, error: isAdminErr } = await admin.rpc("is_admin", {
-        _user_id: userData.user.id,
+        _user_id: userId,
       });
       if (isAdminErr || !isAdminData) {
         return json({ error: "Apenas admins podem provisionar usuários em lote" }, 403);
