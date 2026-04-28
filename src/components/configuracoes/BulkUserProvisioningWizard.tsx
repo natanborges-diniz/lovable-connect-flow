@@ -277,9 +277,17 @@ export function BulkUserProvisioningWizard({ open, onOpenChange, onComplete }: P
             origem: c.origem,
           })),
         };
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken) {
+          throw new Error("Sessão expirada. Faça login novamente.");
+        }
         const { data, error } = await supabase.functions.invoke(
           "admin-bulk-provision-users",
-          { body: payload },
+          {
+            body: payload,
+            headers: { Authorization: `Bearer ${accessToken}` },
+          },
         );
         if (error) throw error;
         if ((data as any)?.error) throw new Error((data as any).error);
