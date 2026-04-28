@@ -1421,6 +1421,7 @@ export type Database = {
           metadata: Json
           nome: string
           setor_id: string | null
+          tipo_usuario: string
           updated_at: string
         }
         Insert: {
@@ -1433,6 +1434,7 @@ export type Database = {
           metadata?: Json
           nome: string
           setor_id?: string | null
+          tipo_usuario?: string
           updated_at?: string
         }
         Update: {
@@ -1445,6 +1447,7 @@ export type Database = {
           metadata?: Json
           nome?: string
           setor_id?: string | null
+          tipo_usuario?: string
           updated_at?: string
         }
         Relationships: [
@@ -1914,6 +1917,10 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       nextval_protocolo: { Args: never; Returns: number }
+      pode_conversar_1a1: {
+        Args: { _destinatario: string; _remetente: string }
+        Returns: boolean
+      }
       resolve_responsavel_setor: {
         Args: { _setor_id: string }
         Returns: string
