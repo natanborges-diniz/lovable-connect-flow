@@ -215,12 +215,16 @@ export function TelefonesLojasCard() {
                 <TableHead>Nome</TableHead>
                 <TableHead>Setor de Destino</TableHead>
                 <TableHead>Info</TableHead>
+                <TableHead>Messenger</TableHead>
                 <TableHead>Ativo</TableHead>
                 <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((t: any) => (
+              {filtered.map((t: any) => {
+                const cleanTel = String(t.telefone || "").replace(/\D/g, "");
+                const cadastrado = profilesTelefones?.has(cleanTel) ?? false;
+                return (
                 <TableRow key={t.id}>
                   <TableCell>
                     <Badge variant="outline" className={TIPO_COLORS[t.tipo as TipoCorporativo || "loja"]}>
