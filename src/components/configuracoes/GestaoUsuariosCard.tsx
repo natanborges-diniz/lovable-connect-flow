@@ -18,11 +18,27 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Loader2, HelpCircle, KeyRound } from "lucide-react";
+import { Users, Plus, Loader2, HelpCircle, KeyRound, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
+import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
 
 type AppRole = "admin" | "operador" | "setor_usuario";
+type TipoUsuario = "loja" | "colaborador" | "setor_operador" | "admin";
+
+const TIPO_USUARIO_LABELS: Record<TipoUsuario, string> = {
+  loja: "Loja",
+  colaborador: "Colaborador",
+  setor_operador: "Op. Setor",
+  admin: "Admin",
+};
+
+const TIPO_USUARIO_COLORS: Record<TipoUsuario, string> = {
+  loja: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  colaborador: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  setor_operador: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  admin: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+};
 
 interface UserRoleRow {
   id: string;
