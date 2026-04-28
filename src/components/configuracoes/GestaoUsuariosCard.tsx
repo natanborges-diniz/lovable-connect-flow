@@ -695,7 +695,11 @@ export function GestaoUsuariosCard() {
                 <Input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
                 <Button
                   variant="outline"
-                  onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success("Link copiado"); }}
+                  onClick={async () => {
+                    const ok = await copyToClipboard(inviteUrl);
+                    if (ok) toast.success("Link copiado!");
+                    else toast.error("Não consegui copiar — selecione e copie manualmente.");
+                  }}
                 >
                   Copiar
                 </Button>
