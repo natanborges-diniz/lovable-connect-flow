@@ -2869,8 +2869,17 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           pipeline_coluna = "Orçamento";
           validatorFlags.push("auto_chain_pos_ocr");
         } else if (needsHumanReview) {
-          resposta = "Consegui ler boa parte da sua receita, mas quero te passar a opção certinha. Posso te mostrar uma base e confirmar na loja? 😊";
-          console.log(`[RX] Low confidence (${(confidence * 100).toFixed(0)}%) — cautious response`);
+          // Se ficou totalmente ilegível (rxType unknown OU sem nenhum sphere/cyl), pede valores por texto.
+          // Caso contrário, mantém a resposta cautelosa com a base lida.
+          const totalmenteIlegivel = rxType === "unknown" || (sphereValues.length === 0 && cylValues.length === 0);
+          if (totalmenteIlegivel) {
+            resposta = MSG_PEDIR_RECEITA_TEXTO;
+            validatorFlags.push("ocr_ilegivel_pedindo_texto");
+            console.log(`[RX] OCR ilegível (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%) — pedindo valores por texto`);
+          } else {
+            resposta = "Consegui ler boa parte da sua receita, mas quero te passar a opção certinha. Posso te mostrar uma base e confirmar na loja? 😊";
+            console.log(`[RX] Low confidence (${(confidence * 100).toFixed(0)}%) — cautious response`);
+          }
         } else {
           resposta = args.resposta;
         }
