@@ -34,12 +34,12 @@ Deno.serve(async (req) => {
     if (!email || typeof email !== "string") return json({ error: "email obrigatório" }, 400);
 
     // URL pública do InFoco Messenger. O Messenger trata `?magic_token=...&email=...`
-    // chamando supabase.auth.verifyOtp localmente — assim NÃO dependemos da allowlist
-    // do Supabase Auth (que bloqueia adições manuais em domínios *.lovable.app).
+    // chamando supabase.auth.verifyOtp({ email, token, type: "magiclink" }) localmente —
+    // então precisamos enviar o OTP bruto (`email_otp`) e não o `hashed_token`.
     const MESSENGER_URL = "https://desktop-joy-app.lovable.app";
 
-    // Redirect final que pedimos ao Supabase. Mesmo que o Supabase troque pela Site URL,
-    // não importa: vamos descartar o action_link e montar o link manualmente com o hashed_token.
+    // Redirect final que pedimos ao Supabase. Mesmo que o provedor troque pela Site URL,
+    // não importa: vamos descartar o action_link e montar o link manualmente com o OTP.
     const requestedRedirect =
       (typeof redirect_to === "string" && redirect_to.startsWith("http") ? redirect_to : "") ||
       MESSENGER_URL;
@@ -56,21 +56,23 @@ Deno.serve(async (req) => {
     }
 
     const props = (data as any)?.properties ?? {};
+    const emailOtp: string | undefined = props.email_otp;
     const hashedToken: string | undefined = props.hashed_token;
     const actionLink: string | undefined = props.action_link;
 
     console.log("[admin-magic-link] gerado para", email, {
+      hasEmailOtp: !!emailOtp,
       hasHashedToken: !!hashedToken,
       hasActionLink: !!actionLink,
       keys: Object.keys(props),
     });
 
-    if (!hashedToken) {
-      return json({ error: "Supabase não retornou hashed_token", debug: props }, 500);
+    if (!emailOtp) {
+      return json({ error: "Auth não retornou email_otp", debug: props }, 500);
     }
 
-    // URL final → app Messenger consumindo verifyOtp localmente. Independe de Site URL/allowlist.
-    const finalUrl = `${MESSENGER_URL}/login?magic_token=${encodeURIComponent(hashedToken)}&email=${encodeURIComponent(email.trim().toLowerCase())}`;
+    // URL final → app Messenger consumindo verifyOtp(email + token) localmente.
+    const finalUrl = `${MESSENGER_URL}/login?magic_token=${encodeURIComponent(emailOtp)}&email=${encodeURIComponent(email.trim().toLowerCase())}`;
 
     return json({ url: finalUrl, redirect_to: MESSENGER_URL });
 
