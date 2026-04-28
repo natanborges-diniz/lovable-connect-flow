@@ -59,6 +59,13 @@ function mensagemEscaladaForaHorario(nomePrim: string): string {
   return `Vou acionar nossa equipe pra você${saud}! 🙌 Só um detalhe: nosso time humano atende de seg a sex das 09h às 18h e sábado das 08h às 12h. Como estamos fora do horário agora, assim que abrir o próximo expediente (${proximaAberturaHumana()}), eles te respondem por aqui. Pode deixar registrado o que precisa que já encaminho 😉`;
 }
 
+// Mensagem padrão quando OCR falha / receita ilegível: pede valores por texto
+// para destravar o fluxo sem repetir "estou analisando" e sem escalar.
+const MSG_PEDIR_RECEITA_TEXTO = "Tô tendo dificuldade de ler os valores na foto 😅 Pode me passar por texto, por favor?\n\nPreciso de:\n• *OD* (olho direito): esférico / cilíndrico / eixo (e adição se tiver)\n• *OE* (olho esquerdo): esférico / cilíndrico / eixo (e adição se tiver)\n\nEx: *OD -2,00 cil -0,75 eixo 180* / *OE -1,75 cil -0,50 eixo 170*\n\nSe preferir, mande outra foto com a receita inteira no enquadramento e boa iluminação 📸";
+
+// Regex para detectar mensagens "estou analisando / recebi sua receita"
+const MSG_ANALISANDO_RE = /recebi sua receita|peguei a imagem|t[oôó]\s*lendo|estou analisando|analisando aqui/i;
+
 // ═══════════════════════════════════════════
 // PHASE 2 — PRE-LLM DETERMINISTIC ROUTER
 // ═══════════════════════════════════════════
