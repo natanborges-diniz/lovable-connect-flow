@@ -552,24 +552,46 @@ export function GestaoUsuariosCard() {
                         />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0"
-                              onClick={() => {
-                                setResetTarget({ id: p.id, nome: p.nome });
-                                setNewPassword("");
-                              }}
-                            >
-                              <KeyRound className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="left" className="text-xs">
-                            Redefinir senha
-                          </TooltipContent>
-                        </Tooltip>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                disabled={!p.email || generateMagicLink.isPending}
+                                onClick={() => p.email && generateMagicLink.mutate(p.email)}
+                              >
+                                {generateMagicLink.isPending && generateMagicLink.variables === p.email ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Link2 className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="text-xs">
+                              Gerar link de acesso (magic link)
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={() => {
+                                  setResetTarget({ id: p.id, nome: p.nome });
+                                  setNewPassword("");
+                                }}
+                              >
+                                <KeyRound className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="text-xs">
+                              Redefinir senha
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
