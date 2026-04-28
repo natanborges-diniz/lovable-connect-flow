@@ -18,11 +18,27 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Loader2, HelpCircle, KeyRound } from "lucide-react";
+import { Users, Plus, Loader2, HelpCircle, KeyRound, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
+import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
 
 type AppRole = "admin" | "operador" | "setor_usuario";
+type TipoUsuario = "loja" | "colaborador" | "setor_operador" | "admin";
+
+const TIPO_USUARIO_LABELS: Record<TipoUsuario, string> = {
+  loja: "Loja",
+  colaborador: "Colaborador",
+  setor_operador: "Op. Setor",
+  admin: "Admin",
+};
+
+const TIPO_USUARIO_COLORS: Record<TipoUsuario, string> = {
+  loja: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  colaborador: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  setor_operador: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  admin: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+};
 
 interface UserRoleRow {
   id: string;
@@ -114,6 +130,22 @@ export function GestaoUsuariosCard() {
   const [novoRole, setNovoRole] = useState<AppRole>("setor_usuario");
   const [novoLojaNome, setNovoLojaNome] = useState<string>("");
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [bulkWizardOpen, setBulkWizardOpen] = useState(false);
+
+  const updateTipoUsuario = useMutation({
+    mutationFn: async ({ userId, tipo }: { userId: string; tipo: TipoUsuario }) => {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ tipo_usuario: tipo })
+        .eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Tipo atualizado");
+      queryClient.invalidateQueries({ queryKey: ["admin-profiles"] });
+    },
+    onError: (e: any) => toast.error(e.message ?? "Falha ao atualizar tipo"),
+  });
 
   const createUser = useMutation({
     mutationFn: async () => {
@@ -290,9 +322,14 @@ export function GestaoUsuariosCard() {
           <CardTitle className="text-lg flex items-center gap-2">
             <Users className="h-5 w-5" /> Gestão de Usuários e Permissões
           </CardTitle>
-          <Button size="sm" onClick={() => { setCreateOpen(true); setInviteUrl(null); }}>
-            <Plus className="h-4 w-4 mr-1" /> Novo usuário
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setBulkWizardOpen(true)}>
+              <Wand2 className="h-4 w-4 mr-1" /> Cadastro em lote
+            </Button>
+            <Button size="sm" onClick={() => { setCreateOpen(true); setInviteUrl(null); }}>
+              <Plus className="h-4 w-4 mr-1" /> Novo usuário
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <DefaultUsuarioConfig />
@@ -304,6 +341,19 @@ export function GestaoUsuariosCard() {
                 <TableRow>
                   <TableHead>Nome</TableHead>
                   <TableHead>E-mail</TableHead>
+                  <TableHead>
+                    <div className="flex items-center gap-1">
+                      Tipo (Messenger)
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[240px] text-xs">
+                          Controla quem pode iniciar conversa 1-a-1 com quem no Messenger interno.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </TableHead>
                   <TableHead>
                     <div className="flex items-center gap-1">
                       Nível de Acesso
@@ -347,6 +397,33 @@ export function GestaoUsuariosCard() {
                     <TableRow key={p.id}>
                       <TableCell className="font-medium">{p.nome}</TableCell>
                       <TableCell className="text-muted-foreground text-xs">{p.email || "—"}</TableCell>
+
+                      {/* Tipo Messenger */}
+                      <TableCell>
+                        <Select
+                          value={(p as any).tipo_usuario || "setor_operador"}
+                          onValueChange={(v) =>
+                            updateTipoUsuario.mutate({ userId: p.id, tipo: v as TipoUsuario })
+                          }
+                        >
+                          <SelectTrigger className="h-8 w-32 text-xs">
+                            <SelectValue>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${TIPO_USUARIO_COLORS[((p as any).tipo_usuario || "setor_operador") as TipoUsuario]}`}
+                              >
+                                {TIPO_USUARIO_LABELS[((p as any).tipo_usuario || "setor_operador") as TipoUsuario]}
+                              </Badge>
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="loja">Loja</SelectItem>
+                            <SelectItem value="colaborador">Colaborador</SelectItem>
+                            <SelectItem value="setor_operador">Op. Setor</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
 
                       {/* Nível de Acesso */}
                       <TableCell>
@@ -628,6 +705,12 @@ export function GestaoUsuariosCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BulkUserProvisioningWizard
+        open={bulkWizardOpen}
+        onOpenChange={setBulkWizardOpen}
+        onComplete={invalidateAll}
+      />
     </TooltipProvider>
   );
 }

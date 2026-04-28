@@ -1,6 +1,6 @@
 ---
 name: Tipos de usuário no InFoco Messenger
-description: Profiles.tipo_usuario (loja|colaborador|setor_operador|admin) governa quem pode iniciar 1:1 com quem. Loja/colab nunca abrem chat solto com setor — só por demanda tipada.
+description: Profiles.tipo_usuario (loja|colaborador|setor_operador|admin) governa quem inicia 1:1 com quem. Wizard de cadastro em lote provisiona usuários a partir de telefones_lojas e fluxo_responsaveis.
 type: feature
 ---
 
@@ -21,8 +21,26 @@ type: feature
 
 - Função `public.pode_conversar_1a1(_remetente uuid, _destinatario uuid) RETURNS boolean` SECURITY DEFINER decide.
 - RLS `Users can send 1to1 or system messages` em `mensagens_internas` chama essa função para INSERTs cujo `conversa_id` não comece com `demanda_` ou `ponte_`.
-- Backfill inicial: usuários com `user_roles.role='admin'` → `admin`; com `user_roles.loja_nome` preenchido → `loja`; demais → `setor_operador`. Admin ajusta manualmente novos cadastros via aba "Tipos de Usuário" em `/configuracoes`.
+- `bot_fluxos.setor_destino_id` mapeia 14 fluxos aos setores reais para o wizard "Nova Demanda".
 
-## Mapeamento bot_fluxos → setor
+## Provisionamento em lote (Atrium → Messenger)
 
-Os 14 fluxos em `bot_fluxos` agora têm `setor_destino_id` preenchido (Financeiro, TI, Atendimento Corporativo, Loja). Wizard "Nova Demanda" no InFoco Messenger usa esse mapping para rotear a quem o setor correto, eliminando dependência só de `loja_nome` em `criar-demanda-loja`.
+InFoco Messenger não tem cadastro próprio — login é SSO via `sso-login` EF. Todos os usuários são criados no Atrium em `/configuracoes` → "Cadastro em lote" (`BulkUserProvisioningWizard`).
+
+**Fluxo do wizard (4 passos):**
+1. **Fonte** — escolhe `telefones_lojas` (lojas/colaboradores/departamentos) ou `fluxo_responsaveis` (operadores de setor).
+2. **Seleção** — checklist com telefones já existentes marcados como "já cadastrado" (match via `profiles.metadata->>telefone`). Operador preenche email (botão "Sugerir e-mails" gera `nome.usuario@oticasdiniz.local`).
+3. **Mapeamento** — confirma `tipo_usuario` (auto: `loja`→loja, `colaborador`→colaborador, `departamento`/`fluxo_responsaveis`→setor_operador) e setor (de `telefones_lojas.setor_destino_id` ou `bot_fluxos.setor_destino_id` via `fluxo_chave`).
+4. **Envio** — dispara `admin-bulk-provision-users` em chunks de 10. Mostra resultado por linha com `invite_url` copiável (botão "Copiar todos").
+
+**Edge function `admin-bulk-provision-users`** (idempotente, admin-only):
+- Lista até 50 candidatos por chamada.
+- Para cada: cria `auth.users` (ou reaproveita se já existe), atualiza `profiles.tipo_usuario/cargo/setor_id/metadata`, reseta `user_roles` com `role='setor_usuario'` (ou `admin`) + `setor_id`/`loja_nome`.
+- Persiste `profiles.metadata = { telefone, origem_cadastro, loja_nome }` para alimentar badges e match futuro.
+- Retorna `{ status: created|exists|error, invite_url, message }` por linha.
+
+## Badges visuais
+
+- `GestaoUsuariosCard`: coluna "Tipo (Messenger)" com select inline trocando `tipo_usuario` (badge colorido por tipo).
+- `TelefonesLojasCard`: coluna "Messenger" com badge ✓ Cadastrado / Pendente comparando telefone com `profiles.metadata->>telefone`.
+- `FluxoResponsaveisSection`: badge ✓ Messenger / Pendente em cada responsável.

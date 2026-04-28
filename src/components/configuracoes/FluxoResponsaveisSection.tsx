@@ -75,6 +75,20 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
     },
   });
 
+  const { data: profilesTelefones } = useQuery({
+    queryKey: ["profiles_telefones_set"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("metadata");
+      if (error) throw error;
+      const set = new Set<string>();
+      (data || []).forEach((p: any) => {
+        const t = p?.metadata?.telefone;
+        if (t) set.add(String(t).replace(/\D/g, ""));
+      });
+      return set;
+    },
+  });
+
   const addResponsavel = useMutation({
     mutationFn: async () => {
       const selected = telefonesCorporativos?.find((t) => t.id === selectedTelefoneId);
@@ -133,7 +147,10 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
       </p>
 
       {/* List */}
-      {responsaveis?.map((r) => (
+      {responsaveis?.map((r) => {
+        const cleanTel = String(r.telefone || "").replace(/\D/g, "");
+        const cadastrado = profilesTelefones?.has(cleanTel) ?? false;
+        return (
         <div key={r.id} className="flex items-center gap-2 py-1.5 px-2 rounded bg-background border">
           <div className="flex-1 min-w-0">
             <span className="text-sm font-medium">{r.nome}</span>
@@ -141,6 +158,15 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
               <Phone className="h-3 w-3" /> {r.telefone}
             </span>
           </div>
+          {cadastrado ? (
+            <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-[10px]">
+              ✓ Messenger
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              Pendente
+            </Badge>
+          )}
           <Badge variant={r.tipo === "primario" ? "default" : "secondary"} className="text-[10px]">
             {r.tipo === "primario" ? "Primário" : "Contingência"}
           </Badge>
@@ -157,7 +183,8 @@ export function FluxoResponsaveisSection({ fluxoChave }: { fluxoChave: string })
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
-      ))}
+        );
+      })}
 
       {!isLoading && !responsaveis?.length && (
         <p className="text-xs text-muted-foreground text-center py-2">Nenhum responsável cadastrado</p>

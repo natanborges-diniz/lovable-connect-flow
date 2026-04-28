@@ -62,6 +62,20 @@ export function TelefonesLojasCard() {
     },
   });
 
+  const { data: profilesTelefones } = useQuery({
+    queryKey: ["profiles_telefones_set"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("metadata");
+      if (error) throw error;
+      const set = new Set<string>();
+      (data || []).forEach((p: any) => {
+        const t = p?.metadata?.telefone;
+        if (t) set.add(String(t).replace(/\D/g, ""));
+      });
+      return set;
+    },
+  });
+
   const { data: setores } = useQuery({
     queryKey: ["setores", "ativos"],
     queryFn: async () => {
@@ -201,12 +215,16 @@ export function TelefonesLojasCard() {
                 <TableHead>Nome</TableHead>
                 <TableHead>Setor de Destino</TableHead>
                 <TableHead>Info</TableHead>
+                <TableHead>Messenger</TableHead>
                 <TableHead>Ativo</TableHead>
                 <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((t: any) => (
+              {filtered.map((t: any) => {
+                const cleanTel = String(t.telefone || "").replace(/\D/g, "");
+                const cadastrado = profilesTelefones?.has(cleanTel) ?? false;
+                return (
                 <TableRow key={t.id}>
                   <TableCell>
                     <Badge variant="outline" className={TIPO_COLORS[t.tipo as TipoCorporativo || "loja"]}>
@@ -224,6 +242,17 @@ export function TelefonesLojasCard() {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">{getSubInfo(t)}</TableCell>
                   <TableCell>
+                    {cadastrado ? (
+                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-[10px]">
+                        ✓ Cadastrado
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        Pendente
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Switch checked={t.ativo ?? true} onCheckedChange={(v) => toggleAtivo.mutate({ id: t.id, ativo: v })} />
                   </TableCell>
                   <TableCell>
@@ -237,7 +266,8 @@ export function TelefonesLojasCard() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         )}
