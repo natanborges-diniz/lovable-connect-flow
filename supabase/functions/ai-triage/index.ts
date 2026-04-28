@@ -561,6 +561,17 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
   // se recusa a chamar interpretar_receita. Sempre indicar que está analisando.
   if (isImageContext || /\[image\]|\[document\]/.test(n)) {
     const recentNorm = (recentOutbound || []).slice(-10).map(norm);
+    // Se já mandamos "estou analisando" antes e ainda não há receita válida,
+    // troca por pedido de digitação dos valores em vez de repetir "analisando" (que vira loop).
+    const jaMandouAnalisando = (recentOutbound || []).some((m) => MSG_ANALISANDO_RE.test(m || ""));
+    if (jaMandouAnalisando) {
+      return {
+        resposta: MSG_PEDIR_RECEITA_TEXTO,
+        intencao: "receita_oftalmologica",
+        pipeline_coluna: "Orçamento",
+        precisa_humano: false,
+      };
+    }
     const receitaPool = [
       "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções certinhas, um instante…",
       "Peguei a imagem da receita aqui 😊 Tô lendo os valores pra montar seu orçamento, só um momento…",
@@ -578,8 +589,9 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
         };
       }
     }
+    // Pool esgotado sem receita válida → pede texto
     return {
-      resposta: receitaPool[0],
+      resposta: MSG_PEDIR_RECEITA_TEXTO,
       intencao: "receita_oftalmologica",
       pipeline_coluna: "Orçamento",
       precisa_humano: false,
