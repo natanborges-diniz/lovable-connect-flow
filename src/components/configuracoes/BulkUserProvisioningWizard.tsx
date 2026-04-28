@@ -83,6 +83,7 @@ export function BulkUserProvisioningWizard({ open, onOpenChange, onComplete }: P
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState<ResultRow[]>([]);
+  const [defaultPassword, setDefaultPassword] = useState<string>("Atrium@2026");
 
   const reset = () => {
     setStep(1);
@@ -266,6 +267,7 @@ export function BulkUserProvisioningWizard({ open, onOpenChange, onComplete }: P
       const all: ResultRow[] = [];
       for (const chunk of chunks) {
         const payload = {
+          default_password: defaultPassword || undefined,
           candidates: chunk.map((c) => ({
             email: c.email.trim().toLowerCase(),
             nome: c.nome,
@@ -522,14 +524,30 @@ export function BulkUserProvisioningWizard({ open, onOpenChange, onComplete }: P
         {step === 4 && (
           <div className="space-y-3 py-2">
             {results.length === 0 && !submitting && (
-              <div className="rounded-lg border border-dashed p-6 text-center">
-                <p className="text-sm">
-                  Pronto para criar <strong>{validCount}</strong> usuários no Messenger.
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Cada um receberá um link de convite para definir senha no primeiro acesso.
-                </p>
-              </div>
+              <>
+                <div className="rounded-lg border border-dashed p-6 text-center space-y-2">
+                  <p className="text-sm">
+                    Pronto para criar <strong>{validCount}</strong> usuários no Messenger.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="default-pwd" className="text-xs">
+                    Senha padrão (todos receberão a mesma)
+                  </Label>
+                  <Input
+                    id="default-pwd"
+                    value={defaultPassword}
+                    onChange={(e) => setDefaultPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    className="font-mono"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Como os e-mails são fictícios, definimos a senha aqui. Os usuários NÃO serão
+                    forçados a trocar no 1º login. Anote essa senha e distribua aos usuários.
+                    Deixe vazio para gerar links de convite por e-mail.
+                  </p>
+                </div>
+              </>
             )}
             {submitting && (
               <div className="flex items-center gap-2 text-sm">

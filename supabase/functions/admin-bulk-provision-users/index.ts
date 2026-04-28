@@ -77,6 +77,10 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const candidates: Candidate[] = Array.isArray(body?.candidates) ? body.candidates : [];
+    const defaultPassword: string | null =
+      typeof body?.default_password === "string" && body.default_password.length >= 6
+        ? body.default_password
+        : null;
     if (candidates.length === 0) return json({ error: "candidates vazio" }, 400);
     if (candidates.length > 50) return json({ error: "máximo 50 por chamada" }, 400);
 
@@ -129,16 +133,19 @@ Deno.serve(async (req) => {
         let invite_url: string | undefined;
 
         if (!exists) {
-          const { data: created, error: createErr } = await admin.auth.admin.createUser({
+          const createPayload: Record<string, unknown> = {
             email,
             email_confirm: true,
             user_metadata: { nome },
-          });
+          };
+          if (defaultPassword) createPayload.password = defaultPassword;
+
+          const { data: created, error: createErr } = await admin.auth.admin.createUser(
+            createPayload as any,
+          );
           if (createErr || !created?.user) {
-            // If error mentions already registered, mark as exists
             const msg = createErr?.message || "Falha ao criar";
             if (/already|registered|exists/i.test(msg)) {
-              // try to fetch
               const { data: list2 } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
               const f2 = list2?.users?.find((u) => u.email?.toLowerCase() === email);
               if (f2) {
@@ -156,15 +163,17 @@ Deno.serve(async (req) => {
             userId = created.user.id;
           }
 
-          // Generate invite link for fresh users
-          try {
-            const { data: linkData } = await admin.auth.admin.generateLink({
-              type: "invite",
-              email,
-            });
-            invite_url = (linkData as any)?.properties?.action_link ?? undefined;
-          } catch (_e) {
-            // best-effort
+          // Only generate invite link if NO default password was provided
+          if (!defaultPassword && userId && !exists) {
+            try {
+              const { data: linkData } = await admin.auth.admin.generateLink({
+                type: "invite",
+                email,
+              });
+              invite_url = (linkData as any)?.properties?.action_link ?? undefined;
+            } catch (_e) {
+              // best-effort
+            }
           }
         }
 
@@ -209,7 +218,11 @@ Deno.serve(async (req) => {
           status: exists ? "exists" : "created",
           user_id: userId,
           invite_url,
-          message: exists ? "Já existia — atualizado tipo/role" : "Criado com convite",
+          message: exists
+            ? "Já existia — atualizado tipo/role"
+            : defaultPassword
+            ? "Criado com senha padrão"
+            : "Criado com convite",
         });
       } catch (e: any) {
         results.push({

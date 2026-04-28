@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Loader2, HelpCircle, KeyRound, Wand2 } from "lucide-react";
+import { Users, Plus, Loader2, HelpCircle, KeyRound, Wand2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
@@ -192,6 +192,26 @@ export function GestaoUsuariosCard() {
       setNewPassword("");
     },
     onError: (e: any) => toast.error(e.message ?? "Falha ao redefinir senha"),
+  });
+
+  const generateMagicLink = useMutation({
+    mutationFn: async (email: string) => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error("Sessão expirada");
+      const { data, error } = await supabase.functions.invoke("admin-magic-link", {
+        body: { email },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return (data as any)?.url as string;
+    },
+    onSuccess: (url) => {
+      navigator.clipboard.writeText(url);
+      toast.success("Link de acesso copiado para a área de transferência");
+    },
+    onError: (e: any) => toast.error(e.message ?? "Falha ao gerar link"),
   });
 
   const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
@@ -532,24 +552,46 @@ export function GestaoUsuariosCard() {
                         />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0"
-                              onClick={() => {
-                                setResetTarget({ id: p.id, nome: p.nome });
-                                setNewPassword("");
-                              }}
-                            >
-                              <KeyRound className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="left" className="text-xs">
-                            Redefinir senha
-                          </TooltipContent>
-                        </Tooltip>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                disabled={!p.email || generateMagicLink.isPending}
+                                onClick={() => p.email && generateMagicLink.mutate(p.email)}
+                              >
+                                {generateMagicLink.isPending && generateMagicLink.variables === p.email ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Link2 className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="text-xs">
+                              Gerar link de acesso (magic link)
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={() => {
+                                  setResetTarget({ id: p.id, nome: p.nome });
+                                  setNewPassword("");
+                                }}
+                              >
+                                <KeyRound className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="text-xs">
+                              Redefinir senha
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
