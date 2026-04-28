@@ -398,6 +398,33 @@ export function GestaoUsuariosCard() {
                       <TableCell className="font-medium">{p.nome}</TableCell>
                       <TableCell className="text-muted-foreground text-xs">{p.email || "—"}</TableCell>
 
+                      {/* Tipo Messenger */}
+                      <TableCell>
+                        <Select
+                          value={(p as any).tipo_usuario || "setor_operador"}
+                          onValueChange={(v) =>
+                            updateTipoUsuario.mutate({ userId: p.id, tipo: v as TipoUsuario })
+                          }
+                        >
+                          <SelectTrigger className="h-8 w-32 text-xs">
+                            <SelectValue>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${TIPO_USUARIO_COLORS[((p as any).tipo_usuario || "setor_operador") as TipoUsuario]}`}
+                              >
+                                {TIPO_USUARIO_LABELS[((p as any).tipo_usuario || "setor_operador") as TipoUsuario]}
+                              </Badge>
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="loja">Loja</SelectItem>
+                            <SelectItem value="colaborador">Colaborador</SelectItem>
+                            <SelectItem value="setor_operador">Op. Setor</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+
                       {/* Nível de Acesso */}
                       <TableCell>
                         <Select
