@@ -135,6 +135,7 @@ export function GestaoUsuariosCard() {
   const [novoLojaNome, setNovoLojaNome] = useState<string>("");
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [bulkWizardOpen, setBulkWizardOpen] = useState(false);
+  const [magicLinkDialog, setMagicLinkDialog] = useState<{ url: string; email: string } | null>(null);
 
   const updateTipoUsuario = useMutation({
     mutationFn: async ({ userId, tipo }: { userId: string; tipo: TipoUsuario }) => {
@@ -211,23 +212,43 @@ export function GestaoUsuariosCard() {
       if ((data as any)?.error) throw new Error((data as any).error);
       return (data as any)?.url as string;
     },
-    onSuccess: (url) => {
+    onSuccess: (url, email) => {
       if (!url || !url.startsWith("http")) {
         toast.error("Link inválido recebido do servidor");
         console.error("[magic-link] url inválida:", url);
         return;
       }
-      navigator.clipboard.writeText(url).catch(() => {
-        // clipboard pode falhar em iframe sem permissão — mostramos no toast pra copiar manual
-      });
-      toast.success("Link de acesso ao InFoco Messenger copiado!", {
-        description: url,
-        duration: 15000,
-      });
       console.log("[magic-link] gerado:", url);
+      setMagicLinkDialog({ url, email });
     },
     onError: (e: any) => toast.error(e.message ?? "Falha ao gerar link"),
   });
+
+  // Helper de cópia com fallback execCommand (funciona em iframes sem clipboard-write)
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // cai no fallback
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
 
   const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
   const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
@@ -674,7 +695,11 @@ export function GestaoUsuariosCard() {
                 <Input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
                 <Button
                   variant="outline"
-                  onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success("Link copiado"); }}
+                  onClick={async () => {
+                    const ok = await copyToClipboard(inviteUrl);
+                    if (ok) toast.success("Link copiado!");
+                    else toast.error("Não consegui copiar — selecione e copie manualmente.");
+                  }}
                 >
                   Copiar
                 </Button>
@@ -768,6 +793,63 @@ export function GestaoUsuariosCard() {
         onOpenChange={setBulkWizardOpen}
         onComplete={invalidateAll}
       />
+
+      {/* Diálogo do magic link — funciona mesmo quando clipboard automático é bloqueado pelo iframe */}
+      <Dialog
+        open={!!magicLinkDialog}
+        onOpenChange={(o) => { if (!o) setMagicLinkDialog(null); }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Link de acesso — InFoco Messenger</DialogTitle>
+            <DialogDescription>
+              {magicLinkDialog?.email
+                ? `Envie este link para ${magicLinkDialog.email}. Válido por 1 hora, uso único.`
+                : "Link válido por 1 hora, uso único."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label>URL</Label>
+            <Input
+              readOnly
+              value={magicLinkDialog?.url ?? ""}
+              onFocus={(e) => e.currentTarget.select()}
+              autoFocus
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              Selecione o texto e copie manualmente caso o botão "Copiar" não funcione no seu navegador.
+            </p>
+          </div>
+
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (!magicLinkDialog) return;
+                const ok = await copyToClipboard(magicLinkDialog.url);
+                if (ok) toast.success("Link copiado!");
+                else toast.error("Não consegui copiar — selecione e copie manualmente.");
+              }}
+            >
+              Copiar link
+            </Button>
+            <Button
+              onClick={() => {
+                if (!magicLinkDialog) return;
+                window.open(magicLinkDialog.url, "_blank", "noopener,noreferrer");
+              }}
+            >
+              Abrir no Messenger
+            </Button>
+            <Button variant="ghost" onClick={() => setMagicLinkDialog(null)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </TooltipProvider>
   );
 }
