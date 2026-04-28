@@ -322,9 +322,14 @@ export function GestaoUsuariosCard() {
           <CardTitle className="text-lg flex items-center gap-2">
             <Users className="h-5 w-5" /> Gestão de Usuários e Permissões
           </CardTitle>
-          <Button size="sm" onClick={() => { setCreateOpen(true); setInviteUrl(null); }}>
-            <Plus className="h-4 w-4 mr-1" /> Novo usuário
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setBulkWizardOpen(true)}>
+              <Wand2 className="h-4 w-4 mr-1" /> Cadastro em lote
+            </Button>
+            <Button size="sm" onClick={() => { setCreateOpen(true); setInviteUrl(null); }}>
+              <Plus className="h-4 w-4 mr-1" /> Novo usuário
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <DefaultUsuarioConfig />
