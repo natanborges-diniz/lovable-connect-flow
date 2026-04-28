@@ -62,6 +62,20 @@ export function TelefonesLojasCard() {
     },
   });
 
+  const { data: profilesTelefones } = useQuery({
+    queryKey: ["profiles_telefones_set"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("metadata");
+      if (error) throw error;
+      const set = new Set<string>();
+      (data || []).forEach((p: any) => {
+        const t = p?.metadata?.telefone;
+        if (t) set.add(String(t).replace(/\D/g, ""));
+      });
+      return set;
+    },
+  });
+
   const { data: setores } = useQuery({
     queryKey: ["setores", "ativos"],
     queryFn: async () => {
