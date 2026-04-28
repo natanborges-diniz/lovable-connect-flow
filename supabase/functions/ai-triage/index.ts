@@ -427,9 +427,14 @@ function detectPrescriptionCorrection(text: string): {
   rx_type: "single_vision" | "progressive";
   raw: string;
 } | null {
-  if (!text || text.length < 8) return null;
+  if (!text || text.length < 4) return null;
   // Normaliza espaço entre sinal e número: "- 425" → "-425", "+ 200" → "+200"
   let t = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2");
+  // Convenções ópticas: pl/plano/neutro/zerado/sc → 0.00 (substitui por "0" pra entrar no parser numérico)
+  t = t.replace(/-\s*(pl|plano|neutro|zerado|zero)\b/g, "0");
+  t = t.replace(/\b(pl|plano|neutro|zerado)\b/g, "0");
+  // "sc" (sem cilindro) → some
+  t = t.replace(/\bsc\b/g, "");
 
   // Strong signals: must contain at least 2 of these markers
   const markers = [
@@ -442,7 +447,9 @@ function detectPrescriptionCorrection(text: string): {
   ];
   const numericPairs = (t.match(/[+-]?\d+[.,]?\d*/g) || []).length;
   const markerHits = markers.filter((r) => r.test(t)).length;
-  if (markerHits < 2 || numericPairs < 2) return null;
+  // Aceita 1 marcador + 1 número quando há OD ou OE explícito (caso esf-only "Od -4.50 / Oe 0")
+  const hasOdOe = /\bod\b/.test(t) && /\boe\b/.test(t);
+  if (!(markerHits >= 2 && numericPairs >= 1) && !(hasOdOe && numericPairs >= 1)) return null;
 
   // Helper: parse a number como dioptria.
   // - Aceita "-9,25", "+0.50", "0.00".
@@ -2331,17 +2338,25 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     console.log(`[CONTEXT] Prompt:${systemPrompt.length}ch | KB:${conhecimentos.length} | Ex:${exemplos.length} | Anti:${antiFeedbacks.length} | Regras:${regrasProibidas.length} | Modo:${atendimento.modo} | Window:${contextWindow.length}/${allMsgs.length} | Range:${historyRange} | Topics:${sentTopics.join(",") || "none"}`);
 
-    // ── 6.4. PRESCRIPTION CORRECTION DETECTOR ──
-    // If the customer types prescription values directly (typically to correct
-    // an OCR mistake), parse it, replace the latest receita in metadata, and
-    // force consultar_lentes with the corrected values. The AI must not ignore
-    // a textual correction just because a prior receita exists.
+    // ── 6.4. PRESCRIPTION TEXT DETECTOR (first-typed OR correction) ──
+    // Aceita receita digitada como PRIMEIRA leitura quando a IA acabou de pedir
+    // os valores por texto (OCR falhou) OU como CORREÇÃO quando já existe receita.
+    // Caso Bianca (28/04): "Od -4.50 / Oe -pl" foi ignorado porque não havia
+    // receita prévia salva. Agora basta a IA ter pedido (MSG_PEDIR_RECEITA_TEXTO)
+    // nas últimas 2 outbound para que o parser entre em modo "first".
     let correctionApplied = false;
-    if (receitas.length > 0) {
-      const correction = detectPrescriptionCorrection(lastInboundText);
-      if (correction) {
-        const idx = receitas.length - 1;
-        const old = receitas[idx] || {};
+    const correction = detectPrescriptionCorrection(lastInboundText);
+    if (correction) {
+      const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
+        typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*/i.test(o)
+      );
+      const isFirst = receitas.length === 0;
+      if (isFirst && !iaJustAskedForText) {
+        // Cliente mandou padrão de receita do nada — ignora pra evitar falso positivo.
+        console.log(`[RX-FIRST-TYPED] Skipped: no prior request from IA`);
+      } else {
+        const idx = isFirst ? 0 : receitas.length - 1;
+        const old: any = isFirst ? {} : (receitas[idx] || {});
         const merged = {
           ...old,
           eyes: {
@@ -2357,29 +2372,25 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           },
           confidence: 0.99,
           data_leitura: new Date().toISOString(),
-          source: "client_correction",
+          source: isFirst ? "client_typed_first" : "client_correction",
           raw_correction: correction.raw,
           needs_human_review: false,
+          label: old.label || (isFirst ? "digitada pelo cliente" : undefined),
         };
-        receitas[idx] = merged;
+        if (isFirst) receitas.push(merged); else receitas[idx] = merged;
 
-        // Persist back to contact metadata
         await supabase.from("contatos").update({
           metadata: { ...contatoMeta, receitas },
         }).eq("id", contatoId);
 
         await supabase.from("eventos_crm").insert({
-          contato_id: contatoId, tipo: "receita_corrigida_pelo_cliente",
-          descricao: `Cliente corrigiu receita por texto. Tipo recalculado: ${correction.rx_type}`,
-          metadata: {
-            od: correction.od, oe: correction.oe, rx_type: correction.rx_type,
-            raw: correction.raw,
-          },
+          contato_id: contatoId,
+          tipo: isFirst ? "receita_digitada_pelo_cliente" : "receita_corrigida_pelo_cliente",
+          descricao: `Cliente ${isFirst ? "digitou" : "corrigiu"} receita por texto. Tipo: ${correction.rx_type}`,
+          metadata: { od: correction.od, oe: correction.oe, rx_type: correction.rx_type, raw: correction.raw, mode: isFirst ? "first" : "correction" },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
-        // Rebuild receitaCtx so the prompt below sees the corrected values
-        // (mutate by re-running the formatter inline)
         receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
         for (let i = 0; i < receitas.length; i++) {
           const rx = receitas[i];
@@ -2394,16 +2405,20 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             if (typeof eye.add === "number") parts.push(`add +${eye.add}`);
             return parts.join(" ");
           };
-          const sourceTag = rx.source === "client_correction" ? " ⚠️ CORRIGIDA PELO CLIENTE" : "";
+          const sourceTag = rx.source === "client_correction"
+            ? " ⚠️ CORRIGIDA PELO CLIENTE"
+            : rx.source === "client_typed_first" ? " ✍️ DIGITADA PELO CLIENTE" : "";
           receitaCtx += `\n## Receita ${i + 1} (${label}) — lida em ${dataLeitura}${sourceTag}\n`;
           receitaCtx += `Tipo: ${rxTypeLabel} | Confiança: ${conf}\n`;
           receitaCtx += `${formatEye(od, "OD")}\n`;
           receitaCtx += `${formatEye(oe, "OE")}\n`;
         }
-        receitaCtx += `\n⚠️ A última receita foi CORRIGIDA pelo cliente nesta mensagem. Use estes valores como verdade — NÃO mencione os valores antigos.`;
+        receitaCtx += isFirst
+          ? `\n⚠️ Esta receita foi DIGITADA pelo cliente AGORA. NÃO peça de novo. Use estes valores e siga DIRETO para consultar_lentes.`
+          : `\n⚠️ A última receita foi CORRIGIDA pelo cliente nesta mensagem. Use estes valores como verdade — NÃO mencione os valores antigos.`;
 
         correctionApplied = true;
-        console.log(`[RX-CORRECTION] Applied client correction. New rx_type=${correction.rx_type}, OD.sph=${correction.od.sphere}, OE.sph=${correction.oe.sphere}`);
+        console.log(`[RX-${isFirst ? "FIRST-TYPED" : "CORRECTION"}] rx_type=${correction.rx_type}, OD.sph=${correction.od.sphere}, OE.sph=${correction.oe.sphere}`);
       }
     }
 
@@ -2542,7 +2557,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     }
 
-    if (loopCheck.detected) {
+    if (loopCheck.detected && !correctionApplied) {
       console.log(`[LOOP-DETECTOR] Loop detected — similarity=${(loopCheck.similarity * 100).toFixed(0)}%`);
       await supabase.from("eventos_crm").insert({
         contato_id: contatoId, tipo: "loop_ia_detectado_pre_llm",
