@@ -706,8 +706,9 @@ export type Database = {
       }
       demandas_loja: {
         Row: {
-          atendimento_cliente_id: string
-          contato_cliente_id: string
+          assunto: string | null
+          atendimento_cliente_id: string | null
+          contato_cliente_id: string | null
           created_at: string
           encerrada_at: string | null
           id: string
@@ -715,18 +716,22 @@ export type Database = {
           loja_telefone: string
           metadata: Json | null
           numero_curto: number
+          origem: string
           pergunta: string
           protocolo: string
+          setor_destino_id: string | null
           solicitante_id: string | null
           solicitante_nome: string | null
           status: string
+          tipo_chave: string | null
           ultima_mensagem_loja_at: string | null
           updated_at: string
           vista_pelo_operador: boolean
         }
         Insert: {
-          atendimento_cliente_id: string
-          contato_cliente_id: string
+          assunto?: string | null
+          atendimento_cliente_id?: string | null
+          contato_cliente_id?: string | null
           created_at?: string
           encerrada_at?: string | null
           id?: string
@@ -734,18 +739,22 @@ export type Database = {
           loja_telefone: string
           metadata?: Json | null
           numero_curto?: number
+          origem?: string
           pergunta: string
           protocolo: string
+          setor_destino_id?: string | null
           solicitante_id?: string | null
           solicitante_nome?: string | null
           status?: string
+          tipo_chave?: string | null
           ultima_mensagem_loja_at?: string | null
           updated_at?: string
           vista_pelo_operador?: boolean
         }
         Update: {
-          atendimento_cliente_id?: string
-          contato_cliente_id?: string
+          assunto?: string | null
+          atendimento_cliente_id?: string | null
+          contato_cliente_id?: string | null
           created_at?: string
           encerrada_at?: string | null
           id?: string
@@ -753,11 +762,14 @@ export type Database = {
           loja_telefone?: string
           metadata?: Json | null
           numero_curto?: number
+          origem?: string
           pergunta?: string
           protocolo?: string
+          setor_destino_id?: string | null
           solicitante_id?: string | null
           solicitante_nome?: string | null
           status?: string
+          tipo_chave?: string | null
           ultima_mensagem_loja_at?: string | null
           updated_at?: string
           vista_pelo_operador?: boolean
