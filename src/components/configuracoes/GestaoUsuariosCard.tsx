@@ -194,6 +194,26 @@ export function GestaoUsuariosCard() {
     onError: (e: any) => toast.error(e.message ?? "Falha ao redefinir senha"),
   });
 
+  const generateMagicLink = useMutation({
+    mutationFn: async (email: string) => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error("Sessão expirada");
+      const { data, error } = await supabase.functions.invoke("admin-magic-link", {
+        body: { email },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return (data as any)?.url as string;
+    },
+    onSuccess: (url) => {
+      navigator.clipboard.writeText(url);
+      toast.success("Link de acesso copiado para a área de transferência");
+    },
+    onError: (e: any) => toast.error(e.message ?? "Falha ao gerar link"),
+  });
+
   const lojaSetorId = setores?.find((s) => s.nome.toLowerCase() === "loja")?.id;
   const isLojaSetor = (id: string | null) => id != null && id === lojaSetorId;
 
