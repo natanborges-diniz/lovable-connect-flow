@@ -705,6 +705,12 @@ export function GestaoUsuariosCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BulkUserProvisioningWizard
+        open={bulkWizardOpen}
+        onOpenChange={setBulkWizardOpen}
+        onComplete={invalidateAll}
+      />
     </TooltipProvider>
   );
 }
