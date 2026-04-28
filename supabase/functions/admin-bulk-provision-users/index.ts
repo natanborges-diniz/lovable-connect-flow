@@ -77,6 +77,10 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const candidates: Candidate[] = Array.isArray(body?.candidates) ? body.candidates : [];
+    const defaultPassword: string | null =
+      typeof body?.default_password === "string" && body.default_password.length >= 6
+        ? body.default_password
+        : null;
     if (candidates.length === 0) return json({ error: "candidates vazio" }, 400);
     if (candidates.length > 50) return json({ error: "máximo 50 por chamada" }, 400);
 
