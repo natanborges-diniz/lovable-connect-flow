@@ -135,6 +135,7 @@ export function GestaoUsuariosCard() {
   const [novoLojaNome, setNovoLojaNome] = useState<string>("");
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [bulkWizardOpen, setBulkWizardOpen] = useState(false);
+  const [magicLinkDialog, setMagicLinkDialog] = useState<{ url: string; email: string } | null>(null);
 
   const updateTipoUsuario = useMutation({
     mutationFn: async ({ userId, tipo }: { userId: string; tipo: TipoUsuario }) => {
