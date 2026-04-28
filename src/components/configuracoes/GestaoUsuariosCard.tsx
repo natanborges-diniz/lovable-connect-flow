@@ -343,6 +343,19 @@ export function GestaoUsuariosCard() {
                   <TableHead>E-mail</TableHead>
                   <TableHead>
                     <div className="flex items-center gap-1">
+                      Tipo (Messenger)
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[240px] text-xs">
+                          Controla quem pode iniciar conversa 1-a-1 com quem no Messenger interno.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </TableHead>
+                  <TableHead>
+                    <div className="flex items-center gap-1">
                       Nível de Acesso
                       <Tooltip>
                         <TooltipTrigger asChild>
