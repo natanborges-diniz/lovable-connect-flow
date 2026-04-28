@@ -57,12 +57,14 @@ Deno.serve(async (req) => {
       }
       const token = authHeader.replace("Bearer ", "");
 
-      const userClient = createClient(SUPABASE_URL, ANON_KEY);
-      const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
-      const userId = claimsData?.claims?.sub as string | undefined;
-      if (claimsErr || !userId) {
-        console.error("[bulk-provision] auth failed:", claimsErr?.message);
-        return json({ error: "Sessão inválida" }, 401);
+      // Use admin client (service role) to validate the token via getUser(jwt).
+      // This works regardless of whether the token has 'sub' claim format mismatches
+      // and avoids the publishable/anon-key getClaims pitfall.
+      const { data: userData, error: userErr } = await admin.auth.getUser(token);
+      const userId = userData?.user?.id;
+      if (userErr || !userId) {
+        console.error("[bulk-provision] auth failed:", userErr?.message, "token_prefix:", token.slice(0, 20));
+        return json({ error: "Sessão inválida — faça logout e login novamente" }, 401);
       }
 
       const { data: isAdminData, error: isAdminErr } = await admin.rpc("is_admin", {
