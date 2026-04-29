@@ -1,76 +1,65 @@
-## Objetivo
-Fechar o Fluxo B (Setor → Loja/Grupo) no Atrium, dando ao operador a UI para disparar uma demanda e melhorando o thread em modo grupo para se parecer com um grupo de WhatsApp (todas as lojas vendo todos falarem).
+# Correções no fluxo do Drin (e leads silenciosos no geral)
 
-## 1) `AcionarLojaDialog` (novo)
-Arquivo: `src/components/atendimentos/AcionarLojaDialog.tsx`
+## Diagnóstico (caso Drin)
 
-Diálogo único com dois modos:
+Linha do tempo real apurada no banco:
 
-**Modo "Loja única"** (default)
-- Combobox com lojas (`telefones_lojas` onde `tipo='loja'` e `ativo=true`, distinct por `nome_loja`).
-- Campo Assunto (curto) e Mensagem inicial (textarea).
-- (Opcional v1) anexo: deixar como TODO — não bloqueia o uso.
+```
+08:57  Drin envia: "Acessei o site..."
+08:57  Gael responde: "Olá! Falo com Drin? 😊 ... Aguardar confirmação do nome..."  ← prompt vazado
+10:00  Cron dispara `retomada_contexto_1`
+10:00  Cron dispara `retomada_contexto_1` de novo (~100ms depois)              ← duplicado
+10:06  watchdog-loop-ia detecta loop (similaridade 80%) e escala para HUMANO   ← problema
+10:54  watchdog-loop-ia detecta loop de novo e re-escala
+13:54  Card termina em modo=humano, status=aguardando, na coluna "Novo Contato"
+```
 
-**Modo "Grupo de lojas"**
-- Toggle "Acionar várias lojas".
-- Checklist de lojas (mesma fonte). Atalhos: "Selecionar todas", "Limpar".
-- Mesmo Assunto + Mensagem inicial.
+Drin nunca respondeu. O que deveria ter acontecido: após esgotar 2 retomadas + despedida, lead vai para **Perdidos**. O que aconteceu: o watchdog de loop, vendo retomadas idênticas seguidas, classificou como loop e jogou em **Humano**.
 
-**Ação:** chama `supabase.functions.invoke("criar-demanda-loja", { body })`:
-- Loja única: `{ atendimento_id, loja_nome, loja_telefone, assunto, pergunta }`
-- Grupo: `{ atendimento_id, lojas: [{nome_loja, telefone}, ...], assunto, pergunta }`
+## O que vamos corrigir
 
-Em sucesso: toast com protocolo, fecha diálogo e dispara callback `onCreated(demanda_id)`.
+### 1. Vazamento do prompt na saudação (`ai-triage`)
 
-**Importante:** o diálogo precisa de um `atendimento_id` (a EF exige modo `humano`). Por isso o botão "Acionar loja(s)" abrirá:
-- A partir de **`AtendimentoView`** (chat humano aberto): usa o `atendimento.id` corrente.
-- A partir de **`/demandas`** (lista geral): se não há atendimento de cliente em foco, o botão fica **desabilitado** com tooltip "Abra um atendimento humano para acionar lojas". *(Esta é a regra atual da EF — manter consistente.)*
+Em `buildFirstContactBlock` o LLM ocasionalmente concatena a instrução interna ("Aguardar confirmação do nome...") na mensagem do cliente. Vamos:
 
-## 2) Botão "Acionar loja(s)" no `AtendimentoView`
-- Adicionar no header de ações do atendimento (perto de outras ações tipo "Encerrar"), visível só quando `modo === "humano"`.
-- Abre `AcionarLojaDialog` passando `atendimento_id`.
-- Em sucesso, navega para `/demandas?demanda=<id>` (ou abre o painel inline existente).
+- Reescrever o bloco para deixar a frase canônica destacada (entre aspas) e separar as regras com cabeçalho `# REGRAS INTERNAS — NÃO ENVIAR AO CLIENTE`.
+- Adicionar guardrail intra-mensagem (já existe um para duplicação, vamos estender): se `inboundCount<=1` e o texto final contiver tokens de instrução vazada (`aguardar confirmação`, `confirme o nome`, `sem reformular`, `tool registrar_nome`, `primeira interação`), **substituir** pela frase canônica determinística e logar `[GUARDRAIL] Prompt vazado corrigido`.
 
-## 3) Thread em modo grupo — header rico + autor por loja
-Arquivo: `src/components/atendimentos/DemandaThreadView.tsx`
+### 2. Idempotência da retomada (`vendas-recuperacao-cron`)
 
-**Header (quando `metadata.grupo === true`):**
-- Badge "Grupo" + ícone `Users`.
-- Título `#NN • Grupo (N lojas)`.
-- Lista expansível de lojas participantes (`metadata.lojas_nomes`) — colapsada por padrão, expande ao clicar em "ver lojas". Já temos linha resumo; transformar em colapsável com `<details>`/popover leve.
+Hoje o lock anti-race existe apenas no ramo `processHumano` (linhas 465-488). O ramo IA (`processContato`, linhas 216-330) **não tem** o mesmo lock — por isso disparou `retomada_contexto_1` 2x em 100ms.
 
-**Identificação por loja em mensagens inbound (`loja_para_operador`):**
-- Hoje mostramos só `autor_nome` (nome do usuário Messenger).
-- Em modo grupo, prefixar com **nome da loja** quando disponível em `mensagens_internas.metadata.loja_nome` (snapshot gravado pela EF de ingresso de resposta).
-- Render: `[NomeLoja] · NomeUsuário` em destaque (estilo cabeçalho de mensagem em grupo de WhatsApp).
-- Cor de avatar/badge derivada deterministicamente do `loja_nome` (hash → tom HSL fixo) para diferenciar visualmente.
+- Replicar o padrão "lock otimista antes do fetch": gravar `recuperacao_vendas.ultima_tentativa_at = now` + `lock_pending=true` ANTES de chamar `responder-solicitacao`/`send-whatsapp-template`.
+- Adicionar guard: se `ultima_tentativa_at` foi escrita há menos de `requiredDelay/2` (ou 30 min), pular.
 
-**Pequena dependência na EF de entrada (`receber-mensagem-interna-loja` ou equivalente que insere em `demanda_mensagens`):** garantir que ao gravar a resposta da loja em `demanda_mensagens`, o campo `metadata.loja_nome` seja preenchido a partir de `user_roles.loja_nome` do remetente. Se essa EF já existe, ajustar; se não, é trivial — leitura de `user_roles` pelo `remetente_id` antes do insert.
+### 3. Lead silencioso → Perdidos (não Humano)
 
-## 4) Detalhes técnicos
-- Lojas para o combobox/checklist: `select distinct nome_loja, telefone from telefones_lojas where tipo='loja' and ativo=true order by nome_loja`. Hook `useLojas()` em `src/hooks/useLojas.ts`.
-- Validação Zod no diálogo (assunto 1–120, mensagem 1–2000, lojas ≥1 em modo grupo).
-- A EF `criar-demanda-loja` já suporta os dois modos — sem mudança backend.
-- Realtime no thread já está OK (`useDemandaMensagens`).
+Trocar a política do `watchdog-loop-ia` quando o "loop" é, na verdade, **a IA falando sozinha** (cliente em silêncio, só temos templates de retomada repetidos):
 
-## 5) Fora de escopo (próximo turno)
-- Anexos no `AcionarLojaDialog` (upload p/ `whatsapp-media` + `metadata.anexo_url` na primeira mensagem).
-- Fluxo A (`criar-solicitacao-loja`) já entregue; UI consumidora vive no Messenger.
+- Detectar a condição: última inbound do cliente foi há > X horas (ex.: 2h) E os outbounds recentes são todos templates de retomada/IA (sem mensagem humana).
+- Nesse caso, em vez de marcar `modo=humano`, **mover o contato direto para a coluna `Perdidos`**, encerrar o atendimento (`status=encerrado`, `fim_at=now`) e registrar `eventos_crm` com tipo `lead_silencioso_perdido`.
+- Manter o comportamento atual de escalar para humano APENAS quando houver ping-pong real entre cliente e IA (cliente respondeu recentemente e a IA está repetindo).
 
-## Arquivos
-- Criar: `src/components/atendimentos/AcionarLojaDialog.tsx`, `src/hooks/useLojas.ts`
-- Editar: `src/components/atendimentos/DemandaThreadView.tsx` (header colapsável + autor por loja), `src/pages/Atendimentos.tsx` (botão no header), possivelmente `src/pages/Demandas.tsx` (botão desabilitado com tooltip)
-- Possivelmente editar a EF que recebe respostas da loja para gravar `metadata.loja_nome` em `demanda_mensagens` (verificar antes de alterar).
+Resultado: leads que nunca respondem nem ao 1º contato + 2 retomadas + despedida fluem naturalmente para Perdidos sem sujar a fila humana.
 
----
+### 4. Ação imediata no card do Drin
 
-## Turno 2026-04-29 — Fluxo B UI completo
-- Criado `AcionarLojaDialog` (loja única OU grupo, busca + atalhos).
-- Criado hook `useLojas` (distinct por nome_loja).
-- `DemandaThreadView`: header de grupo colapsável com badges coloridas por loja; mensagens inbound em modo grupo agora prefixam loja_nome com cor determinística (estilo grupo de WhatsApp).
-- `bridge-demanda`: agora grava `metadata.loja_nome` em `demanda_mensagens` ao espelhar respostas vindas da loja (via lookup `user_roles.loja_nome`).
-- `Atendimentos`: novo botão "Acionar loja(s)" no header do detalhe (visível só em modo humano), abre o diálogo.
+Mover o card `5843fcdb...` de "Novo Contato"/modo humano direto para **Perdidos**, encerrar o atendimento e registrar evento `lead_silencioso_perdido` (saneamento manual desse caso).
 
-Pendências pequenas (próximo turno):
-- Anexos no `AcionarLojaDialog` (upload p/ `whatsapp-media`).
-- Botão na lista `/demandas` (desabilitado quando não há atendimento humano em foco).
+## Arquivos afetados
+
+- `supabase/functions/ai-triage/index.ts` — reescrever `buildFirstContactBlock` + extender guardrail intra-mensagem
+- `supabase/functions/vendas-recuperacao-cron/index.ts` — adicionar lock otimista no ramo IA (`processContato`)
+- `supabase/functions/watchdog-loop-ia/index.ts` — bifurcar decisão (Perdidos vs Humano) conforme há resposta recente do cliente
+- Migration / insert de saneamento — mover Drin para Perdidos
+
+## Memórias a atualizar
+
+- `mem://ia/saudacao-confirma-nome` — anotar guardrail anti-vazamento
+- `mem://crm/recuperacao-ia-anti-abandono` — anotar lock otimista no ramo IA
+- Nova: `mem://watchdog/lead-silencioso-perdidos` — política "silêncio total → Perdidos, não Humano"
+
+## Não vou tocar
+
+- Não vou alterar a cadência (1h → 24h → despedida +1h) — só o destino final em casos de silêncio total.
+- Não vou alterar o fluxo de escalada quando o cliente está conversando ativamente com a IA e ela trava.

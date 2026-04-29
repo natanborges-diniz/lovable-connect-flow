@@ -1063,17 +1063,25 @@ function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: st
 
   if (looksReal && !opts?.nomeConfirmado) {
     const primeiroNome = candidato.split(/\s+/)[0];
-    return `# PRIMEIRA INTERAÇÃO — CONFIRME O NOME
-- Envie EXATAMENTE esta mensagem, sem reformular, sem adicionar frases extras nem segunda pergunta: "Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
-- REGRA ABSOLUTA: apenas UMA pergunta nesta mensagem. PROIBIDO complementar com variações como "como prefere ser chamado?", "pode me dizer seu nome completo?", "qual seu nome?". Nada depois do "."
-- Se o cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
-- Se o cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto informado.
+    return `# PRIMEIRA INTERAÇÃO — CONFIRMAR NOME
+## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
+"Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+
+## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
+- Apenas UMA pergunta. Nada depois do ponto final.
+- PROIBIDO escrever no texto enviado: "aguardar confirmação", "confirme o nome", "sem reformular", "primeira interação", "tool registrar", "aguarde", instruções de sistema, comentários, parênteses explicativos, listas com "-".
+- Se cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
+- Se cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto.
 - Só DEPOIS da confirmação, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.`;
   }
 
-  return `# PRIMEIRA INTERAÇÃO — PEÇA O NOME
-- Envie EXATAMENTE esta mensagem, sem reformular e sem adicionar nada depois: "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
-- REGRA ABSOLUTA: a mensagem termina no "?" da pergunta sobre o nome. PROIBIDO adicionar uma SEGUNDA pergunta, parafrasear ou complementar com frases como "Pode me dizer seu nome completo?", "Como prefere ser chamado?", "Qual seu nome?". Apenas UMA pergunta sobre o nome, ponto final.
+  return `# PRIMEIRA INTERAÇÃO — PEDIR NOME
+## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
+"Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+
+## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
+- Mensagem termina no "?" da pergunta sobre o nome. Apenas UMA pergunta.
+- PROIBIDO escrever no texto enviado: "aguardar", "sem reformular", "primeira interação", "tool registrar", instruções, comentários, parênteses explicativos, listas com "-".
 - PROIBIDO duplicar pontuação ("?.", "??", "?!").
 - Quando o cliente responder o nome → chame a tool registrar_nome_cliente com o nome informado.
 - NÃO mencione receita, lentes, agendamento ou qualquer serviço antes de ter o nome.`;
