@@ -2477,73 +2477,10 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.log(`[REFERENCIA-OPCAO] Cliente referenciou opção do orçamento anterior — forçando tool_choice=responder`);
     }
 
-    // ── 6.5.b. SHORT-CIRCUIT: FECHAMENTO LC → escalar para humano direto ──
-    // LC NÃO requer visita à loja. Cliente escolheu marca / pediu reservar:
-    // confirmamos a escolha, avisamos que o Consultor humano dá continuidade
-    // (e que a loja de retirada é definida no fechamento), e escalamos.
-    if (forcedIntent?.tool === "fechamento_lc") {
-      console.log(`[FECHAMENTO-LC] ${forcedIntent.reason}`);
-
-      // Tenta extrair marca mencionada para personalizar a confirmação
-      const brandMatch = lastInboundText.match(LC_BRAND_REGEX);
-      const marcaEcho = brandMatch ? brandMatch[0].replace(/\b\w/g, (c) => c.toUpperCase()) : null;
-      const nomePrim = (contatoNomeAtual || "").split(/\s+/)[0] || "";
-      const saudacao = nomePrim ? `Perfeito, ${nomePrim}` : "Perfeito";
-      const linhaEscolha = marcaEcho
-        ? `${saudacao} — anotei sua escolha: *${marcaEcho}* 👌`
-        : `${saudacao} — anotei sua escolha 👌`;
-      const fechamentoLinhaConsultor = isHorarioHumano()
-        ? "Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido — com ele você confirma o modelo certo da sua receita, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝"
-        : `Já registrei sua escolha pra um Consultor finalizar o pedido (confirmação do modelo, escolha da loja de retirada e link de pagamento). Nosso time humano atende seg-sex das 09h às 18h e sábado das 08h às 12h — assim que abrir o próximo expediente (${proximaAberturaHumana()}) ele te chama por aqui 🤝`;
-      const fechamentoMsg = [
-        linhaEscolha,
-        fechamentoLinhaConsultor,
-      ].join("\n\n");
-
-      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, fechamentoMsg);
-
-      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
-
-      await supabase.from("eventos_crm").insert({
-        contato_id: contatoId,
-        tipo: "fechamento_lc_escalado",
-        descricao: `Cliente escolheu LC — encaminhado para fechamento humano${marcaEcho ? ` (marca: ${marcaEcho})` : ""}`,
-        metadata: {
-          marca_escolhida: marcaEcho,
-          last_inbound: lastInboundText.substring(0, 200),
-          had_lc_quote_presented: hasLCQuotePresented,
-          reason: forcedIntent.reason,
-        },
-        referencia_tipo: "atendimento",
-        referencia_id: atendimento_id,
-      });
-
-      // Resumo para o humano
-      try {
-        await fetch(`${SUPABASE_URL}/functions/v1/summarize-atendimento`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ atendimento_id }),
-        });
-      } catch (_) { /* best-effort */ }
-
-      // Limpa lock de debounce
-      try {
-        const lockMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
-        delete lockMeta.ia_lock;
-        await supabase.from("atendimentos").update({ metadata: lockMeta }).eq("id", atendimento_id);
-      } catch (_) { /* ignore */ }
-
-      return jsonResponse({
-        status: "ok",
-        tools_used: ["fechamento_lc_escalado"],
-        intencao: "fechamento_lc",
-        precisa_humano: true,
-        pipeline_coluna_sugerida: null,
-        modo: "humano",
-        validator_flags: ["fechamento_lc_short_circuit"],
-      });
-    }
+    // ── 6.5.b. (removido) — LC não escala mais compulsoriamente para humano.
+    // Política nova: catálogo de LC está no banco, IA orça e direciona à loja
+    // como qualquer outro pedido. Humano só entra se houver objeção real
+    // (sem produto compatível, reclamação, pedido explícito de humano).
 
 
     // If a correction was applied, force consultar_lentes regardless of loop state
