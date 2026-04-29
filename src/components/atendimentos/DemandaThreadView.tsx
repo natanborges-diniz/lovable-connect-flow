@@ -156,9 +156,23 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
                   isSelected && "ring-2 ring-primary ring-offset-1",
                 )}
               >
-                {m.autor_nome && m.direcao !== "sistema" && (
-                  <p className="mb-0.5 text-[10px] font-medium opacity-70">{m.autor_nome}</p>
-                )}
+                {m.autor_nome && m.direcao !== "sistema" && (() => {
+                  const lojaNome = (m as any).metadata?.loja_nome as string | undefined;
+                  const showLoja = isGrupo && m.direcao === "loja_para_operador" && lojaNome;
+                  return (
+                    <p className="mb-0.5 flex items-center gap-1 text-[10px] font-medium opacity-80">
+                      {showLoja && (
+                        <span
+                          className="rounded-sm px-1 py-px text-[9px] font-semibold text-white"
+                          style={{ backgroundColor: lojaTone(lojaNome!) }}
+                        >
+                          {lojaNome}
+                        </span>
+                      )}
+                      <span>{m.autor_nome}</span>
+                    </p>
+                  );
+                })()}
                 <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
                 {m.anexo_url && (
                   <a href={m.anexo_url} target="_blank" rel="noreferrer" className="mt-1 block text-[11px] underline opacity-80">
