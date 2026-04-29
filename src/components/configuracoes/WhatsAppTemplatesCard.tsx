@@ -449,6 +449,7 @@ export function WhatsAppTemplatesCard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <CategoriaBadge categoria={t.categoria} />
                     <StatusBadge status={t.status} />
                     {t.status === "rascunho" && (
                       <Button
