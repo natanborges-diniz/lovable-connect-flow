@@ -2926,11 +2926,15 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         resposta = quoteResult.resposta;
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
         // ── GUARDRAIL LC: lente de contato NÃO requer visita à loja ──
-        // Se o contexto é LC + receita salva, agendar_visita está PROIBIDO
-        // (cliente não vai à loja "tirar medidas" — fechamento é com humano,
-        // que define a loja de retirada no momento do pagamento).
-        if (isLCContextGlobal && receitas.length > 0) {
-          console.log(`[GUARDRAIL-LC] Blocked ${fn} in LC context — converting to fechamento_lc`);
+        // Se o contexto é EXCLUSIVAMENTE LC + receita salva, agendar_visita está PROIBIDO
+        // (cliente não vai à loja "tirar medidas" — fechamento é com humano).
+        // EXCEÇÃO: se o cliente também demonstrou interesse em ÓCULOS (intent misto LC+óculos),
+        // a visita é NECESSÁRIA para escolher armação — permite agendar_visita normalmente.
+        const recentInboundJoined = recentInboundTexts.join(" | ").toLowerCase();
+        const interesseOculos = /\b([oó]culo[s]?|arma[çc][aã]o|armacoes|gr?au|monoc?focal|multifocal|antirreflex|fotossens[ií]vel|transitions|prov[ae]r\s+arma)\b/i.test(recentInboundJoined);
+        const lcOnlyContext = isLCContextGlobal && !interesseOculos;
+        if (lcOnlyContext && receitas.length > 0) {
+          console.log(`[GUARDRAIL-LC] Blocked ${fn} in LC-only context — converting to fechamento_lc`);
           await supabase.from("eventos_crm").insert({
             contato_id: contatoId,
             tipo: "lc_agendamento_bloqueado",
