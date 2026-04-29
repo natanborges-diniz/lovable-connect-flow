@@ -1063,17 +1063,25 @@ function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: st
 
   if (looksReal && !opts?.nomeConfirmado) {
     const primeiroNome = candidato.split(/\s+/)[0];
-    return `# PRIMEIRA INTERAÇÃO — CONFIRME O NOME
-- Envie EXATAMENTE esta mensagem, sem reformular, sem adicionar frases extras nem segunda pergunta: "Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
-- REGRA ABSOLUTA: apenas UMA pergunta nesta mensagem. PROIBIDO complementar com variações como "como prefere ser chamado?", "pode me dizer seu nome completo?", "qual seu nome?". Nada depois do "."
-- Se o cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
-- Se o cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto informado.
+    return `# PRIMEIRA INTERAÇÃO — CONFIRMAR NOME
+## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
+"Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+
+## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
+- Apenas UMA pergunta. Nada depois do ponto final.
+- PROIBIDO escrever no texto enviado: "aguardar confirmação", "confirme o nome", "sem reformular", "primeira interação", "tool registrar", "aguarde", instruções de sistema, comentários, parênteses explicativos, listas com "-".
+- Se cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
+- Se cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto.
 - Só DEPOIS da confirmação, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.`;
   }
 
-  return `# PRIMEIRA INTERAÇÃO — PEÇA O NOME
-- Envie EXATAMENTE esta mensagem, sem reformular e sem adicionar nada depois: "Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
-- REGRA ABSOLUTA: a mensagem termina no "?" da pergunta sobre o nome. PROIBIDO adicionar uma SEGUNDA pergunta, parafrasear ou complementar com frases como "Pode me dizer seu nome completo?", "Como prefere ser chamado?", "Qual seu nome?". Apenas UMA pergunta sobre o nome, ponto final.
+  return `# PRIMEIRA INTERAÇÃO — PEDIR NOME
+## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
+"Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+
+## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
+- Mensagem termina no "?" da pergunta sobre o nome. Apenas UMA pergunta.
+- PROIBIDO escrever no texto enviado: "aguardar", "sem reformular", "primeira interação", "tool registrar", instruções, comentários, parênteses explicativos, listas com "-".
 - PROIBIDO duplicar pontuação ("?.", "??", "?!").
 - Quando o cliente responder o nome → chame a tool registrar_nome_cliente com o nome informado.
 - NÃO mencione receita, lentes, agendamento ou qualquer serviço antes de ter o nome.`;
@@ -4013,7 +4021,45 @@ async function runConsultarLentes(
   return { resposta: quoteMsg };
 }
 
+// Detecta e sanitiza vazamento de instruções internas no texto enviado ao cliente
+function sanitizeLeakedInstructions(texto: string): string {
+  if (!texto) return texto;
+  const leakPatterns = [
+    /aguardar?\s+confirma[çc][ãa]o\s+do\s+nome[^\n]*/gi,
+    /confirme\s+o\s+nome[^\n]*/gi,
+    /sem\s+reformular[^\n]*/gi,
+    /primeira\s+intera[çc][ãa]o[^\n]*/gi,
+    /tool\s+registrar_nome_cliente[^\n]*/gi,
+    /chame\s+a\s+tool[^\n]*/gi,
+    /regra\s+absoluta[^\n]*/gi,
+    /proibido[^\n]*/gi,
+    /^\s*-\s+(envie|regra|se\s+o\s+cliente|s[óo]\s+depois|n[ãa]o\s+mencione)[^\n]*/gim,
+    /##?\s+(mensagem\s+a\s+enviar|regras\s+internas)[^\n]*/gi,
+    /#\s+primeira\s+intera[çc][ãa]o[^\n]*/gi,
+  ];
+  let cleaned = texto;
+  let hadLeak = false;
+  for (const pat of leakPatterns) {
+    if (pat.test(cleaned)) {
+      hadLeak = true;
+      cleaned = cleaned.replace(pat, "");
+    }
+  }
+  // limpa linhas vazias múltiplas, espaços em excesso
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
+  if (hadLeak) {
+    console.warn(`[GUARDRAIL] Prompt vazado corrigido. Original=${JSON.stringify(texto.slice(0, 200))} → Limpo=${JSON.stringify(cleaned.slice(0, 200))}`);
+    // Se sobrar pouca coisa, devolve fallback de saudação
+    if (cleaned.length < 20) {
+      return "Olá! 😊 Aqui é o Gael das Óticas Diniz Osasco. Como posso te ajudar hoje?";
+    }
+  }
+  return cleaned;
+}
+
 async function sendWhatsApp(supabaseUrl: string, serviceKey: string, atendimentoId: string, texto: string) {
+  texto = sanitizeLeakedInstructions(texto);
+
   const maxAttempts = 3;
   let lastError = "unknown error";
 
