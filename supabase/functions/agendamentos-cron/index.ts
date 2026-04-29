@@ -111,18 +111,18 @@ serve(async (req) => {
     }
 
     // ═══════════════════════════════════════════
-    // G) ABANDONO — sem resposta após tentativas de recuperação
+    // G) RECUPERAÇÃO CLIENTE — 3 tentativas (imediata + 24h + 24h) e abandono em 72h com despedida
     // ═══════════════════════════════════════════
     const { data: emRecuperacao } = await supabase
       .from("agendamentos")
-      .select("id, contato_id, tentativas_recuperacao, updated_at, atendimento_id, status")
+      .select("id, contato_id, tentativas_recuperacao, updated_at, atendimento_id, status, metadata, loja_nome")
       .in("status", ["no_show", "recuperacao"]);
 
     for (const ag of emRecuperacao || []) {
       const lastUpdate = new Date(ag.updated_at);
       const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
 
-      // Check if client responded recently
+      // Cliente respondeu? Move para "recuperacao" e deixa IA conduzir.
       if (ag.atendimento_id) {
         const { data: recentInbound } = await supabase
           .from("mensagens")
@@ -140,19 +140,66 @@ serve(async (req) => {
         }
       }
 
-      // Second recovery attempt
-      if ((ag.tentativas_recuperacao || 0) === 1 && hoursSinceUpdate >= HORAS_SEGUNDA_RECUPERACAO) {
+      const tentativas = ag.tentativas_recuperacao || 0;
+
+      // 2ª tentativa após HORAS_SEGUNDA_RECUPERACAO
+      if (tentativas <= 1 && hoursSinceUpdate >= HORAS_SEGUNDA_RECUPERACAO) {
         await supabase.from("agendamentos").update({
           tentativas_recuperacao: 2,
           status: "recuperacao",
         }).eq("id", ag.id);
         results.push(`recuperacao_2:${ag.id}`);
+        continue;
       }
 
-      // Abandon after max attempts + wait
-      if ((ag.tentativas_recuperacao || 0) >= MAX_TENTATIVAS_RECUPERACAO && hoursSinceUpdate >= HORAS_ABANDONO) {
-        await supabase.from("agendamentos").update({ status: "abandonado" }).eq("id", ag.id);
-        results.push(`abandonado:${ag.id}`);
+      // 3ª tentativa após mais HORAS_TERCEIRA_RECUPERACAO
+      if (tentativas === 2 && hoursSinceUpdate >= HORAS_TERCEIRA_RECUPERACAO) {
+        await supabase.from("agendamentos").update({
+          tentativas_recuperacao: 3,
+          status: "recuperacao",
+        }).eq("id", ag.id);
+        results.push(`recuperacao_3:${ag.id}`);
+        continue;
+      }
+
+      // Após MAX tentativas, espera HORAS_ABANDONO desde a 1ª e envia despedida fixa
+      if (tentativas >= MAX_TENTATIVAS_RECUPERACAO && hoursSinceUpdate >= HORAS_ABANDONO) {
+        const md = (ag.metadata || {}) as Record<string, any>;
+        if (!md.despedida_enviada_at && ag.atendimento_id && dentroDeJanelaComunicacaoCliente(now)) {
+          const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
+          const firstName = contato?.nome?.split(" ")[0] || "";
+          const msg = `Tudo bem${firstName ? ", " + firstName : ""}! Como não consegui retorno, vou encerrar este atendimento por aqui. Se quiser remarcar sua visita${ag.loja_nome ? " na " + ag.loja_nome : ""}, é só me chamar. Um abraço! 👋`;
+          await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
+          });
+          await supabase.from("agendamentos").update({
+            metadata: { ...md, despedida_enviada_at: new Date().toISOString() },
+          }).eq("id", ag.id);
+          await supabase.from("eventos_crm").insert({
+            contato_id: ag.contato_id,
+            tipo: "agendamento_despedida_enviada",
+            descricao: `Despedida enviada antes de marcar como abandonado (${ag.loja_nome || ""})`,
+            referencia_id: ag.id,
+            referencia_tipo: "agendamento",
+          });
+          results.push(`despedida:${ag.id}`);
+          continue; // marca abandonado no próximo ciclo (1h depois)
+        }
+        // Se já enviou despedida há ≥1h, encerra
+        const despedidaAt = md.despedida_enviada_at ? new Date(md.despedida_enviada_at) : null;
+        if (despedidaAt && (now.getTime() - despedidaAt.getTime()) >= 60 * 60 * 1000) {
+          await supabase.from("agendamentos").update({ status: "abandonado" }).eq("id", ag.id);
+          await supabase.from("eventos_crm").insert({
+            contato_id: ag.contato_id,
+            tipo: "agendamento_perdido",
+            descricao: `Cliente declarado perdido após 3 tentativas + despedida (${ag.loja_nome || ""})`,
+            referencia_id: ag.id,
+            referencia_tipo: "agendamento",
+          });
+          results.push(`abandonado:${ag.id}`);
+        }
       }
     }
 
