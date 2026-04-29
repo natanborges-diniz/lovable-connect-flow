@@ -213,9 +213,11 @@ serve(async (req) => {
           const valorFmt = Number.isFinite(valorNum)
             ? valorNum.toFixed(2).replace(".", ",")
             : String(dados.valor);
-          const primeiroNome = nomeClienteRaw.split(/\s+/)[0];
 
-          // Dispara template via send-whatsapp-template (gate de aprovação aplicado lá)
+          // Protocolo curto: últimos 8 chars do payment_link_id (UTILITY v3 exige protocolo)
+          const protocolo = String(obData.id || "").slice(-8).toUpperCase() || "PAGTO";
+
+          // Dispara template via send-whatsapp-template usando alias (resolve para versão UTILITY aprovada)
           const tplRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
             method: "POST",
             headers: {
@@ -224,13 +226,11 @@ serve(async (req) => {
             },
             body: JSON.stringify({
               contato_id: contatoClienteId,
-              template_name: "link_pagamento_cliente",
+              template_alias: "link_pagamento_cliente",
               template_params: [
-                primeiroNome,
-                "Óticas Diniz",
-                valorFmt,
-                String(dados.descricao || "").slice(0, 200),
-                obData.url_pagamento,
+                protocolo,           // {{1}} protocolo
+                valorFmt,            // {{2}} valor
+                obData.url_pagamento, // {{3}} link
               ],
               language: "pt_BR",
             }),
