@@ -610,6 +610,11 @@ function TemplateForm({ initial, onClose }: { initial: CatalogoTemplate | null; 
             <SelectItem value="AUTHENTICATION">Authentication (OTP)</SelectItem>
           </SelectContent>
         </Select>
+        <div className="text-xs bg-muted/40 border border-border rounded p-2 space-y-1">
+          <p><strong className="text-success">UTILITY</strong> · transacional, ~5–10× mais barato. Use para: confirmação/lembrete de agendamento, recibo de pagamento, retomada de tópico que o cliente já estava conversando, status de operação em curso.</p>
+          <p><strong className="text-warning">MARKETING</strong> · promocional, tarifa premium. Use APENAS para: campanhas, ofertas, anúncio de novo número, reativação fria sem contexto prévio.</p>
+          <p className="opacity-70">Na dúvida, escolha UTILITY. A Meta reclassifica automaticamente se discordar.</p>
+        </div>
       </div>
       <div className="space-y-2">
         <Label>Corpo da Mensagem *</Label>
