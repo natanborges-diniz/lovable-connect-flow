@@ -77,17 +77,17 @@ serve(async (req) => {
     await processLembreteDiaD(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
 
     // ═══════════════════════════════════════════
-    // C) COBRANÇA À LOJA — horário do agendamento passou
+    // C) COBRANÇA À LOJA — 2h após o horário marcado
     // ═══════════════════════════════════════════
-    await processFirstStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
+    await processFirstStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_PRIMEIRA_COBRANCA_LOJA);
 
     // ═══════════════════════════════════════════
-    // D) SEGUNDA COBRANÇA À LOJA
+    // D) SEGUNDA COBRANÇA À LOJA — 10:00 SP do dia seguinte
     // ═══════════════════════════════════════════
-    await processSecondStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_SEGUNDA_COBRANCA_LOJA);
+    await processSecondStoreChargeNextMorning(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
 
     // ═══════════════════════════════════════════
-    // E) TIMEOUT DA LOJA
+    // E) TIMEOUT DA LOJA — 48h sem resposta = tarefa interna ao supervisor
     // ═══════════════════════════════════════════
     await processStoreTimeout(supabase, now, results, HORAS_TIMEOUT_LOJA);
 
