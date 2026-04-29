@@ -274,6 +274,31 @@ async function processContato(
   const hoursSinceReference = (now.getTime() - referenceTime.getTime()) / (1000 * 60 * 60);
   if (hoursSinceReference < requiredDelay) return result;
 
+  // ── IDEMPOTÊNCIA: bloqueia disparo duplicado por race do cron ──
+  // Cron pode rodar overlap; duas execuções concorrentes leem tentativas=0
+  // simultaneamente e disparam o template duas vezes (caso Drin 29/04).
+  if (recuperacao.ultima_tentativa_at) {
+    const desdeMs = now.getTime() - new Date(recuperacao.ultima_tentativa_at).getTime();
+    const minGapMs = Math.max(30 * 60 * 1000, (requiredDelay * 60 * 60 * 1000) / 2);
+    if (desdeMs < minGapMs) {
+      console.log(`[IA-DEDUPE] ${contato.nome}: tentativa há ${Math.round(desdeMs/60000)}min — pulando`);
+      return result;
+    }
+  }
+
+  // Lock otimista: marca ultima_tentativa_at ANTES do fetch
+  await supabase.from("contatos").update({
+    metadata: {
+      ...meta,
+      recuperacao_vendas: {
+        ...recuperacao,
+        tentativas: tentativas + 1,
+        ultima_tentativa_at: now.toISOString(),
+        lock_pending: true,
+      },
+    },
+  }).eq("id", contato.id);
+
   // Generate context summary on first attempt
   let resumoContexto = recuperacao.resumo_contexto || "";
   if (tentativas === 0) {
