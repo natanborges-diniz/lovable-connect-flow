@@ -99,7 +99,7 @@ export function DemandaLojaPanel({ atendimentoId, modo }: { atendimentoId: strin
               )}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium truncate">#{d.numero_curto} • {d.loja_nome}</span>
+                <span className="font-medium truncate">#{d.numero_curto} • {d.metadata?.grupo ? `Grupo (${d.metadata.lojas_nomes?.length ?? "?"} lojas)` : d.loja_nome}</span>
                 <Badge
                   variant="outline"
                   className={cn(
