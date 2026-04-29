@@ -439,7 +439,7 @@ async function processHumano(
     if (hoursSince < FINAL_WAIT_HOURS) return result;
 
     const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
-    const topico = inferirTopico(lastOutbound) || "seu atendimento";
+    const topico = inferirTopico(lastOutbound) || recH.topico || "seu atendimento";
 
     try {
       await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
@@ -513,7 +513,7 @@ async function processHumano(
   }).eq("id", atendimento.id);
 
   const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
-  const topico = inferirTopico(lastOutbound) || "seu atendimento";
+  const topico = inferirTopico(lastOutbound) || recH.topico || "seu atendimento";
   const TEMPLATES = ["retomada_contexto_1", "retomada_contexto_2"];
   const templateName = TEMPLATES[tentativas] || TEMPLATES[TEMPLATES.length - 1];
 
@@ -563,23 +563,59 @@ async function processHumano(
   return result;
 }
 
-// Infere tópico ({{2}} do template) das últimas mensagens outbound humanas
+// Infere tópico ({{2}} do template) de forma curta e natural
 function inferirTopico(outbound: any[] | null): string | null {
   if (!outbound?.length) return null;
+
   const humanos = outbound.filter((m: any) => {
     const nome = String(m.remetente_nome || "").toLowerCase();
     return nome && !/gael|sistema|template|bot|ia\b/i.test(nome);
   }).slice(0, 5);
-  const texto = humanos.map((m: any) => String(m.conteudo || "")).join(" ").toLowerCase();
+
+  const texto = humanos
+    .map((m: any) => String(m.conteudo || ""))
+    .filter(Boolean)
+    .join(" ");
+
+  return resumirTopicoTemplate(texto);
+}
+
+function resumirTopicoTemplate(textoBruto: string | null | undefined): string | null {
+  if (!textoBruto) return null;
+
+  const texto = String(textoBruto)
+    .replace(/\[template:[^\]]+\]/gi, " ")
+    .replace(/params?:/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   if (!texto) return null;
 
-  if (/lentes? de contato|lente diária|lente mensal/.test(texto)) return "as lentes de contato";
-  if (/orçamento|orcamento|preço|preco|valor/.test(texto)) return "seu orçamento";
-  if (/agendar|agendamento|visita|horário|horario/.test(texto)) return "sua visita à loja";
-  if (/receita|grau|exame/.test(texto)) return "sua receita";
-  if (/armaç|armac|óculos|oculos|modelo/.test(texto)) return "seus óculos";
-  if (/multifocal|progressiv/.test(texto)) return "suas lentes multifocais";
-  return null;
+  const normalizado = texto.toLowerCase();
+
+  if (/lentes? de contato|lente(?:s)? diária|lente(?:s)? mensal|caixa de lente/.test(normalizado)) return "as lentes de contato";
+  if (/multifocal|progressiv/.test(normalizado)) return "as lentes multifocais";
+  if (/troca de lente|lentes? de [óo]culos|lente para [óo]culos/.test(normalizado)) return "as lentes dos seus óculos";
+  if (/armaç|armac|[óo]culos|oculos|modelo/.test(normalizado)) return "seus óculos";
+  if (/agendar|agendamento|visita|hor[áa]rio|horario|ir (?:na|à) loja|unidade/.test(normalizado)) return "sua visita à loja";
+  if (/receita|grau|esf|cil|add|dp|dnp/.test(normalizado)) return "sua receita";
+  if (/exame|cl[ií]nica parceira|oftalmo/.test(normalizado)) return "o exame de vista";
+  if (/or[çc]amento|pre[çc]o|valor|quanto custa|investimento/.test(normalizado)) return "seu orçamento";
+
+  const limpado = texto
+    .replace(/^a cliente\s+[^,.:;!?-]+(?:solicitou|pediu|quer|perguntou)\s+/i, "")
+    .replace(/^o cliente\s+[^,.:;!?-]+(?:solicitou|pediu|quer|perguntou)\s+/i, "")
+    .replace(/^cliente\s+[^,.:;!?-]+(?:solicitou|pediu|quer|perguntou)\s+/i, "")
+    .replace(/^sobre\s+/i, "")
+    .replace(/[.?!,:;\-]+$/g, "")
+    .trim();
+
+  if (!limpado) return null;
+  if (limpado.length <= 48 && /^[\p{L}\p{N}\sà-üÀ-Ü]+$/u.test(limpado)) {
+    return limpado.charAt(0).toLowerCase() + limpado.slice(1);
+  }
+
+  return "seu atendimento";
 }
 
 // ── Generate summary ──
@@ -615,6 +651,7 @@ async function sendRecoveryTemplate(
 ) {
   const TEMPLATES = ["retomada_contexto_1", "retomada_contexto_2", "retomada_despedida"];
   const templateName = TEMPLATES[tentativas] || TEMPLATES[TEMPLATES.length - 1];
+  const topico = resumirTopicoTemplate(resumoContexto) || "seu atendimento";
 
   await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
     method: "POST",
@@ -625,7 +662,7 @@ async function sendRecoveryTemplate(
     body: JSON.stringify({
       contato_id: contato.id,
       template_name: templateName,
-      template_params: [firstName, resumoContexto],
+      template_params: [firstName, topico],
       language: "pt_BR",
     }),
   });
