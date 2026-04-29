@@ -29,6 +29,9 @@ serve(async (req) => {
 
     const body = await req.json();
     const { atendimento_id, pergunta, assunto } = body;
+    // Anexo opcional já uploadado em mensagens-anexos; URL pública + mime
+    const anexo_url: string | null = body.anexo_url || null;
+    const anexo_mime: string | null = body.anexo_mime || null;
     // Modo loja única: loja_telefone + loja_nome
     // Modo grupo: lojas: [{nome_loja, telefone}, ...] (snapshot)
     const lojasGrupo: Array<{ nome_loja: string; telefone: string }> | undefined = body.lojas;
@@ -36,29 +39,33 @@ serve(async (req) => {
     const loja_telefone: string = isGrupo ? "__GRUPO__" : body.loja_telefone;
     const loja_nome: string = isGrupo ? "__GRUPO__" : body.loja_nome;
 
-    if (!atendimento_id || !pergunta || (!isGrupo && (!loja_telefone || !loja_nome))) {
-      return new Response(JSON.stringify({ error: "atendimento_id, pergunta e (loja_telefone+loja_nome ou lojas[]) são obrigatórios" }), {
+    if (!pergunta || (!isGrupo && (!loja_telefone || !loja_nome))) {
+      return new Response(JSON.stringify({ error: "pergunta e (loja_telefone+loja_nome ou lojas[]) são obrigatórios" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const { data: atendimento, error: atErr } = await supabase
-      .from("atendimentos")
-      .select("id, contato_id, modo, contatos(nome)")
-      .eq("id", atendimento_id)
-      .single();
-    if (atErr || !atendimento) throw new Error("Atendimento não encontrado");
-
-    if ((atendimento as any).modo !== "humano") {
-      return new Response(JSON.stringify({ error: "Demandas só podem ser abertas em modo humano" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // atendimento_id é opcional (pode abrir demanda avulsa pelo botão global em /demandas)
+    let atendimento: any = null;
+    if (atendimento_id) {
+      const { data: at, error: atErr } = await supabase
+        .from("atendimentos")
+        .select("id, contato_id, modo, contatos(nome)")
+        .eq("id", atendimento_id)
+        .single();
+      if (atErr || !at) throw new Error("Atendimento não encontrado");
+      if ((at as any).modo !== "humano") {
+        return new Response(JSON.stringify({ error: "Demandas vinculadas a atendimento exigem modo humano" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      atendimento = at;
     }
 
     const { data: profile } = await supabase
       .from("profiles").select("nome").eq("id", user.id).single();
     const operadorNome = profile?.nome || user.email || "Operador";
-    const clienteNome = (atendimento as any).contatos?.nome || "Cliente";
+    const clienteNome = atendimento?.contatos?.nome || null;
 
     const ano = new Date().getFullYear();
 
@@ -76,8 +83,8 @@ serve(async (req) => {
       .from("demandas_loja")
       .insert({
         protocolo: `DEM-${ano}-PENDING`,
-        atendimento_cliente_id: atendimento_id,
-        contato_cliente_id: (atendimento as any).contato_id,
+        atendimento_cliente_id: atendimento_id ?? null,
+        contato_cliente_id: atendimento?.contato_id ?? null,
         loja_telefone,
         loja_nome,
         solicitante_id: user.id,
@@ -101,6 +108,8 @@ serve(async (req) => {
       autor_id: user.id,
       autor_nome: operadorNome,
       conteudo: pergunta,
+      anexo_url: anexo_url,
+      anexo_mime: anexo_mime,
       metadata: { bootstrap: true },
     });
 
@@ -124,7 +133,9 @@ serve(async (req) => {
     const conversa_id = `demanda_${demanda.id}`;
     const headerLoja = isGrupo ? `Grupo (${lojasDestino.length} lojas)` : loja_nome;
     const titulo = `Nova demanda ${protocolo} (${headerLoja})`;
-    const corpoChat = `📌 *${protocolo}* — ${headerLoja}\nCliente: ${clienteNome}\n\n${pergunta}\n\n_Responda aqui ou envie /encerrar para fechar._`;
+    const linhaCliente = clienteNome ? `Cliente: ${clienteNome}\n` : "";
+    const corpoChat = `📌 *${protocolo}* — ${headerLoja}\n${linhaCliente}\n${pergunta}${anexo_url ? `\n\n📎 ${anexo_url}` : ""}\n\n_Responda aqui ou envie /encerrar para fechar._`;
+    const resumoCliente = clienteNome ? `${operadorNome} sobre cliente ${clienteNome}: ${pergunta}` : `${operadorNome}: ${pergunta}`;
 
     for (const d of dests) {
       await supabase.from("notificacoes").insert({
@@ -132,7 +143,7 @@ serve(async (req) => {
         setor_id: d.setor_id,
         tipo: "demanda_loja",
         titulo,
-        mensagem: `${operadorNome} sobre cliente ${clienteNome}: ${pergunta}`,
+        mensagem: resumoCliente,
         referencia_id: demanda.id,
       });
 
@@ -141,6 +152,8 @@ serve(async (req) => {
         destinatario_id: d.user_id,
         conversa_id,
         conteudo: corpoChat,
+        anexo_url: anexo_url,
+        anexo_tipo: anexo_mime,
       });
     }
 
