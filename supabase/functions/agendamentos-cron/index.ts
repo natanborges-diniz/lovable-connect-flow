@@ -32,11 +32,14 @@ serve(async (req) => {
   }
 
   const HORAS_REENVIO_LEMBRETE = payload.horas_reenvio_lembrete ?? 4;
-  const HORAS_SEGUNDA_COBRANCA_LOJA = payload.horas_segunda_cobranca_loja ?? 3;
-  const HORAS_TIMEOUT_LOJA = payload.horas_timeout_loja ?? 6;
-  const HORAS_ABANDONO = payload.horas_abandono ?? 48;
-  const MAX_TENTATIVAS_RECUPERACAO = payload.max_tentativas_recuperacao ?? 2;
+  // Cobrança loja: 1ª = 2h após horário marcado; 2ª = 10:00 SP do dia seguinte; tarefa interna = 48h
+  const HORAS_PRIMEIRA_COBRANCA_LOJA = payload.horas_primeira_cobranca_loja ?? 2;
+  const HORAS_TIMEOUT_LOJA = payload.horas_timeout_loja ?? 48;
+  // Cadência cliente perdido: 1ª imediata + 2ª em 24h + 3ª em 24h → despedida e abandonado em 72h
+  const HORAS_ABANDONO = payload.horas_abandono ?? 72;
+  const MAX_TENTATIVAS_RECUPERACAO = payload.max_tentativas_recuperacao ?? 3;
   const HORAS_SEGUNDA_RECUPERACAO = payload.horas_segunda_recuperacao ?? 24;
+  const HORAS_TERCEIRA_RECUPERACAO = payload.horas_terceira_recuperacao ?? 24;
 
   const now = new Date();
   const results: string[] = [];
