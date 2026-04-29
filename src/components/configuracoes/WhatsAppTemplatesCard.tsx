@@ -411,7 +411,21 @@ export function WhatsAppTemplatesCard() {
         </div>
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="space-y-4">
+        <AliasesSection catalogo={catalogo || []} />
+
+        <div className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={mostrarDescontinuados}
+              onChange={(e) => setMostrarDescontinuados(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            Mostrar descontinuados
+          </label>
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
