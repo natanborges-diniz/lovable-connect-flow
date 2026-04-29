@@ -447,7 +447,7 @@ async function processHumano(
         headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           contato_id: contato.id,
-          template_name: "retomada_despedida",
+          template_alias: "retomada_despedida",
           template_params: [firstName, topico],
           language: "pt_BR",
         }),
@@ -523,7 +523,7 @@ async function processHumano(
       headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         contato_id: contato.id,
-        template_name: templateName,
+        template_alias: templateName,
         template_params: [firstName, topico],
         language: "pt_BR",
       }),
@@ -661,7 +661,7 @@ async function sendRecoveryTemplate(
     },
     body: JSON.stringify({
       contato_id: contato.id,
-      template_name: templateName,
+      template_alias: templateName,
       template_params: [firstName, topico],
       language: "pt_BR",
     }),
