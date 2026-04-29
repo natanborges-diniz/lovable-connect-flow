@@ -177,7 +177,11 @@ serve(async (req) => {
       anexo_url: anexo_url || null,
       anexo_mime: anexo_tipo || null,
       tipo_conteudo: anexo_url ? (String(anexo_tipo || "").startsWith("image") ? "image" : "file") : "text",
-      metadata: { via_bridge: true, origin_msg_id: mensagem_interna_id },
+      metadata: {
+        via_bridge: true,
+        origin_msg_id: mensagem_interna_id,
+        ...(autorLojaNome ? { loja_nome: autorLojaNome } : {}),
+      },
     });
 
     // Atualiza demanda + notifica solicitante quando vier da loja
