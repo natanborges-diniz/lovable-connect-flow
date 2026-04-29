@@ -16,14 +16,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Store, Users, Search } from "lucide-react";
+import { Loader2, Store, Users, Search, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLojas } from "@/hooks/useLojas";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  atendimentoId: string;
+  /** Opcional: quando aberto a partir de um atendimento humano vincula a demanda ao cliente. */
+  atendimentoId?: string | null;
   onCreated?: (demandaId: string) => void;
 }
 
@@ -36,6 +37,7 @@ export function AcionarLojaDialog({ open, onOpenChange, atendimentoId, onCreated
   const [pergunta, setPergunta] = useState("");
   const [busca, setBusca] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [anexo, setAnexo] = useState<File | null>(null);
 
   const filtradas = busca.trim()
     ? lojas.filter((l) => l.nome_loja.toLowerCase().includes(busca.toLowerCase()))
@@ -48,6 +50,7 @@ export function AcionarLojaDialog({ open, onOpenChange, atendimentoId, onCreated
     setAssunto("");
     setPergunta("");
     setBusca("");
+    setAnexo(null);
   };
 
   const toggle = (nome: string) => {
@@ -70,10 +73,27 @@ export function AcionarLojaDialog({ open, onOpenChange, atendimentoId, onCreated
     if (!podeEnviar) return;
     setEnviando(true);
     try {
+      // Upload do anexo (opcional) — bucket público mensagens-anexos
+      let anexo_url: string | null = null;
+      let anexo_mime: string | null = null;
+      if (anexo) {
+        const ext = anexo.name.split(".").pop()?.toLowerCase() || "bin";
+        const path = `demandas/${new Date().getFullYear()}/${crypto.randomUUID()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("mensagens-anexos")
+          .upload(path, anexo, { contentType: anexo.type, upsert: false });
+        if (upErr) throw new Error("Falha no upload: " + upErr.message);
+        const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+        anexo_url = pub.publicUrl;
+        anexo_mime = anexo.type || null;
+      }
+
       let body: Record<string, unknown> = {
-        atendimento_id: atendimentoId,
+        atendimento_id: atendimentoId ?? null,
         assunto: assunto.trim() || null,
         pergunta: pergunta.trim(),
+        anexo_url,
+        anexo_mime,
       };
       if (grupo) {
         const lojasPayload = lojas
@@ -198,6 +218,36 @@ export function AcionarLojaDialog({ open, onOpenChange, atendimentoId, onCreated
               className="resize-none text-sm"
             />
             <p className="text-right text-[10px] text-muted-foreground">{pergunta.length}/2000</p>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">Anexo (opcional)</Label>
+            {anexo ? (
+              <div className="flex items-center justify-between rounded-md border bg-muted/30 px-2 py-1.5 text-xs">
+                <span className="flex items-center gap-1.5 truncate">
+                  <Paperclip className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{anexo.name}</span>
+                  <span className="shrink-0 text-muted-foreground">({Math.round(anexo.size / 1024)} KB)</span>
+                </span>
+                <Button type="button" variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setAnexo(null)}>
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ) : (
+              <Input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f && f.size > 10 * 1024 * 1024) {
+                    toast.error("Arquivo maior que 10MB");
+                    return;
+                  }
+                  setAnexo(f ?? null);
+                }}
+                className="h-8 text-xs file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-[10px]"
+              />
+            )}
           </div>
 
           {grupo && selecionadas.size > 0 && (

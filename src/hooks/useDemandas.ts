@@ -120,6 +120,8 @@ export interface DemandaMensagemRow {
   anexo_url: string | null;
   anexo_mime: string | null;
   encaminhada_ao_cliente: boolean;
+  visto_pela_loja_at: string | null;
+  visto_por_loja_user_id: string | null;
   created_at: string;
   metadata: Record<string, any> | null;
 }

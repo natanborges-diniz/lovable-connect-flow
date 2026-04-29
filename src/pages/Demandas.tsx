@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Pin, Search, Users } from "lucide-react";
+import { Pin, Search, Users, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,6 +12,7 @@ import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useDemandas, useUserContext, type DemandaRow } from "@/hooks/useDemandas";
 import { DemandaThreadView } from "@/components/atendimentos/DemandaThreadView";
+import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 
 export default function Demandas() {
   const [params, setParams] = useSearchParams();
@@ -18,6 +20,7 @@ export default function Demandas() {
   const [selectedId, setSelectedId] = useState<string | null>(initialId);
   const [statusTab, setStatusTab] = useState<string>("aberta");
   const [search, setSearch] = useState("");
+  const [acionarOpen, setAcionarOpen] = useState(false);
   const { isAdmin } = useUserContext();
   const { data: demandas = [], isLoading } = useDemandas({ status: statusTab });
 
@@ -63,8 +66,18 @@ export default function Demandas() {
               className="h-8 w-64 pl-7 text-sm"
             />
           </div>
+          <Button size="sm" className="h-8 gap-1 text-xs" onClick={() => setAcionarOpen(true)}>
+            <Plus className="h-3.5 w-3.5" /> Acionar loja(s)
+          </Button>
         </div>
       </header>
+
+      <AcionarLojaDialog
+        open={acionarOpen}
+        onOpenChange={setAcionarOpen}
+        atendimentoId={null}
+        onCreated={(id) => id && handleSelect(id)}
+      />
 
       <Tabs value={statusTab} onValueChange={setStatusTab}>
         <TabsList className="h-8">

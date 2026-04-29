@@ -665,6 +665,8 @@ export type Database = {
           id: string
           metadata: Json | null
           tipo_conteudo: string
+          visto_pela_loja_at: string | null
+          visto_por_loja_user_id: string | null
         }
         Insert: {
           anexo_mime?: string | null
@@ -679,6 +681,8 @@ export type Database = {
           id?: string
           metadata?: Json | null
           tipo_conteudo?: string
+          visto_pela_loja_at?: string | null
+          visto_por_loja_user_id?: string | null
         }
         Update: {
           anexo_mime?: string | null
@@ -693,6 +697,8 @@ export type Database = {
           id?: string
           metadata?: Json | null
           tipo_conteudo?: string
+          visto_pela_loja_at?: string | null
+          visto_por_loja_user_id?: string | null
         }
         Relationships: [
           {

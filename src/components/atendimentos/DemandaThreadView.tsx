@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Pin, Loader2, Check, ArrowRight, X, Users, ChevronDown, ChevronRight } from "lucide-react";
+import { Pin, Loader2, Check, CheckCheck, ArrowRight, X, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -181,7 +181,16 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
                 )}
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <p className="text-[10px] opacity-60">{format(new Date(m.created_at), "dd/MM HH:mm", { locale: ptBR })}</p>
-                  {m.encaminhada_ao_cliente && <Check className="h-3 w-3 opacity-70" />}
+                  <div className="flex items-center gap-1">
+                    {m.direcao === "operador_para_loja" && (
+                      m.visto_pela_loja_at ? (
+                        <CheckCheck className="h-3 w-3 text-sky-300" aria-label="Visto pela loja" />
+                      ) : (
+                        <Check className="h-3 w-3 opacity-60" aria-label="Enviado" />
+                      )
+                    )}
+                    {m.encaminhada_ao_cliente && <Check className="h-3 w-3 opacity-70" />}
+                  </div>
                 </div>
               </div>
             );
