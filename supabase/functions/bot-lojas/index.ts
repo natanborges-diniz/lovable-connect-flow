@@ -732,7 +732,13 @@ serve(async (req) => {
                     resposta = buildConfirmacao(fluxoDef, newDados);
                     updateSessao = { etapa: "confirmar", dados: newDados };
                   } else {
-                    resposta = etapas[nextIndex].mensagem + "\n\n_Digite *0* para voltar ao menu._";
+                    const proxima = etapas[nextIndex];
+                    let sugestaoProx: string | null = null;
+                    if (proxima.tipo_input === "texto_prefilled") {
+                      sugestaoProx = resolveSugestaoSolicitante(loja_info);
+                      if (sugestaoProx) newDados[`_sugestao_${proxima.campo}`] = sugestaoProx;
+                    }
+                    resposta = buildEtapaMensagem(proxima, sugestaoProx) + "\n\n_Digite *0* para voltar ao menu._";
                     updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
                   }
                 }
