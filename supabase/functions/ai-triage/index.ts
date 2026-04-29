@@ -4021,7 +4021,45 @@ async function runConsultarLentes(
   return { resposta: quoteMsg };
 }
 
+// Detecta e sanitiza vazamento de instruções internas no texto enviado ao cliente
+function sanitizeLeakedInstructions(texto: string): string {
+  if (!texto) return texto;
+  const leakPatterns = [
+    /aguardar?\s+confirma[çc][ãa]o\s+do\s+nome[^\n]*/gi,
+    /confirme\s+o\s+nome[^\n]*/gi,
+    /sem\s+reformular[^\n]*/gi,
+    /primeira\s+intera[çc][ãa]o[^\n]*/gi,
+    /tool\s+registrar_nome_cliente[^\n]*/gi,
+    /chame\s+a\s+tool[^\n]*/gi,
+    /regra\s+absoluta[^\n]*/gi,
+    /proibido[^\n]*/gi,
+    /^\s*-\s+(envie|regra|se\s+o\s+cliente|s[óo]\s+depois|n[ãa]o\s+mencione)[^\n]*/gim,
+    /##?\s+(mensagem\s+a\s+enviar|regras\s+internas)[^\n]*/gi,
+    /#\s+primeira\s+intera[çc][ãa]o[^\n]*/gi,
+  ];
+  let cleaned = texto;
+  let hadLeak = false;
+  for (const pat of leakPatterns) {
+    if (pat.test(cleaned)) {
+      hadLeak = true;
+      cleaned = cleaned.replace(pat, "");
+    }
+  }
+  // limpa linhas vazias múltiplas, espaços em excesso
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
+  if (hadLeak) {
+    console.warn(`[GUARDRAIL] Prompt vazado corrigido. Original=${JSON.stringify(texto.slice(0, 200))} → Limpo=${JSON.stringify(cleaned.slice(0, 200))}`);
+    // Se sobrar pouca coisa, devolve fallback de saudação
+    if (cleaned.length < 20) {
+      return "Olá! 😊 Aqui é o Gael das Óticas Diniz Osasco. Como posso te ajudar hoje?";
+    }
+  }
+  return cleaned;
+}
+
 async function sendWhatsApp(supabaseUrl: string, serviceKey: string, atendimentoId: string, texto: string) {
+  texto = sanitizeLeakedInstructions(texto);
+
   const maxAttempts = 3;
   let lastError = "unknown error";
 
