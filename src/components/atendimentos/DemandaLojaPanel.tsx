@@ -19,10 +19,12 @@ interface Demanda {
   loja_nome: string;
   loja_telefone: string;
   pergunta: string;
+  assunto?: string | null;
   status: string;
   vista_pelo_operador: boolean;
   ultima_mensagem_loja_at: string | null;
   created_at: string;
+  metadata?: { grupo?: boolean; lojas_nomes?: string[] } | null;
 }
 
 interface DemandaMsg {
@@ -97,7 +99,7 @@ export function DemandaLojaPanel({ atendimentoId, modo }: { atendimentoId: strin
               )}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium truncate">#{d.numero_curto} • {d.loja_nome}</span>
+                <span className="font-medium truncate">#{d.numero_curto} • {d.metadata?.grupo ? `Grupo (${d.metadata.lojas_nomes?.length ?? "?"} lojas)` : d.loja_nome}</span>
                 <Badge
                   variant="outline"
                   className={cn(
@@ -140,8 +142,10 @@ export function DemandaLojaPanel({ atendimentoId, modo }: { atendimentoId: strin
 
 function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoId: string; onClose: () => void; onCreated: () => void }) {
   const [lojas, setLojas] = useState<Array<{ nome_loja: string; telefone: string }>>([]);
+  const [modo, setModo] = useState<"loja" | "grupo">("loja");
   const [lojaTelefone, setLojaTelefone] = useState("");
   const [pergunta, setPergunta] = useState("");
+  const [assunto, setAssunto] = useState("");
   const [sending, setSending] = useState(false);
   const [destCount, setDestCount] = useState<number | null>(null);
 
@@ -163,34 +167,52 @@ function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoI
       });
   }, []);
 
-  // Recalcula destinatários internos sempre que a loja muda
+  // Recalcula destinatários internos
   useEffect(() => {
-    if (!lojaTelefone) { setDestCount(null); return; }
-    const loja = lojas.find((l) => l.telefone === lojaTelefone);
-    if (!loja) { setDestCount(null); return; }
-    supabase
-      .rpc("resolver_destinatarios_loja", { _loja_nome: loja.nome_loja })
-      .then(({ data }) => setDestCount(Array.isArray(data) ? data.length : 0));
-  }, [lojaTelefone, lojas]);
+    const run = async () => {
+      if (modo === "grupo") {
+        if (lojas.length === 0) { setDestCount(null); return; }
+        const set = new Set<string>();
+        for (const l of lojas) {
+          const { data } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: l.nome_loja });
+          for (const d of (data || []) as Array<{ user_id: string }>) set.add(d.user_id);
+        }
+        setDestCount(set.size);
+      } else {
+        if (!lojaTelefone) { setDestCount(null); return; }
+        const loja = lojas.find((l) => l.telefone === lojaTelefone);
+        if (!loja) { setDestCount(null); return; }
+        const { data } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: loja.nome_loja });
+        setDestCount(Array.isArray(data) ? data.length : 0);
+      }
+    };
+    void run();
+  }, [modo, lojaTelefone, lojas]);
 
   const handleSend = async () => {
-    if (!lojaTelefone || !pergunta.trim()) return;
-    const loja = lojas.find((l) => l.telefone === lojaTelefone);
-    if (!loja) return;
+    if (!pergunta.trim()) return;
+    if (modo === "loja" && !lojaTelefone) return;
+    if (modo === "grupo" && lojas.length === 0) return;
 
     setSending(true);
     try {
-      const { data, error } = await supabase.functions.invoke("criar-demanda-loja", {
-        body: {
-          atendimento_id: atendimentoId,
-          loja_telefone: loja.telefone,
-          loja_nome: loja.nome_loja,
-          pergunta: pergunta.trim(),
-        },
-      });
+      const payload: any = {
+        atendimento_id: atendimentoId,
+        pergunta: pergunta.trim(),
+        assunto: assunto.trim() || undefined,
+      };
+      if (modo === "grupo") {
+        payload.lojas = lojas;
+      } else {
+        const loja = lojas.find((l) => l.telefone === lojaTelefone)!;
+        payload.loja_telefone = loja.telefone;
+        payload.loja_nome = loja.nome_loja;
+      }
+      const { data, error } = await supabase.functions.invoke("criar-demanda-loja", { body: payload });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      toast.success(`Demanda ${data.protocolo} enviada à ${loja.nome_loja}`);
+      const target = modo === "grupo" ? `Grupo de ${lojas.length} lojas` : (lojas.find((l) => l.telefone === lojaTelefone)?.nome_loja ?? "loja");
+      toast.success(`Demanda ${data.protocolo} enviada à ${target}`);
       onCreated();
     } catch (e: any) {
       toast.error("Falha ao criar demanda: " + (e?.message || "erro"));
@@ -209,15 +231,49 @@ function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoI
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium mb-1 block">Loja</label>
-            <Select value={lojaTelefone} onValueChange={setLojaTelefone}>
-              <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Selecione a loja" /></SelectTrigger>
-              <SelectContent>
-                {lojas.map((l) => (
-                  <SelectItem key={l.telefone} value={l.telefone}>{l.nome_loja}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <label className="text-xs font-medium mb-1 block">Destino</label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={modo === "loja" ? "default" : "outline"}
+                onClick={() => setModo("loja")}
+                className="text-xs"
+              >
+                Loja específica
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={modo === "grupo" ? "default" : "outline"}
+                onClick={() => setModo("grupo")}
+                className="text-xs"
+              >
+                Grupo (todas as lojas)
+              </Button>
+            </div>
+          </div>
+          {modo === "loja" && (
+            <div>
+              <label className="text-xs font-medium mb-1 block">Loja</label>
+              <Select value={lojaTelefone} onValueChange={setLojaTelefone}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Selecione a loja" /></SelectTrigger>
+                <SelectContent>
+                  {lojas.map((l) => (
+                    <SelectItem key={l.telefone} value={l.telefone}>{l.nome_loja}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {modo === "grupo" && (
+            <p className="text-[11px] text-muted-foreground rounded-md bg-muted p-2">
+              📣 A demanda será enviada para <strong>{lojas.length} lojas ativas</strong>. Todas as respostas aparecem como em um grupo de WhatsApp — todos veem todos.
+            </p>
+          )}
+          <div>
+            <label className="text-xs font-medium mb-1 block">Assunto (opcional)</label>
+            <Input value={assunto} onChange={(e) => setAssunto(e.target.value)} placeholder="Ex.: Disponibilidade armação" className="h-9 text-sm" />
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Pergunta / pedido</label>
@@ -228,11 +284,11 @@ function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoI
               rows={4}
               className="text-sm resize-none"
             />
-            <p className="text-[10px] text-muted-foreground mt-1">A loja receberá no app Atrium Messenger e poderá responder direto na thread (ou enviar /encerrar).</p>
+            <p className="text-[10px] text-muted-foreground mt-1">A loja receberá no app InFoco Messenger e poderá responder direto na thread (ou enviar /encerrar).</p>
             {destCount !== null && (
               <p className={cn("text-[10px] mt-1", destCount === 0 ? "text-destructive" : "text-muted-foreground")}>
                 {destCount === 0
-                  ? "⚠️ Nenhum usuário interno vinculado a esta loja — a demanda será criada sem entrega push."
+                  ? "⚠️ Nenhum usuário interno vinculado — a demanda será criada sem entrega push."
                   : `📨 ${destCount} usuário(s) interno(s) receberão a notificação.`}
               </p>
             )}
@@ -240,8 +296,8 @@ function NovaDemandaDialog({ atendimentoId, onClose, onCreated }: { atendimentoI
         </div>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-          <Button size="sm" onClick={handleSend} disabled={!lojaTelefone || !pergunta.trim() || sending}>
-            {sending ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Enviando</> : <><Send className="h-3 w-3 mr-1" /> Enviar à loja</>}
+          <Button size="sm" onClick={handleSend} disabled={!pergunta.trim() || (modo === "loja" && !lojaTelefone) || sending}>
+            {sending ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Enviando</> : <><Send className="h-3 w-3 mr-1" /> {modo === "grupo" ? "Enviar ao grupo" : "Enviar à loja"}</>}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -343,7 +399,7 @@ function DemandaThreadDialog({ demanda, onClose }: { demanda: Demanda; onClose: 
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base pr-8">
               <Pin className="h-4 w-4 text-primary shrink-0" />
-              <span className="truncate">#{demanda.numero_curto} • {demanda.loja_nome}</span>
+              <span className="truncate">#{demanda.numero_curto} • {demanda.metadata?.grupo ? `Grupo (${demanda.metadata.lojas_nomes?.length ?? "?"} lojas)` : demanda.loja_nome}</span>
               <Badge variant="outline" className="text-[10px] capitalize">{demanda.status}</Badge>
             </DialogTitle>
           </DialogHeader>

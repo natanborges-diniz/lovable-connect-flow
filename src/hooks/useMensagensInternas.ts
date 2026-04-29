@@ -60,10 +60,12 @@ export function useMensagensInternas() {
         .from("mensagens_internas")
         .select("*")
         .or(`remetente_id.eq.${uid},destinatario_id.eq.${uid}`)
+        .not("conversa_id", "like", "demanda_%")
+        .not("conversa_id", "like", "ponte_%")
         .order("created_at", { ascending: false });
       if (error) throw error;
 
-      // Group by conversa_id
+      // Group by conversa_id (já filtrado de demandas/pontes)
       const map = new Map<string, { msgs: typeof msgs; outro_id: string }>();
       for (const m of msgs || []) {
         if (!map.has(m.conversa_id)) {
@@ -97,7 +99,7 @@ export function useMensagensInternas() {
     },
   });
 
-  // Total unread count
+  // Total unread count (apenas chat 1:1 — exclui demanda_* e ponte_*)
   const totalNaoLidas = useQuery({
     queryKey: ["total-nao-lidas", uid],
     enabled: !!uid && isAuthReady,
@@ -106,7 +108,9 @@ export function useMensagensInternas() {
         .from("mensagens_internas")
         .select("*", { count: "exact", head: true })
         .eq("destinatario_id", uid!)
-        .eq("lida", false);
+        .eq("lida", false)
+        .not("conversa_id", "like", "demanda_%")
+        .not("conversa_id", "like", "ponte_%");
       if (error) throw error;
       return count || 0;
     },
