@@ -545,8 +545,13 @@ serve(async (req) => {
                 }
               } else {
                 const primeiraEtapa = etapas[0];
-                resposta = primeiraEtapa.mensagem + "\n\n_Digite *0* para voltar ao menu._";
-                updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: {} };
+                const sugestao = resolveSugestaoSolicitante(loja_info);
+                const dadosIniciais: Record<string, any> = {};
+                if (primeiraEtapa.tipo_input === "texto_prefilled" && sugestao) {
+                  dadosIniciais[`_sugestao_${primeiraEtapa.campo}`] = sugestao;
+                }
+                resposta = buildEtapaMensagem(primeiraEtapa, sugestao) + "\n\n_Digite *0* para voltar ao menu._";
+                updateSessao = { fluxo: selectedFluxo, etapa: "step_0", dados: dadosIniciais };
               }
             } else {
               resposta = "⚠️ Fluxo sem etapas configuradas.";
