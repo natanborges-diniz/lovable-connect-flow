@@ -1,98 +1,164 @@
-## Reclassificação de templates WhatsApp Meta: MARKETING → UTILITY
+## Contexto
 
-A Meta cobra três tarifas distintas: **Authentication** (mais barato, OTPs), **Utility** (mensagens transacionais sobre uma operação em curso — confirmações, status, recibos, retomada de uma conversa específica que o cliente iniciou) e **Marketing** (promoções, divulgação, reativação genérica). Hoje vários templates do Atrium estão indevidamente em MARKETING quando o conteúdo é claramente transacional (UTILITY).
+Plano para o projeto **InFoco Messenger** (não Atrium). O wizard que renderiza fluxos (`bot_fluxos.etapas[]`) está em `src/pages/LojaNovaDemanda.tsx` e consome o Supabase compartilhado. Todas as mudanças abaixo são genéricas — valem para **qualquer fluxo** atual e futuro, não só reembolso.
 
-### Diagnóstico atual
+### Já está pronto (não mexer)
+- Botões "Tirar foto" (`capture="environment"`) e "Anexar imagem".
+- Upload em bucket público.
+- Wizard dinâmico das `etapas[]`.
 
-| Template | Cat. atual | Status | Cat. correta | Justificativa |
-|---|---|---|---|---|
-| `confirmacao_agendamento` | UTILITY | approved | UTILITY ✅ | Já correto |
-| `lembrete_agendamento` | UTILITY | approved | UTILITY ✅ | Já correto |
-| `link_pagamento_cliente` | UTILITY | rascunho | UTILITY ✅ | Já correto (será submetido) |
-| `noshow_reagendamento` | MARKETING | approved | **UTILITY** | Mensagem sobre agendamento específico que o cliente já tinha — operação em curso |
-| `retomada_contexto_1` | MARKETING | approved | **UTILITY** | Retomada de uma conversa/orçamento que o cliente iniciou — referência explícita ao contexto `{{2}}` |
-| `retomada_contexto_2` | MARKETING | approved | **UTILITY** | Idem — continuação de tópico aberto |
-| `retomada_despedida` | MARKETING | approved | **UTILITY** | Encerramento cordial de conversa específica iniciada pelo cliente |
-| `despedida_cordial_v2` | MARKETING | rejected | **UTILITY** | Encerramento de atendimento — descartar (substituído por `retomada_despedida`) |
-| `aviso_novo_numero_v3` | MARKETING | pending | MARKETING ✅ | Comunicado proativo sem operação em curso — Meta tende a manter como MARKETING |
-| `diniz_comvocacao_*`, `diniz_vendas_comvocao` | MARKETING | approved | MARKETING ✅ | Campanha promocional |
+### O que falta (genérico)
+1. Renderizador da etapa `tipo_input: "texto_prefilled"` que pré-preenche o nome do **solicitante** quando o usuário logado é `loja` ou `colaborador` (setor_operador). Pessoa final não vê esse campo (ou vê em branco e edita).
+2. Renderizador da etapa `tipo_input: "loja"` que:
+   - Auto-preenche se o usuário logado é `loja`/`colaborador` (`useLojaContext().lojaNome`), e oculta/trava o campo.
+   - Mostra **combobox com lista de lojas ativas** se o usuário for `setor_operador` ou pessoa final.
+3. Toda etapa `tipo_input: "imagem"` aceita **múltiplos arquivos** + **PDF** (não apenas para reembolso).
 
-**Observação importante sobre a Meta**: não dá para "mudar a categoria" de um template já aprovado via API. O caminho oficial é **criar uma nova versão (`_v2`, `_v3`...) com `category: UTILITY`**, submeter à Meta, e quando aprovada, apontar o código que dispara para o novo nome. O template antigo MARKETING continua existindo (não bloqueia nada) e fica como histórico até ser deletado.
+### Já feito no Atrium (não desfazer)
+- Migração que adicionou `nome_solicitante` (`tipo_input: "texto_prefilled"`) em `bot_fluxos.reembolso`. **Vai ficar útil** porque o renderizador genérico desse plano funciona para todos os fluxos.
+- Lógica antiga no `bot-lojas/index.ts` é código morto (WA corporativo descontinuado). Limpeza separada depois.
 
-### O que vai ser feito
+## Mudanças no InFoco Messenger
 
-#### 1. Criar versões UTILITY dos 4 templates mal classificados
+Arquivo principal: `src/pages/LojaNovaDemanda.tsx`. Eventualmente um pequeno hook novo (`useLojasAtivas`) para listar lojas.
 
-Para cada um dos 4 templates (`noshow_reagendamento`, `retomada_contexto_1`, `retomada_contexto_2`, `retomada_despedida`), inserir um novo registro em `whatsapp_templates`:
+### 1. Renderizador genérico para `texto_prefilled` (nome do solicitante)
 
-- Nome: próximo `_vN` disponível (ex.: `noshow_reagendamento_v2`, `retomada_contexto_1_v2`, etc.)
-- `categoria: 'UTILITY'`
-- Mesmo `body`, `idioma`, `variaveis`, `funcao_alvo`
-- `status: 'rascunho'`
-
-Operador clica **Submeter** no painel "Templates WhatsApp (Meta)" para mandar à Meta. Em 1–24h a Meta aprova como UTILITY (tarifa muito menor por disparo).
-
-#### 2. Apontar os crons consumidores para os novos nomes
-
-Os arquivos que disparam cada template precisam apontar para a versão UTILITY assim que aprovada. Como o operador controla o ciclo de aprovação, a estratégia é **ler o nome do template do catálogo dinamicamente em vez de hardcoded**:
-
-Adicionar coluna `whatsapp_templates.ativo` (boolean, default true) e função SQL `get_template_ativo(funcao_alvo, intencao)` que retorna o template aprovado mais recente para um dado uso.
-
-Mais simples e suficiente: adicionar coluna `whatsapp_templates.substitui` (text, FK pelo nome) — quando o `_v2` UTILITY é aprovado, o operador marca `substitui = 'noshow_reagendamento'` e os crons resolvem o nome via lookup.
-
-**Decisão proposta**: usar a abordagem direta — ajustar `agendamentos-cron`, `vendas-recuperacao-cron` e qualquer outro consumidor para chamar `send-whatsapp-template` com nomes que vêm de uma tabela de mapeamento `template_aliases` (alias lógico → nome real aprovado). Isso permite trocar versões sem redeploy.
-
-Mapeamento inicial:
-```
-alias 'noshow_reagendamento'     → 'noshow_reagendamento_v2' (quando aprovado)
-alias 'retomada_contexto_1'      → 'retomada_contexto_1_v2'
-alias 'retomada_contexto_2'      → 'retomada_contexto_2_v2'
-alias 'retomada_despedida'       → 'retomada_despedida_v2'
+```ts
+type EtapaInput =
+  | "texto" | "decimal" | "inteiro" | "cpf" | "documento" | "imagem"
+  | "texto_prefilled" | "loja";
 ```
 
-Enquanto a Meta não aprovar, o alias aponta para o nome MARKETING atual (sem quebrar nada). Quando aprovar, o operador edita o alias na UI e o cron passa a usar UTILITY automaticamente.
+No topo do componente, resolver o nome a sugerir uma vez:
 
-#### 3. Limpeza
+```ts
+const [profileNome, setProfileNome] = useState<string>("");
+useEffect(() => {
+  if (!user) return;
+  (async () => {
+    const { data } = await supabase
+      .from("profiles")
+      .select("nome, tipo_usuario")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (data?.nome) setProfileNome(data.nome);
+  })();
+}, [user]);
+```
 
-- Marcar `despedida_cordial_v2` como descontinuado (não deletar — Meta auditoria); tirar do menu de uso.
-- Adicionar coluna `descontinuado` (boolean) no catálogo para esconder no UI sem perder histórico.
+Ao entrar em um fluxo, pré-preencher **toda etapa** `texto_prefilled` com `profileNome` (o autor logado é sempre o "responsável que está lançando a demanda"):
 
-#### 4. UI: WhatsAppTemplatesCard
+```ts
+const initial: Record<string,string> = {};
+for (const et of fluxo.etapas) {
+  if (et.tipo_input === "texto_prefilled" && profileNome) {
+    initial[et.campo] = profileNome;
+  }
+}
+setDados(initial);
+```
 
-- Mostrar **selo "UTILITY (econômico)"** em verde nos cards UTILITY e **"MARKETING (premium)"** em laranja, para o operador entender o impacto de custo.
-- Adicionar aviso no formulário de criação: "UTILITY = mensagens sobre operação em curso (confirmação, status, retomada de tópico iniciado pelo cliente). MARKETING = promoções e reativação fria. UTILITY custa cerca de 5–10x menos por envio."
-- Aba/filtro "Aliases" mostrando o mapeamento lógico → real, com botão para repontar quando uma nova versão é aprovada.
+Renderização: `<Input>` editável normal (mesmas regras de validação do `texto`). Não esconder — o usuário pode trocar, ex.: "Maria atendendo pelo João".
 
-#### 5. Memória
+Observação: se o usuário for **pessoa final** (não tem profile interno), `profileNome` virá vazio e o campo aparece em branco para preencher manualmente. Comportamento correto sem if/else explícito.
 
-Atualizar `mem://integracao/templates-whatsapp-catalogo.md` com:
-- Regra: "Template novo nasce UTILITY salvo se for promoção/aviso frio."
-- Tabela de aliases lógicos.
-- Procedimento para repontar quando UTILITY é aprovado.
+### 2. Renderizador genérico para `loja` (a qual loja a demanda se refere)
 
-### Arquivos afetados
+Hoje o componente já tem `useLojaContext()` com `lojaNome` quando o usuário é loja/colaborador. Vamos formalizar isso como uma etapa `tipo_input: "loja"` que pode aparecer em qualquer fluxo:
 
-**Banco (migração)**:
-- `whatsapp_templates`: adicionar `descontinuado boolean default false`.
-- Nova tabela `template_aliases (alias text PK, template_nome text, atualizado_em timestamptz)`.
-- Inserir aliases iniciais apontando aos nomes MARKETING atuais.
-- Inserir 4 rascunhos UTILITY (`*_v2`).
-- Atualizar `funcao_alvo` para usar alias em vez de nome direto.
+a) Hook novo `src/hooks/useLojasAtivas.ts`:
 
-**Edge functions (Atrium)**:
-- `send-whatsapp-template`: aceitar `template_alias` opcional; se vier, resolve via `template_aliases` antes do gate de status.
-- `agendamentos-cron`: trocar `template_name: 'noshow_reagendamento'` por `template_alias: 'noshow_reagendamento'`.
-- `vendas-recuperacao-cron`: trocar 3 referências (`retomada_contexto_1/2`, `retomada_despedida`).
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
-**Frontend Atrium**:
-- `src/components/configuracoes/WhatsAppTemplatesCard.tsx`: badge UTILITY/MARKETING colorido, aviso educativo no form, seção "Aliases" com botão "Apontar para esta versão".
+export function useLojasAtivas() {
+  return useQuery({
+    queryKey: ["lojas-ativas"],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("telefones_lojas")
+        .select("nome_loja")
+        .eq("tipo", "loja")
+        .eq("ativo", true)
+        .order("nome_loja");
+      if (error) throw error;
+      const seen = new Set<string>();
+      return (data ?? [])
+        .map((r) => r.nome_loja?.trim())
+        .filter((n): n is string => !!n && !seen.has(n.toLowerCase()) && !!seen.add(n.toLowerCase()));
+    },
+  });
+}
+```
 
-**Memória**:
-- `mem://integracao/templates-whatsapp-catalogo.md` atualizado.
+b) Pré-preencher no boot do fluxo quando o usuário tem loja vinculada:
 
-### Resultado para o usuário
+```ts
+for (const et of fluxo.etapas) {
+  if (et.tipo_input === "loja" && lojaNome) initial[et.campo] = lojaNome;
+}
+```
 
-- Os 4 templates de operação em curso passam a custar tarifa UTILITY (≈ 5–10x mais barato que MARKETING) assim que a Meta aprovar a v2.
-- Repontamento sem redeploy: basta editar o alias na UI quando a Meta aprovar.
-- UI mostra explicitamente categoria + custo estimado para evitar erro de classificação em templates futuros.
-- Templates MARKETING legítimos (campanhas, aviso de novo número) seguem como MARKETING — não tudo é UTILITY.
+c) Renderização:
+
+- Se `lojaNome` (do `useLojaContext`) **e** `tipo_usuario IN ('loja','colaborador')`: mostrar como `<Input>` em modo readonly + badge "minha loja" (sem combobox; o valor já está em `dados[et.campo]`).
+- Senão (setor_operador ou pessoa final): combobox com `useLojasAtivas()` — `<select>` simples ou um `Combobox` se já existir no design system. Validação: obrigatório (a menos que a etapa marque `obrigatorio:false`).
+
+Submit não muda: `dados[et.campo]` carrega o `nome_loja` em ambos os casos.
+
+### 3. Etapas `imagem` aceitam múltiplos arquivos e PDF (genérico)
+
+Mudar o estado:
+
+```ts
+const [anexos, setAnexos] = useState<Record<string, Anexo[]>>({});
+```
+
+No bloco do `tipo_input === "imagem"`:
+
+- Input "Tirar foto": continua `accept="image/*"` + `capture="environment"`, single (uma foto por clique; o usuário pode clicar várias vezes).
+- Input "Anexar arquivo" (renomear de "Anexar imagem"): `accept="image/*,application/pdf"` + atributo `multiple`.
+- `uploadImagem` (renomear para `uploadAnexo`) faz `push` no array da etapa em vez de substituir; aceita iterar sobre `FileList` quando `multiple`.
+- Preview vira `.map()`: thumbnail para `mime_type` que comece com `image/`, ícone de PDF (`FileText` do lucide) quando `application/pdf`. Cada item tem botão "X" pra remover.
+- Validação obrigatória: `if (et.obrigatorio !== false && !(anexos[et.campo]?.length))`.
+- Limites por arquivo: `file.size <= 10 * 1024 * 1024` (toast de erro se passar). Cap por etapa: 10 arquivos.
+- Submit continua: `anexos: Object.values(anexos).flat()` — formato que `criar-solicitacao-loja` já espera.
+
+### 4. Tipos de validação
+
+```ts
+function validar(et: Etapa, raw: string) {
+  if (et.tipo_input === "texto_prefilled") {
+    // mesmas regras de texto
+  }
+  if (et.tipo_input === "loja") {
+    if (et.obrigatorio !== false && !raw.trim()) return "Selecione uma loja";
+  }
+  // resto inalterado
+}
+```
+
+## Como o usuário vai ver (qualquer fluxo, não só reembolso)
+
+| Usuário logado | Etapa `texto_prefilled` (responsável) | Etapa `loja` |
+|---|---|---|
+| Loja / colaborador | nome do logado, editável | loja vinculada, readonly + badge |
+| Setor_operador | nome do logado, editável | combobox com todas as lojas ativas |
+| Pessoa final | em branco, edita manualmente | combobox com todas as lojas ativas |
+
+Em qualquer etapa `imagem` (reembolso, garantia futura, sinistro, etc.):
+- "Tirar foto" → câmera nativa.
+- "Anexar arquivo" → galeria + arquivos (PDF), permite múltiplos.
+- Lista de previews com remover.
+
+## Como executar
+
+Eu (IA do Atrium) não consigo editar o projeto InFoco daqui. Opções:
+
+1. **Recomendado**: abre o [InFoco Messenger](/projects/2d68a67b-8187-4e4e-9d36-8dcf8e39cebb), cola este plano no chat de lá e aprova.
+2. Aplica manualmente no editor do InFoco seguindo as 4 seções (mexem em `src/pages/LojaNovaDemanda.tsx` e criam `src/hooks/useLojasAtivas.ts`).
+
+Backend já está pronto — nada muda no Atrium. Para ativar a etapa `loja` em um fluxo específico (ex.: `reembolso`), o operador adiciona uma etapa com `tipo_input:"loja"` no JSON em `bot_fluxos` (via UI de Configurações ou migração) e ela passa a renderizar automaticamente.
