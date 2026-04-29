@@ -333,25 +333,32 @@ async function processFirstStoreCharge(
 }
 
 // ═══════════════════════════════════════════
-// Helper: Segunda cobrança à loja
+// Helper: Segunda cobrança à loja — 10:00 SP do dia seguinte ao agendamento
 // ═══════════════════════════════════════════
-async function processSecondStoreCharge(
-  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[],
-  horasSegundaCobranca: number
+async function processSecondStoreChargeNextMorning(
+  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[]
 ) {
-  const cutoff = new Date(now.getTime() - horasSegundaCobranca * 60 * 60 * 1000).toISOString();
+  // Roda só entre 10:00 e 10:59 SP
+  const spNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  if (spNow.getHours() !== 10) return;
 
   const { data: pendentes } = await supabase
     .from("agendamentos")
-    .select("id, contato_id, loja_nome, loja_telefone, data_horario, updated_at")
+    .select("id, contato_id, loja_nome, loja_telefone, data_horario, updated_at, metadata")
     .in("status", ["agendado", "lembrete_enviado", "confirmado"])
     .eq("confirmacao_enviada", true)
     .eq("tentativas_cobranca_loja", 1)
-    .is("loja_confirmou_presenca", null)
-    .lt("updated_at", cutoff);
+    .is("loja_confirmou_presenca", null);
 
   for (const ag of pendentes || []) {
     if (!ag.loja_telefone) continue;
+    // Confere se o agendamento foi em dia anterior (em SP)
+    const dt = new Date(ag.data_horario);
+    const dtSP = new Date(dt.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+    const dtDay = new Date(dtSP.getFullYear(), dtSP.getMonth(), dtSP.getDate()).getTime();
+    const todayDay = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate()).getTime();
+    if (todayDay <= dtDay) continue; // ainda não é "dia seguinte"
+
     await sendStoreChargeMessage(supabase, ag, now, SUPABASE_URL, SERVICE_KEY, true);
     await supabase.from("agendamentos").update({ tentativas_cobranca_loja: 2 }).eq("id", ag.id);
     results.push(`cobranca_loja_2:${ag.id}`);
@@ -359,28 +366,89 @@ async function processSecondStoreCharge(
 }
 
 // ═══════════════════════════════════════════
-// Helper: Timeout da loja
+// Helper: Timeout da loja — após 48h sem resposta, cria tarefa interna detalhada
+// para o supervisor cobrar a loja diretamente, e notifica admins.
 // ═══════════════════════════════════════════
 async function processStoreTimeout(supabase: any, now: Date, results: string[], horasTimeout: number) {
   const cutoff = new Date(now.getTime() - horasTimeout * 60 * 60 * 1000).toISOString();
 
   const { data: timeout } = await supabase
     .from("agendamentos")
-    .select("id, contato_id, loja_nome")
-    .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+    .select("id, contato_id, loja_nome, loja_telefone, data_horario, metadata")
+    .in("status", ["agendado", "lembrete_enviado", "confirmado", "no_show"])
     .gte("tentativas_cobranca_loja", 2)
     .is("loja_confirmou_presenca", null)
     .lt("updated_at", cutoff);
 
   for (const ag of timeout || []) {
-    await supabase.from("agendamentos").update({ status: "no_show" }).eq("id", ag.id);
-    const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
+    const md = (ag.metadata || {}) as Record<string, any>;
+    if (md.tarefa_supervisor_at) continue; // já criou
+
+    const { data: contato } = await supabase.from("contatos").select("nome, telefone").eq("id", ag.contato_id).single();
+    const dt = new Date(ag.data_horario);
+    const horaAg = dt.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+
+    // Resolve responsáveis ativos da loja para apontar a tarefa
+    const { data: dests } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: ag.loja_nome });
+    const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
+    const setorId = list.find((d) => d.setor_id)?.setor_id || null;
+
+    const titulo = `🚨 Loja ${ag.loja_nome} silenciou — cobrar comparecimento de ${contato?.nome || "cliente"}`;
+    const descricao = [
+      `A loja **${ag.loja_nome}** não respondeu sobre o comparecimento do cliente após 2 cobranças no app.`,
+      ``,
+      `**Cliente:** ${contato?.nome || "(sem nome)"}${contato?.telefone ? ` — ${contato.telefone}` : ""}`,
+      `**Agendamento:** ${horaAg}`,
+      `**Loja:** ${ag.loja_nome}${ag.loja_telefone ? ` (${ag.loja_telefone})` : ""}`,
+      ``,
+      `**Como cobrar com eficiência:**`,
+      `1. Ligue diretamente para a loja e confirme se o cliente compareceu.`,
+      `2. Se não há registro, marque manualmente como **No-show** ou **Compareceu** no card.`,
+      `3. Registre observações no card do agendamento sobre o motivo do silêncio da loja (sistema do PDV fora do ar, esquecimento, etc.).`,
+      `4. Reincidências serão refletidas no placar de comparecimento da loja.`,
+    ].join("\n");
+
     await supabase.from("tarefas").insert({
-      titulo: `Loja ${ag.loja_nome} não respondeu sobre ${contato?.nome || "cliente"}`,
-      descricao: `A loja não confirmou presença do cliente após 2 cobranças. Verificar manualmente.`,
+      titulo,
+      descricao,
       prioridade: "alta",
+      status: "pendente",
+      fila_id: null,
+      metadata: {
+        agendamento_id: ag.id,
+        loja_nome: ag.loja_nome,
+        contato_id: ag.contato_id,
+        origem: "agendamentos-cron/timeout-loja",
+      },
     });
-    results.push(`timeout_noshow:${ag.id}`);
+
+    // Notifica supervisores/admin do setor
+    if (setorId) {
+      await supabase.from("notificacoes").insert({
+        setor_id: setorId,
+        tipo: "loja_silenciou_agendamento",
+        titulo: `Loja silenciou: ${ag.loja_nome}`,
+        mensagem: `Cobrar comparecimento do cliente ${contato?.nome || ""} (agendado ${horaAg}).`,
+        referencia_id: ag.id,
+      });
+    }
+
+    // Marca agendamento como no_show e registra evento (placar)
+    await supabase.from("agendamentos").update({
+      status: "no_show",
+      metadata: { ...md, tarefa_supervisor_at: new Date().toISOString() },
+    }).eq("id", ag.id);
+
+    await supabase.from("eventos_crm").insert({
+      contato_id: ag.contato_id,
+      tipo: "loja_silenciou",
+      descricao: `Loja ${ag.loja_nome} não respondeu sobre comparecimento — tarefa interna criada para supervisor`,
+      referencia_id: ag.id,
+      referencia_tipo: "agendamento",
+      metadata: { loja_nome: ag.loja_nome },
+    });
+
+    results.push(`timeout_supervisor:${ag.id}`);
   }
 }
 
