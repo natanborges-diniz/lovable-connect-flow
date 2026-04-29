@@ -27,9 +27,17 @@ serve(async (req) => {
       });
     }
 
-    const { atendimento_id, loja_telefone, loja_nome, pergunta } = await req.json();
-    if (!atendimento_id || !loja_telefone || !loja_nome || !pergunta) {
-      return new Response(JSON.stringify({ error: "atendimento_id, loja_telefone, loja_nome and pergunta are required" }), {
+    const body = await req.json();
+    const { atendimento_id, pergunta, assunto } = body;
+    // Modo loja única: loja_telefone + loja_nome
+    // Modo grupo: lojas: [{nome_loja, telefone}, ...] (snapshot)
+    const lojasGrupo: Array<{ nome_loja: string; telefone: string }> | undefined = body.lojas;
+    const isGrupo = Array.isArray(lojasGrupo) && lojasGrupo.length > 0;
+    const loja_telefone: string = isGrupo ? "__GRUPO__" : body.loja_telefone;
+    const loja_nome: string = isGrupo ? "__GRUPO__" : body.loja_nome;
+
+    if (!atendimento_id || !pergunta || (!isGrupo && (!loja_telefone || !loja_nome))) {
+      return new Response(JSON.stringify({ error: "atendimento_id, pergunta e (loja_telefone+loja_nome ou lojas[]) são obrigatórios" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -54,7 +62,16 @@ serve(async (req) => {
 
     const ano = new Date().getFullYear();
 
-    // Cria demanda
+    // Cria demanda (loja única ou grupo com snapshot)
+    const demandaMetadata: Record<string, unknown> = isGrupo
+      ? {
+          grupo: true,
+          lojas_nomes: lojasGrupo!.map((l) => l.nome_loja),
+          lojas_telefones: lojasGrupo!.map((l) => l.telefone),
+          snapshot_at: new Date().toISOString(),
+        }
+      : {};
+
     const { data: demanda, error: demErr } = await supabase
       .from("demandas_loja")
       .insert({
@@ -65,8 +82,10 @@ serve(async (req) => {
         loja_nome,
         solicitante_id: user.id,
         solicitante_nome: operadorNome,
+        assunto: assunto ?? null,
         pergunta,
         status: "aberta",
+        metadata: demandaMetadata,
       })
       .select()
       .single();
