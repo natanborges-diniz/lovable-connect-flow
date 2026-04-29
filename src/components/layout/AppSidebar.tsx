@@ -2,7 +2,7 @@ import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset,
+  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin,
   ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
