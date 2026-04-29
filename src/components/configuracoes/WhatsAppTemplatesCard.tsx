@@ -183,17 +183,24 @@ export function WhatsAppTemplatesCard() {
     },
   });
 
+  const [mostrarDescontinuados, setMostrarDescontinuados] = useState(false);
+
   const filtered = useMemo(() => {
     if (!catalogo) return [];
-    if (filtroCategoria === "all") return catalogo;
-    return catalogo.filter((t) => t.categoria === filtroCategoria);
-  }, [catalogo, filtroCategoria]);
+    let out = catalogo;
+    if (!mostrarDescontinuados) out = out.filter((t) => !t.descontinuado);
+    if (filtroCategoria !== "all") out = out.filter((t) => t.categoria === filtroCategoria);
+    return out;
+  }, [catalogo, filtroCategoria, mostrarDescontinuados]);
 
   const counters = useMemo(() => {
-    const c = { total: 0, approved: 0, pending: 0, rejected: 0, rascunho: 0 };
+    const c = { total: 0, approved: 0, pending: 0, rejected: 0, rascunho: 0, utility: 0, marketing: 0 };
     catalogo?.forEach((t) => {
+      if (t.descontinuado) return;
       c.total++;
       c[t.status]++;
+      if (t.categoria === "UTILITY") c.utility++;
+      if (t.categoria === "MARKETING") c.marketing++;
     });
     return c;
   }, [catalogo]);
