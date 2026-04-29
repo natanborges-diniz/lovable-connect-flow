@@ -266,11 +266,11 @@ function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: 
 // When the customer responds with clear keywords to a previous AI question,
 // forces the corresponding tool execution to break out of repetitive prompts.
 //
-// `fechamento_lc`: cliente em contexto de LENTES DE CONTATO já com receita
-// salva escolheu uma marca/modelo OU pediu reservar/fechar o pedido.
-// LC NÃO requer visita à loja para "tirar medidas" — a finalização é feita
-// por um Consultor humano (que envia link de pagamento e define a loja de
-// retirada). Por isso esse intent NÃO mapeia para `agendar_visita`.
+// LC com receita: cliente que escolheu marca/pediu reservar quer fechar — agora
+// segue o fluxo padrão `agendar_cliente_intent` (vai à loja retirar/pagar).
+// Humano só entra se houver objeção real (sem catálogo compatível, reclamação,
+// pedido explícito de humano).
+
 const LC_BRAND_REGEX = /\b(acuvue|oasys|biofinity|air\s*optix|solflex|sol[oó]tica|dnz|biomedics|focus|frequency|freshlook|proclear|purevision|softlens|hydron|mioflex|aviator|naturale|colors?)\b/i;
 const RESERVE_VERBS_REGEX = /\b(quero\s+(reservar|fechar|pedir|levar|essa|esse|comprar|fechar|essa op[cç][aã]o)|vou\s+(querer|levar|de|com)|fica\s+(com|essa|esse)|pode\s+(reservar|pedir|fechar|mandar)|fechar\s+(pedido|essa|esse|com)|fechar\b|reserva[r]?\b|comprar\s+essa)/i;
 
