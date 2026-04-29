@@ -16,6 +16,7 @@ import PipelineInterno from "./pages/PipelineInterno";
 import Atendimentos from "./pages/Atendimentos";
 import Tarefas from "./pages/Tarefas";
 import Mensagens from "./pages/Mensagens";
+import Demandas from "./pages/Demandas";
 import Configuracoes from "./pages/Configuracoes";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
