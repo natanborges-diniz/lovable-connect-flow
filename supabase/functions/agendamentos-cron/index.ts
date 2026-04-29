@@ -283,15 +283,18 @@ async function processLembreteRetry(
 // Helper: Primeira cobrança à loja
 // ═══════════════════════════════════════════
 async function processFirstStoreCharge(
-  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[]
+  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[],
+  horasDelay: number
 ) {
+  // 1ª cobrança só dispara se já passou (horário do agendamento + horasDelay)
+  const cutoff = new Date(now.getTime() - horasDelay * 60 * 60 * 1000).toISOString();
   const { data: paraCobranca } = await supabase
     .from("agendamentos")
     .select("id, contato_id, loja_nome, loja_telefone, data_horario")
     .in("status", ["agendado", "lembrete_enviado", "confirmado"])
     .eq("confirmacao_enviada", false)
     .eq("tentativas_cobranca_loja", 0)
-    .lt("data_horario", now.toISOString());
+    .lt("data_horario", cutoff);
 
   for (const ag of paraCobranca || []) {
     if (!ag.loja_telefone) continue;
