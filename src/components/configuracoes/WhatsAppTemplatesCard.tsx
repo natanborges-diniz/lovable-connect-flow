@@ -676,3 +676,99 @@ function TemplateForm({ initial, onClose }: { initial: CatalogoTemplate | null; 
     </form>
   );
 }
+
+// ── Aliases section: maps logical name → real approved template ──
+function AliasesSection({ catalogo }: { catalogo: CatalogoTemplate[] }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+
+  const { data: aliases } = useQuery({
+    queryKey: ["template-aliases"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("template_aliases")
+        .select("*")
+        .order("alias", { ascending: true });
+      if (error) throw error;
+      return (data || []) as TemplateAlias[];
+    },
+  });
+
+  const updateAlias = useMutation({
+    mutationFn: async ({ alias, template_nome }: { alias: string; template_nome: string }) => {
+      const { error } = await supabase
+        .from("template_aliases")
+        .update({ template_nome, atualizado_em: new Date().toISOString() })
+        .eq("alias", alias);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["template-aliases"] });
+      toast.success("Alias atualizado. Próximo disparo já usa o novo template.");
+    },
+    onError: (e: any) => toast.error("Erro: " + e.message),
+  });
+
+  if (!aliases?.length) return null;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-between">
+          <span className="flex items-center gap-2">
+            <Wand2 className="h-4 w-4" />
+            Aliases lógicos ({aliases.length}) — repointar templates sem redeploy
+          </span>
+          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2 space-y-2">
+        <div className="text-xs bg-muted/40 border border-border rounded p-2">
+          Crons disparam pelo <strong>alias</strong>. Quando uma versão UTILITY for aprovada pela Meta,
+          troque o alias para apontar para o novo nome — sem precisar redeployar nada.
+        </div>
+        {aliases.map((a) => {
+          const candidatos = catalogo.filter(
+            (t) => t.status === "approved" && (t.nome === a.alias || t.nome.startsWith(a.alias))
+          );
+          const atual = catalogo.find((t) => t.nome === a.template_nome);
+          return (
+            <div key={a.alias} className="flex items-center gap-2 p-2 border border-border rounded-md text-xs">
+              <div className="flex-1 min-w-0">
+                <p className="font-mono font-semibold truncate">{a.alias}</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className="text-muted-foreground">→</span>
+                  <span className="font-mono truncate">{a.template_nome}</span>
+                  {atual && <CategoriaBadge categoria={atual.categoria} />}
+                </div>
+              </div>
+              <Select
+                value={a.template_nome}
+                onValueChange={(v) => {
+                  if (v !== a.template_nome) updateAlias.mutate({ alias: a.alias, template_nome: v });
+                }}
+              >
+                <SelectTrigger className="h-7 w-[200px]">
+                  <SelectValue placeholder="Trocar template…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidatos.length === 0 ? (
+                    <SelectItem value={a.template_nome} disabled>
+                      {a.template_nome} (atual)
+                    </SelectItem>
+                  ) : (
+                    candidatos.map((t) => (
+                      <SelectItem key={t.id} value={t.nome}>
+                        {t.nome} · {t.categoria}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        })}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
