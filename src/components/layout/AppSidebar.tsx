@@ -115,6 +115,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "Mensagens",
       items: [
         { title: "Conversas", url: "/mensagens", icon: MessageSquare },
+        { title: "Demandas", url: "/demandas", icon: Pin },
       ],
     },
   ],
