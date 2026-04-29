@@ -651,6 +651,7 @@ async function sendRecoveryTemplate(
 ) {
   const TEMPLATES = ["retomada_contexto_1", "retomada_contexto_2", "retomada_despedida"];
   const templateName = TEMPLATES[tentativas] || TEMPLATES[TEMPLATES.length - 1];
+  const topico = resumirTopicoTemplate(resumoContexto) || "seu atendimento";
 
   await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
     method: "POST",
@@ -661,7 +662,7 @@ async function sendRecoveryTemplate(
     body: JSON.stringify({
       contato_id: contato.id,
       template_name: templateName,
-      template_params: [firstName, resumoContexto],
+      template_params: [firstName, topico],
       language: "pt_BR",
     }),
   });
