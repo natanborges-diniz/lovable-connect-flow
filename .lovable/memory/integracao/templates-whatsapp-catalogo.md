@@ -18,11 +18,14 @@ Catálogo local sincronizado com a Meta. Campos: nome (único), categoria (UTILI
 ### Tabela `template_aliases` (alias lógico → nome real)
 Permite trocar a versão usada (ex.: MARKETING aprovado hoje → UTILITY aprovado amanhã) sem redeploy. Crons chamam `send-whatsapp-template` com `template_alias` em vez de `template_name`; a EF resolve o alias antes do gate de aprovação.
 
-Aliases iniciais:
-- `noshow_reagendamento` → `noshow_reagendamento` (trocar p/ `_v2` quando UTILITY aprovado)
-- `retomada_contexto_1` → `retomada_contexto_1`
-- `retomada_contexto_2` → `retomada_contexto_2`
-- `retomada_despedida`  → `retomada_despedida`
+Aliases ativos (abr/2026):
+- `link_pagamento_cliente` → `link_pagamento_cliente_v3` (UTILITY aprovado — usado por `criar-solicitacao-loja`)
+- `noshow_reagendamento` → `noshow_reagendamento` (MARKETING — `_v2` UTILITY rejeitado)
+- `retomada_contexto_1` → `retomada_contexto_1` (MARKETING)
+- `retomada_contexto_2` → `retomada_contexto_2_v3` (MARKETING aprovado, texto refeito)
+- `retomada_despedida`  → `retomada_despedida_v3` (MARKETING aprovado, texto refeito)
+
+**Regra de ouro**: TODA edge function que dispara template proativo DEVE usar `template_alias`, nunca `template_name`. Isso permite repontar versões via UI sem redeploy.
 
 UI em **Configurações > Templates WhatsApp > Aliases lógicos**: dropdown por alias listando templates aprovados compatíveis. Mudança é instantânea (próximo disparo já usa).
 
