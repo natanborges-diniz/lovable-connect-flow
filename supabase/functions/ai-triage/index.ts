@@ -2855,61 +2855,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args);
         resposta = quoteResult.resposta;
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
-        // ── GUARDRAIL LC: lente de contato NÃO requer visita à loja ──
-        // Se o contexto é EXCLUSIVAMENTE LC + receita salva, agendar_visita está PROIBIDO
-        // (cliente não vai à loja "tirar medidas" — fechamento é com humano).
-        // EXCEÇÃO: se o cliente também demonstrou interesse em ÓCULOS (intent misto LC+óculos),
-        // a visita é NECESSÁRIA para escolher armação — permite agendar_visita normalmente.
-        const recentInboundJoined = recentInboundTexts.join(" | ").toLowerCase();
-        const interesseOculos = /\b([oó]culo[s]?|arma[çc][aã]o|armacoes|gr?au|monoc?focal|multifocal|antirreflex|fotossens[ií]vel|transitions|prov[ae]r\s+arma)\b/i.test(recentInboundJoined);
-        const lcOnlyContext = isLCContextGlobal && !interesseOculos;
-        if (lcOnlyContext && receitas.length > 0) {
-          console.log(`[GUARDRAIL-LC] Blocked ${fn} in LC-only context — converting to fechamento_lc`);
-          await supabase.from("eventos_crm").insert({
-            contato_id: contatoId,
-            tipo: "lc_agendamento_bloqueado",
-            descricao: `IA tentou ${fn} em contexto de lentes de contato — bloqueado e convertido em fechamento humano.`,
-            metadata: { tool: fn, args, motivo: "LC não requer visita para tirar medidas" },
-            referencia_tipo: "atendimento",
-            referencia_id: atendimento_id,
-          });
-          const nomePrim = (contatoNomeAtual || "").split(/\s+/)[0] || "";
-          const saudacao = nomePrim ? `Perfeito, ${nomePrim}` : "Perfeito";
-          resposta = `${saudacao}! Pra lente de contato você não precisa vir até a loja tirar medidas — sua receita já basta 😉 Vou te passar agora pra um Consultor da nossa equipe finalizar o pedido: com ele você confirma o modelo, escolhe em qual loja prefere retirar e recebe o link de pagamento. Em instantes ele te chama por aqui mesmo 🤝`;
-          intencao = "fechamento_lc";
-          pipeline_coluna = "Novo Contato"; // mantém na coluna atual
-          precisa_humano = true;
-          setor_sugerido = "";
-          validatorFlags.push("lc_agendamento_bloqueado");
-          continue;
-        }
-        // ── GUARDRAIL ANTI-DUPLICAÇÃO: cliente já tem agendamento ativo ──
-        // Se já existe agendamento em "agendado/lembrete_enviado/confirmado" e o cliente
-        // NÃO pediu explicitamente remarcar/cancelar/mudar, NÃO criamos novo nem reconfirmamos
-        // como se fosse novo. Apenas reafirmamos o existente e seguimos com encerramento.
-        const lastInboundLowerForGuard = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
-        const explicitChangeRequest = isDiaDReschedule || /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInboundLowerForGuard);
-        const existingActive = (agendamentosAtivos || []).find((a: any) => ["agendado","lembrete_enviado","confirmado"].includes(a.status));
-        if (fn === "agendar_visita" && existingActive && !explicitChangeRequest) {
-          console.log(`[GUARDRAIL] agendar_visita bloqueado — já existe agendamento ativo ${existingActive.id} sem pedido explícito de mudança`);
-          await supabase.from("eventos_crm").insert({
-            contato_id: contatoId,
-            tipo: "agendamento_duplicado_evitado",
-            descricao: `IA tentou agendar nova visita sem pedido explícito de mudança — bloqueado.`,
-            metadata: { tentativa: args, existente: existingActive, msg: lastInboundLowerForGuard.slice(0, 200) },
-            referencia_tipo: "atendimento",
-            referencia_id: atendimento_id,
-          });
-          // Reafirma o existente (sem bloco de "Agendamento confirmado" — já foi enviado antes).
-          const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
-          resposta = agendamentoFmt
-            ? `Tudo certo${_nomePrim ? ", " + _nomePrim : ""}! Seu agendamento segue mantido — ${agendamentoFmt}. Posso te ajudar em mais alguma coisa antes de finalizar?`
-            : `Tudo certo${_nomePrim ? ", " + _nomePrim : ""}! Seu agendamento já está mantido. Posso te ajudar em mais alguma coisa antes de finalizar?`;
-          intencao = "agendamento_mantido";
-          pipeline_coluna = "Agendamento";
-          validatorFlags.push("agendamento_duplicado_bloqueado");
-          continue;
-        }
+        // (Guardrail antigo "LC não exige visita" foi removido: catálogo de LC está
+        // no banco, IA orça e direciona à loja como qualquer outro pedido.
+        // Cliente vai à loja para retirar/pagar — fluxo unificado óculos/LC.)
 
         resposta = args.resposta;
         intencao = "agendamento";
