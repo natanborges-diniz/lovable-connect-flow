@@ -695,8 +695,9 @@ serve(async (req) => {
               updateSessao = { etapa: `step_${nextIndex}`, dados: newDados };
             }
           } else {
-            // Validate input
-            const validation = validateInput(texto, currentEtapa, mediaContext);
+            // Validate input (passa sugestão pré-preenchida quando aplicável)
+            const sugestaoCampo = (dados as any)[`_sugestao_${currentEtapa.campo}`] || null;
+            const validation = validateInput(texto, currentEtapa, { ...mediaContext, sugestao: sugestaoCampo } as any);
             if (!validation.valid) {
               resposta = validation.error!;
             } else {
