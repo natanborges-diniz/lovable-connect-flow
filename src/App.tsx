@@ -45,6 +45,7 @@ const App = () => (
               <Route path="/interno" element={<PipelineInterno />} />
               <Route path="/tarefas" element={<Tarefas />} />
               <Route path="/mensagens" element={<Mensagens />} />
+              <Route path="/demandas" element={<Demandas />} />
               <Route path="/configuracoes" element={
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <Configuracoes />
