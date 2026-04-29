@@ -29,6 +29,7 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   const [forwarding, setForwarding] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [expandLojas, setExpandLojas] = useState(false);
 
   const isGrupo = demanda.metadata?.grupo === true;
   const lojasNomes: string[] = demanda.metadata?.lojas_nomes ?? [];
