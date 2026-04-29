@@ -25,26 +25,25 @@ Deno.serve(async (req) => {
 
     if (!isInternalCall) {
       const authHeader = req.headers.get("Authorization");
-      if (!authHeader) {
+      if (!authHeader?.startsWith("Bearer ")) {
         return new Response(JSON.stringify({ error: "Não autorizado" }), {
           status: 401,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: userData, error: userErr } = await userClient.auth.getUser();
-      if (userErr || !userData.user) {
+      const token = authHeader.replace("Bearer ", "");
+      const { data: claimsData, error: claimsErr } = await admin.auth.getClaims(token);
+      if (claimsErr || !claimsData?.claims?.sub) {
         return new Response(JSON.stringify({ error: "Sessão inválida" }), {
           status: 401,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      const callerId = claimsData.claims.sub as string;
 
       const { data: isAdminData, error: isAdminErr } = await admin.rpc("is_admin", {
-        _user_id: userData.user.id,
+        _user_id: callerId,
       });
       if (isAdminErr || !isAdminData) {
         return new Response(JSON.stringify({ error: "Apenas admins podem redefinir senhas" }), {
