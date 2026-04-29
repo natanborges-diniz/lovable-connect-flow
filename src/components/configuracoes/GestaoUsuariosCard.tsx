@@ -201,14 +201,26 @@ export function GestaoUsuariosCard() {
 
   const generateMagicLink = useMutation({
     mutationFn: async (email: string) => {
+      // Revalida a sessão antes de chamar (evita 401 com token expirado)
+      const { data: userCheck, error: userCheckErr } = await supabase.auth.getUser();
+      if (userCheckErr || !userCheck?.user) {
+        await supabase.auth.signOut().catch(() => {});
+        throw new Error("Sua sessão expirou. Faça login novamente.");
+      }
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) throw new Error("Sessão expirada");
+      if (!accessToken) throw new Error("Sua sessão expirou. Faça login novamente.");
       const { data, error } = await supabase.functions.invoke("admin-magic-link", {
         body: { email, redirect_to: INFOCO_MESSENGER_URL },
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      if (error) throw error;
+      if (error) {
+        const msg = (error as any)?.message ?? "";
+        if (msg.includes("401") || /sess[aã]o/i.test(msg)) {
+          throw new Error("Sua sessão expirou. Faça login novamente.");
+        }
+        throw error;
+      }
       if ((data as any)?.error) throw new Error((data as any).error);
       return (data as any)?.url as string;
     },
