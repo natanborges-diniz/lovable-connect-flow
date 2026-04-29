@@ -399,7 +399,7 @@ function DemandaThreadDialog({ demanda, onClose }: { demanda: Demanda; onClose: 
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base pr-8">
               <Pin className="h-4 w-4 text-primary shrink-0" />
-              <span className="truncate">#{demanda.numero_curto} • {demanda.loja_nome}</span>
+              <span className="truncate">#{demanda.numero_curto} • {demanda.metadata?.grupo ? `Grupo (${demanda.metadata.lojas_nomes?.length ?? "?"} lojas)` : demanda.loja_nome}</span>
               <Badge variant="outline" className="text-[10px] capitalize">{demanda.status}</Badge>
             </DialogTitle>
           </DialogHeader>
