@@ -111,9 +111,30 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
           {demanda.assunto && ` • ${demanda.assunto}`}
         </p>
         {isGrupo && lojasNomes.length > 0 && (
-          <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground/80">
-            Lojas: {lojasNomes.join(", ")}
-          </p>
+          <div className="mt-1.5">
+            <button
+              type="button"
+              onClick={() => setExpandLojas((v) => !v)}
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              {expandLojas ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {expandLojas ? "ocultar lojas" : `ver ${lojasNomes.length} lojas`}
+            </button>
+            {expandLojas && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {lojasNomes.map((n) => (
+                  <Badge
+                    key={n}
+                    variant="outline"
+                    className="text-[10px]"
+                    style={{ borderColor: lojaTone(n), color: lojaTone(n) }}
+                  >
+                    {n}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
