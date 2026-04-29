@@ -379,6 +379,22 @@ serve(async (req) => {
     const protocolo = `SOL-${ano}-${String(seq).padStart(5, "0")}`;
     await supabase.from("solicitacoes").update({ protocolo }).eq("id", solicitacao.id);
 
+    // ── Vínculo bidirecional Boleto ↔ Consulta CPF ──
+    if (consultaCpfOrigem) {
+      const metaOrigem = (consultaCpfOrigem.metadata || {}) as Record<string, any>;
+      await supabase
+        .from("solicitacoes")
+        .update({
+          metadata: {
+            ...metaOrigem,
+            boleto_solicitacao_id: solicitacao.id,
+            boleto_protocolo: protocolo,
+            boleto_gerado_at: new Date().toISOString(),
+          },
+        })
+        .eq("id", consultaCpfOrigem.id);
+    }
+
     // ── Anexos ──
     for (let i = 0; i < anexos.length; i++) {
       const a = anexos[i];
