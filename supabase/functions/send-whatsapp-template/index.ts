@@ -19,19 +19,33 @@ serve(async (req) => {
       throw new Error("Meta WhatsApp credentials not configured");
     }
 
-    const { contato_id, template_name, template_params, language } = await req.json();
+    const body = await req.json();
+    const { contato_id, template_alias, template_params, language } = body;
+    let template_name: string | undefined = body.template_name;
 
-    if (!contato_id || !template_name) {
-      throw new Error("contato_id and template_name are required");
+    if (!contato_id || (!template_name && !template_alias)) {
+      throw new Error("contato_id and (template_name or template_alias) are required");
     }
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // ─── Resolve alias → template_name real ───
+    if (template_alias && !template_name) {
+      const { data: aliasRow } = await supabase
+        .from("template_aliases")
+        .select("template_nome")
+        .eq("alias", template_alias)
+        .maybeSingle();
+      if (!aliasRow?.template_nome) {
+        throw new Error(`alias "${template_alias}" não encontrado em template_aliases`);
+      }
+      template_name = aliasRow.template_nome;
+      console.log(`[ALIAS] ${template_alias} → ${template_name}`);
+    }
+
     // ─── GATE: bloquear se template não estiver aprovado no catálogo local ───
-    // Se o template não existe no catálogo, deixa passar (compat com templates legados Meta).
-    // Se existe e status != 'approved', bloqueia e registra evento.
     const { data: catalogo } = await supabase
       .from("whatsapp_templates")
       .select("status, motivo_rejeicao")
