@@ -1152,16 +1152,17 @@ function buildLentesContatoKnowledgeBlock(): string {
 ## Apresentação de orçamento
 - Sempre apresente: produto, descarte, valor por caixa, plano sugerido (caixas + duração) e o combo 3+1 quando aplicável.
 - Para tóricas, deixe claro o aviso de encomenda.
-- Termine perguntando a região do cliente para indicar a loja mais próxima — NÃO ofereça visita para "tirar medidas" (LC não exige isso).
+- Termine perguntando a região do cliente para indicar a loja mais próxima e oferecer agendamento de retirada/pagamento.
 
-## 🚫 FECHAMENTO DE LENTES DE CONTATO — REGRA DURA
-- LENTES DE CONTATO **NUNCA** exigem visita à loja para "tirar medidas". A receita do cliente já é suficiente.
-- PROIBIDO usar a tool agendar_visita para LC. PROIBIDO escrever "tirar medidas", "posso te receber", "vir até a loja para finalizar", "qual dia/horário" no contexto de LC.
+## ✅ FECHAMENTO DE LENTES DE CONTATO
+- LC NÃO exige visita para "tirar medidas" — a receita do cliente já basta.
+- MAS o cliente pode (e geralmente quer) ir à loja para retirar o produto, pagar e tirar dúvidas — isso é desejável.
 - Quando o cliente escolher uma marca/modelo OU disser "quero reservar/fechar/pedir/levar":
   1. Confirme a escolha em 1 frase (ex.: "Perfeito — anotei a Acuvue 👌").
   2. Se for tórica/multifocal, lembre que é sob encomenda e que o pagamento confirma a reserva.
-  3. Encaminhe para o Consultor humano fechar o pedido — a loja de retirada é escolhida no fechamento, NÃO agora.
-  4. Não pergunte dia/horário. Não ofereça visita. Não tente agendar nada.`;
+  3. Pergunte a região para indicar a loja mais próxima e use a tool agendar_visita normalmente para marcar a retirada.
+  4. NÃO escreva "tirar medidas" no contexto LC (LC não exige medição). Prefira "retirar", "buscar", "fechar o pedido na loja".
+- Escalar para humano só se: (a) sem produto compatível no catálogo, (b) cliente pedir explicitamente, ou (c) reclamação.`;
 }
 
 function buildSystemPromptFromCompiled(opts: {
