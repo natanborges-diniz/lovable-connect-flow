@@ -177,7 +177,62 @@ serve(async (req) => {
         }
       }
 
-      // ── ESCALATE ──
+      // ── LEAD SILENCIOSO → PERDIDOS (não Humano) ──
+      // Se o cliente está em silêncio há horas e os outbounds recentes são apenas
+      // templates de retomada/IA, isso NÃO é loop conversacional — é lead que
+      // não respondeu. Move direto para "Perdidos" em vez de sujar a fila humana.
+      const inboundsRecentes = ordered.filter((m) => m.direcao === "inbound");
+      const lastInbound = inboundsRecentes[inboundsRecentes.length - 1];
+      const horasDesdeUltimoInbound = lastInbound
+        ? (Date.now() - new Date(lastInbound.created_at).getTime()) / (1000 * 60 * 60)
+        : 999;
+      const TEMPLATE_OU_RETOMADA_RE = /\[template:\s*retomada|retomada_contexto|despedida|n[ãa]o quero te incomodar|agrade[çc]o muito o seu contato/i;
+      const ultimosDoisOutboundsSaoTemplate = outbounds.slice(-2).every((o) =>
+        TEMPLATE_OU_RETOMADA_RE.test(String(o.conteudo || ""))
+      );
+
+      if (horasDesdeUltimoInbound >= 2 && ultimosDoisOutboundsSaoTemplate) {
+        console.log(`[WATCHDOG] Lead silencioso ${at.id} — movendo para Perdidos (último inbound há ${horasDesdeUltimoInbound.toFixed(1)}h)`);
+
+        // Busca coluna "Perdidos" do CRM (sem setor)
+        const { data: perdidosCol } = await supabase
+          .from("pipeline_colunas")
+          .select("id")
+          .eq("nome", "Perdidos")
+          .is("setor_id", null)
+          .eq("ativo", true)
+          .limit(1)
+          .single();
+
+        // Encerra atendimento e move contato
+        await supabase.from("atendimentos")
+          .update({ status: "encerrado", fim_at: new Date().toISOString(), modo: "ia" })
+          .eq("id", at.id);
+
+        if (perdidosCol?.id) {
+          await supabase.from("contatos")
+            .update({ pipeline_coluna_id: perdidosCol.id })
+            .eq("id", at.contato_id);
+        }
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: at.contato_id,
+          tipo: "lead_silencioso_perdido",
+          descricao: `Watchdog moveu lead silencioso para Perdidos (último inbound há ${horasDesdeUltimoInbound.toFixed(1)}h, similaridade ${(sim*100).toFixed(0)}%)`,
+          metadata: {
+            similarity: sim,
+            horas_silencio: horasDesdeUltimoInbound,
+            last_outbound: String(outbounds[outbounds.length - 1].conteudo).substring(0, 200),
+          },
+          referencia_tipo: "atendimento",
+          referencia_id: at.id,
+        });
+
+        details.push({ atendimento_id: at.id, similarity: sim, action: "movido_para_perdidos" });
+        continue; // não escala para humano
+      }
+
+      // ── ESCALATE PARA HUMANO (apenas quando há diálogo ativo travado) ──
       console.log(`[WATCHDOG] Escalating atendimento ${at.id} — similarity=${(sim * 100).toFixed(0)}%`);
 
       await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", at.id);
