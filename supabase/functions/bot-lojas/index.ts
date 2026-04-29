@@ -133,6 +133,18 @@ serve(async (req) => {
         }
         return { valid: true, value: context.media_url };
       }
+      case "texto_prefilled": {
+        // Sugestão fica em context.sugestao; "sim/s/ok/confirmar" aceita a sugestão.
+        const sugestao = (context as any)?.sugestao as string | undefined;
+        const lower = texto.trim().toLowerCase();
+        if (sugestao && ["sim", "s", "ok", "confirmar", "confirmo", "isso", "1"].includes(lower)) {
+          return { valid: true, value: sugestao };
+        }
+        if (validacao.min_length && texto.length < validacao.min_length) {
+          return { valid: false, value: null, error: `⚠️ Texto muito curto (mínimo ${validacao.min_length} caracteres).` + hint };
+        }
+        return { valid: true, value: texto.trim() };
+      }
       case "texto":
       default: {
         if (validacao.min_length && texto.length < validacao.min_length) {
@@ -141,6 +153,22 @@ serve(async (req) => {
         return { valid: true, value: texto };
       }
     }
+  }
+
+  // ─── Resolve nome do solicitante a partir do loja_info (telefones_lojas) ───
+  function resolveSugestaoSolicitante(loja_info: any): string | null {
+    if (!loja_info) return null;
+    const nome = loja_info.nome_colaborador || loja_info.nome_loja || null;
+    return nome ? String(nome).trim() : null;
+  }
+
+  // ─── Mensagem da etapa, com pré-preenchimento opcional ───
+  function buildEtapaMensagem(etapa: any, sugestao?: string | null): string {
+    const base = etapa.mensagem;
+    if (etapa.tipo_input === "texto_prefilled" && sugestao) {
+      return `${base}\n\nSugestão: *${sugestao}*\n\nResponda *SIM* para confirmar ou digite o nome correto.`;
+    }
+    return base;
   }
 
   // ─── Build confirmation message from collected data ───
