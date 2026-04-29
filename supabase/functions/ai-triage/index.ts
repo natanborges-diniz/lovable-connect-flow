@@ -369,21 +369,19 @@ function detectForcedToolIntent(
     return { tool: "agendar_cliente_intent", reason: "cliente quer ir à loja — prioriza agendamento sobre fechamento LC" };
   }
 
-  // ── FECHAMENTO LC: cliente escolheu marca OU pediu reservar em contexto LC ──
-  // Só dispara se: (a) há receita salva, (b) contexto é LC, (c) já apresentamos
-  // opções OU o texto é inequívoco (tem marca + verbo de reserva).
-  // Guardrail: NUNCA cair em agendar_visita aqui — LC não exige visita à loja.
+  // ── LC com receita: cliente escolheu marca / pediu reservar ──
+  // Política nova: temos catálogo de LC no banco e a IA monta orçamento sozinha.
+  // Cliente que escolheu marca ou pediu reservar quer FECHAR — direcionamos para
+  // agendamento na loja (retirar/pagar) como qualquer outro pedido. Humano só entra
+  // se houver objeção real (sem produto compatível, reclamação, etc.).
   if (hasReceitas && isLCContext) {
     const hasBrand = LC_BRAND_REGEX.test(lastInboundText);
     const hasReserveVerb = RESERVE_VERBS_REGEX.test(lastInboundText);
-    // Marca + verbo de reserva em qualquer ordem = fechamento.
-    // Verbo de reserva isolado também conta se já apresentamos opções.
-    // Marca isolada conta se já apresentamos opções (ex.: "Acuvue").
     if (hasBrand && hasReserveVerb) {
-      return { tool: "fechamento_lc", reason: "cliente escolheu marca + pediu reservar (LC)" };
+      return { tool: "agendar_cliente_intent", reason: "cliente escolheu marca + pediu reservar (LC) — agendar na loja" };
     }
     if (hasLCQuotePresented && (hasBrand || hasReserveVerb)) {
-      return { tool: "fechamento_lc", reason: hasBrand ? "cliente escolheu marca após orçamento LC" : "cliente pediu reservar após orçamento LC" };
+      return { tool: "agendar_cliente_intent", reason: hasBrand ? "cliente escolheu marca após orçamento LC — agendar na loja" : "cliente pediu reservar após orçamento LC — agendar na loja" };
     }
   }
 
