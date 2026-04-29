@@ -1,65 +1,132 @@
-# Correções no fluxo do Drin (e leads silenciosos no geral)
+## Visão geral
 
-## Diagnóstico (caso Drin)
+Três entregas relacionadas:
 
-Linha do tempo real apurada no banco:
+1. **Calendário de agendamentos no app InFoco Messenger** — nova tela que lista, em formato calendário, os agendamentos da loja do usuário logado, com card detalhado por agendamento (cliente, horário, status, observações/resumo, valores).
+2. **Captura do WhatsApp do cliente no fluxo "Gerar Link de Pagamento"** — adicionar campo obrigatório `cliente_whatsapp` na etapa do fluxo `link_pagamento`.
+3. **Envio automático do link de pagamento ao cliente via WhatsApp** — após gerar o link, disparar template aprovado para o número informado, abrindo conversa com o cliente.
 
-```
-08:57  Drin envia: "Acessei o site..."
-08:57  Gael responde: "Olá! Falo com Drin? 😊 ... Aguardar confirmação do nome..."  ← prompt vazado
-10:00  Cron dispara `retomada_contexto_1`
-10:00  Cron dispara `retomada_contexto_1` de novo (~100ms depois)              ← duplicado
-10:06  watchdog-loop-ia detecta loop (similaridade 80%) e escala para HUMANO   ← problema
-10:54  watchdog-loop-ia detecta loop de novo e re-escala
-13:54  Card termina em modo=humano, status=aguardando, na coluna "Novo Contato"
-```
+---
 
-Drin nunca respondeu. O que deveria ter acontecido: após esgotar 2 retomadas + despedida, lead vai para **Perdidos**. O que aconteceu: o watchdog de loop, vendo retomadas idênticas seguidas, classificou como loop e jogou em **Humano**.
+## Parte 1 — Calendário no Messenger (projeto InFoco Messenger)
 
-## O que vamos corrigir
+### Tela nova: `/agenda`
+- Rota nova em `src/App.tsx` apontando para `src/pages/LojaAgenda.tsx`.
+- Item novo no `AppShell.tsx` (ícone `Calendar`), `lojaOnly: true`, com badge opcional de agendamentos do dia.
+- Visível apenas para `tipo_usuario` loja/colaborador (já há `useLojaContext`).
 
-### 1. Vazamento do prompt na saudação (`ai-triage`)
+### Layout
+- **Header**: nome da loja + seletor de mês (setas anterior/próximo) + botão "Hoje".
+- **Vista mensal compacta** (mobile-first): grid 7 colunas; cada dia mostra contador de agendamentos com cor por status dominante (`agendado` neutro, `lembrete_enviado` azul, `confirmado` verde, `no_show` vermelho, `compareceu` verde escuro).
+- **Lista do dia selecionado** (abaixo do grid): cards rolando verticalmente.
+- **Vista alternativa "Lista"** (toggle no topo): apenas próximos 30 dias em lista cronológica.
 
-Em `buildFirstContactBlock` o LLM ocasionalmente concatena a instrução interna ("Aguardar confirmação do nome...") na mensagem do cliente. Vamos:
+### Card de agendamento
+Cada card exibe:
+- Horário em destaque (`HH:mm`) + badge de status colorido.
+- Nome do cliente (de `contatos.nome` via join) e telefone mascarado.
+- Observações/resumo do atendimento (campo `observacoes`).
+- Se houver `valor_orcamento` ou `valor_venda`, mostra valores; se `numeros_os` preenchido, lista OS.
+- Indicadores: `loja_confirmou_presenca`, `lembrete_enviado`.
+- Ação rápida: "Confirmar presença do cliente" (toggle de `loja_confirmou_presenca` quando `status='compareceu'` ainda não houver).
+- Tap no card abre detalhe (drawer/modal) com toda observação completa, metadata relevante e link "Ver atendimento" caso `atendimento_id` exista (no-op por enquanto, apenas exibe id).
 
-- Reescrever o bloco para deixar a frase canônica destacada (entre aspas) e separar as regras com cabeçalho `# REGRAS INTERNAS — NÃO ENVIAR AO CLIENTE`.
-- Adicionar guardrail intra-mensagem (já existe um para duplicação, vamos estender): se `inboundCount<=1` e o texto final contiver tokens de instrução vazada (`aguardar confirmação`, `confirme o nome`, `sem reformular`, `tool registrar_nome`, `primeira interação`), **substituir** pela frase canônica determinística e logar `[GUARDRAIL] Prompt vazado corrigido`.
+### Dados
+- Query Supabase direta a `agendamentos` filtrando `loja_nome = lojaContext.lojaNome` no intervalo do mês visível, com join em `contatos(nome, telefone)`.
+- RLS atual já permite `authenticated` ler tudo; segurança de loja é enforced pelo filtro client-side (consistente com `LojaMinhasDemandas`).
+- Realtime opcional: subscribe em `agendamentos` filtrado por `loja_nome` para refresh automático.
 
-### 2. Idempotência da retomada (`vendas-recuperacao-cron`)
+### Notificação (já existente)
+A loja já recebe notificações de agendamento/lembrete/no-show via push (`agendamentos-cron` + `pipeline-automations`). Sem mudança nesse fluxo — o calendário é apenas a visão consolidada.
 
-Hoje o lock anti-race existe apenas no ramo `processHumano` (linhas 465-488). O ramo IA (`processContato`, linhas 216-330) **não tem** o mesmo lock — por isso disparou `retomada_contexto_1` 2x em 100ms.
+---
 
-- Replicar o padrão "lock otimista antes do fetch": gravar `recuperacao_vendas.ultima_tentativa_at = now` + `lock_pending=true` ANTES de chamar `responder-solicitacao`/`send-whatsapp-template`.
-- Adicionar guard: se `ultima_tentativa_at` foi escrita há menos de `requiredDelay/2` (ou 30 min), pular.
+## Parte 2 — Capturar WhatsApp do cliente no link de pagamento
 
-### 3. Lead silencioso → Perdidos (não Humano)
+### Banco
+Atualizar `bot_fluxos.etapas` da chave `link_pagamento` (UPDATE via tool de inserção):
 
-Trocar a política do `watchdog-loop-ia` quando o "loop" é, na verdade, **a IA falando sozinha** (cliente em silêncio, só temos templates de retomada repetidos):
+Etapas finais (ordem):
+1. `valor` (decimal, obrigatório) — já existe
+2. `descricao` (texto, obrigatório) — já existe
+3. `parcelas` (inteiro, obrigatório) — já existe
+4. `cliente` (texto, obrigatório agora) — passa de opcional a obrigatório (já vinha sendo coletado)
+5. **NOVO** `cliente_whatsapp` (tipo_input `texto`, obrigatório, validação min 10/max 15 dígitos) com mensagem "📱 WhatsApp do cliente (com DDD, ex: 11999998888) — receberá o link"
 
-- Detectar a condição: última inbound do cliente foi há > X horas (ex.: 2h) E os outbounds recentes são todos templates de retomada/IA (sem mensagem humana).
-- Nesse caso, em vez de marcar `modo=humano`, **mover o contato direto para a coluna `Perdidos`**, encerrar o atendimento (`status=encerrado`, `fim_at=now`) e registrar `eventos_crm` com tipo `lead_silencioso_perdido`.
-- Manter o comportamento atual de escalar para humano APENAS quando houver ping-pong real entre cliente e IA (cliente respondeu recentemente e a IA está repetindo).
+### Frontend Messenger
+Como o `LojaNovaDemanda.tsx` já renderiza dinamicamente as etapas vindas de `bot_fluxos`, o novo campo aparece automaticamente. Adicionar apenas:
+- Validador local extra para `cliente_whatsapp`: aceita só dígitos após sanitização, exige 10–13 dígitos (BR).
+- Máscara visual leve (mostrar `(11) 99999-9999`).
 
-Resultado: leads que nunca respondem nem ao 1º contato + 2 retomadas + despedida fluem naturalmente para Perdidos sem sujar a fila humana.
+### Backend
+- `supabase/functions/criar-solicitacao-loja/index.ts` (projeto Atrium): após chamar OB e receber `payment_link_id` + `url_pagamento`, executar **novo passo de notificação ao cliente** (descrito na Parte 3) usando `dados.cliente_whatsapp` e `dados.cliente`.
+- O telefone vai para `metadata.cliente_whatsapp` da `solicitacao` para auditoria.
 
-### 4. Ação imediata no card do Drin
+---
 
-Mover o card `5843fcdb...` de "Novo Contato"/modo humano direto para **Perdidos**, encerrar o atendimento e registrar evento `lead_silencioso_perdido` (saneamento manual desse caso).
+## Parte 3 — Envio do link de pagamento ao cliente via WhatsApp
 
-## Arquivos afetados
+### Novo template Meta
+Cadastrar em `whatsapp_templates` (status `rascunho` → submeter à Meta pelo painel existente):
 
-- `supabase/functions/ai-triage/index.ts` — reescrever `buildFirstContactBlock` + extender guardrail intra-mensagem
-- `supabase/functions/vendas-recuperacao-cron/index.ts` — adicionar lock otimista no ramo IA (`processContato`)
-- `supabase/functions/watchdog-loop-ia/index.ts` — bifurcar decisão (Perdidos vs Humano) conforme há resposta recente do cliente
-- Migration / insert de saneamento — mover Drin para Perdidos
+- **Nome**: `link_pagamento_cliente`
+- **Categoria**: UTILITY
+- **Idioma**: pt_BR
+- **Variáveis**: `{{1}}` = nome cliente, `{{2}}` = nome loja, `{{3}}` = valor formatado, `{{4}}` = descrição, `{{5}}` = URL
+- **Body sugerido**:
+  ```
+  Olá {{1}}! Aqui é da {{2}}.
+  
+  Segue seu link de pagamento:
+  💳 Valor: R$ {{3}}
+  📝 {{4}}
+  
+  🔗 {{5}}
+  
+  Pague com cartão em até várias parcelas. Qualquer dúvida, é só responder por aqui.
+  ```
+- `funcao_alvo`: `criar-solicitacao-loja`
 
-## Memórias a atualizar
+### Novo passo em `criar-solicitacao-loja`
+Após `payment_link_id` retornar com sucesso e antes de responder ao app, fazer:
 
-- `mem://ia/saudacao-confirma-nome` — anotar guardrail anti-vazamento
-- `mem://crm/recuperacao-ia-anti-abandono` — anotar lock otimista no ramo IA
-- Nova: `mem://watchdog/lead-silencioso-perdidos` — política "silêncio total → Perdidos, não Humano"
+1. Sanitizar `cliente_whatsapp` (`+55` + DDD + número, só dígitos).
+2. **Upsert em `contatos`** (PK telefone, conforme regra do projeto): `nome = dados.cliente`, `telefone = numeroSanitizado`, `tipo = 'cliente'`, `metadata.origem = 'link_pagamento_loja'`.
+3. Invocar EF interna `send-whatsapp-template` com:
+   - `contato_id` do upsert
+   - `template_name = 'link_pagamento_cliente'`
+   - `template_params = [primeiroNome, nomeLoja, valorFormatado, descricao, url]`
+4. Registrar `eventos_crm` tipo `link_pagamento_enviado_cliente` com `referencia_id = solicitacao.id` e metadata (telefone mascarado, payment_link_id).
+5. Falha no envio: NÃO bloqueia o sucesso da solicitação — apenas marca `metadata.envio_cliente_status='falhou'` e retorna campo `cliente_envio_status` no response para o app exibir aviso.
 
-## Não vou tocar
+### Resposta ao app
+O `Resultado` na tela de sucesso do Messenger ganha:
+- Linha extra: "✅ Link enviado para WhatsApp de {{cliente}}" ou alerta amarelo "Link gerado, mas não foi possível enviar ao cliente — copie e envie manualmente".
 
-- Não vou alterar a cadência (1h → 24h → despedida +1h) — só o destino final em casos de silêncio total.
-- Não vou alterar o fluxo de escalada quando o cliente está conversando ativamente com a IA e ela trava.
+### Gate de template
+O `send-whatsapp-template` já bloqueia disparo se template não estiver `approved`. Enquanto `link_pagamento_cliente` estiver pending/rascunho, o app exibirá o alerta amarelo automaticamente — comportamento desejado.
+
+---
+
+## Resumo técnico (arquivos)
+
+**Atrium (este projeto):**
+- `supabase/functions/criar-solicitacao-loja/index.ts` — adicionar bloco de upsert de contato + chamada `send-whatsapp-template` após `OB` retornar com sucesso, somente quando `acao.endpoint === 'payment-links'`.
+- Migração SQL (UPDATE em `bot_fluxos` para etapas do `link_pagamento`) + INSERT em `whatsapp_templates` (`link_pagamento_cliente` rascunho).
+
+**InFoco Messenger (projeto cross):**
+- `src/App.tsx` — nova rota `/agenda`.
+- `src/components/AppShell.tsx` — novo item de nav `Agenda` (loja-only).
+- `src/pages/LojaAgenda.tsx` — nova página (calendário mensal + lista do dia + cards).
+- `src/pages/LojaNovaDemanda.tsx` — máscara/validação extra para `cliente_whatsapp`; exibir status de envio ao cliente na tela de sucesso.
+
+**Memória:**
+- Atualizar `mem://integracao/templates-whatsapp-catalogo.md` com o novo template `link_pagamento_cliente`.
+
+---
+
+## Pontos a confirmar
+
+1. O campo `cliente` deve passar a obrigatório (hoje é opcional)? — proposta sim, já que vamos endereçar o link no nome do cliente.
+2. Calendário deve incluir agendamentos com status terminais (`compareceu`, `cancelado`, `no_show`) ou só ativos? — proposta: mostrar todos com filtro padrão "ativos" e toggle "mostrar histórico".
+3. Loja deve poder editar/cancelar agendamento direto pelo card? — proposta inicial: somente leitura + ação "confirmar presença"; edição fica para iteração futura.
