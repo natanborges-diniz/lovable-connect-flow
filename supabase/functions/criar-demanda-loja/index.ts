@@ -105,19 +105,28 @@ serve(async (req) => {
     });
 
     // Resolve destinatários internos (app Atrium Messenger)
-    const { data: destinatarios } = await supabase
-      .rpc("resolver_destinatarios_loja", { _loja_nome: loja_nome });
+    // Em modo grupo, união dos usuários de todas as lojas do snapshot
+    const lojasDestino: string[] = isGrupo
+      ? lojasGrupo!.map((l) => l.nome_loja)
+      : [loja_nome];
 
-    const dests = (destinatarios || []) as Array<{ user_id: string; setor_id: string | null }>;
-    console.log(`[criar-demanda-loja] Demanda ${protocolo} → ${dests.length} destinatário(s) interno(s)`);
+    const destSet = new Map<string, { user_id: string; setor_id: string | null }>();
+    for (const ln of lojasDestino) {
+      const { data } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: ln });
+      for (const d of (data || []) as Array<{ user_id: string; setor_id: string | null }>) {
+        if (!destSet.has(d.user_id)) destSet.set(d.user_id, d);
+      }
+    }
+    const dests = Array.from(destSet.values());
+    console.log(`[criar-demanda-loja] Demanda ${protocolo} (${isGrupo ? "GRUPO " + lojasDestino.length + " lojas" : loja_nome}) → ${dests.length} destinatário(s)`);
 
     // Conversa-demanda: mesma conversa_id para todos os destinatários (broadcast)
     const conversa_id = `demanda_${demanda.id}`;
-    const titulo = `Nova demanda ${protocolo} (${loja_nome})`;
-    const corpoChat = `📌 *${protocolo}* — ${loja_nome}\nCliente: ${clienteNome}\n\n${pergunta}\n\n_Responda aqui ou envie /encerrar para fechar._`;
+    const headerLoja = isGrupo ? `Grupo (${lojasDestino.length} lojas)` : loja_nome;
+    const titulo = `Nova demanda ${protocolo} (${headerLoja})`;
+    const corpoChat = `📌 *${protocolo}* — ${headerLoja}\nCliente: ${clienteNome}\n\n${pergunta}\n\n_Responda aqui ou envie /encerrar para fechar._`;
 
     for (const d of dests) {
-      // Notificação push-friendly
       await supabase.from("notificacoes").insert({
         usuario_id: d.user_id,
         setor_id: d.setor_id,
@@ -127,8 +136,6 @@ serve(async (req) => {
         referencia_id: demanda.id,
       });
 
-      // Mensagem interna na conversa-demanda (broadcast). O bridge ignora pois o conteúdo
-      // contém o protocolo + a pergunta original (heurística de bootstrap).
       await supabase.from("mensagens_internas").insert({
         remetente_id: user.id,
         destinatario_id: d.user_id,
@@ -138,12 +145,12 @@ serve(async (req) => {
     }
 
     if (dests.length === 0) {
-      console.warn(`[criar-demanda-loja] Nenhum destinatário interno para "${loja_nome}".`);
+      console.warn(`[criar-demanda-loja] Nenhum destinatário interno para "${headerLoja}".`);
       await supabase.from("demanda_mensagens").insert({
         demanda_id: demanda.id,
         direcao: "sistema",
         autor_nome: "Sistema",
-        conteudo: `⚠️ Loja "${loja_nome}" sem usuários internos vinculados no app Atrium Messenger. Cadastre em Configurações → Lojas / Usuários.`,
+        conteudo: `⚠️ ${headerLoja} sem usuários internos vinculados no app InFoco Messenger. Cadastre em Configurações → Lojas / Usuários.`,
       });
     }
 
