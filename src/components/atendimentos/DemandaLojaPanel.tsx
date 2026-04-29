@@ -19,10 +19,12 @@ interface Demanda {
   loja_nome: string;
   loja_telefone: string;
   pergunta: string;
+  assunto?: string | null;
   status: string;
   vista_pelo_operador: boolean;
   ultima_mensagem_loja_at: string | null;
   created_at: string;
+  metadata?: { grupo?: boolean; lojas_nomes?: string[] } | null;
 }
 
 interface DemandaMsg {
