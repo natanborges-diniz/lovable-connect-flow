@@ -99,7 +99,7 @@ export function useMensagensInternas() {
     },
   });
 
-  // Total unread count
+  // Total unread count (apenas chat 1:1 — exclui demanda_* e ponte_*)
   const totalNaoLidas = useQuery({
     queryKey: ["total-nao-lidas", uid],
     enabled: !!uid && isAuthReady,
@@ -108,7 +108,9 @@ export function useMensagensInternas() {
         .from("mensagens_internas")
         .select("*", { count: "exact", head: true })
         .eq("destinatario_id", uid!)
-        .eq("lida", false);
+        .eq("lida", false)
+        .not("conversa_id", "like", "demanda_%")
+        .not("conversa_id", "like", "ponte_%");
       if (error) throw error;
       return count || 0;
     },
