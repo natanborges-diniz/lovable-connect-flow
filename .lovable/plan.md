@@ -139,8 +139,8 @@ UI: botão "↗ Encaminhar ao cliente" em cada bolha do operador (Atrium). v1 = 
 ### Atrium (este projeto)
 | Arquivo | Tipo | Mudança |
 |---|---|---|
-| `supabase/functions/criar-solicitacao-loja/index.ts` | NOVO | Porta lógica dormente de `bot-lojas` (Fluxo A) |
-| `supabase/functions/criar-demanda-acionamento/index.ts` | NOVO | Cria demanda (loja única ou grupo) — Fluxo B |
+| `supabase/functions/criar-solicitacao-loja/index.ts` | ✅ FEITO | Fluxo A: porta lógica dormente de `bot-lojas`. JWT loja/colaborador, caso `link_pagamento` chama OB |
+| `supabase/functions/criar-demanda-loja/index.ts` | ✅ FEITO | Fluxo B (renomeado de `criar-demanda-acionamento`): loja única + grupo com snapshot |
 | `supabase/functions/encaminhar-resposta-cliente/index.ts` | NOVO | Encaminha bolha de loja ao WhatsApp do cliente |
 | `supabase/functions/encerrar-demanda-loja/index.ts` | EDIT | Aceita `encerrado_por: operador|loja|admin` |
 | `src/components/atendimentos/AcionarLojaDialog.tsx` | NOVO | Dialog de abertura (loja/grupo) |
