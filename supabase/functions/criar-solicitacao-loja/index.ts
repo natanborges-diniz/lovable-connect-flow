@@ -130,7 +130,7 @@ serve(async (req) => {
 
     // ── Caso especial: link_pagamento via Optical Business ──
     let extraMetadata: Record<string, unknown> = {};
-    let respostaCliente: { url?: string; payment_link_id?: string } = {};
+    let respostaCliente: { url?: string; payment_link_id?: string; cliente_envio_status?: string; cliente_envio_erro?: string | null } = {};
     if (acao.endpoint === "payment-links") {
       if (!OB_URL || !OB_SECRET) {
         return new Response(JSON.stringify({ error: "Integração de pagamento não configurada" }), {
@@ -164,6 +164,124 @@ serve(async (req) => {
       }
       respostaCliente = { url: obData.url_pagamento, payment_link_id: obData.id };
       extraMetadata = { payment_link_id: obData.id, url: obData.url_pagamento };
+
+      // ── Envio do link ao cliente final via WhatsApp template ──
+      const rawTel = String(dados.cliente_whatsapp || "").replace(/\D/g, "");
+      const nomeClienteRaw = String(dados.cliente || "").trim();
+      let envioClienteStatus: "enviado" | "falhou" | "pulado" = "pulado";
+      let envioClienteErro: string | null = null;
+
+      if (rawTel.length >= 10 && nomeClienteRaw) {
+        // Normaliza para padrão internacional BR (55 + DDD + número)
+        const telNormalizado = rawTel.startsWith("55") ? rawTel : `55${rawTel}`;
+
+        try {
+          // Upsert contato (PK telefone)
+          const { data: contatoExist } = await supabase
+            .from("contatos")
+            .select("id, nome")
+            .eq("telefone", telNormalizado)
+            .maybeSingle();
+
+          let contatoClienteId = contatoExist?.id;
+          if (!contatoClienteId) {
+            const { data: novoCont, error: ncErr } = await supabase
+              .from("contatos")
+              .insert({
+                nome: nomeClienteRaw,
+                telefone: telNormalizado,
+                tipo: "cliente",
+                metadata: {
+                  origem: "link_pagamento_loja",
+                  loja_origem: nomeLoja,
+                  payment_link_id: obData.id,
+                },
+              })
+              .select("id")
+              .single();
+            if (ncErr) throw ncErr;
+            contatoClienteId = novoCont.id;
+          } else if (!contatoExist?.nome || contatoExist.nome.trim().length < 2) {
+            await supabase
+              .from("contatos")
+              .update({ nome: nomeClienteRaw })
+              .eq("id", contatoClienteId);
+          }
+
+          // Formata valor
+          const valorNum = Number(String(dados.valor).replace(",", "."));
+          const valorFmt = Number.isFinite(valorNum)
+            ? valorNum.toFixed(2).replace(".", ",")
+            : String(dados.valor);
+          const primeiroNome = nomeClienteRaw.split(/\s+/)[0];
+
+          // Dispara template via send-whatsapp-template (gate de aprovação aplicado lá)
+          const tplRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${SERVICE}`,
+            },
+            body: JSON.stringify({
+              contato_id: contatoClienteId,
+              template_name: "link_pagamento_cliente",
+              template_params: [
+                primeiroNome,
+                "Óticas Diniz",
+                valorFmt,
+                String(dados.descricao || "").slice(0, 200),
+                obData.url_pagamento,
+              ],
+              language: "pt_BR",
+            }),
+          });
+          const tplJson = await tplRes.json().catch(() => ({}));
+          if (!tplRes.ok || tplJson?.status === "blocked_template_not_approved") {
+            envioClienteStatus = "falhou";
+            envioClienteErro = tplJson?.template_status
+              ? `template_${tplJson.template_status}`
+              : tplJson?.error || `http_${tplRes.status}`;
+          } else if (tplJson?.status === "sent") {
+            envioClienteStatus = "enviado";
+          } else {
+            envioClienteStatus = "falhou";
+            envioClienteErro = tplJson?.error || "resposta_inesperada";
+          }
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoClienteId,
+            tipo:
+              envioClienteStatus === "enviado"
+                ? "link_pagamento_enviado_cliente"
+                : "link_pagamento_envio_falhou",
+            descricao:
+              envioClienteStatus === "enviado"
+                ? `Link de pagamento enviado para ${primeiroNome} (${nomeLoja})`
+                : `Falha ao enviar link de pagamento: ${envioClienteErro}`,
+            metadata: {
+              payment_link_id: obData.id,
+              loja_nome: nomeLoja,
+              telefone_mascarado: telNormalizado.slice(0, 4) + "****" + telNormalizado.slice(-2),
+              erro: envioClienteErro,
+            },
+          });
+        } catch (e) {
+          console.error("[criar-solicitacao-loja] envio cliente falhou", e);
+          envioClienteStatus = "falhou";
+          envioClienteErro = e instanceof Error ? e.message : "erro_desconhecido";
+        }
+      }
+
+      respostaCliente = {
+        ...respostaCliente,
+        cliente_envio_status: envioClienteStatus,
+        cliente_envio_erro: envioClienteErro,
+      } as typeof respostaCliente & { cliente_envio_status?: string; cliente_envio_erro?: string | null };
+      extraMetadata = {
+        ...extraMetadata,
+        cliente_whatsapp: rawTel,
+        cliente_envio_status: envioClienteStatus,
+      };
     }
 
     // ── Resolve coluna destino (primeira do setor do fluxo) ──

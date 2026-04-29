@@ -18,6 +18,7 @@ Catálogo local sincronizado com a Meta. Campos: nome (único), categoria (UTILI
 - `comprovante_pagamento_loja` → payment-webhook
 - `demanda_loja_nova` → criar-demanda-loja
 - `demanda_loja_encerrada` → encerrar-demanda-loja
+- `link_pagamento_cliente` → criar-solicitacao-loja (envia link gerado pela loja direto ao cliente final, vars: nome_cliente, nome_loja, valor, descricao, url)
 
 **MARKETING**
 - `retomada_contexto_lead` → vendas-recuperacao-cron
