@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Pin, Loader2, Check, ArrowRight, X, Users } from "lucide-react";
+import { Pin, Loader2, Check, ArrowRight, X, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -15,6 +15,13 @@ const dirColors: Record<string, string> = {
   loja_para_operador: "bg-muted text-foreground mr-auto",
   sistema: "bg-amber-500/10 text-amber-700 dark:text-amber-300 mx-auto text-center text-[11px] italic",
 };
+
+// Cor determinística por nome de loja (HSL com saturação/luminosidade fixas)
+function lojaTone(nome: string): string {
+  let h = 0;
+  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) % 360;
+  return `hsl(${h} 70% 45%)`;
+}
 
 export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
   const { data: msgs = [] } = useDemandaMensagens(demanda.id);
