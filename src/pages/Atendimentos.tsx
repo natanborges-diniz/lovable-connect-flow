@@ -340,6 +340,26 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             </PopoverContent>
           </Popover>
 
+          {(atendimento as any)?.modo === "humano" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px] px-2"
+              onClick={() => setAcionarOpen(true)}
+              title="Abrir demanda interna para uma ou várias lojas"
+            >
+              <Pin className="h-3 w-3 mr-1 text-primary" />
+              Acionar loja(s)
+            </Button>
+          )}
+
+          <AcionarLojaDialog
+            open={acionarOpen}
+            onOpenChange={setAcionarOpen}
+            atendimentoId={id}
+            onCreated={() => setDemandasOpen(true)}
+          />
+
           {atendimento?.canal === "whatsapp" && atendimento?.contato_id && (
             <ReconectarTemplateButton
               atendimentoId={id}
