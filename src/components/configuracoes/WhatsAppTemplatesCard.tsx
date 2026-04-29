@@ -65,6 +65,7 @@ interface CatalogoTemplate {
   motivo_rejeicao: string | null;
   funcao_alvo: string | null;
   ultima_sincronizacao: string | null;
+  descontinuado?: boolean;
 }
 
 interface MetaTemplate {
@@ -77,11 +78,24 @@ interface MetaTemplate {
   rejected_reason?: string;
 }
 
+interface TemplateAlias {
+  alias: string;
+  template_nome: string;
+  descricao: string | null;
+  atualizado_em: string;
+}
+
 const statusConfig = {
   approved: { label: "Aprovado", icon: CheckCircle2, className: "bg-success-soft text-success border-success/20" },
   pending: { label: "Em análise Meta", icon: Clock, className: "bg-warning-soft text-warning border-warning/20" },
   rejected: { label: "Reprovado", icon: XCircle, className: "bg-destructive/10 text-destructive border-destructive/20" },
   rascunho: { label: "Rascunho", icon: AlertCircle, className: "bg-muted text-muted-foreground border-border" },
+};
+
+const categoriaConfig = {
+  UTILITY:        { label: "UTILITY · econômico",   className: "bg-success-soft text-success border-success/30" },
+  MARKETING:      { label: "MARKETING · premium",   className: "bg-warning-soft text-warning border-warning/30" },
+  AUTHENTICATION: { label: "AUTHENTICATION",        className: "bg-muted text-muted-foreground border-border" },
 };
 
 function StatusBadge({ status }: { status: CatalogoTemplate["status"] }) {
@@ -92,6 +106,11 @@ function StatusBadge({ status }: { status: CatalogoTemplate["status"] }) {
       <Icon className="h-3 w-3" /> {cfg.label}
     </Badge>
   );
+}
+
+function CategoriaBadge({ categoria }: { categoria: CatalogoTemplate["categoria"] }) {
+  const cfg = categoriaConfig[categoria];
+  return <Badge variant="outline" className={`${cfg.className} text-[10px]`}>{cfg.label}</Badge>;
 }
 
 function buildPreviewComponents(t: CatalogoTemplate) {
