@@ -410,14 +410,9 @@ function detectForcedToolIntent(
     }
   }
 
-  // Scheduling keywords
-  // ⚠️ Em contexto LC com receita salva, "reservar" = fechar pedido (humano), NÃO agendar visita.
-  // Esse caso já é capturado acima como fechamento_lc; aqui ignoramos "reservar" se LC+receita.
+  // Scheduling keywords — funciona igual para óculos e LC.
+  // (LC agora vai à loja para retirar/pagar como qualquer outro pedido.)
   if (/\b(agendar|marcar|hor[aá]rio|amanh[aã]|hoje|essa semana|pode marcar|pode agendar|reservar)\b/.test(t)) {
-    if (hasReceitas && isLCContext) {
-      // LC + receita: "reservar/marcar" também vira fechamento humano, NUNCA agendamento de visita.
-      return { tool: "fechamento_lc", reason: "cliente pediu reservar/marcar em contexto LC com receita" };
-    }
     return { tool: "agendar_cliente_intent", reason: "cliente quer agendar" };
   }
 
