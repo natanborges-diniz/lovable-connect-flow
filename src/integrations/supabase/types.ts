@@ -1821,6 +1821,27 @@ export type Database = {
           },
         ]
       }
+      template_aliases: {
+        Row: {
+          alias: string
+          atualizado_em: string
+          descricao: string | null
+          template_nome: string
+        }
+        Insert: {
+          alias: string
+          atualizado_em?: string
+          descricao?: string | null
+          template_nome: string
+        }
+        Update: {
+          alias?: string
+          atualizado_em?: string
+          descricao?: string | null
+          template_nome?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -1861,6 +1882,7 @@ export type Database = {
           body: string
           categoria: string
           created_at: string
+          descontinuado: boolean
           funcao_alvo: string | null
           id: string
           idioma: string
@@ -1875,6 +1897,7 @@ export type Database = {
           body: string
           categoria: string
           created_at?: string
+          descontinuado?: boolean
           funcao_alvo?: string | null
           id?: string
           idioma?: string
@@ -1889,6 +1912,7 @@ export type Database = {
           body?: string
           categoria?: string
           created_at?: string
+          descontinuado?: boolean
           funcao_alvo?: string | null
           id?: string
           idioma?: string
@@ -1925,6 +1949,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      get_template_by_alias: { Args: { _alias: string }; Returns: string }
       get_user_setor_ids: { Args: { _user_id: string }; Returns: string[] }
       has_role: {
         Args: {

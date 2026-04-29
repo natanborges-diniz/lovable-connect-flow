@@ -65,6 +65,7 @@ interface CatalogoTemplate {
   motivo_rejeicao: string | null;
   funcao_alvo: string | null;
   ultima_sincronizacao: string | null;
+  descontinuado?: boolean;
 }
 
 interface MetaTemplate {
@@ -77,11 +78,24 @@ interface MetaTemplate {
   rejected_reason?: string;
 }
 
+interface TemplateAlias {
+  alias: string;
+  template_nome: string;
+  descricao: string | null;
+  atualizado_em: string;
+}
+
 const statusConfig = {
   approved: { label: "Aprovado", icon: CheckCircle2, className: "bg-success-soft text-success border-success/20" },
   pending: { label: "Em análise Meta", icon: Clock, className: "bg-warning-soft text-warning border-warning/20" },
   rejected: { label: "Reprovado", icon: XCircle, className: "bg-destructive/10 text-destructive border-destructive/20" },
   rascunho: { label: "Rascunho", icon: AlertCircle, className: "bg-muted text-muted-foreground border-border" },
+};
+
+const categoriaConfig = {
+  UTILITY:        { label: "UTILITY · econômico",   className: "bg-success-soft text-success border-success/30" },
+  MARKETING:      { label: "MARKETING · premium",   className: "bg-warning-soft text-warning border-warning/30" },
+  AUTHENTICATION: { label: "AUTHENTICATION",        className: "bg-muted text-muted-foreground border-border" },
 };
 
 function StatusBadge({ status }: { status: CatalogoTemplate["status"] }) {
@@ -92,6 +106,11 @@ function StatusBadge({ status }: { status: CatalogoTemplate["status"] }) {
       <Icon className="h-3 w-3" /> {cfg.label}
     </Badge>
   );
+}
+
+function CategoriaBadge({ categoria }: { categoria: CatalogoTemplate["categoria"] }) {
+  const cfg = categoriaConfig[categoria];
+  return <Badge variant="outline" className={`${cfg.className} text-[10px]`}>{cfg.label}</Badge>;
 }
 
 function buildPreviewComponents(t: CatalogoTemplate) {
@@ -164,17 +183,24 @@ export function WhatsAppTemplatesCard() {
     },
   });
 
+  const [mostrarDescontinuados, setMostrarDescontinuados] = useState(false);
+
   const filtered = useMemo(() => {
     if (!catalogo) return [];
-    if (filtroCategoria === "all") return catalogo;
-    return catalogo.filter((t) => t.categoria === filtroCategoria);
-  }, [catalogo, filtroCategoria]);
+    let out = catalogo;
+    if (!mostrarDescontinuados) out = out.filter((t) => !t.descontinuado);
+    if (filtroCategoria !== "all") out = out.filter((t) => t.categoria === filtroCategoria);
+    return out;
+  }, [catalogo, filtroCategoria, mostrarDescontinuados]);
 
   const counters = useMemo(() => {
-    const c = { total: 0, approved: 0, pending: 0, rejected: 0, rascunho: 0 };
+    const c = { total: 0, approved: 0, pending: 0, rejected: 0, rascunho: 0, utility: 0, marketing: 0 };
     catalogo?.forEach((t) => {
+      if (t.descontinuado) return;
       c.total++;
       c[t.status]++;
+      if (t.categoria === "UTILITY") c.utility++;
+      if (t.categoria === "MARKETING") c.marketing++;
     });
     return c;
   }, [catalogo]);
@@ -385,7 +411,21 @@ export function WhatsAppTemplatesCard() {
         </div>
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="space-y-4">
+        <AliasesSection catalogo={catalogo || []} />
+
+        <div className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={mostrarDescontinuados}
+              onChange={(e) => setMostrarDescontinuados(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            Mostrar descontinuados
+          </label>
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -423,6 +463,7 @@ export function WhatsAppTemplatesCard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <CategoriaBadge categoria={t.categoria} />
                     <StatusBadge status={t.status} />
                     {t.status === "rascunho" && (
                       <Button
@@ -583,6 +624,11 @@ function TemplateForm({ initial, onClose }: { initial: CatalogoTemplate | null; 
             <SelectItem value="AUTHENTICATION">Authentication (OTP)</SelectItem>
           </SelectContent>
         </Select>
+        <div className="text-xs bg-muted/40 border border-border rounded p-2 space-y-1">
+          <p><strong className="text-success">UTILITY</strong> · transacional, ~5–10× mais barato. Use para: confirmação/lembrete de agendamento, recibo de pagamento, retomada de tópico que o cliente já estava conversando, status de operação em curso.</p>
+          <p><strong className="text-warning">MARKETING</strong> · promocional, tarifa premium. Use APENAS para: campanhas, ofertas, anúncio de novo número, reativação fria sem contexto prévio.</p>
+          <p className="opacity-70">Na dúvida, escolha UTILITY. A Meta reclassifica automaticamente se discordar.</p>
+        </div>
       </div>
       <div className="space-y-2">
         <Label>Corpo da Mensagem *</Label>
@@ -628,5 +674,101 @@ function TemplateForm({ initial, onClose }: { initial: CatalogoTemplate | null; 
         Após criar, clique em <strong>Submeter</strong> na lista para enviar à Meta para aprovação.
       </p>
     </form>
+  );
+}
+
+// ── Aliases section: maps logical name → real approved template ──
+function AliasesSection({ catalogo }: { catalogo: CatalogoTemplate[] }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+
+  const { data: aliases } = useQuery({
+    queryKey: ["template-aliases"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("template_aliases")
+        .select("*")
+        .order("alias", { ascending: true });
+      if (error) throw error;
+      return (data || []) as TemplateAlias[];
+    },
+  });
+
+  const updateAlias = useMutation({
+    mutationFn: async ({ alias, template_nome }: { alias: string; template_nome: string }) => {
+      const { error } = await supabase
+        .from("template_aliases")
+        .update({ template_nome, atualizado_em: new Date().toISOString() })
+        .eq("alias", alias);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["template-aliases"] });
+      toast.success("Alias atualizado. Próximo disparo já usa o novo template.");
+    },
+    onError: (e: any) => toast.error("Erro: " + e.message),
+  });
+
+  if (!aliases?.length) return null;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-between">
+          <span className="flex items-center gap-2">
+            <Wand2 className="h-4 w-4" />
+            Aliases lógicos ({aliases.length}) — repointar templates sem redeploy
+          </span>
+          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2 space-y-2">
+        <div className="text-xs bg-muted/40 border border-border rounded p-2">
+          Crons disparam pelo <strong>alias</strong>. Quando uma versão UTILITY for aprovada pela Meta,
+          troque o alias para apontar para o novo nome — sem precisar redeployar nada.
+        </div>
+        {aliases.map((a) => {
+          const candidatos = catalogo.filter(
+            (t) => t.status === "approved" && (t.nome === a.alias || t.nome.startsWith(a.alias))
+          );
+          const atual = catalogo.find((t) => t.nome === a.template_nome);
+          return (
+            <div key={a.alias} className="flex items-center gap-2 p-2 border border-border rounded-md text-xs">
+              <div className="flex-1 min-w-0">
+                <p className="font-mono font-semibold truncate">{a.alias}</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className="text-muted-foreground">→</span>
+                  <span className="font-mono truncate">{a.template_nome}</span>
+                  {atual && <CategoriaBadge categoria={atual.categoria} />}
+                </div>
+              </div>
+              <Select
+                value={a.template_nome}
+                onValueChange={(v) => {
+                  if (v !== a.template_nome) updateAlias.mutate({ alias: a.alias, template_nome: v });
+                }}
+              >
+                <SelectTrigger className="h-7 w-[200px]">
+                  <SelectValue placeholder="Trocar template…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidatos.length === 0 ? (
+                    <SelectItem value={a.template_nome} disabled>
+                      {a.template_nome} (atual)
+                    </SelectItem>
+                  ) : (
+                    candidatos.map((t) => (
+                      <SelectItem key={t.id} value={t.nome}>
+                        {t.nome} · {t.categoria}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        })}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
