@@ -128,6 +128,57 @@ serve(async (req) => {
     const acao = (fluxo as any).acao_final || {};
     const tipoSolicitacao: string = acao.tipo_solicitacao || fluxoChave;
 
+    // ── Gate "Gerar Boleto" exige Consulta de CPF aprovada ──
+    let consultaCpfOrigem: any = null;
+    if (fluxoChave === "gerar_boleto") {
+      const consultaId = (dados as any).consulta_cpf_id as string | undefined;
+      if (!consultaId) {
+        return new Response(JSON.stringify({
+          error: "Selecione uma Consulta de CPF aprovada para gerar o boleto.",
+          code: "CONSULTA_CPF_OBRIGATORIA",
+        }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const { data: consulta } = await supabase
+        .from("solicitacoes")
+        .select("id, tipo, metadata, created_at")
+        .eq("id", consultaId)
+        .maybeSingle();
+      if (!consulta || consulta.tipo !== "consulta_cpf") {
+        return new Response(JSON.stringify({ error: "Consulta de CPF não encontrada.", code: "CONSULTA_NAO_ENCONTRADA" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const meta = (consulta.metadata || {}) as Record<string, any>;
+      if (meta.resultado_consulta !== "aprovado") {
+        return new Response(JSON.stringify({ error: "A Consulta de CPF não está aprovada.", code: "CONSULTA_NAO_APROVADA" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (meta.boleto_solicitacao_id) {
+        return new Response(JSON.stringify({ error: "Esta consulta já gerou um boleto.", code: "CONSULTA_JA_USADA" }), {
+          status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const lojaConsulta = String(meta.loja_nome || "").trim().toLowerCase();
+      if (lojaConsulta && lojaConsulta !== nomeLoja.trim().toLowerCase()) {
+        return new Response(JSON.stringify({ error: "A consulta pertence a outra loja.", code: "LOJA_DIVERGENTE" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const idadeDias = (Date.now() - new Date(consulta.created_at).getTime()) / 86400000;
+      if (idadeDias > 60) {
+        return new Response(JSON.stringify({ error: "Consulta expirada (mais de 60 dias).", code: "CONSULTA_EXPIRADA" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      consultaCpfOrigem = consulta;
+      // Herda dados da consulta — sobrescreve qualquer input do cliente
+      (dados as any).cpf = meta.cpf ?? (dados as any).cpf;
+      (dados as any).cliente = meta.nome_cliente ?? meta.cliente ?? (dados as any).cliente;
+      (dados as any).valor = meta.valor_aprovado ?? meta.valor ?? (dados as any).valor;
+      (dados as any).consulta_cpf_id = consultaId;
+    }
+
     // ── Caso especial: link_pagamento via Optical Business ──
     let extraMetadata: Record<string, unknown> = {};
     let respostaCliente: { url?: string; payment_link_id?: string; cliente_envio_status?: string; cliente_envio_erro?: string | null } = {};
