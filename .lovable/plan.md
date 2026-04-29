@@ -61,3 +61,16 @@ Arquivo: `src/components/atendimentos/DemandaThreadView.tsx`
 - Criar: `src/components/atendimentos/AcionarLojaDialog.tsx`, `src/hooks/useLojas.ts`
 - Editar: `src/components/atendimentos/DemandaThreadView.tsx` (header colapsável + autor por loja), `src/pages/Atendimentos.tsx` (botão no header), possivelmente `src/pages/Demandas.tsx` (botão desabilitado com tooltip)
 - Possivelmente editar a EF que recebe respostas da loja para gravar `metadata.loja_nome` em `demanda_mensagens` (verificar antes de alterar).
+
+---
+
+## Turno 2026-04-29 — Fluxo B UI completo
+- Criado `AcionarLojaDialog` (loja única OU grupo, busca + atalhos).
+- Criado hook `useLojas` (distinct por nome_loja).
+- `DemandaThreadView`: header de grupo colapsável com badges coloridas por loja; mensagens inbound em modo grupo agora prefixam loja_nome com cor determinística (estilo grupo de WhatsApp).
+- `bridge-demanda`: agora grava `metadata.loja_nome` em `demanda_mensagens` ao espelhar respostas vindas da loja (via lookup `user_roles.loja_nome`).
+- `Atendimentos`: novo botão "Acionar loja(s)" no header do detalhe (visível só em modo humano), abre o diálogo.
+
+Pendências pequenas (próximo turno):
+- Anexos no `AcionarLojaDialog` (upload p/ `whatsapp-media`).
+- Botão na lista `/demandas` (desabilitado quando não há atendimento humano em foco).
