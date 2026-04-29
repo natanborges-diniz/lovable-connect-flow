@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
 import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
+import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
@@ -160,6 +161,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [sendingOutbound, setSendingOutbound] = useState(false);
   const [resumoOpen, setResumoOpen] = useState(false);
   const [demandasOpen, setDemandasOpen] = useState(false);
+  const [acionarOpen, setAcionarOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
@@ -337,6 +339,26 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
               <DemandaLojaPanel atendimentoId={id} modo={(atendimento as any)?.modo || "ia"} />
             </PopoverContent>
           </Popover>
+
+          {(atendimento as any)?.modo === "humano" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px] px-2"
+              onClick={() => setAcionarOpen(true)}
+              title="Abrir demanda interna para uma ou várias lojas"
+            >
+              <Pin className="h-3 w-3 mr-1 text-primary" />
+              Acionar loja(s)
+            </Button>
+          )}
+
+          <AcionarLojaDialog
+            open={acionarOpen}
+            onOpenChange={setAcionarOpen}
+            atendimentoId={id}
+            onCreated={() => setDemandasOpen(true)}
+          />
 
           {atendimento?.canal === "whatsapp" && atendimento?.contato_id && (
             <ReconectarTemplateButton

@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Pin, Loader2, Check, ArrowRight, X, Users } from "lucide-react";
+import { Pin, Loader2, Check, ArrowRight, X, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -16,12 +16,20 @@ const dirColors: Record<string, string> = {
   sistema: "bg-amber-500/10 text-amber-700 dark:text-amber-300 mx-auto text-center text-[11px] italic",
 };
 
+// Cor determinística por nome de loja (HSL com saturação/luminosidade fixas)
+function lojaTone(nome: string): string {
+  let h = 0;
+  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) % 360;
+  return `hsl(${h} 70% 45%)`;
+}
+
 export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
   const { data: msgs = [] } = useDemandaMensagens(demanda.id);
   const [forwardText, setForwardText] = useState("");
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   const [forwarding, setForwarding] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [expandLojas, setExpandLojas] = useState(false);
 
   const isGrupo = demanda.metadata?.grupo === true;
   const lojasNomes: string[] = demanda.metadata?.lojas_nomes ?? [];
@@ -103,9 +111,30 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
           {demanda.assunto && ` • ${demanda.assunto}`}
         </p>
         {isGrupo && lojasNomes.length > 0 && (
-          <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground/80">
-            Lojas: {lojasNomes.join(", ")}
-          </p>
+          <div className="mt-1.5">
+            <button
+              type="button"
+              onClick={() => setExpandLojas((v) => !v)}
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              {expandLojas ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {expandLojas ? "ocultar lojas" : `ver ${lojasNomes.length} lojas`}
+            </button>
+            {expandLojas && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {lojasNomes.map((n) => (
+                  <Badge
+                    key={n}
+                    variant="outline"
+                    className="text-[10px]"
+                    style={{ borderColor: lojaTone(n), color: lojaTone(n) }}
+                  >
+                    {n}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -127,9 +156,23 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
                   isSelected && "ring-2 ring-primary ring-offset-1",
                 )}
               >
-                {m.autor_nome && m.direcao !== "sistema" && (
-                  <p className="mb-0.5 text-[10px] font-medium opacity-70">{m.autor_nome}</p>
-                )}
+                {m.autor_nome && m.direcao !== "sistema" && (() => {
+                  const lojaNome = (m as any).metadata?.loja_nome as string | undefined;
+                  const showLoja = isGrupo && m.direcao === "loja_para_operador" && lojaNome;
+                  return (
+                    <p className="mb-0.5 flex items-center gap-1 text-[10px] font-medium opacity-80">
+                      {showLoja && (
+                        <span
+                          className="rounded-sm px-1 py-px text-[9px] font-semibold text-white"
+                          style={{ backgroundColor: lojaTone(lojaNome!) }}
+                        >
+                          {lojaNome}
+                        </span>
+                      )}
+                      <span>{m.autor_nome}</span>
+                    </p>
+                  );
+                })()}
                 <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
                 {m.anexo_url && (
                   <a href={m.anexo_url} target="_blank" rel="noreferrer" className="mt-1 block text-[11px] underline opacity-80">

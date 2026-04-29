@@ -107,8 +107,9 @@ serve(async (req) => {
       });
     }
 
-    // Resolve nome do autor
+    // Resolve nome do autor + loja (em demandas de grupo, identifica de qual loja a mensagem veio)
     let autorNome = "Operador";
+    let autorLojaNome: string | null = null;
     if (!isOperador) autorNome = demanda.loja_nome;
     if (remetente_id) {
       const { data: prof } = await supabase
@@ -117,6 +118,21 @@ serve(async (req) => {
         .eq("id", remetente_id)
         .single();
       if (prof?.nome) autorNome = prof.nome;
+
+      // Lookup loja do remetente em user_roles (qualquer role com loja_nome preenchido)
+      if (!isOperador) {
+        const { data: roles } = await supabase
+          .from("user_roles")
+          .select("loja_nome")
+          .eq("user_id", remetente_id)
+          .not("loja_nome", "is", null)
+          .limit(1);
+        if (roles && roles[0]?.loja_nome) {
+          autorLojaNome = roles[0].loja_nome;
+        } else if (!demanda.metadata?.grupo) {
+          autorLojaNome = demanda.loja_nome;
+        }
+      }
     }
 
     // Comandos textuais da loja
@@ -161,7 +177,11 @@ serve(async (req) => {
       anexo_url: anexo_url || null,
       anexo_mime: anexo_tipo || null,
       tipo_conteudo: anexo_url ? (String(anexo_tipo || "").startsWith("image") ? "image" : "file") : "text",
-      metadata: { via_bridge: true, origin_msg_id: mensagem_interna_id },
+      metadata: {
+        via_bridge: true,
+        origin_msg_id: mensagem_interna_id,
+        ...(autorLojaNome ? { loja_nome: autorLojaNome } : {}),
+      },
     });
 
     // Atualiza demanda + notifica solicitante quando vier da loja
