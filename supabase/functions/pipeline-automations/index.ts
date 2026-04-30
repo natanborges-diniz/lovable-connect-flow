@@ -147,7 +147,29 @@ serve(async (req) => {
     for (const auto of automacoes) {
       const config = auto.config || {};
 
+      // ── App-only routing for B2B contacts (loja/colaborador sintéticos) ──
+      // Quando o contato é interno (loja/colaborador), o retorno NUNCA vai por WhatsApp.
+      // Substitui enviar_template/enviar_mensagem por aviso na demanda + notificação in-app.
+      const contatoInterno = contato?.tipo === "loja" || contato?.tipo === "colaborador";
+      const podeNotificarAppAuto =
+        contatoInterno &&
+        entity_type === "solicitacao" &&
+        (auto.tipo_acao === "enviar_template" || auto.tipo_acao === "enviar_mensagem");
+
       try {
+        if (podeNotificarAppAuto || auto.tipo_acao === "notificar_loja_app") {
+          await notificarLojaApp({
+            supabase,
+            solicitacao,
+            contato,
+            colunaId: coluna_id,
+            config,
+            tipoAcao: auto.tipo_acao,
+          });
+          results.push(`app_loja:${auto.tipo_acao}`);
+          continue;
+        }
+
         switch (auto.tipo_acao) {
           case "enviar_template": {
             if (!contato_id) break;
