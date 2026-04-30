@@ -190,7 +190,7 @@ export function SolicitarAutorizacaoDialog({
         },
       });
 
-      // 3. Notificação push
+      // 3. Notificação push para o autorizador
       await supabase.from("notificacoes").insert({
         usuario_id: escolhido.id,
         tipo: "autorizacao_excecao",
@@ -198,6 +198,59 @@ export function SolicitarAutorizacaoDialog({
         mensagem: `${solicitanteNome}: ${motivo.trim().slice(0, 100)}`,
         referencia_id: autz.id,
       });
+
+      // 4. Avisa a loja (read-only) que a solicitação está em análise especial
+      // — só aplicável quando a referência é uma solicitacao (card de demanda da loja).
+      if (referenciaTipo === "solicitacao") {
+        try {
+          const { data: sol } = await supabase
+            .from("solicitacoes")
+            .select("id, protocolo, metadata, contato_id, contato:contatos(nome, metadata)")
+            .eq("id", referenciaId)
+            .maybeSingle();
+
+          if (sol) {
+            const meta: any = (sol.metadata as any) || {};
+            const contatoAny: any = (sol as any).contato || {};
+            const lojaNome: string =
+              meta.alias_loja || meta.loja_nome || contatoAny?.metadata?.loja_nome || contatoAny?.nome || "";
+            const protocolo = sol.protocolo ? ` #${sol.protocolo}` : "";
+            const aviso =
+              `🔄 Sua solicitação está em análise especial.\n` +
+              `Um supervisor foi acionado para avaliar uma possível exceção. Aguarde o retorno.`;
+
+            // Comentário no card (mesmo padrão dos retornos atuais)
+            await supabase.from("solicitacao_comentarios").insert({
+              solicitacao_id: sol.id,
+              tipo: "retorno_setor",
+              autor_id: user.id,
+              autor_nome: "Financeiro",
+              conteudo: aviso,
+            });
+
+            // Notifica usuários da loja (push via trigger)
+            if (lojaNome) {
+              const { data: dest } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+              const userIds = Array.from(
+                new Set(((dest || []) as any[]).map((d: any) => d.user_id))
+              ).filter(Boolean) as string[];
+              if (userIds.length > 0) {
+                await supabase.from("notificacoes").insert(
+                  userIds.map((uid) => ({
+                    usuario_id: uid,
+                    titulo: `Em análise especial${protocolo}`,
+                    mensagem: aviso.slice(0, 200),
+                    tipo: "retorno_setor",
+                    referencia_id: sol.id,
+                  }))
+                );
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[autorizacao] aviso loja falhou", e);
+        }
+      }
 
       toast.success(`Pedido enviado a ${escolhido.nome}.`);
       onSent?.();
