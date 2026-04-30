@@ -75,7 +75,11 @@ Deno.serve(async (req) => {
 
     // Aplica efeito por processo
     if (autz.processo_chave === "consulta_cpf_excecao" && autz.referencia_tipo === "solicitacao") {
-      const { data: sol } = await admin.from("solicitacoes").select("id, metadata, pipeline_coluna_id").eq("id", autz.referencia_id).maybeSingle();
+      const { data: sol } = await admin
+        .from("solicitacoes")
+        .select("id, protocolo, metadata, pipeline_coluna_id, contato_id, contato:contatos(nome, metadata)")
+        .eq("id", autz.referencia_id)
+        .maybeSingle();
       const metaAtual = (sol?.metadata as any) || {};
       const carimbo = {
         autorizacao_id,
@@ -117,7 +121,7 @@ Deno.serve(async (req) => {
 
       await admin.from("solicitacoes").update(updates).eq("id", autz.referencia_id);
 
-      // Comentário visível no card
+      // Comentário visível no card (auditoria interna)
       await admin.from("solicitacao_comentarios").insert({
         solicitacao_id: autz.referencia_id,
         autor_id: user.id,
@@ -127,6 +131,68 @@ Deno.serve(async (req) => {
           ? `✅ Exceção APROVADA por ${autorizadorNome} (${autz.autorizador_role || "autorizador"}).${justificativa ? `\nJustificativa: ${justificativa}` : ""}`
           : `❌ Exceção REJEITADA por ${autorizadorNome} (${autz.autorizador_role || "autorizador"}).${justificativa ? `\nMotivo: ${justificativa}` : ""}`,
       });
+
+      // ─── Aviso read-only para a LOJA (canal único: comentário "retorno_setor" + notificação) ───
+      try {
+        const meta: any = metaAtual || {};
+        const contatoAny: any = (sol as any)?.contato || {};
+        const lojaNome: string =
+          meta.alias_loja || meta.loja_nome || contatoAny?.metadata?.loja_nome || contatoAny?.nome || "";
+        const protocolo = sol?.protocolo ? ` #${sol.protocolo}` : "";
+
+        let textoLoja = "";
+        let tituloLoja = "";
+        if (decisao === "aprovar") {
+          tituloLoja = `Liberação aprovada por exceção${protocolo}`;
+          textoLoja =
+            `✅ Liberação aprovada por exceção pelo supervisor ${autorizadorNome}.\n` +
+            `Sua solicitação pode prosseguir.`;
+        } else {
+          // Resultado original que permanece
+          const resultadoOriginal =
+            meta.resultado_consulta === "reprovado" ? "Reprovado"
+            : (Array.isArray(meta.dados_incompletos_labels) && meta.dados_incompletos_labels.length > 0) || meta.observacao_dados_incompletos
+              ? "Dados Incompletos"
+              : "resultado anterior";
+          tituloLoja = `Exceção não aprovada${protocolo}`;
+          textoLoja =
+            `❌ A exceção não foi aprovada pelo supervisor ${autorizadorNome}.\n` +
+            `O resultado anterior (${resultadoOriginal}) permanece válido.` +
+            (justificativa ? `\n\nMotivo: "${justificativa}"` : "");
+        }
+
+        // Comentário visível para a loja
+        await admin.from("solicitacao_comentarios").insert({
+          solicitacao_id: autz.referencia_id,
+          tipo: "retorno_setor",
+          autor_id: user.id,
+          autor_nome: "Financeiro",
+          conteudo: textoLoja,
+        });
+
+        // Notifica usuários da loja (push via trigger)
+        if (lojaNome) {
+          const { data: dest } = await admin.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+          const userIds = Array.from(
+            new Set(((dest || []) as any[]).map((d: any) => d.user_id))
+          ).filter(Boolean) as string[];
+          if (userIds.length > 0) {
+            await admin.from("notificacoes").insert(
+              userIds.map((uid) => ({
+                usuario_id: uid,
+                titulo: tituloLoja,
+                mensagem: textoLoja.slice(0, 200),
+                tipo: "retorno_setor",
+                referencia_id: autz.referencia_id,
+              }))
+            );
+          } else {
+            console.warn(`[autorizacao] sem destinatários para loja "${lojaNome}"`);
+          }
+        }
+      } catch (e) {
+        console.warn("[autorizacao] aviso loja falhou", e);
+      }
 
       // Dispara automações se aprovou e moveu coluna
       if (decisao === "aprovar" && updates.pipeline_coluna_id) {
