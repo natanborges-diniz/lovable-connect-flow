@@ -128,9 +128,10 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         await supabase.from("eventos_crm").insert({
           contato_id: solicitacao.contato_id,
           tipo: "dados_incompletos",
-          descricao: `Dados incompletos na consulta CPF: ${dadosLabels.join(", ")}`,
+          descricao: `Dados incompletos na consulta CPF: ${dadosLabels.join(", ")}. Observação: ${observacaoIncompletos.trim()}`,
           referencia_tipo: "solicitacao",
           referencia_id: solicitacao.id,
+          metadata: { observacao: observacaoIncompletos.trim(), dados_incompletos: dadosSelecionados },
         });
       }
 
