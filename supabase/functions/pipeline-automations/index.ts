@@ -369,6 +369,8 @@ function resolveText(template: string, contato: any, agendamento: any, solicitac
     .replace(/\{\{valor_entrada\}\}/g, valorEntrada)
     .replace(/\{\{valor_financiado\}\}/g, valorFinanciado)
     .replace(/\{\{cpf\}\}/g, cpf)
+    .replace(/\{\{observacao\}\}/g, meta.observacao_dados_incompletos || "")
+    .replace(/\{\{dados_faltantes\}\}/g, (meta.dados_incompletos_labels || []).join(", "))
     .replace(/\{\{data\}\}/g, agendamento?.data_horario
       ? new Date(agendamento.data_horario).toLocaleDateString("pt-BR")
       : "");
