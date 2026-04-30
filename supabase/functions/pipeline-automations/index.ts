@@ -343,8 +343,6 @@ function resolveText(template: string, contato: any, agendamento: any, solicitac
   const valorEntrada = meta.valor_entrada ? `R$ ${Number(meta.valor_entrada).toFixed(2)}` : "";
   const valorFinanciado = meta.valor_financiado ? `R$ ${Number(meta.valor_financiado).toFixed(2)}` : "";
   const cpf = meta.cpf || "";
-  const observacao = meta.observacao_dados_incompletos || "";
-  const dadosFaltantes = (meta.dados_incompletos_labels || []).join(", ");
   
   let hora = "";
   let quando = "";
