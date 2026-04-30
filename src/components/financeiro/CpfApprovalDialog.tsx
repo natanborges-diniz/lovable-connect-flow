@@ -89,6 +89,10 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       toast.error("Selecione pelo menos um dado incompleto.");
       return;
     }
+    if (!observacaoIncompletos.trim()) {
+      toast.error("Descreva no campo de observação o que falta para a loja.");
+      return;
+    }
 
     setAction("dados_incompletos");
     setUploading(true);
@@ -101,6 +105,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         ...meta,
         dados_incompletos: dadosSelecionados,
         dados_incompletos_labels: dadosLabels,
+        observacao_dados_incompletos: observacaoIncompletos.trim(),
         data_dados_incompletos: new Date().toISOString(),
       };
 
