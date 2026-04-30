@@ -125,7 +125,7 @@ export default function Mensagens() {
                   onChange={(e) => setBuscaUsuario(e.target.value)}
                   className="mb-2 h-8 text-sm"
                 />
-                <ScrollArea className="max-h-48">
+                <div className="max-h-72 overflow-y-auto pr-1">
                   {filteredProfiles.map((p) => (
                     <button
                       key={p.id}
@@ -138,7 +138,12 @@ export default function Mensagens() {
                   {filteredProfiles.length === 0 && (
                     <p className="text-xs text-muted-foreground text-center py-3">Nenhum usuário encontrado</p>
                   )}
-                </ScrollArea>
+                  {filteredProfiles.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground text-center pt-2 pb-1">
+                      {filteredProfiles.length} usuário{filteredProfiles.length > 1 ? "s" : ""}
+                    </p>
+                  )}
+                </div>
               </PopoverContent>
             </Popover>
           </div>
