@@ -407,7 +407,36 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
             </div>
           )}
 
-          {/* Boleto vinculado: indica que esta consulta já gerou um boleto */}
+          {/* Solicitar autorização de exceção */}
+          {((alreadyProcessed && meta.resultado_consulta === "reprovado") || isDadosIncompletos) && !meta.autorizacao_excecao && (
+            <Button
+              variant="outline"
+              className="w-full border-primary/40 text-primary hover:bg-primary/5"
+              onClick={() => setExcecaoOpen(true)}
+            >
+              <Shield className="h-4 w-4 mr-1" />
+              Solicitar autorização de exceção
+            </Button>
+          )}
+
+          {meta.autorizacao_excecao && (
+            <div className={`p-3 rounded-lg border text-sm ${
+              meta.autorizacao_excecao.decisao === "aprovar"
+                ? "bg-green-500/10 border-green-500/30 text-green-700"
+                : "bg-destructive/10 border-destructive/30 text-destructive"
+            }`}>
+              <div className="font-medium flex items-center gap-1">
+                <Shield className="h-4 w-4" />
+                Exceção {meta.autorizacao_excecao.decisao === "aprovar" ? "aprovada" : "rejeitada"}
+              </div>
+              <p className="text-xs mt-1">
+                Por {meta.autorizacao_excecao.autorizador_nome} ({meta.autorizacao_excecao.autorizador_role})
+              </p>
+              {meta.autorizacao_excecao.justificativa && (
+                <p className="text-xs italic mt-1">"{meta.autorizacao_excecao.justificativa}"</p>
+              )}
+            </div>
+          )}
           {meta.boleto_solicitacao_id && (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 text-blue-700 border border-blue-500/30">
               <FileText className="h-5 w-5" />
