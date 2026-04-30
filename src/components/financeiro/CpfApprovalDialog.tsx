@@ -60,6 +60,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const [action, setAction] = useState<"aprovar" | "reprovar" | "dados_incompletos" | null>(null);
   const [showDadosIncompletos, setShowDadosIncompletos] = useState(false);
   const [dadosSelecionados, setDadosSelecionados] = useState<string[]>([]);
+  const [observacaoIncompletos, setObservacaoIncompletos] = useState("");
 
   const meta = solicitacao?.metadata || {};
   const nomeCliente = meta.nome_cliente || "—";
