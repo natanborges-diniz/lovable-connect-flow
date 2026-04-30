@@ -147,7 +147,29 @@ serve(async (req) => {
     for (const auto of automacoes) {
       const config = auto.config || {};
 
+      // ── App-only routing for B2B contacts (loja/colaborador sintéticos) ──
+      // Quando o contato é interno (loja/colaborador), o retorno NUNCA vai por WhatsApp.
+      // Substitui enviar_template/enviar_mensagem por aviso na demanda + notificação in-app.
+      const contatoInterno = contato?.tipo === "loja" || contato?.tipo === "colaborador";
+      const podeNotificarAppAuto =
+        contatoInterno &&
+        entity_type === "solicitacao" &&
+        (auto.tipo_acao === "enviar_template" || auto.tipo_acao === "enviar_mensagem");
+
       try {
+        if (podeNotificarAppAuto || auto.tipo_acao === "notificar_loja_app") {
+          await notificarLojaApp({
+            supabase,
+            solicitacao,
+            contato,
+            colunaId: coluna_id,
+            config,
+            tipoAcao: auto.tipo_acao,
+          });
+          results.push(`app_loja:${auto.tipo_acao}`);
+          continue;
+        }
+
         switch (auto.tipo_acao) {
           case "enviar_template": {
             if (!contato_id) break;
@@ -345,7 +367,92 @@ function resolveText(template: string, contato: any, agendamento: any, solicitac
     .replace(/\{\{valor_entrada\}\}/g, valorEntrada)
     .replace(/\{\{valor_financiado\}\}/g, valorFinanciado)
     .replace(/\{\{cpf\}\}/g, cpf)
+    .replace(/\{\{observacao\}\}/g, meta.observacao_dados_incompletos || "")
+    .replace(/\{\{dados_faltantes\}\}/g, (meta.dados_incompletos_labels || []).join(", "))
     .replace(/\{\{data\}\}/g, agendamento?.data_horario
       ? new Date(agendamento.data_horario).toLocaleDateString("pt-BR")
       : "");
+}
+
+// ─── Notifica loja via app interno (canal único B2B) ───
+// Cria comentário visível na "demanda" (solicitação) + notificação in-app/push
+// para os usuários da loja resolvidos via resolver_destinatarios_loja().
+async function notificarLojaApp({
+  supabase,
+  solicitacao,
+  contato,
+  colunaId,
+  config,
+  tipoAcao,
+}: {
+  supabase: any;
+  solicitacao: any;
+  contato: any;
+  colunaId?: string | null;
+  config: any;
+  tipoAcao: string;
+}) {
+  if (!solicitacao) return;
+
+  const meta = solicitacao.metadata || {};
+  const lojaNome: string =
+    meta.alias_loja || meta.loja_nome || contato?.metadata?.loja_nome || contato?.nome || "";
+
+  // Resolve título/corpo
+  let texto = "";
+  if (tipoAcao === "enviar_template" && config.template_name) {
+    // Mapa básico para os 3 templates da Consulta CPF
+    const nomeCliente = meta.nome_cliente || meta.cliente || "";
+    const cpf = meta.cpf || "";
+    const labels = (meta.dados_incompletos_labels || []).join(", ");
+    const obs = meta.observacao_dados_incompletos || "";
+    if (config.template_name === "dados_incompletos") {
+      texto =
+        `⚠️ Consulta CPF — Dados Incompletos\n` +
+        `Cliente: ${nomeCliente}${cpf ? ` (CPF ${cpf})` : ""}\n` +
+        `Pendências: ${labels || "—"}` +
+        (obs ? `\n\nObservação do Financeiro:\n"${obs}"` : "") +
+        `\n\nReenvie a Consulta CPF com os dados corrigidos.`;
+    } else {
+      texto = resolveText(config.texto || "", contato, null, solicitacao);
+    }
+  } else {
+    texto = resolveText(config.texto || config.template || "", contato, null, solicitacao);
+  }
+
+  if (!texto) {
+    texto = "🔔 Sua solicitação teve um retorno do setor. Abra o card para ver os detalhes.";
+  }
+
+  const protocolo = solicitacao.protocolo ? ` #${solicitacao.protocolo}` : "";
+  const titulo = `Retorno do Financeiro${protocolo}`;
+
+  // 1) Comentário "tipo retorno_setor" — visível na demanda, somente leitura para a loja
+  await supabase.from("solicitacao_comentarios").insert({
+    solicitacao_id: solicitacao.id,
+    tipo: "retorno_setor",
+    autor_nome: "Financeiro",
+    conteudo: texto,
+  });
+
+  // 2) Resolve usuários da loja
+  let userIds: string[] = [];
+  if (lojaNome) {
+    const { data: dest } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+    userIds = Array.from(new Set((dest || []).map((d: any) => d.user_id))).filter(Boolean);
+  }
+
+  // 3) Cria notificações in-app (trigger trg_push_nova_notificacao envia push)
+  if (userIds.length > 0) {
+    const notifs = userIds.map((uid) => ({
+      usuario_id: uid,
+      titulo,
+      mensagem: texto.slice(0, 200),
+      tipo: "retorno_setor",
+      referencia_id: solicitacao.id,
+    }));
+    await supabase.from("notificacoes").insert(notifs);
+  } else {
+    console.warn(`[AUTOMATIONS] notificar_loja_app: sem destinatários para loja "${lojaNome}"`);
+  }
 }

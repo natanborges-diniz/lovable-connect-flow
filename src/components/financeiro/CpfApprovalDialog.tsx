@@ -60,6 +60,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const [action, setAction] = useState<"aprovar" | "reprovar" | "dados_incompletos" | null>(null);
   const [showDadosIncompletos, setShowDadosIncompletos] = useState(false);
   const [dadosSelecionados, setDadosSelecionados] = useState<string[]>([]);
+  const [observacaoIncompletos, setObservacaoIncompletos] = useState("");
 
   const meta = solicitacao?.metadata || {};
   const nomeCliente = meta.nome_cliente || "—";
@@ -88,6 +89,10 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       toast.error("Selecione pelo menos um dado incompleto.");
       return;
     }
+    if (!observacaoIncompletos.trim()) {
+      toast.error("Descreva no campo de observação o que falta para a loja.");
+      return;
+    }
 
     setAction("dados_incompletos");
     setUploading(true);
@@ -100,6 +105,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         ...meta,
         dados_incompletos: dadosSelecionados,
         dados_incompletos_labels: dadosLabels,
+        observacao_dados_incompletos: observacaoIncompletos.trim(),
         data_dados_incompletos: new Date().toISOString(),
       };
 
@@ -122,9 +128,10 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         await supabase.from("eventos_crm").insert({
           contato_id: solicitacao.contato_id,
           tipo: "dados_incompletos",
-          descricao: `Dados incompletos na consulta CPF: ${dadosLabels.join(", ")}`,
+          descricao: `Dados incompletos na consulta CPF: ${dadosLabels.join(", ")}. Observação: ${observacaoIncompletos.trim()}`,
           referencia_tipo: "solicitacao",
           referencia_id: solicitacao.id,
+          metadata: { observacao: observacaoIncompletos.trim(), dados_incompletos: dadosSelecionados },
         });
       }
 
@@ -257,6 +264,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
     setAction(null);
     setShowDadosIncompletos(false);
     setDadosSelecionados([]);
+    setObservacaoIncompletos("");
   };
 
   const handleDownloadDoc = async () => {
@@ -363,11 +371,16 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           {isDadosIncompletos && (
             <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 text-yellow-700 border border-yellow-500/30">
               <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
-              <div>
+              <div className="space-y-1">
                 <p className="font-medium text-sm">Dados Incompletos</p>
-                <p className="text-xs mt-0.5">
+                <p className="text-xs">
                   {meta.dados_incompletos_labels?.join(", ")}
                 </p>
+                {meta.observacao_dados_incompletos && (
+                  <p className="text-xs italic border-l-2 border-yellow-500/40 pl-2 mt-1">
+                    "{meta.observacao_dados_incompletos}"
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -457,12 +470,26 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                   </label>
                 ))}
               </div>
+              <div className="space-y-1 pt-1">
+                <Label className="text-sm font-medium">
+                  Observação para a loja <span className="text-destructive">*</span>
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Descreva o que precisa ser corrigido/enviado. Esta mensagem será entregue à loja no app.
+                </p>
+                <Textarea
+                  value={observacaoIncompletos}
+                  onChange={(e) => setObservacaoIncompletos(e.target.value)}
+                  placeholder="Ex.: O valor da entrada informado está abaixo do mínimo. Reenvie com entrada de pelo menos 30%."
+                  rows={3}
+                />
+              </div>
               <div className="flex gap-2 pt-2">
                 <Button
                   size="sm"
                   className="bg-yellow-600 hover:bg-yellow-700 text-white"
                   onClick={handleDadosIncompletos}
-                  disabled={uploading || dadosSelecionados.length === 0}
+                  disabled={uploading || dadosSelecionados.length === 0 || !observacaoIncompletos.trim()}
                 >
                   {uploading && action === "dados_incompletos" ? (
                     <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -471,7 +498,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                   )}
                   Confirmar Dados Incompletos
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => { setShowDadosIncompletos(false); setDadosSelecionados([]); }}>
+                <Button size="sm" variant="ghost" onClick={() => { setShowDadosIncompletos(false); setDadosSelecionados([]); setObservacaoIncompletos(""); }}>
                   Cancelar
                 </Button>
               </div>
