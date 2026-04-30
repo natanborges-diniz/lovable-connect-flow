@@ -620,6 +620,33 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           )}
         </div>
       </DialogContent>
+
+      <SolicitarAutorizacaoDialog
+        open={excecaoOpen}
+        onOpenChange={setExcecaoOpen}
+        processoChave="consulta_cpf_excecao"
+        processoNome="Consulta CPF — exceção"
+        referenciaTipo="solicitacao"
+        referenciaId={solicitacao.id}
+        contexto={{
+          nome_cliente: nomeCliente,
+          cpf,
+          valor_compra: valorCompra,
+          valor_entrada: valorEntrada,
+          valor_financiado: valorFinanciado,
+          resultado_consulta: meta.resultado_consulta || (isDadosIncompletos ? "dados_incompletos" : null),
+          dados_incompletos: meta.dados_incompletos_labels,
+          observacao_dados_incompletos: meta.observacao_dados_incompletos,
+          justificativa_interna: meta.justificativa_interna,
+        }}
+        motivoPadrao={
+          meta.resultado_consulta === "reprovado"
+            ? `CPF reprovado. Solicito autorização para liberar o financiamento. ${meta.justificativa_interna || ""}`
+            : isDadosIncompletos
+              ? `Caso com dados incompletos (${meta.dados_incompletos_labels?.join(", ")}). Solicito autorização para prosseguir.`
+              : ""
+        }
+      />
     </Dialog>
   );
 }
