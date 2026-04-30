@@ -201,6 +201,63 @@ export type Database = {
           },
         ]
       }
+      autorizacoes_excecao: {
+        Row: {
+          autorizador_id: string
+          autorizador_nome: string | null
+          autorizador_role: string | null
+          contexto: Json
+          created_at: string
+          id: string
+          justificativa_resposta: string | null
+          motivo_solicitacao: string | null
+          processo_chave: string
+          referencia_id: string
+          referencia_tipo: string
+          respondido_at: string | null
+          solicitante_id: string
+          solicitante_nome: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          autorizador_id: string
+          autorizador_nome?: string | null
+          autorizador_role?: string | null
+          contexto?: Json
+          created_at?: string
+          id?: string
+          justificativa_resposta?: string | null
+          motivo_solicitacao?: string | null
+          processo_chave: string
+          referencia_id: string
+          referencia_tipo: string
+          respondido_at?: string | null
+          solicitante_id: string
+          solicitante_nome?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          autorizador_id?: string
+          autorizador_nome?: string | null
+          autorizador_role?: string | null
+          contexto?: Json
+          created_at?: string
+          id?: string
+          justificativa_resposta?: string | null
+          motivo_solicitacao?: string | null
+          processo_chave?: string
+          referencia_id?: string
+          referencia_tipo?: string
+          respondido_at?: string | null
+          solicitante_id?: string
+          solicitante_nome?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bot_fluxos: {
         Row: {
           acao_final: Json
@@ -1089,6 +1146,7 @@ export type Database = {
           destinatario_id: string
           id: string
           lida: boolean
+          metadata: Json
           remetente_id: string
         }
         Insert: {
@@ -1100,6 +1158,7 @@ export type Database = {
           destinatario_id: string
           id?: string
           lida?: boolean
+          metadata?: Json
           remetente_id: string
         }
         Update: {
@@ -1111,6 +1170,7 @@ export type Database = {
           destinatario_id?: string
           id?: string
           lida?: boolean
+          metadata?: Json
           remetente_id?: string
         }
         Relationships: [
@@ -1425,6 +1485,39 @@ export type Database = {
           sphere_min?: number | null
           treatment?: string
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      processos_excecao: {
+        Row: {
+          ativo: boolean
+          chave: string
+          created_at: string
+          descricao: string | null
+          id: string
+          niveis_autorizadores: string[]
+          nome: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          chave: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          niveis_autorizadores?: string[]
+          nome: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          chave?: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          niveis_autorizadores?: string[]
+          nome?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -1985,7 +2078,12 @@ export type Database = {
       unschedule_cron_job: { Args: { job_name: string }; Returns: undefined }
     }
     Enums: {
-      app_role: "admin" | "operador" | "setor_usuario"
+      app_role:
+        | "admin"
+        | "operador"
+        | "setor_usuario"
+        | "supervisao"
+        | "diretoria"
       direcao_mensagem: "inbound" | "outbound" | "internal"
       estagio_funil: "lead" | "qualificado" | "proposta" | "fechado" | "perdido"
       prioridade: "critica" | "alta" | "normal" | "baixa"
@@ -2129,7 +2227,13 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "operador", "setor_usuario"],
+      app_role: [
+        "admin",
+        "operador",
+        "setor_usuario",
+        "supervisao",
+        "diretoria",
+      ],
       direcao_mensagem: ["inbound", "outbound", "internal"],
       estagio_funil: ["lead", "qualificado", "proposta", "fechado", "perdido"],
       prioridade: ["critica", "alta", "normal", "baixa"],

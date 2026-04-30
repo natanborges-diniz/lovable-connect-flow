@@ -16,6 +16,8 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { SolicitarAutorizacaoDialog } from "./SolicitarAutorizacaoDialog";
+import { Shield } from "lucide-react";
 
 interface CpfApprovalDialogProps {
   solicitacao: any;
@@ -61,6 +63,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const [showDadosIncompletos, setShowDadosIncompletos] = useState(false);
   const [dadosSelecionados, setDadosSelecionados] = useState<string[]>([]);
   const [observacaoIncompletos, setObservacaoIncompletos] = useState("");
+  const [excecaoOpen, setExcecaoOpen] = useState(false);
 
   const meta = solicitacao?.metadata || {};
   const nomeCliente = meta.nome_cliente || "—";
@@ -404,7 +407,36 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
             </div>
           )}
 
-          {/* Boleto vinculado: indica que esta consulta já gerou um boleto */}
+          {/* Solicitar autorização de exceção */}
+          {((alreadyProcessed && meta.resultado_consulta === "reprovado") || isDadosIncompletos) && !meta.autorizacao_excecao && (
+            <Button
+              variant="outline"
+              className="w-full border-primary/40 text-primary hover:bg-primary/5"
+              onClick={() => setExcecaoOpen(true)}
+            >
+              <Shield className="h-4 w-4 mr-1" />
+              Solicitar autorização de exceção
+            </Button>
+          )}
+
+          {meta.autorizacao_excecao && (
+            <div className={`p-3 rounded-lg border text-sm ${
+              meta.autorizacao_excecao.decisao === "aprovar"
+                ? "bg-green-500/10 border-green-500/30 text-green-700"
+                : "bg-destructive/10 border-destructive/30 text-destructive"
+            }`}>
+              <div className="font-medium flex items-center gap-1">
+                <Shield className="h-4 w-4" />
+                Exceção {meta.autorizacao_excecao.decisao === "aprovar" ? "aprovada" : "rejeitada"}
+              </div>
+              <p className="text-xs mt-1">
+                Por {meta.autorizacao_excecao.autorizador_nome} ({meta.autorizacao_excecao.autorizador_role})
+              </p>
+              {meta.autorizacao_excecao.justificativa && (
+                <p className="text-xs italic mt-1">"{meta.autorizacao_excecao.justificativa}"</p>
+              )}
+            </div>
+          )}
           {meta.boleto_solicitacao_id && (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 text-blue-700 border border-blue-500/30">
               <FileText className="h-5 w-5" />
@@ -588,6 +620,33 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           )}
         </div>
       </DialogContent>
+
+      <SolicitarAutorizacaoDialog
+        open={excecaoOpen}
+        onOpenChange={setExcecaoOpen}
+        processoChave="consulta_cpf_excecao"
+        processoNome="Consulta CPF — exceção"
+        referenciaTipo="solicitacao"
+        referenciaId={solicitacao.id}
+        contexto={{
+          nome_cliente: nomeCliente,
+          cpf,
+          valor_compra: valorCompra,
+          valor_entrada: valorEntrada,
+          valor_financiado: valorFinanciado,
+          resultado_consulta: meta.resultado_consulta || (isDadosIncompletos ? "dados_incompletos" : null),
+          dados_incompletos: meta.dados_incompletos_labels,
+          observacao_dados_incompletos: meta.observacao_dados_incompletos,
+          justificativa_interna: meta.justificativa_interna,
+        }}
+        motivoPadrao={
+          meta.resultado_consulta === "reprovado"
+            ? `CPF reprovado. Solicito autorização para liberar o financiamento. ${meta.justificativa_interna || ""}`
+            : isDadosIncompletos
+              ? `Caso com dados incompletos (${meta.dados_incompletos_labels?.join(", ")}). Solicito autorização para prosseguir.`
+              : ""
+        }
+      />
     </Dialog>
   );
 }
