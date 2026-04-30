@@ -470,12 +470,26 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                   </label>
                 ))}
               </div>
+              <div className="space-y-1 pt-1">
+                <Label className="text-sm font-medium">
+                  Observação para a loja <span className="text-destructive">*</span>
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Descreva o que precisa ser corrigido/enviado. Esta mensagem será entregue à loja no app.
+                </p>
+                <Textarea
+                  value={observacaoIncompletos}
+                  onChange={(e) => setObservacaoIncompletos(e.target.value)}
+                  placeholder="Ex.: O valor da entrada informado está abaixo do mínimo. Reenvie com entrada de pelo menos 30%."
+                  rows={3}
+                />
+              </div>
               <div className="flex gap-2 pt-2">
                 <Button
                   size="sm"
                   className="bg-yellow-600 hover:bg-yellow-700 text-white"
                   onClick={handleDadosIncompletos}
-                  disabled={uploading || dadosSelecionados.length === 0}
+                  disabled={uploading || dadosSelecionados.length === 0 || !observacaoIncompletos.trim()}
                 >
                   {uploading && action === "dados_incompletos" ? (
                     <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -484,7 +498,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                   )}
                   Confirmar Dados Incompletos
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => { setShowDadosIncompletos(false); setDadosSelecionados([]); }}>
+                <Button size="sm" variant="ghost" onClick={() => { setShowDadosIncompletos(false); setDadosSelecionados([]); setObservacaoIncompletos(""); }}>
                   Cancelar
                 </Button>
               </div>
