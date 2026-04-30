@@ -371,11 +371,16 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           {isDadosIncompletos && (
             <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 text-yellow-700 border border-yellow-500/30">
               <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
-              <div>
+              <div className="space-y-1">
                 <p className="font-medium text-sm">Dados Incompletos</p>
-                <p className="text-xs mt-0.5">
+                <p className="text-xs">
                   {meta.dados_incompletos_labels?.join(", ")}
                 </p>
+                {meta.observacao_dados_incompletos && (
+                  <p className="text-xs italic border-l-2 border-yellow-500/40 pl-2 mt-1">
+                    "{meta.observacao_dados_incompletos}"
+                  </p>
+                )}
               </div>
             </div>
           )}
