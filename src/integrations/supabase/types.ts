@@ -1146,6 +1146,7 @@ export type Database = {
           destinatario_id: string
           id: string
           lida: boolean
+          metadata: Json
           remetente_id: string
         }
         Insert: {
@@ -1157,6 +1158,7 @@ export type Database = {
           destinatario_id: string
           id?: string
           lida?: boolean
+          metadata?: Json
           remetente_id: string
         }
         Update: {
@@ -1168,6 +1170,7 @@ export type Database = {
           destinatario_id?: string
           id?: string
           lida?: boolean
+          metadata?: Json
           remetente_id?: string
         }
         Relationships: [
