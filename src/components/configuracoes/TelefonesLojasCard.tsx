@@ -16,6 +16,29 @@ import { toast } from "sonner";
 
 type TipoCorporativo = "loja" | "colaborador" | "departamento";
 
+type DiaChave = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
+type HorariosSemana = Record<DiaChave, { abre: string; fecha: string } | null>;
+
+const DIAS: { chave: DiaChave; label: string }[] = [
+  { chave: "seg", label: "Segunda" },
+  { chave: "ter", label: "Terça" },
+  { chave: "qua", label: "Quarta" },
+  { chave: "qui", label: "Quinta" },
+  { chave: "sex", label: "Sexta" },
+  { chave: "sab", label: "Sábado" },
+  { chave: "dom", label: "Domingo" },
+];
+
+const HORARIOS_SEMANA_DEFAULT: HorariosSemana = {
+  seg: { abre: "09:00", fecha: "19:00" },
+  ter: { abre: "09:00", fecha: "19:00" },
+  qua: { abre: "09:00", fecha: "19:00" },
+  qui: { abre: "09:00", fecha: "19:00" },
+  sex: { abre: "09:00", fecha: "19:00" },
+  sab: { abre: "09:00", fecha: "18:00" },
+  dom: null,
+};
+
 interface LojaFormData {
   telefone: string;
   nome_loja: string;
@@ -25,6 +48,7 @@ interface LojaFormData {
   endereco?: string;
   horario_abertura?: string;
   horario_fechamento?: string;
+  horarios_semana?: HorariosSemana;
   google_profile_url?: string;
   cargo?: string;
   nome_colaborador?: string;
