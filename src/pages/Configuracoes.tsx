@@ -23,6 +23,7 @@ import { AutomacoesCard } from "@/components/configuracoes/AutomacoesCard";
 import { GestaoUsuariosCard } from "@/components/configuracoes/GestaoUsuariosCard";
 import { CronJobsCard } from "@/components/configuracoes/CronJobsCard";
 import { RecuperacaoCard } from "@/components/configuracoes/RecuperacaoCard";
+import { FeriadosCard } from "@/components/configuracoes/FeriadosCard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -126,6 +127,7 @@ export default function Configuracoes() {
         <TabsContent value="lojas">
           <div className="grid gap-6">
             <TelefonesLojasCard />
+            <FeriadosCard />
             <BotFluxosCard />
             <BotMenuCard />
           </div>
