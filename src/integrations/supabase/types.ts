@@ -880,6 +880,45 @@ export type Database = {
           },
         ]
       }
+      feriados: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          data: string
+          fecha_todas: boolean
+          id: string
+          metadata: Json
+          nome: string
+          recorrente: boolean
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          data: string
+          fecha_todas?: boolean
+          id?: string
+          metadata?: Json
+          nome: string
+          recorrente?: boolean
+          tipo?: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          data?: string
+          fecha_todas?: boolean
+          id?: string
+          metadata?: Json
+          nome?: string
+          recorrente?: boolean
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       filas: {
         Row: {
           ativo: boolean
@@ -1088,6 +1127,57 @@ export type Database = {
             columns: ["contato_id"]
             isOneToOne: false
             referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      loja_feriado_politica: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          escopo: string
+          feriado_id: string | null
+          horario_custom: Json | null
+          id: string
+          loja_id: string
+          politica: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          escopo: string
+          feriado_id?: string | null
+          horario_custom?: Json | null
+          id?: string
+          loja_id: string
+          politica: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          escopo?: string
+          feriado_id?: string | null
+          horario_custom?: Json | null
+          id?: string
+          loja_id?: string
+          politica?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loja_feriado_politica_feriado_id_fkey"
+            columns: ["feriado_id"]
+            isOneToOne: false
+            referencedRelation: "feriados"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "loja_feriado_politica_loja_id_fkey"
+            columns: ["loja_id"]
+            isOneToOne: false
+            referencedRelation: "telefones_lojas"
             referencedColumns: ["id"]
           },
         ]
@@ -1863,6 +1953,7 @@ export type Database = {
           google_profile_url: string | null
           horario_abertura: string | null
           horario_fechamento: string | null
+          horarios_semana: Json
           id: string
           nome_colaborador: string | null
           nome_loja: string
@@ -1880,6 +1971,7 @@ export type Database = {
           google_profile_url?: string | null
           horario_abertura?: string | null
           horario_fechamento?: string | null
+          horarios_semana?: Json
           id?: string
           nome_colaborador?: string | null
           nome_loja: string
@@ -1897,6 +1989,7 @@ export type Database = {
           google_profile_url?: string | null
           horario_abertura?: string | null
           horario_fechamento?: string | null
+          horarios_semana?: Json
           id?: string
           nome_colaborador?: string | null
           nome_loja?: string
@@ -2052,6 +2145,10 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      loja_status_no_dia: {
+        Args: { _data: string; _loja_id: string }
+        Returns: Json
+      }
       nextval_protocolo: { Args: never; Returns: number }
       pode_conversar_1a1: {
         Args: { _destinatario: string; _remetente: string }
