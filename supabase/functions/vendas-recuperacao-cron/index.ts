@@ -32,12 +32,13 @@ serve(async (req) => {
   const MAX_TENTATIVAS = payload.max_tentativas ?? 2;
   const INACTIVITY_DEFAULT = payload.inatividade_default ?? 48;
 
-  // ── Cadência HUMANO (mais lenta — assume consultor pode estar conduzindo) ──
+  // ── Cadência HUMANO (templates Meta — fora da janela 24h) ──
+  // Defaults: 4h → 24h → +4h despedida (rápida, evita esfriar lead)
   const HUMANO_DELAY_HOURS = [
-    payload.humano_delay_primeira ?? 24,
-    payload.humano_delay_segunda ?? 48,
+    payload.humano_delay_primeira ?? 4,
+    payload.humano_delay_segunda ?? 24,
   ];
-  const HUMANO_FINAL_WAIT_HOURS = payload.humano_espera_final ?? 24;
+  const HUMANO_FINAL_WAIT_HOURS = payload.humano_espera_final ?? 4;
   const HUMANO_MAX_TENTATIVAS = payload.humano_max_tentativas ?? 2;
   // Se houve outbound humano nas últimas N horas, suspende retomada (consultor ativo)
   const HUMANO_COOLDOWN_HORAS = payload.humano_cooldown_horas ?? 24;
