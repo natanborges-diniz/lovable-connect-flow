@@ -1867,17 +1867,75 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       knowledgeStr = Object.entries(grouped).map(([cat, items]) => `## ${cat}\n${items.join("\n")}`).join("\n\n");
     }
 
+    // ── Pré-calcula grade de status (7 dias) por loja via loja_status_no_dia ──
+    // Resultado: lojaStatusGrade[loja_id] = "Hoje (sáb 03/05): 09:00–18:00\n  Amanhã (dom 04/05): FECHADA\n  ..."
+    const lojaStatusGrade: Record<string, string> = {};
+    try {
+      const tz = "America/Sao_Paulo";
+      const dayLabels = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+      const baseDate = new Date(new Date().toLocaleString("en-US", { timeZone: tz }));
+      const days: { label: string; iso: string; idx: number }[] = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(baseDate);
+        d.setDate(baseDate.getDate() + i);
+        const iso = d.toISOString().substring(0, 10); // YYYY-MM-DD (suficiente p/ função)
+        const ddmm = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const prefix = i === 0 ? "Hoje" : i === 1 ? "Amanhã" : dayLabels[d.getDay()];
+        days.push({ label: `${prefix} (${dayLabels[d.getDay()]} ${ddmm})`, iso, idx: i });
+      }
+
+      const lojasComId = (lojas || []).filter((l: any) => l.id);
+      const calls: Promise<any>[] = [];
+      for (const l of lojasComId) {
+        for (const d of days) {
+          calls.push(
+            supabase.rpc("loja_status_no_dia", { _loja_id: l.id, _data: d.iso })
+              .then((r: any) => ({ loja_id: l.id, day: d, status: r.data }))
+              .catch(() => ({ loja_id: l.id, day: d, status: null }))
+          );
+        }
+      }
+      const results = await Promise.all(calls);
+      const grouped: Record<string, string[]> = {};
+      for (const r of results) {
+        if (!grouped[r.loja_id]) grouped[r.loja_id] = [];
+        const s = r.status;
+        let line: string;
+        if (!s) {
+          line = `${r.day.label}: —`;
+        } else if (s.aberta) {
+          line = `${r.day.label}: ${s.abre}–${s.fecha}`;
+        } else if (s.motivo === "feriado_nacional_total" || s.motivo === "feriado_loja_fechada" || s.motivo === "feriado_sem_politica" || s.motivo === "feriado_sem_horario_domingo") {
+          line = `${r.day.label}: FECHADA (feriado${s.feriado_nome ? " — " + s.feriado_nome : ""})`;
+        } else {
+          line = `${r.day.label}: FECHADA`;
+        }
+        grouped[r.loja_id].push(line);
+      }
+      for (const id in grouped) {
+        lojaStatusGrade[id] = grouped[id].join("\n  ");
+      }
+    } catch (e) {
+      console.error("[ai-triage] falha ao montar grade de status das lojas:", e);
+    }
+
     // Inject lojas into knowledge
     if (lojas.length > 0) {
       knowledgeStr += "\n\n## LOJAS DISPONÍVEIS\n";
+      knowledgeStr += "⚠️ Use a grade de horário abaixo. NUNCA ofereça horário num dia marcado como FECHADA. Se o cliente pedir um dia fechado, diga que aquela loja não abre nesse dia e ofereça outra data ou outra loja que abra naquele dia.\n\n";
       for (const l of lojas) {
         const parts = [`**${l.nome_loja}**`];
         if (l.endereco) parts.push(l.endereco);
-        if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
         if (l.telefone) parts.push(`Tel: ${l.telefone}`);
         if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
         if (l.google_profile_url) parts.push(`Google: ${l.google_profile_url}`);
         knowledgeStr += `- ${parts.join(" | ")}\n`;
+        const grade = l.id ? lojaStatusGrade[l.id] : "";
+        if (grade) {
+          knowledgeStr += `  ${grade}\n`;
+        } else if (l.horario_abertura && l.horario_fechamento) {
+          knowledgeStr += `  Horário padrão: ${l.horario_abertura}–${l.horario_fechamento}\n`;
+        }
       }
     }
 
