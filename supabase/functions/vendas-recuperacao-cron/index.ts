@@ -297,6 +297,17 @@ async function processContato(
   const hoursSinceReference = (now.getTime() - referenceTime.getTime()) / (1000 * 60 * 60);
   if (hoursSinceReference < requiredDelay) return result;
 
+  // Janela de envio: nada sai entre 22h–08h SP — adia para próxima rodada
+  if (!dentroDaJanelaEnvio(now)) {
+    await supabase.from("eventos_crm").insert({
+      contato_id: contato.id,
+      tipo: "retomada_adiada_janela_noturna",
+      descricao: `Retomada IA tentativa ${tentativas + 1} adiada — fora da janela 08–22 SP`,
+      metadata: { fase: "retomada_ia", tentativa_pretendida: tentativas + 1, agora: now.toISOString() },
+    });
+    return result;
+  }
+
   // ── IDEMPOTÊNCIA: bloqueia disparo duplicado por race do cron ──
   // Cron pode rodar overlap; duas execuções concorrentes leem tentativas=0
   // simultaneamente e disparam o template duas vezes (caso Drin 29/04).
