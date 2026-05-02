@@ -1992,13 +1992,19 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       let lojasStr = "";
       if (lojas.length > 0) {
         lojasStr = "## LOJAS DISPONÍVEIS\n";
+        lojasStr += "⚠️ Use a grade de horário abaixo. NUNCA ofereça horário num dia marcado como FECHADA. Se o cliente pedir um dia fechado, diga que aquela loja não abre nesse dia e ofereça outra data ou outra loja que abra naquele dia.\n\n";
         for (const l of lojas) {
           const parts = [`**${l.nome_loja}**`];
           if (l.endereco) parts.push(l.endereco);
-          if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
           if (l.telefone) parts.push(`Tel: ${l.telefone}`);
           if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
           lojasStr += `- ${parts.join(" | ")}\n`;
+          const grade = l.id ? lojaStatusGrade[l.id] : "";
+          if (grade) {
+            lojasStr += `  ${grade}\n`;
+          } else if (l.horario_abertura && l.horario_fechamento) {
+            lojasStr += `  Horário padrão: ${l.horario_abertura}–${l.horario_fechamento}\n`;
+          }
         }
       }
 
