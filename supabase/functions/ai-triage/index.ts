@@ -2980,6 +2980,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           });
         }
 
+        if (!agendamentoBloqueado) {
         // ── Build standardized appointment confirmation block (tabulated) ──
         // Strip any raw URLs the LLM may have inserted, then append a clean address block.
         try {
@@ -3059,7 +3060,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           } else {
             // Create new agendamento via agendar-cliente function
             try {
-              await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+              const agResp = await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
                 method: "POST",
                 headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -3071,6 +3072,19 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                   observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
                 }),
               });
+              if (agResp.status === 409) {
+                // agendar-cliente recusou (loja fechada / fora horário) — sobrescreve resposta
+                const errBody = await agResp.json().catch(() => ({}));
+                console.warn("[TOOL] agendar-cliente recusou:", errBody);
+                const dt = new Date(args.data_horario);
+                const dataFmtErr = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+                if (errBody?.error === "loja_fechada_no_dia") {
+                  const fer = errBody.feriado_nome ? ` (feriado de ${errBody.feriado_nome})` : "";
+                  resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} não abre${fer}. Me desculpa! Quer escolher outro dia ou outra loja?`;
+                } else if (errBody?.error === "fora_do_horario") {
+                  resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} funciona das ${errBody.abre} às ${errBody.fecha}. Quer marcar pra um horário dentro desse intervalo?`;
+                }
+              }
             } catch (e) {
               console.error("[TOOL] agendar-cliente call failed:", e);
             }
@@ -3085,6 +3099,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
+        } // end if (!agendamentoBloqueado)
       } else if (fn === "agendar_lembrete") {
         resposta = args.resposta;
         intencao = "lembrete";
