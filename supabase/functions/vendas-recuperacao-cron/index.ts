@@ -472,6 +472,17 @@ async function processHumano(
     const hoursSince = (now.getTime() - lastAttemptAt.getTime()) / (1000 * 3600);
     if (hoursSince < FINAL_WAIT_HOURS) return result;
 
+    // Janela de envio: nada sai entre 22h–08h SP
+    if (!dentroDaJanelaEnvio(now)) {
+      await supabase.from("eventos_crm").insert({
+        contato_id: contato.id,
+        tipo: "retomada_adiada_janela_noturna",
+        descricao: `Despedida humano adiada — fora da janela 08–22 SP`,
+        metadata: { fase: "despedida_humano", agora: now.toISOString() },
+      });
+      return result;
+    }
+
     const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
     const topico = inferirTopico(lastOutbound) || recH.topico || "seu atendimento";
 
