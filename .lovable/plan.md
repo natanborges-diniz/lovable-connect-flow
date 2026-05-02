@@ -1,168 +1,72 @@
-# Feriados no calendário e horários especiais por loja
+# Bloquear agendamentos em dias que a loja está fechada
 
-## Diagnóstico atual
+## Diagnóstico
 
-Hoje, em `telefones_lojas`, cada loja tem **apenas um par** `horario_abertura` / `horario_fechamento` (texto `HH:MM`). Não há:
-- distinção por dia da semana (seg–sex / sáb / dom),
-- conceito de feriado,
-- regra de exceção por loja.
+No diálogo do Jorge (Osasco), a IA ofereceu **domingo 11h ou 15h** na "Diniz Antônio Agú (Centro)" — uma loja de rua que **não abre aos domingos**. A infraestrutura de horários por dia da semana (`horarios_semana`) e a função `loja_status_no_dia` já existem e estão populadas, mas **nada disso é consultado** hoje:
 
-A IA (`ai-triage`) e a UI de Configurações (`TelefonesLojasCard`) leem somente esse par único, então qualquer feriado é "invisível" para o sistema.
+- `ai-triage/index.ts` (linhas 1761 e 1876/1940) lê apenas `horario_abertura`/`horario_fechamento` (par único legado) ao montar o prompt das lojas. A IA não tem como saber que aquela loja fecha dom.
+- `agendar-cliente/index.ts` cria o agendamento sem checar se a loja abre na data.
+- Resultado: a IA "alucina" horários plausíveis em dias fechados, e o agendamento é gravado mesmo assim.
 
-Regra de negócio confirmada:
-- **Domingo** — só **Shopping União** e **Super Shopping** abrem, das **14:00 às 20:00**.
-- **Feriados nacionais** — só Shopping União e Super Shopping abrem, **usando o mesmo horário de domingo (14:00–20:00)**.
-- **Exceções absolutas** — **01/01** e **01/05**: todas as lojas fechadas, inclusive os shoppings.
+## O que vai mudar
 
-## Proposta — visão geral
+### 1. `ai-triage` — injetar status real do dia no prompt
 
-Três camadas, encaixadas no que já existe:
-
-1. **Horários por dia da semana** em cada loja (estende `telefones_lojas`).
-2. **Calendário de feriados** central (nova tabela `feriados`), com tipo e flag "fecha tudo".
-3. **Política de feriado por loja** (nova tabela `loja_feriado_politica`) para dizer, por loja, o que acontece num feriado nacional: `fechada` (default) ou `abre_horario_domingo`.
-
-Tudo é consultado por uma função `loja_status_no_dia(loja, data) → { aberta, abre, fecha, motivo }`, que vira o ponto único usado pela IA, pelo cron de agendamentos e pela UI.
-
----
-
-## 1. Modelo de dados
-
-### 1.1 `telefones_lojas` — horários por dia da semana
-
-Adicionar coluna `horarios_semana jsonb`. Mantemos `horario_abertura`/`horario_fechamento` por compatibilidade (preenchidos a partir de seg–sex), mas o JSON passa a ser a fonte da verdade.
-
-Formato:
-```json
-{
-  "seg": { "abre": "09:00", "fecha": "19:00" },
-  "ter": { "abre": "09:00", "fecha": "19:00" },
-  "qua": { "abre": "09:00", "fecha": "19:00" },
-  "qui": { "abre": "09:00", "fecha": "19:00" },
-  "sex": { "abre": "09:00", "fecha": "19:00" },
-  "sab": { "abre": "09:00", "fecha": "18:00" },
-  "dom": null
-}
-```
-- `null` = fechada nesse dia.
-- Shopping União e Super Shopping iniciam com `dom = { "abre": "14:00", "fecha": "20:00" }`.
-- Demais lojas: `dom = null`.
-
-### 1.2 Nova tabela `feriados`
+Ao montar o bloco "LOJAS DISPONÍVEIS" (tanto no caminho compiled quanto legacy), para cada loja chamar `loja_status_no_dia(loja_id, data)` para **hoje, amanhã e depois**. Substituir a linha única `Horário: 09:00-19:00` por uma grade dos próximos 3 dias, ex.:
 
 ```text
-feriados
-- id uuid pk
-- data date
-- nome text
-- tipo text            -- 'nacional' | 'estadual' | 'municipal' | 'interno'
-- fecha_todas boolean  -- true para 01/01 e 01/05
-- recorrente boolean   -- true = repete todo ano na mesma data
-- ativo boolean
-- metadata jsonb
-- unique (data, nome)
+- **Diniz Antônio Agú (Centro)** | R. Antônio Agú, 681
+  Hoje (sáb 03/05): 09:00–18:00
+  Amanhã (dom 04/05): FECHADA
+  Seg 05/05: 09:00–19:00
 ```
 
-Seeds iniciais (nacionais, recorrentes salvo móveis):
-- 01/01 Confraternização — `fecha_todas = true`
-- 01/05 Dia do Trabalho — `fecha_todas = true`
-- 21/04 Tiradentes
-- 07/09 Independência
-- 12/10 Padroeira
-- 02/11 Finados
-- 15/11 República
-- 20/11 Consciência Negra
-- 25/12 Natal
-- Sexta-feira Santa, Carnaval (terça) e Corpus Christi como linhas anuais não-recorrentes.
+Adicionar instrução explícita no prompt:
+> **Nunca ofereça horário num dia marcado como FECHADA.** Se o cliente pedir um dia em que a loja está fechada, diga que aquela loja não abre nesse dia e ofereça (a) outra data ou (b) outra loja que abra.
 
-### 1.3 Nova tabela `loja_feriado_politica`
+Onde a IA já mostra "horário 09:00-19:00", trocar por essa grade calculada.
 
-```text
-loja_feriado_politica
-- id uuid pk
-- loja_id uuid (fk telefones_lojas)
-- escopo text          -- 'default_nacional' | 'feriado_especifico'
-- feriado_id uuid null
-- politica text        -- 'fechada' | 'abre_horario_domingo' | 'abre_horario_normal' | 'abre_horario_customizado'
-- horario_custom jsonb null
-- ativo boolean
-- unique (loja_id, escopo, feriado_id)
-```
+### 2. `agendar-cliente` — validação dura antes de criar
 
-Seeds iniciais:
-- Todas as lojas → `escopo='default_nacional'`, `politica='fechada'`.
-- Shopping União e Super Shopping → `escopo='default_nacional'`, `politica='abre_horario_domingo'`.
-- 01/01 e 01/05 não precisam de override: `feriados.fecha_todas=true` vence qualquer política.
+Antes do `INSERT` em `agendamentos`:
 
-### 1.4 Função `loja_status_no_dia`
+1. Resolver `loja_id` a partir de `loja_nome` (ILIKE em `telefones_lojas`).
+2. Chamar `loja_status_no_dia(loja_id, data::date)`.
+3. Se `aberta = false`: **abortar**, registrar evento `agendamento_dia_fechado` em `eventos_crm` e devolver erro estruturado para a IA reformular:
+   ```json
+   { "error": "loja_fechada_no_dia", "motivo": "feriado_nacional_total" | "dia_fechado" | ..., "loja_nome": "...", "data": "YYYY-MM-DD" }
+   ```
+4. Se `aberta = true` mas a `hora` cair fora de `[abre, fecha]`: também abortar com `error: "fora_do_horario"`, devolvendo `abre`/`fecha` para a IA propor um slot válido.
 
-`loja_status_no_dia(_loja_id uuid, _data date) returns jsonb`, retornando ex.:
-```json
-{ "aberta": true, "abre": "14:00", "fecha": "20:00", "motivo": "feriado_horario_domingo" }
-```
-Regras (ordem):
-1. Feriado ativo na data com `fecha_todas=true` → fechada (motivo `feriado_nacional_total`).
-2. Feriado ativo + `loja_feriado_politica` aplicável:
-   - `fechada` → fechada,
-   - `abre_horario_domingo` → usa `horarios_semana.dom` (se `null`, fechada),
-   - `abre_horario_normal` → usa horário do dia da semana real,
-   - `abre_horario_customizado` → usa `horario_custom`.
-3. Sem feriado → usa `horarios_semana[dia_da_semana]` (`null` = fechada, motivo `dia_fechado`).
+### 3. `ai-triage` — tratar erro e refazer
 
----
+No bloco que processa o retorno de `agendar-cliente`, se vier `error: loja_fechada_no_dia` ou `fora_do_horario`:
+- **Não** confirmar agendamento ao cliente.
+- Reinjetar o erro como observação de sistema na próxima iteração da tool, com instrução para oferecer outro dia/loja.
+- Logar `eventos_crm` tipo `agendamento_recusado_horario`.
 
-## 2. UI — Configurações
+### 4. `agendamentos-cron` (lembretes/confirmações)
 
-### 2.1 Card "Telefones / Lojas" (existente)
+Antes de disparar lembrete/confirmação, validar se a loja realmente abre na `data_horario`. Se não, gerar evento `agendamento_em_dia_fechado` para revisão humana e **não** enviar a mensagem ao cliente. (Salvaguarda contra agendamentos antigos criados antes desta correção.)
 
-No diálogo de edição da loja, substituir os dois inputs únicos por uma **grade de 7 linhas (seg…dom)** com `abre`, `fecha` e toggle "fechado". `horario_abertura`/`horario_fechamento` legados são preenchidos a partir de seg→sex automaticamente.
+### 5. UI — alerta no card do agendamento
 
-Badge "Aberta hoje 14:00–20:00 (feriado)" no card, calculado via `loja_status_no_dia` para o dia atual.
+Em `AgendamentoDialog.tsx` (criação/edição manual): ao escolher data e loja, chamar `loja_status_no_dia` e mostrar badge vermelho "Loja fechada nesta data — motivo: ..." bloqueando o salvar até trocar data ou loja.
 
-### 2.2 Novo card "Feriados" em `Configurações`
+## Detalhes técnicos
 
-Dois blocos:
+- A função `public.loja_status_no_dia(_loja_id uuid, _data date)` já retorna `{ aberta, abre, fecha, motivo, feriado_nome?, dia? }`. Vai ser chamada via `supabase.rpc("loja_status_no_dia", { _loja_id, _data })`.
+- Em `ai-triage`, fazer um único batch: `Promise.all` para 3 dias × N lojas, com cache em memória durante a request.
+- Em `agendar-cliente`, a validação é uma única chamada RPC + comparação de horas; ~5ms de overhead.
+- Lojas sem `horarios_semana` populado já recebem fallback `dia_fechado` da função — verificar no backfill se todas têm o JSON; se não, completar.
 
-**(a) Calendário de feriados** — tabela com `data | nome | tipo | fecha todas? | ativo`. Botões "Adicionar feriado" e "Importar feriados nacionais do ano X" (gera as datas recorrentes + móveis com cálculo de Páscoa).
+## Não está no escopo
 
-**(b) Política por loja** — para cada loja ativa, seletor de política padrão em feriados nacionais:
-- Fechada (default)
-- Abre no horário de domingo
-- Abre no horário normal do dia
-- Customizado
+- Não vamos mexer em `bot-lojas` agora (fluxos B2B internos não dependem de horário de loja física).
+- Não vamos adicionar UI de feriados além da que já existe (`FeriadosCard`).
 
-Pré-seleciona Shopping União e Super Shopping em "Abre no horário de domingo".
+## Pontos a confirmar
 
-Cada feriado da lista tem botão "Overrides" para setar exceções pontuais por loja.
-
----
-
-## 3. Integrações que passam a usar a função
-
-- **`ai-triage`**: ao montar a string de horários no prompt, passa a usar `loja_status_no_dia` para o(s) dia(s) relevantes. Lojas fechadas no dia não aparecem na lista oferecida ao cliente. Em 01/01 e 01/05, instrução automática "todas as lojas fechadas, ofereça outra data".
-- **`agendar-cliente`**: antes de criar o `agendamento`, valida se a loja está aberta na `data_horario`; se não, retorna erro estruturado para a IA reformular.
-- **`agendamentos-cron` / lembretes**: ao montar mensagens de confirmação, checa se a loja realmente abre no dia — caso contrário, gera evento `agendamento_em_dia_fechado` para revisão humana.
-- **Bot de lojas**: respostas tipo "estamos abertos hoje?" passam pela mesma função.
-
----
-
-## 4. Migrações e seeds
-
-1. Schema: adiciona `horarios_semana jsonb` em `telefones_lojas`; cria `feriados`, `loja_feriado_politica` e a função `loja_status_no_dia`.
-2. Backfill de `horarios_semana`: para cada loja, popula seg–sex a partir do `horario_abertura/fechamento` atual; sáb = `09:00–18:00` (default revisável); dom = `null`.
-3. Override Shopping União + Super Shopping: `dom = { "abre": "14:00", "fecha": "20:00" }`.
-4. Seed `feriados` para o ano corrente e o próximo.
-5. Seed `loja_feriado_politica`:
-   - todas as lojas → `default_nacional = fechada`,
-   - Shopping União + Super Shopping → `default_nacional = abre_horario_domingo`.
-6. Marcar 01/01 e 01/05 com `fecha_todas=true`.
-
----
-
-## 5. Pontos a confirmar antes de implementar
-
-1. **Sábado das lojas de rua** — manter `09:00–18:00` no backfill? (Memória registra `Seg-Sex 09–18 / Sáb 08–12` para humano, mas isso parece ser o horário do atendimento humano interno, não da loja física. Confirmar.)
-2. **Feriados estaduais (SP) e municipais (Osasco etc.)** — entram no calendário também? Sugestão: cadastrados, mas com política padrão "abre_horario_normal" salvo configuração contrária.
-3. **Outras lojas que abrem em algum feriado pontual** (ex.: véspera de Natal, Black Friday)? Se sim, ficam como overrides por feriado; se não, regra geral basta.
-
-Posso seguir com defaults sensatos pras 3 perguntas (ajustáveis depois pela UI), ou prefere responder antes da implementação.
+1. **Quantos dias para frente** mostrar no prompt da IA? Sugestão: **hoje + 6 (1 semana)** para dar repertório, mas só listar os abertos, marcando os fechados de forma compacta.
+2. Quando a IA detectar "loja fechada no dia que cliente pediu", devo **sugerir automaticamente Shopping União/Super Shopping** se eles estiverem abertos naquele dia (regra de negócio: shoppings abrem dom 14–20)?
+3. Para agendamentos antigos já gravados em dia fechado (caso existam), devo gerar uma lista para revisão humana via evento `eventos_crm`, ou só aplicar a regra para novos?
