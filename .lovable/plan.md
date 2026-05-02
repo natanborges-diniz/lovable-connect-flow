@@ -1,72 +1,80 @@
-# Bloquear agendamentos em dias que a loja está fechada
+# Cadência de retomada (humano) + janela noturna 22h–08h
 
-## Diagnóstico
+## O que muda
 
-No diálogo do Jorge (Osasco), a IA ofereceu **domingo 11h ou 15h** na "Diniz Antônio Agú (Centro)" — uma loja de rua que **não abre aos domingos**. A infraestrutura de horários por dia da semana (`horarios_semana`) e a função `loja_status_no_dia` já existem e estão populadas, mas **nada disso é consultado** hoje:
+### 1. Nova cadência humano (templates Meta)
 
-- `ai-triage/index.ts` (linhas 1761 e 1876/1940) lê apenas `horario_abertura`/`horario_fechamento` (par único legado) ao montar o prompt das lojas. A IA não tem como saber que aquela loja fecha dom.
-- `agendar-cliente/index.ts` cria o agendamento sem checar se a loja abre na data.
-- Resultado: a IA "alucina" horários plausíveis em dias fechados, e o agendamento é gravado mesmo assim.
+Em `vendas-recuperacao-cron/index.ts`, ramo `processHumano`:
 
-## O que vai mudar
+| Fase | Quando | Ação |
+|---|---|---|
+| 1ª retomada | **4h** sem resposta | Template `retomada_contexto_1` |
+| 2ª retomada | **24h** após a 1ª | Template `retomada_contexto_2` |
+| Despedida | **4h** após a 2ª | Template `retomada_despedida` + encerra atendimento (modo→ia) + Perdidos |
 
-### 1. `ai-triage` — injetar status real do dia no prompt
+Defaults atualizados:
+- `HUMANO_DELAY_HOURS = [4, 24]` (era `[24, 48]`)
+- `HUMANO_FINAL_WAIT_HOURS = 4` (era `24`)
+- `HUMANO_MAX_TENTATIVAS = 2`, cooldown 24h (mantidos)
 
-Ao montar o bloco "LOJAS DISPONÍVEIS" (tanto no caminho compiled quanto legacy), para cada loja chamar `loja_status_no_dia(loja_id, data)` para **hoje, amanhã e depois**. Substituir a linha única `Horário: 09:00-19:00` por uma grade dos próximos 3 dias, ex.:
+Os campos da UI em **Configurações → Agendamentos Automáticos** (`humano_delay_primeira`, `humano_delay_segunda`, `humano_espera_final`) continuam editáveis — só os valores iniciais mudam.
 
-```text
-- **Diniz Antônio Agú (Centro)** | R. Antônio Agú, 681
-  Hoje (sáb 03/05): 09:00–18:00
-  Amanhã (dom 04/05): FECHADA
-  Seg 05/05: 09:00–19:00
+### 2. Janela noturna: nada sai entre 22:00 e 08:00 (SP)
+
+Regra única para envios outbound automáticos ao cliente:
+- **Permitido**: 08:00–21:59 (America/Sao_Paulo), todos os dias.
+- **Bloqueado**: 22:00–07:59. Se a hora calculada de envio cair nesse intervalo, **adia para 08:00 do próximo dia** (ou para 08:00 do mesmo dia, se ainda for antes das 8h).
+- O contador de tentativa só incrementa quando o template realmente é enviado — o adiamento não consome fase.
+
+Aplicada a:
+
+**a) Templates de retomada** (`vendas-recuperacao-cron`, ramo humano):
+- Antes do `fetch` do template, verifica janela. Fora da janela: pula essa execução do cron, registra evento `retomada_adiada_janela_noturna` em `eventos_crm` com o horário previsto de envio. Próxima rodada do cron (5min) re-tenta; quando entrar em 08:00, dispara.
+- O lock otimista atual (`ultima_tentativa_at` gravado antes do fetch) só é gravado quando o envio sai — adiamento não toca o contador.
+
+**b) Cadência IA** (`vendas-recuperacao-cron`, ramo IA — 1h/24h/+1h):
+- Mesma janela aplicada. Mantém os delays atuais; só atrasa quando cair em 22–08.
+
+**c) Lembretes de agendamento** (`agendamentos-cron`, `processLembreteRetry` e `processLembreteDiaD`):
+- Helper hoje permite 08–21h todo dia. Vai virar **08–21:59** com o mesmo helper compartilhado. (Efeito prático: mantém o que já existe; só consolida em uma única função reusada.)
+
+### 3. Helper compartilhado
+
+Criar uma função única em cada edge function (não há "lib" compartilhada entre EFs no Deno deploy, então duplica o helper local em ambas):
+
+```ts
+// Janela permitida: 08:00–21:59 America/Sao_Paulo
+function dentroDaJanelaEnvio(now: Date): boolean
+function proximoSlotEnvio(now: Date): Date  // próxima 08:00 SP
 ```
 
-Adicionar instrução explícita no prompt:
-> **Nunca ofereça horário num dia marcado como FECHADA.** Se o cliente pedir um dia em que a loja está fechada, diga que aquela loja não abre nesse dia e ofereça (a) outra data ou (b) outra loja que abra.
+Usado em `vendas-recuperacao-cron` (IA + Humano) e `agendamentos-cron` (lembretes).
 
-Onde a IA já mostra "horário 09:00-19:00", trocar por essa grade calculada.
+### 4. Eventos de auditoria
 
-### 2. `agendar-cliente` — validação dura antes de criar
+Quando um envio for adiado pela janela:
+- `eventos_crm` tipo `retomada_adiada_janela_noturna` (humano e IA)
+- `eventos_crm` tipo `lembrete_adiado_janela_noturna` (lembretes)
 
-Antes do `INSERT` em `agendamentos`:
+Metadata inclui: fase prevista, template/lembrete, horário adiado, próximo slot.
 
-1. Resolver `loja_id` a partir de `loja_nome` (ILIKE em `telefones_lojas`).
-2. Chamar `loja_status_no_dia(loja_id, data::date)`.
-3. Se `aberta = false`: **abortar**, registrar evento `agendamento_dia_fechado` em `eventos_crm` e devolver erro estruturado para a IA reformular:
-   ```json
-   { "error": "loja_fechada_no_dia", "motivo": "feriado_nacional_total" | "dia_fechado" | ..., "loja_nome": "...", "data": "YYYY-MM-DD" }
-   ```
-4. Se `aberta = true` mas a `hora` cair fora de `[abre, fecha]`: também abortar com `error: "fora_do_horario"`, devolvendo `abre`/`fecha` para a IA propor um slot válido.
+### 5. Memória atualizada
 
-### 3. `ai-triage` — tratar erro e refazer
-
-No bloco que processa o retorno de `agendar-cliente`, se vier `error: loja_fechada_no_dia` ou `fora_do_horario`:
-- **Não** confirmar agendamento ao cliente.
-- Reinjetar o erro como observação de sistema na próxima iteração da tool, com instrução para oferecer outro dia/loja.
-- Logar `eventos_crm` tipo `agendamento_recusado_horario`.
-
-### 4. `agendamentos-cron` (lembretes/confirmações)
-
-Antes de disparar lembrete/confirmação, validar se a loja realmente abre na `data_horario`. Se não, gerar evento `agendamento_em_dia_fechado` para revisão humana e **não** enviar a mensagem ao cliente. (Salvaguarda contra agendamentos antigos criados antes desta correção.)
-
-### 5. UI — alerta no card do agendamento
-
-Em `AgendamentoDialog.tsx` (criação/edição manual): ao escolher data e loja, chamar `loja_status_no_dia` e mostrar badge vermelho "Loja fechada nesta data — motivo: ..." bloqueando o salvar até trocar data ou loja.
+- `mem://crm/recuperacao-ia-anti-abandono` — atualizar tabela humano para 4h/24h/+4h e adicionar nota sobre janela noturna 22–08.
+- `mem://agendamentos/janela-comunicacao-e-d-day` — alinhar para 08–21:59 (já está nesse range, só consolidar texto).
 
 ## Detalhes técnicos
 
-- A função `public.loja_status_no_dia(_loja_id uuid, _data date)` já retorna `{ aberta, abre, fecha, motivo, feriado_nome?, dia? }`. Vai ser chamada via `supabase.rpc("loja_status_no_dia", { _loja_id, _data })`.
-- Em `ai-triage`, fazer um único batch: `Promise.all` para 3 dias × N lojas, com cache em memória durante a request.
-- Em `agendar-cliente`, a validação é uma única chamada RPC + comparação de horas; ~5ms de overhead.
-- Lojas sem `horarios_semana` populado já recebem fallback `dia_fechado` da função — verificar no backfill se todas têm o JSON; se não, completar.
+- Timezone calculado via `Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false })` — padrão já usado em `ai-triage` e watchdogs.
+- Adiamento NÃO altera `ultima_tentativa_at`; o cron de 5min reentrará assim que cruzar 08:00.
+- Cooldown anti-interferência humano (24h após outbound de operador) continua igual.
+- Reativação automática IA pós-retomada no `whatsapp-webhook` continua igual.
+- Nenhuma migração de banco — só edge functions + memória.
 
-## Não está no escopo
+## Fora do escopo
 
-- Não vamos mexer em `bot-lojas` agora (fluxos B2B internos não dependem de horário de loja física).
-- Não vamos adicionar UI de feriados além da que já existe (`FeriadosCard`).
-
-## Pontos a confirmar
-
-1. **Quantos dias para frente** mostrar no prompt da IA? Sugestão: **hoje + 6 (1 semana)** para dar repertório, mas só listar os abertos, marcando os fechados de forma compacta.
-2. Quando a IA detectar "loja fechada no dia que cliente pediu", devo **sugerir automaticamente Shopping União/Super Shopping** se eles estiverem abertos naquele dia (regra de negócio: shoppings abrem dom 14–20)?
-3. Para agendamentos antigos já gravados em dia fechado (caso existam), devo gerar uma lista para revisão humana via evento `eventos_crm`, ou só aplicar a regra para novos?
+- Não muda templates Meta (continuam `retomada_contexto_1/2` e `retomada_despedida`).
+- Não muda colunas elegíveis (Novo Contato, Lead, Orçamento, Qualificado, Retorno).
+- Não muda frequência do cron (5min) — só a lógica de quando disparar.
+- Não toca em `bot-lojas` / mensagens internas B2B.
+- Não muda a janela de **escalada humana** (Seg-Sex 09–18, Sáb 08–12) que controla a mensagem do Gael ao escalar — é janela diferente, sobre outro fluxo.

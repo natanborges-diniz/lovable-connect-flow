@@ -218,13 +218,14 @@ serve(async (req) => {
 });
 
 // ═══════════════════════════════════════════
-// Helper: Janela de comunicação outbound ao cliente (08:00–21:00 SP)
+// Helper: Janela de comunicação outbound ao cliente (08:00–21:59 SP)
 // Lembretes/cobranças automáticas só saem dentro dessa janela.
+// Bloqueado: 22:00–07:59 (alinhado com cadência de retomada).
 // ═══════════════════════════════════════════
 function dentroDeJanelaComunicacaoCliente(now: Date): boolean {
   const sp = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
   const h = sp.getHours();
-  return h >= 8 && h < 21;
+  return h >= 8 && h < 22;
 }
 
 // ═══════════════════════════════════════════

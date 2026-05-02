@@ -6,6 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ═══════════════════════════════════════════
+// Janela de envio outbound ao cliente: 08:00–21:59 (America/Sao_Paulo).
+// Bloqueia 22:00–07:59. Templates de retomada e mensagens IA de
+// recuperação adiam para a próxima abertura quando caem nesse intervalo.
+// O contador de tentativa só incrementa quando o envio realmente sai.
+// ═══════════════════════════════════════════
+function dentroDaJanelaEnvio(now: Date): boolean {
+  const sp = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const h = sp.getHours();
+  return h >= 8 && h < 22;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -32,12 +44,13 @@ serve(async (req) => {
   const MAX_TENTATIVAS = payload.max_tentativas ?? 2;
   const INACTIVITY_DEFAULT = payload.inatividade_default ?? 48;
 
-  // ── Cadência HUMANO (mais lenta — assume consultor pode estar conduzindo) ──
+  // ── Cadência HUMANO (templates Meta — fora da janela 24h) ──
+  // Defaults: 4h → 24h → +4h despedida (rápida, evita esfriar lead)
   const HUMANO_DELAY_HOURS = [
-    payload.humano_delay_primeira ?? 24,
-    payload.humano_delay_segunda ?? 48,
+    payload.humano_delay_primeira ?? 4,
+    payload.humano_delay_segunda ?? 24,
   ];
-  const HUMANO_FINAL_WAIT_HOURS = payload.humano_espera_final ?? 24;
+  const HUMANO_FINAL_WAIT_HOURS = payload.humano_espera_final ?? 4;
   const HUMANO_MAX_TENTATIVAS = payload.humano_max_tentativas ?? 2;
   // Se houve outbound humano nas últimas N horas, suspende retomada (consultor ativo)
   const HUMANO_COOLDOWN_HORAS = payload.humano_cooldown_horas ?? 24;
@@ -221,6 +234,16 @@ async function processContato(
     const hoursSinceLastAttempt = (now.getTime() - lastAttemptAt.getTime()) / (1000 * 60 * 60);
 
     if (hoursSinceLastAttempt >= FINAL_WAIT_HOURS) {
+      // Janela de envio: nada sai entre 22h–08h SP
+      if (!dentroDaJanelaEnvio(now)) {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contato.id,
+          tipo: "retomada_adiada_janela_noturna",
+          descricao: `Despedida IA adiada — fora da janela 08–22 SP`,
+          metadata: { fase: "despedida_ia", agora: now.toISOString() },
+        });
+        return result;
+      }
       const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
       const despedida = `Olá ${firstName}! 😊 Agradeço muito o seu contato com as Óticas Diniz Osasco. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨`;
 
@@ -273,6 +296,17 @@ async function processContato(
 
   const hoursSinceReference = (now.getTime() - referenceTime.getTime()) / (1000 * 60 * 60);
   if (hoursSinceReference < requiredDelay) return result;
+
+  // Janela de envio: nada sai entre 22h–08h SP — adia para próxima rodada
+  if (!dentroDaJanelaEnvio(now)) {
+    await supabase.from("eventos_crm").insert({
+      contato_id: contato.id,
+      tipo: "retomada_adiada_janela_noturna",
+      descricao: `Retomada IA tentativa ${tentativas + 1} adiada — fora da janela 08–22 SP`,
+      metadata: { fase: "retomada_ia", tentativa_pretendida: tentativas + 1, agora: now.toISOString() },
+    });
+    return result;
+  }
 
   // ── IDEMPOTÊNCIA: bloqueia disparo duplicado por race do cron ──
   // Cron pode rodar overlap; duas execuções concorrentes leem tentativas=0
@@ -438,6 +472,17 @@ async function processHumano(
     const hoursSince = (now.getTime() - lastAttemptAt.getTime()) / (1000 * 3600);
     if (hoursSince < FINAL_WAIT_HOURS) return result;
 
+    // Janela de envio: nada sai entre 22h–08h SP
+    if (!dentroDaJanelaEnvio(now)) {
+      await supabase.from("eventos_crm").insert({
+        contato_id: contato.id,
+        tipo: "retomada_adiada_janela_noturna",
+        descricao: `Despedida humano adiada — fora da janela 08–22 SP`,
+        metadata: { fase: "despedida_humano", agora: now.toISOString() },
+      });
+      return result;
+    }
+
     const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
     const topico = inferirTopico(lastOutbound) || recH.topico || "seu atendimento";
 
@@ -486,6 +531,17 @@ async function processHumano(
     : (recH.ultima_tentativa_at ? new Date(recH.ultima_tentativa_at) : lastInboundAt);
   const hoursSinceRef = (now.getTime() - referenceTime.getTime()) / (1000 * 3600);
   if (hoursSinceRef < requiredDelay) return result;
+
+  // Janela de envio: nada sai entre 22h–08h SP — adia para próxima rodada
+  if (!dentroDaJanelaEnvio(now)) {
+    await supabase.from("eventos_crm").insert({
+      contato_id: contato.id,
+      tipo: "retomada_adiada_janela_noturna",
+      descricao: `Retomada humano tentativa ${tentativas + 1} adiada — fora da janela 08–22 SP`,
+      metadata: { fase: "retomada_humano", tentativa_pretendida: tentativas + 1, agora: now.toISOString() },
+    });
+    return result;
+  }
 
   // ── IDEMPOTÊNCIA: bloqueia disparo duplicado por race do cron ──
   // Cron roda a cada 1min; duas execuções concorrentes liam tentativas=0
