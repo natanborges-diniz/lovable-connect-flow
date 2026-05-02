@@ -6,6 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ═══════════════════════════════════════════
+// Janela de envio outbound ao cliente: 08:00–21:59 (America/Sao_Paulo).
+// Bloqueia 22:00–07:59. Templates de retomada e mensagens IA de
+// recuperação adiam para a próxima abertura quando caem nesse intervalo.
+// O contador de tentativa só incrementa quando o envio realmente sai.
+// ═══════════════════════════════════════════
+function dentroDaJanelaEnvio(now: Date): boolean {
+  const sp = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const h = sp.getHours();
+  return h >= 8 && h < 22;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
