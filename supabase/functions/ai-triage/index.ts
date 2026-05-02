@@ -2931,6 +2931,55 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // Find loja telephone
         const lojaMatch = lojas.find((l: any) => l.nome_loja.toLowerCase() === (args.loja_nome || "").toLowerCase());
 
+        // ── PRÉ-VALIDAÇÃO: a loja abre nesse dia/horário? ──
+        // Se a loja estiver fechada na data ou a hora estiver fora do intervalo,
+        // bloqueia a criação e devolve mensagem corretiva ao cliente.
+        let agendamentoBloqueado = false;
+        let bloqueioMotivo: string | null = null;
+        try {
+          if (lojaMatch?.id && args.data_horario) {
+            const dataDia = String(args.data_horario).substring(0, 10);
+            const { data: status } = await supabase.rpc("loja_status_no_dia", {
+              _loja_id: lojaMatch.id,
+              _data: dataDia,
+            }) as any;
+
+            const dtBr = new Date(args.data_horario);
+            const dataFmtErr = dtBr.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+
+            if (status?.aberta === false) {
+              agendamentoBloqueado = true;
+              bloqueioMotivo = status.motivo;
+              const feriadoStr = status.feriado_nome ? ` (feriado de ${status.feriado_nome})` : "";
+              const lojasAbertas = lojas.filter((l: any) => l.id && lojaStatusGrade[l.id] && !lojaStatusGrade[l.id].split("\n")[0].includes("FECHADA"));
+              const sugestao = lojasAbertas.length > 0
+                ? `\n\nNesse dia, a unidade de ${lojasAbertas[0].nome_loja} está aberta — quer que eu marque por lá? Ou prefere outro dia na ${args.loja_nome}?`
+                : `\n\nQuer escolher outro dia na ${args.loja_nome}?`;
+              resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} não abre${feriadoStr}. Me desculpa a confusão!${sugestao}`;
+            } else if (status?.aberta === true && status.abre && status.fecha) {
+              const horaSP = dtBr.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+              if (horaSP < status.abre || horaSP >= status.fecha) {
+                agendamentoBloqueado = true;
+                bloqueioMotivo = "fora_do_horario";
+                resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} funciona das ${status.abre} às ${status.fecha}. ${horaSP} fica fora desse intervalo. Quer marcar pra outro horário dentro desse período?`;
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[TOOL agendar] pré-validação de horário falhou:", e);
+        }
+
+        if (agendamentoBloqueado) {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "agendamento_recusado_horario",
+            descricao: `IA tentou agendar em horário inválido — motivo: ${bloqueioMotivo}. Loja: ${args.loja_nome}, data: ${args.data_horario}`,
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+            metadata: { args, motivo: bloqueioMotivo },
+          });
+        }
+
         // ── Build standardized appointment confirmation block (tabulated) ──
         // Strip any raw URLs the LLM may have inserted, then append a clean address block.
         try {
