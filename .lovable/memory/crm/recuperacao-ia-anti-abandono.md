@@ -1,6 +1,6 @@
 ---
 name: Recuperação anti-abandono — cadência IA + cadência Humano
-description: vendas-recuperacao-cron monitora inatividade no CRM. Cadência IA 1h→24h→despedida. Cadência humano 24h→48h→despedida via templates Meta, com cooldown de 24h se consultor ativo.
+description: vendas-recuperacao-cron monitora inatividade no CRM. Cadência IA 1h→24h→despedida 1h. Cadência humano 4h→24h→despedida 4h via templates Meta. Janela de envio 08–22h SP.
 type: feature
 ---
 
@@ -25,17 +25,27 @@ Disparado quando cliente fica inerte após handoff para humano. Como tipicamente
 | Fase | Quando | Ação | Canal |
 |---|---|---|---|
 | Alerta interno | 6h sem resposta | Notificação in-app ao operador | in-app |
-| 1ª retomada | **24h** sem resposta E sem outbound humano nas últimas 24h | Template `retomada_contexto_1` | WhatsApp Meta |
-| 2ª retomada | **48h** após a 1ª | Template `retomada_contexto_2` | WhatsApp Meta |
-| Despedida | **24h** após a 2ª | Template `retomada_despedida` + encerra atendimento (modo→ia) + Perdidos | WhatsApp Meta |
+| 1ª retomada | **4h** sem resposta E sem outbound humano nas últimas 24h | Template `retomada_contexto_1` | WhatsApp Meta |
+| 2ª retomada | **24h** após a 1ª | Template `retomada_contexto_2` | WhatsApp Meta |
+| Despedida | **4h** após a 2ª | Template `retomada_despedida` + encerra atendimento (modo→ia) + Perdidos | WhatsApp Meta |
 
-Total: ~96h. Contador em `atendimentos.metadata.recuperacao_humano` (separado do contador IA).
+Total: ~32h. Contador em `atendimentos.metadata.recuperacao_humano` (separado do contador IA).
+
+## Janela noturna 22h–08h (SP)
+
+Helper `dentroDaJanelaEnvio(now)` em `vendas-recuperacao-cron/index.ts` libera envio entre 08:00 e 21:59 (America/Sao_Paulo). Aplicado em **ambos os ramos** (IA e Humano) e em **todas as fases** (1ª, 2ª e despedida):
+
+- Se a hora calculada cair entre 22:00–07:59, a execução é **pulada** e registra `retomada_adiada_janela_noturna` em `eventos_crm` com a fase pretendida.
+- O lock otimista (`ultima_tentativa_at`) e o contador de tentativas **só são gravados quando o envio sai** — o adiamento não consome fase.
+- O cron de 5min reentra naturalmente; assim que cruza 08:00, dispara.
+
+Helper análogo `dentroDeJanelaComunicacaoCliente(now)` em `agendamentos-cron/index.ts` (mesma janela 08–22) bloqueia lembretes de agendamento fora desse intervalo.
 
 ### Cooldown anti-interferência (humano)
 Se houve outbound de remetente humano (não-Gael/IA/Sistema/Bot/Template) nas últimas **24h**, o cron pula a retomada — assume que o consultor está conduzindo. Configurável via `humano_cooldown_horas`.
 
 ### Idempotência (anti-duplicação por race do cron)
-Antes de disparar o template, `processHumano` verifica `recuperacao_humano.ultima_tentativa_at`: se foi gravada nos últimos 60min, pula. Logo em seguida, **grava o novo `ultima_tentativa_at` ANTES do `fetch`** (lock otimista), garantindo que duas execuções concorrentes do cron não disparem o template duas vezes (caso Jorge 27/04 — duplicado em 75ms).
+Antes de disparar o template, `processHumano` verifica `recuperacao_humano.ultima_tentativa_at`: se foi gravada nos últimos 60min, pula. Logo em seguida, **grava o novo `ultima_tentativa_at` ANTES do `fetch`** (lock otimista), garantindo que duas execuções concorrentes do cron não disparem o template duas vezes.
 
 ### Reativação automática IA pós-retomada (`whatsapp-webhook`)
 Quando o cliente responde a um template de retomada estando o atendimento em `modo='humano'` órfão (sem `atendente_nome`), o webhook automaticamente:
@@ -43,20 +53,11 @@ Quando o cliente responde a um template de retomada estando o atendimento em `mo
 2. Limpa `recuperacao_humano` do metadata.
 3. Roteia o inbound para `ai-triage` no mesmo request.
 
-Critérios: `atendimento.modo='humano'` + `atendente_nome IS NULL` + `recuperacao_humano.ultima_tentativa_at` nos últimos 7 dias. Registra evento `reativacao_ia_pos_retomada` em `eventos_crm`. Se houver atendente humano ativo, apenas zera o contador.
-
 ### Inferência do tópico ({{2}})
-Função `inferirTopico` analisa últimas 5 outbound humanas em busca de palavras-chave:
-- "lentes de contato" → `"as lentes de contato"`
-- "orçamento/preço/valor" → `"seu orçamento"`
-- "agendar/visita/horário" → `"sua visita à loja"`
-- "receita/grau/exame" → `"sua receita"`
-- "armação/óculos/modelo" → `"seus óculos"`
-- "multifocal/progressivo" → `"suas lentes multifocais"`
-- fallback → `"seu atendimento"`
+Função `inferirTopico` analisa últimas 5 outbound humanas em busca de palavras-chave (lentes de contato → orçamento → agendar → receita → armação → multifocal → fallback "seu atendimento").
 
 ### Fallback manual
-O componente `ReconectarTemplateButton.tsx` permite ao operador disparar template manualmente a qualquer momento depois das 24h. A automação cobre o caso "operador esqueceu".
+O componente `ReconectarTemplateButton.tsx` permite ao operador disparar template manualmente após 24h.
 
 ## Defaults configuráveis (`vendas-recuperacao-cron/index.ts`)
 
@@ -66,9 +67,9 @@ DELAY_HOURS = [1, 24]
 FINAL_WAIT_HOURS = 1
 MAX_TENTATIVAS = 2
 
-// Humano
-HUMANO_DELAY_HOURS = [24, 48]
-HUMANO_FINAL_WAIT_HOURS = 24
+// Humano (atualizado: 4h/24h/+4h despedida)
+HUMANO_DELAY_HOURS = [4, 24]
+HUMANO_FINAL_WAIT_HOURS = 4
 HUMANO_MAX_TENTATIVAS = 2
 HUMANO_COOLDOWN_HORAS = 24
 ```
@@ -78,5 +79,6 @@ Todos overridáveis via payload do cron em **Configurações → Agendamentos Au
 ## Eventos registrados em `eventos_crm`
 - `recuperacao_tentativa` (IA)
 - `lead_despedida_final` (IA)
-- `recuperacao_humano_tentativa` (Humano) — com template e tópico no metadata
+- `recuperacao_humano_tentativa` (Humano)
 - `lead_despedida_humano` (Humano)
+- `retomada_adiada_janela_noturna` (IA + Humano, quando envio cai em 22h–08h)
