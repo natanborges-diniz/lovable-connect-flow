@@ -31,6 +31,77 @@ serve(async (req) => {
 
     if (!contato) throw new Error("Contato not found");
 
+    // ── VALIDAÇÃO DE HORÁRIO DE FUNCIONAMENTO DA LOJA ──
+    // Resolve loja_id por nome e consulta loja_status_no_dia. Se a loja estiver
+    // fechada na data, ou se a hora estiver fora do intervalo de funcionamento,
+    // aborta a criação e devolve erro estruturado para a IA reformular.
+    try {
+      const { data: lojaRow } = await supabase
+        .from("telefones_lojas")
+        .select("id, nome_loja")
+        .ilike("nome_loja", loja_nome)
+        .eq("ativo", true)
+        .maybeSingle();
+
+      if (lojaRow?.id) {
+        const dataIso = String(data_horario);
+        const dataDia = dataIso.substring(0, 10); // YYYY-MM-DD
+        const { data: status } = await supabase.rpc("loja_status_no_dia", {
+          _loja_id: lojaRow.id,
+          _data: dataDia,
+        }) as any;
+
+        if (status && status.aberta === false) {
+          console.warn(`[agendar-cliente] LOJA FECHADA — ${lojaRow.nome_loja} em ${dataDia}: ${status.motivo}`);
+          await supabase.from("eventos_crm").insert({
+            contato_id,
+            tipo: "agendamento_dia_fechado",
+            descricao: `Tentativa bloqueada: ${lojaRow.nome_loja} não abre em ${dataDia} (${status.motivo})`,
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id || null,
+            metadata: { loja_nome, data_horario, status },
+          });
+          return new Response(JSON.stringify({
+            error: "loja_fechada_no_dia",
+            motivo: status.motivo,
+            feriado_nome: status.feriado_nome || null,
+            loja_nome: lojaRow.nome_loja,
+            data: dataDia,
+          }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        // Loja aberta: valida hora dentro do intervalo
+        if (status && status.aberta === true && status.abre && status.fecha) {
+          const horaSP = new Date(dataIso).toLocaleTimeString("en-GB", {
+            hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo",
+          }); // "HH:MM"
+          if (horaSP < status.abre || horaSP >= status.fecha) {
+            console.warn(`[agendar-cliente] FORA DO HORÁRIO — ${lojaRow.nome_loja} em ${dataDia} ${horaSP} (abre ${status.abre}–${status.fecha})`);
+            await supabase.from("eventos_crm").insert({
+              contato_id,
+              tipo: "agendamento_fora_horario",
+              descricao: `Tentativa bloqueada: ${horaSP} fora de ${status.abre}–${status.fecha} em ${lojaRow.nome_loja}`,
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id || null,
+              metadata: { loja_nome, data_horario, status, hora_solicitada: horaSP },
+            });
+            return new Response(JSON.stringify({
+              error: "fora_do_horario",
+              loja_nome: lojaRow.nome_loja,
+              data: dataDia,
+              hora_solicitada: horaSP,
+              abre: status.abre,
+              fecha: status.fecha,
+            }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+        }
+      } else {
+        console.warn(`[agendar-cliente] loja "${loja_nome}" não encontrada em telefones_lojas — pulando validação de horário`);
+      }
+    } catch (e) {
+      console.error("[agendar-cliente] validação de horário falhou (prossegue):", e);
+    }
+
     // ── IDEMPOTÊNCIA: se já existe agendamento ativo equivalente, retorna o existente ──
     // Critérios:
     //  (a) mesma loja (case-insensitive) e mesma data (YYYY-MM-DD) → mesmo agendamento.
