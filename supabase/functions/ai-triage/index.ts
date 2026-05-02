@@ -1758,7 +1758,7 @@ serve(async (req) => {
         .limit(60),
       supabase.from("pipeline_colunas").select("id, nome, setor_id").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
-      supabase.from("telefones_lojas").select("nome_loja, telefone, endereco, horario_abertura, horario_fechamento, departamento, google_profile_url").eq("ativo", true),
+      supabase.from("telefones_lojas").select("id, nome_loja, telefone, endereco, horario_abertura, horario_fechamento, horarios_semana, departamento, google_profile_url").eq("ativo", true),
       supabase.from("agendamentos").select("id, loja_nome, data_horario, status, observacoes, metadata").eq("contato_id", contatoId).in("status", ["agendado", "confirmado", "lembrete_enviado", "no_show", "recuperacao"]).order("data_horario", { ascending: false }).limit(5),
       supabase.from("contatos").select("metadata, tipo, nome").eq("id", contatoId).single(),
     ]);
@@ -1867,17 +1867,75 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       knowledgeStr = Object.entries(grouped).map(([cat, items]) => `## ${cat}\n${items.join("\n")}`).join("\n\n");
     }
 
+    // ── Pré-calcula grade de status (7 dias) por loja via loja_status_no_dia ──
+    // Resultado: lojaStatusGrade[loja_id] = "Hoje (sáb 03/05): 09:00–18:00\n  Amanhã (dom 04/05): FECHADA\n  ..."
+    const lojaStatusGrade: Record<string, string> = {};
+    try {
+      const tz = "America/Sao_Paulo";
+      const dayLabels = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+      const baseDate = new Date(new Date().toLocaleString("en-US", { timeZone: tz }));
+      const days: { label: string; iso: string; idx: number }[] = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(baseDate);
+        d.setDate(baseDate.getDate() + i);
+        const iso = d.toISOString().substring(0, 10); // YYYY-MM-DD (suficiente p/ função)
+        const ddmm = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const prefix = i === 0 ? "Hoje" : i === 1 ? "Amanhã" : dayLabels[d.getDay()];
+        days.push({ label: `${prefix} (${dayLabels[d.getDay()]} ${ddmm})`, iso, idx: i });
+      }
+
+      const lojasComId = (lojas || []).filter((l: any) => l.id);
+      const calls: Promise<any>[] = [];
+      for (const l of lojasComId) {
+        for (const d of days) {
+          calls.push(
+            supabase.rpc("loja_status_no_dia", { _loja_id: l.id, _data: d.iso })
+              .then((r: any) => ({ loja_id: l.id, day: d, status: r.data }))
+              .catch(() => ({ loja_id: l.id, day: d, status: null }))
+          );
+        }
+      }
+      const results = await Promise.all(calls);
+      const grouped: Record<string, string[]> = {};
+      for (const r of results) {
+        if (!grouped[r.loja_id]) grouped[r.loja_id] = [];
+        const s = r.status;
+        let line: string;
+        if (!s) {
+          line = `${r.day.label}: —`;
+        } else if (s.aberta) {
+          line = `${r.day.label}: ${s.abre}–${s.fecha}`;
+        } else if (s.motivo === "feriado_nacional_total" || s.motivo === "feriado_loja_fechada" || s.motivo === "feriado_sem_politica" || s.motivo === "feriado_sem_horario_domingo") {
+          line = `${r.day.label}: FECHADA (feriado${s.feriado_nome ? " — " + s.feriado_nome : ""})`;
+        } else {
+          line = `${r.day.label}: FECHADA`;
+        }
+        grouped[r.loja_id].push(line);
+      }
+      for (const id in grouped) {
+        lojaStatusGrade[id] = grouped[id].join("\n  ");
+      }
+    } catch (e) {
+      console.error("[ai-triage] falha ao montar grade de status das lojas:", e);
+    }
+
     // Inject lojas into knowledge
     if (lojas.length > 0) {
       knowledgeStr += "\n\n## LOJAS DISPONÍVEIS\n";
+      knowledgeStr += "⚠️ Use a grade de horário abaixo. NUNCA ofereça horário num dia marcado como FECHADA. Se o cliente pedir um dia fechado, diga que aquela loja não abre nesse dia e ofereça outra data ou outra loja que abra naquele dia.\n\n";
       for (const l of lojas) {
         const parts = [`**${l.nome_loja}**`];
         if (l.endereco) parts.push(l.endereco);
-        if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
         if (l.telefone) parts.push(`Tel: ${l.telefone}`);
         if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
         if (l.google_profile_url) parts.push(`Google: ${l.google_profile_url}`);
         knowledgeStr += `- ${parts.join(" | ")}\n`;
+        const grade = l.id ? lojaStatusGrade[l.id] : "";
+        if (grade) {
+          knowledgeStr += `  ${grade}\n`;
+        } else if (l.horario_abertura && l.horario_fechamento) {
+          knowledgeStr += `  Horário padrão: ${l.horario_abertura}–${l.horario_fechamento}\n`;
+        }
       }
     }
 
@@ -1934,13 +1992,19 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       let lojasStr = "";
       if (lojas.length > 0) {
         lojasStr = "## LOJAS DISPONÍVEIS\n";
+        lojasStr += "⚠️ Use a grade de horário abaixo. NUNCA ofereça horário num dia marcado como FECHADA. Se o cliente pedir um dia fechado, diga que aquela loja não abre nesse dia e ofereça outra data ou outra loja que abra naquele dia.\n\n";
         for (const l of lojas) {
           const parts = [`**${l.nome_loja}**`];
           if (l.endereco) parts.push(l.endereco);
-          if (l.horario_abertura && l.horario_fechamento) parts.push(`Horário: ${l.horario_abertura}-${l.horario_fechamento}`);
           if (l.telefone) parts.push(`Tel: ${l.telefone}`);
           if (l.departamento && l.departamento !== "geral") parts.push(`Depto: ${l.departamento}`);
           lojasStr += `- ${parts.join(" | ")}\n`;
+          const grade = l.id ? lojaStatusGrade[l.id] : "";
+          if (grade) {
+            lojasStr += `  ${grade}\n`;
+          } else if (l.horario_abertura && l.horario_fechamento) {
+            lojasStr += `  Horário padrão: ${l.horario_abertura}–${l.horario_fechamento}\n`;
+          }
         }
       }
 
@@ -2867,6 +2931,56 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // Find loja telephone
         const lojaMatch = lojas.find((l: any) => l.nome_loja.toLowerCase() === (args.loja_nome || "").toLowerCase());
 
+        // ── PRÉ-VALIDAÇÃO: a loja abre nesse dia/horário? ──
+        // Se a loja estiver fechada na data ou a hora estiver fora do intervalo,
+        // bloqueia a criação e devolve mensagem corretiva ao cliente.
+        let agendamentoBloqueado = false;
+        let bloqueioMotivo: string | null = null;
+        try {
+          if (lojaMatch?.id && args.data_horario) {
+            const dataDia = String(args.data_horario).substring(0, 10);
+            const { data: status } = await supabase.rpc("loja_status_no_dia", {
+              _loja_id: lojaMatch.id,
+              _data: dataDia,
+            }) as any;
+
+            const dtBr = new Date(args.data_horario);
+            const dataFmtErr = dtBr.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+
+            if (status?.aberta === false) {
+              agendamentoBloqueado = true;
+              bloqueioMotivo = status.motivo;
+              const feriadoStr = status.feriado_nome ? ` (feriado de ${status.feriado_nome})` : "";
+              const lojasAbertas = lojas.filter((l: any) => l.id && lojaStatusGrade[l.id] && !lojaStatusGrade[l.id].split("\n")[0].includes("FECHADA"));
+              const sugestao = lojasAbertas.length > 0
+                ? `\n\nNesse dia, a unidade de ${lojasAbertas[0].nome_loja} está aberta — quer que eu marque por lá? Ou prefere outro dia na ${args.loja_nome}?`
+                : `\n\nQuer escolher outro dia na ${args.loja_nome}?`;
+              resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} não abre${feriadoStr}. Me desculpa a confusão!${sugestao}`;
+            } else if (status?.aberta === true && status.abre && status.fecha) {
+              const horaSP = dtBr.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+              if (horaSP < status.abre || horaSP >= status.fecha) {
+                agendamentoBloqueado = true;
+                bloqueioMotivo = "fora_do_horario";
+                resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} funciona das ${status.abre} às ${status.fecha}. ${horaSP} fica fora desse intervalo. Quer marcar pra outro horário dentro desse período?`;
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[TOOL agendar] pré-validação de horário falhou:", e);
+        }
+
+        if (agendamentoBloqueado) {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "agendamento_recusado_horario",
+            descricao: `IA tentou agendar em horário inválido — motivo: ${bloqueioMotivo}. Loja: ${args.loja_nome}, data: ${args.data_horario}`,
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+            metadata: { args, motivo: bloqueioMotivo },
+          });
+        }
+
+        if (!agendamentoBloqueado) {
         // ── Build standardized appointment confirmation block (tabulated) ──
         // Strip any raw URLs the LLM may have inserted, then append a clean address block.
         try {
@@ -2946,7 +3060,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           } else {
             // Create new agendamento via agendar-cliente function
             try {
-              await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+              const agResp = await fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
                 method: "POST",
                 headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -2958,6 +3072,19 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                   observacoes: args.observacoes || (fn === "reagendar_visita" ? "Reagendamento após no-show" : null),
                 }),
               });
+              if (agResp.status === 409) {
+                // agendar-cliente recusou (loja fechada / fora horário) — sobrescreve resposta
+                const errBody = await agResp.json().catch(() => ({}));
+                console.warn("[TOOL] agendar-cliente recusou:", errBody);
+                const dt = new Date(args.data_horario);
+                const dataFmtErr = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+                if (errBody?.error === "loja_fechada_no_dia") {
+                  const fer = errBody.feriado_nome ? ` (feriado de ${errBody.feriado_nome})` : "";
+                  resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} não abre${fer}. Me desculpa! Quer escolher outro dia ou outra loja?`;
+                } else if (errBody?.error === "fora_do_horario") {
+                  resposta = `Opa, ${dataFmtErr} a ${args.loja_nome} funciona das ${errBody.abre} às ${errBody.fecha}. Quer marcar pra um horário dentro desse intervalo?`;
+                }
+              }
             } catch (e) {
               console.error("[TOOL] agendar-cliente call failed:", e);
             }
@@ -2972,6 +3099,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
+        } // end if (!agendamentoBloqueado)
       } else if (fn === "agendar_lembrete") {
         resposta = args.resposta;
         intencao = "lembrete";
