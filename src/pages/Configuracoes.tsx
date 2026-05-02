@@ -127,6 +127,7 @@ export default function Configuracoes() {
         <TabsContent value="lojas">
           <div className="grid gap-6">
             <TelefonesLojasCard />
+            <FeriadosCard />
             <BotFluxosCard />
             <BotMenuCard />
           </div>
