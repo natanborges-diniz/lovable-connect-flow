@@ -532,6 +532,17 @@ async function processHumano(
   const hoursSinceRef = (now.getTime() - referenceTime.getTime()) / (1000 * 3600);
   if (hoursSinceRef < requiredDelay) return result;
 
+  // Janela de envio: nada sai entre 22h–08h SP — adia para próxima rodada
+  if (!dentroDaJanelaEnvio(now)) {
+    await supabase.from("eventos_crm").insert({
+      contato_id: contato.id,
+      tipo: "retomada_adiada_janela_noturna",
+      descricao: `Retomada humano tentativa ${tentativas + 1} adiada — fora da janela 08–22 SP`,
+      metadata: { fase: "retomada_humano", tentativa_pretendida: tentativas + 1, agora: now.toISOString() },
+    });
+    return result;
+  }
+
   // ── IDEMPOTÊNCIA: bloqueia disparo duplicado por race do cron ──
   // Cron roda a cada 1min; duas execuções concorrentes liam tentativas=0
   // simultaneamente e disparavam o template duas vezes em ~75ms (caso Jorge 27/04).
