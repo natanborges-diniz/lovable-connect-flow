@@ -234,6 +234,16 @@ async function processContato(
     const hoursSinceLastAttempt = (now.getTime() - lastAttemptAt.getTime()) / (1000 * 60 * 60);
 
     if (hoursSinceLastAttempt >= FINAL_WAIT_HOURS) {
+      // Janela de envio: nada sai entre 22h–08h SP
+      if (!dentroDaJanelaEnvio(now)) {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contato.id,
+          tipo: "retomada_adiada_janela_noturna",
+          descricao: `Despedida IA adiada — fora da janela 08–22 SP`,
+          metadata: { fase: "despedida_ia", agora: now.toISOString() },
+        });
+        return result;
+      }
       const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
       const despedida = `Olá ${firstName}! 😊 Agradeço muito o seu contato com as Óticas Diniz Osasco. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨`;
 
