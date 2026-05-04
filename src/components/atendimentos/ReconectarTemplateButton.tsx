@@ -160,23 +160,25 @@ export function ReconectarTemplateButton({
     }
   };
 
-  if (!foraJanela) return null;
+  if (!foraJanela && !forceVisible) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-[11px] px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
-        >
-          <RefreshCw className="h-3 w-3 mr-1" />
-          Reconectar
-          <Badge variant="outline" className="ml-1.5 h-4 px-1 text-[9px] border-amber-500/60 text-amber-700 dark:text-amber-400">
-            +24h
-          </Badge>
-        </Button>
-      </PopoverTrigger>
+      {!hideTrigger && (
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
+          >
+            <RefreshCw className="h-3 w-3 mr-1" />
+            Reconectar
+            <Badge variant="outline" className="ml-1.5 h-4 px-1 text-[9px] border-amber-500/60 text-amber-700 dark:text-amber-400">
+              +24h
+            </Badge>
+          </Button>
+        </PopoverTrigger>
+      )}
       <PopoverContent align="start" className="w-96 p-3">
         <div className="space-y-3">
           <div className="flex items-start gap-2">
