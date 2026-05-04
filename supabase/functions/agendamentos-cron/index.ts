@@ -46,35 +46,16 @@ serve(async (req) => {
 
   try {
     // ═══════════════════════════════════════════
-    // A) TRANSIÇÃO → "lembrete_enviado" (24h antes)
+    // A) LEMBRETE VÉSPERA — 08h SP, 1 mensagem para agendamentos de amanhã
     // ═══════════════════════════════════════════
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2).toISOString();
-
-    const { data: paraLembrete } = await supabase
-      .from("agendamentos")
-      .select("id")
-      .eq("status", "agendado")
-      .gte("data_horario", todayStart)
-      .lt("data_horario", tomorrowEnd);
-
-    for (const ag of paraLembrete || []) {
-      await supabase.from("agendamentos").update({
-        status: "lembrete_enviado",
-        tentativas_lembrete: 1,
-      }).eq("id", ag.id);
-      results.push(`lembrete_enviado:${ag.id}`);
-    }
+    await processLembreteVespera(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
 
     // ═══════════════════════════════════════════
-    // B) REENVIO DE LEMBRETE ao cliente (2ª tentativa)
+    // B) LEMBRETE 1H ANTES — 1 mensagem ~1h antes do horário (mesmo dia)
+    //    Pula agendamentos marcados com <1h de antecedência.
     // ═══════════════════════════════════════════
-    await processLembreteRetry(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_REENVIO_LEMBRETE);
+    await processLembrete1hAntes(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
 
-    // ═══════════════════════════════════════════
-    // B2) LEMBRETE DIA-D às 08:00 (America/Sao_Paulo)
-    // ═══════════════════════════════════════════
-    await processLembreteDiaD(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
 
     // ═══════════════════════════════════════════
     // C) COBRANÇA À LOJA — 2h após o horário marcado
