@@ -521,6 +521,13 @@ serve(async (req) => {
             }),
           });
 
+          // Notifica a loja via Atrium Messenger (background)
+          fetch(`${SUPABASE_URL}/functions/v1/notificar-loja-agendamento`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ agendamento_id: agendamentoPendente.id }),
+          }).catch((e) => console.warn("[whatsapp-webhook] notificar-loja-agendamento falhou:", e));
+
           // Pipeline automations will fire via the DB trigger on status change
           return new Response(JSON.stringify({ status: "ok", action: "auto_confirmed", atendimento_id: atendimentoId }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },

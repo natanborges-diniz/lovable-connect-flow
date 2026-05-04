@@ -1,41 +1,73 @@
-## Diagnóstico
+## Objetivo
 
-O número **5511963268878** continua não sendo atendido mesmo após você ter desativado o cadastro em Telefones Corporativos. Investiguei e achei 3 resíduos do estado anterior que travam o fluxo:
+Quando o agendamento passar para `confirmado` (cliente confirmou via WhatsApp ou IA), enviar **automaticamente** um aviso à loja correspondente pelo Atrium Messenger (notificação in-app + push), contendo: nome do cliente, horário/data, loja, e resumo do atendimento.
 
-1. **`telefones_lojas`**: `ativo=false` ✅ (correto, foi o que você fez)
-2. **`contatos`**: ainda está com `tipo='loja'` e `setor_destino='Atendimento Corporativo'` (resíduo do saneamento corporativo anterior)
-3. **`atendimentos`** (b91af612...): `modo='ponte'`, `status='aguardando'` — herdado da época em que tinha responsável único
-4. **`contato_ponte`**: `ativo=false` (ok), mas o atendimento ainda está marcado `modo=ponte`
+Hoje a loja só é cutucada **depois** do horário ("compareceu?"). Não existe aviso antecipado.
 
-**Causa raiz:** o webhook, ao ver atendimento aberto com `modo='ponte'`, desvia para `bridge-mensageria` em vez de `ai-triage`. Como a ponte está inativa, a mensagem fica "no limbo" — nem IA responde, nem espelha pro Messenger interno.
+## Fluxo proposto
 
-**Falha de design:** o trigger `on_telefone_loja_change` só roda `sanitize_corporate_contact` quando o telefone é **ativado/criado**. Quando você **desativa**, nenhum saneamento reverso acontece — o contato fica preso no estado corporativo.
+```text
+Cliente confirma "sim/ok/confirmado"
+        │
+        ▼
+whatsapp-webhook OU ai-triage marca agendamento.status = 'confirmado'
+        │
+        ▼
+[NOVO] dispara helper notificar-loja-agendamento
+        │
+        ├─ Resolve destinatários da loja via resolver_destinatarios_loja(loja_nome)
+        ├─ Monta título + mensagem com resumo
+        └─ INSERT em notificacoes (1 por usuário)
+                 │
+                 ▼ (trigger trg_push_nova_notificacao já existe)
+        Push FCM/APNs + badge in-app no Atrium Messenger
+```
 
-## Plano
+## Nova edge function: `notificar-loja-agendamento`
 
-### 1. Saneamento imediato do contato 8878 (migração one-shot)
-- `contatos`: setar `tipo='cliente'`, `setor_destino=NULL`, `pipeline_coluna_id=NULL`
-- `atendimentos` abertos do contato: `modo='ia'` (assim ai-triage volta a processar)
-- `contato_ponte`: garantir `ativo=false` (já está)
+Recebe `{ agendamento_id }`, idempotente via `metadata.aviso_loja_enviado_at`.
 
-### 2. Corrigir o trigger (causa raiz)
-Estender `on_telefone_loja_change` para tratar **desativação** (`ativo true→false`) ou **deleção** do cadastro:
-- Reverter contatos com aquele telefone para `tipo='cliente'`, `setor_destino=NULL`
-- Limpar `pipeline_coluna_id` se a coluna pertencia ao setor corporativo
-- Mudar atendimentos abertos `modo='ponte'` ou `modo='humano' sem atendente` para `modo='ia'`
-- Desativar `contato_ponte` correspondente
-- Registrar evento `desclassificacao_corporativa` em `eventos_crm`
+Conteúdo da notificação:
 
-Implementação: nova função `desanitize_corporate_contact(_telefone)` simétrica à atual, chamada pelo trigger no caminho de desativação.
+- **Título:** `📅 Novo agendamento confirmado — {Nome do Cliente}`
+- **Mensagem:**
+  ```
+  Cliente {nome} confirmou visita
+  🗓 {dia da semana}, {DD/MM} às {HH:MM}
+  📞 {telefone do cliente}
+  
+  Resumo:
+  {resumo gerado pelo summarize-atendimento OU últimas observações do agendamento}
+  ```
 
-### 3. Validação
-- Reenviar mensagem do 8878 e confirmar nos logs do `ai-triage` que ele entra normalmente
-- Verificar que próximo telefone que você desativar recebe o saneamento reverso automaticamente
+O resumo vem de:
+1. Se `agendamento.atendimento_id` tem resumo recente em `metadata.resumo_ia`, usa.
+2. Senão chama `summarize-atendimento` para gerar agora (síncrono, leve).
+3. Fallback: usa `agendamento.observacoes` ou texto curto.
 
-## Detalhes técnicos
+## Pontos de disparo (2 lugares)
 
-Arquivos afetados:
-- Migração SQL: nova função `desanitize_corporate_contact` + atualização do trigger `on_telefone_loja_change`
-- Migração SQL one-shot para corrigir o estado atual do contato `62e4499c-...` e o atendimento `b91af612-...`
+1. **`whatsapp-webhook/index.ts`** (linha ~485): logo após o `update({ status: "confirmado" })`, invocar a nova EF.
+2. **`ai-triage/index.ts`** (linha ~3362): mesmo padrão, após marcar `status: "confirmado"` no fluxo dia-D.
 
-Sem mudanças em edge functions ou frontend.
+Ambos chamam via `fetch` para `notificar-loja-agendamento` em background (não bloqueia resposta ao cliente).
+
+## Idempotência
+
+- Antes de enviar: ler `agendamentos.metadata.aviso_loja_enviado_at`. Se existir, retorna `{skipped: true}`.
+- Após enviar: gravar `metadata.aviso_loja_enviado_at = now()` e inserir evento em `eventos_crm` (`tipo: 'aviso_loja_agendamento'`).
+
+## Edge case: loja sem destinatários
+
+Se `resolver_destinatarios_loja` retornar vazio (caso da DINIZ ANTONIO AGU hoje, que não tem usuários app vinculados), criar **tarefa interna** para o supervisor com título "⚠️ Configurar usuários da loja {X} — agendamento confirmado sem destinatário" + log no `eventos_crm`. Assim nenhum agendamento fica sem aviso.
+
+## Memória a salvar
+
+Nova entrada `mem://agendamentos/aviso-loja-pos-confirmacao`:
+> Após cliente confirmar agendamento (`status=confirmado` via WA-webhook ou ai-triage), `notificar-loja-agendamento` envia push+notificação in-app via Atrium Messenger aos usuários da loja com nome, horário e resumo. Idempotente via `metadata.aviso_loja_enviado_at`. Se loja sem destinatários → tarefa para supervisor.
+
+## Fora de escopo
+
+- Editor visual de template do aviso (texto fica no código por enquanto).
+- Aviso para mudanças de horário/reagendamento (foco aqui é só confirmação inicial).
+- Notificar loja via WhatsApp template — explicitamente vetado pela regra "Canal Único: B2B = App Atrium".
