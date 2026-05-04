@@ -1,161 +1,71 @@
-## 1. Como o bot do Messenger funciona hoje
 
-A engine vive em `bot-lojas/index.ts`, alimentada por duas tabelas configuráveis:
+# Plano — OCR robusto + Retomada cordial pós-janela 24h (consultor humano)
 
-- **`bot_fluxos`** — 14 fluxos cadastrados, cada um com um `tipo_bot` e um `setor_destino_id`. Hoje: 13 com `tipo_bot='loja'` + 1 (`compra_funcionario`) com `tipo_bot='colaborador'`.
-- **`bot_menu_opcoes`** — opções que aparecem no menu, filtradas por `tipo_bot` + `parent_id` (para submenus).
+## Bloco 1 — Interpretação de receita (sem mudança vs. plano anterior)
 
-A engine resolve o `tipo_bot` em uma única linha (`bot-lojas/index.ts:464`):
-```ts
-const tipoBot = loja_info?.tipo_bot || "loja";
-```
+Resumo: limiar OCR mais conservador (≥0.85), pedido por olho específico quando parcial, conciliar OCR+texto antes de orçar, aceitar digitação espontânea, escalar humano só por improdutividade real (2× sem resposta interpretável, loop pós-pedido, cliente pediu, ou zero opções com receita conciliada). Watchdog força pedido por texto se imagem >30min sem receita válida.
 
-`loja_info` vem de `telefones_lojas` matching pelo telefone do remetente. Ou seja: **o menu disponível depende exclusivamente do registro em `telefones_lojas`**, e os `tipo_bot` possíveis são `loja`, `colaborador`, `departamento`.
-
-### Inventário atual do menu
-
-| `tipo_bot` | Usado por | Conteúdo |
-|---|---|---|
-| `loja` | Telefones de lojas físicas (operadoras de balcão) | 13 fluxos diretos: gerar boleto, link de pagamento, estornos, devoluções, autorização Dataweb, suporte TI, impressão, confirmar comparecimento etc. |
-| `colaborador` | Telefones de funcionários individuais | 2 fluxos: Compra de Funcionário, Suporte Técnico |
-| `departamento` | Telefones de "departamentos" / pessoas-chave | Menu **hierárquico** com 3 submenus (Financeiro, TI, Operacional), cada submenu com seus próprios subfluxos. É o menu mais completo. |
-
-### O problema real
-
-Não existe ainda o conceito de **supervisor** ou **diretor** no bot. Um supervisor que use o WhatsApp/Messenger é tratado como `loja` ou `colaborador` (depende de como foi cadastrado em `telefones_lojas`). Resultado:
-
-- Supervisor de loja só vê o menu mínimo da loja (mesmo subset de uma operadora de balcão).
-- Diretor vê só o que estiver no `tipo_bot` do telefone dele.
-- Não há jeito de dar a um supervisor acesso ao **menu de departamento** (que é o mais completo) sem trocar o `tipo_bot` do registro inteiro.
+Arquivos: `ai-triage/index.ts`, `watchdog-loop-ia/index.ts`, memórias `auto-receita-e-anti-loop` e `correcao-receita-por-texto`.
 
 ---
 
-## 2. Como vamos resolver
+## Bloco 2 — Template `retomada_consultor_v1` + ação manual no erro 422
 
-A proposta é tratar **hierarquia** como uma dimensão própria do bot, igual à hierarquia que vamos criar no app web. Em vez de duplicar fluxos por papel, **somamos** opções por papel.
+### Cenário (corrigido)
+Atendimento foi para humano, **o consultor não conseguiu falar dentro das 24h**, a janela Meta fechou. Hoje, quando o consultor tenta enviar texto livre, `send-whatsapp` devolve `422 outside_24h_window` (vide print). O consultor não tem caminho fácil pra reabrir — precisa lembrar de abrir o `ReconectarTemplateButton` e escolher um template no meio da lista.
 
-### 2.1 Novos `tipo_bot`
+### Template — UTILITY, cordial, natural, sem "explicar o retorno"
 
-Adicionar dois novos valores ao catálogo `bot_menu_opcoes.tipo_bot` / `bot_fluxos.tipo_bot`:
+**Nome:** `retomada_consultor_v1`  
+**Categoria:** **UTILITY** (continuidade de atendimento iniciado pelo cliente — não é promoção; é a categoria mais barata e correta semanticamente; o catálogo já documenta `noshow_reagendamento_v2` e `retomada_contexto_*_v2` como UTILITY pelo mesmo motivo).  
+**Idioma:** pt_BR  
+**Variáveis:** `{{1}}` nome do cliente · `{{2}}` nome do consultor
 
-- `supervisor` — supervisor de uma ou mais lojas. Vê o menu de `loja` **mais** opções de gestão (relatórios, autorizações, estornos sem aprovação, etc.).
-- `diretor` — diretoria. Vê tudo que `supervisor` vê + opções estratégicas (consolidados, aprovação de exceções, impersonar loja).
-
-Roles existentes (`loja`, `colaborador`, `departamento`) continuam intactos.
-
-### 2.2 Resolução do menu por papel (engine)
-
-Trocar a linha única `tipoBot = loja_info?.tipo_bot || "loja"` por uma **resolução em camadas** que carrega múltiplos `tipo_bot` e concatena o menu na ordem hierárquica:
-
-```text
-papel detectado    →    tipo_bot carregados (na ordem)
-─────────────────       ──────────────────────────────
-loja               →    [loja]
-colaborador        →    [colaborador]
-departamento       →    [departamento]
-supervisor         →    [supervisor, loja]                     ← supervisor herda menu de loja
-diretor            →    [diretor, supervisor, loja, departamento]  ← diretor vê tudo
+**Body (versão única, sem variável de "assunto"):**
+```
+Oi {{1}}, aqui é {{2}}, das Óticas Diniz. Desculpa não ter conseguido te responder antes — a falha foi nossa. Posso seguir seu atendimento por aqui agora? É só me mandar um "oi" que já te respondo.
 ```
 
-A função `loadMenuOpcoes(tipoBot, parentId)` vira `loadMenuOpcoesAggregated(tipoBots[], parentId)` e:
-1. Busca opções com `tipo_bot IN (...)` e `parent_id = ...`.
-2. Deduplica por `chave` (a primeira ocorrência ganha — quem está mais alto na lista vence).
-3. Reordena por `ordem` dentro de cada `tipo_bot`, mas mantendo o agrupamento.
+Por que ficou assim:
+- Sem `{{2}}` de "assunto" — o cliente lembra do que estava falando, não precisa ser relembrado e isso evita texto travado tipo "sobre seu orçamento de lentes multifocais".
+- Pedido de desculpas explícito ("a falha foi nossa") — assume a responsabilidade.
+- "{{2}}" agora é o **nome do consultor**, dá rosto humano à mensagem.
+- "É só me mandar um oi" — CTA leve, reabre janela de 24h sem cobrança.
+- Assina "Óticas Diniz" (regra `branding-cliente-final`).
+- UTILITY tem chance maior de aprovação Meta com esse tom (sem CTA promocional, sem oferta).
 
-Submenus (parent_id) seguem o mesmo padrão.
+### Disparo manual disparado pelo erro 422 (novo fluxo)
 
-### 2.3 Como o telefone "vira" supervisor/diretor
+Hoje: erro `outside_24h_window` aparece como toast vermelho cru no chat (vide print) e o consultor precisa adivinhar o próximo passo.
 
-Adicionar uma coluna em `telefones_lojas`:
+Proposta:
 
-```text
-papel_hierarquico text NOT NULL DEFAULT 'operacional'
-  CHECK (papel_hierarquico IN ('operacional','supervisor','diretor'))
-```
+1. **`useAtendimentos` / handler de envio** — detectar resposta `422` com `error === "outside_24h_window"` do `send-whatsapp`. Em vez de só toast de erro, abrir um `AlertDialog` com:
+   - Título: "Janela de 24h fechada"
+   - Texto: "Faz {{N}}h que o cliente não responde. Pra reabrir o atendimento, envie o template de retomada — você pode editar antes."
+   - Botão primário: **"Enviar retomada"** → abre `ReconectarTemplateButton` já com `retomada_consultor_v1` pré-selecionado e `{{1}}` = nome do contato, `{{2}}` = nome do consultor logado (de `profiles.nome`).
+   - Botão secundário: "Escolher outro template" → comportamento atual.
+   - Botão terciário: "Cancelar".
 
-- `operacional` (default): comportamento atual — `tipo_bot` é o que dita o menu.
-- `supervisor`: engine carrega `[supervisor, <tipo_bot original>]`.
-- `diretor`: engine carrega `[diretor, supervisor, <tipo_bot original>, departamento]`.
+2. **`ReconectarTemplateButton.tsx`** — aceitar prop `defaultTemplate` e `prefilledVars`; quando vier do diálogo do 422, pular a etapa de seleção e ir direto pro preview com o texto montado. `retomada_consultor_v1` entra no topo da constante `PRIORIDADE`.
 
-Mantém o `tipo_bot` atual fazendo sentido (loja/colaborador/departamento descreve o **contexto operacional** — de qual ângulo a pessoa fala). `papel_hierarquico` descreve **o nível de poder**. Uma supervisora cadastrada como `tipo_bot=loja, papel_hierarquico=supervisor` ganha tudo o que a operadora vê + as ferramentas de supervisão.
+3. **Texto que o consultor estava tentando enviar** — preservar como rascunho no input após reabertura, pra ele reenviar livremente assim que o cliente responder "oi". Hoje o texto se perde quando dá 422.
 
-Esse mesmo campo amarra com o `user_roles.papel_loja` proposto no plano de permissões web — uma única fonte de verdade.
+4. **Log** — após envio bem-sucedido, gravar `eventos_crm` tipo `retomada_consultor_manual` com `template_nome`, `atendente_nome`, `texto_rascunho_preservado` (boolean), e `horas_desde_ultimo_inbound`.
 
-### 2.4 Configuração visual no painel `/configuracoes`
+5. **Sem cron automático** — disparo é 100% manual (intencional: o consultor decide quando reabrir; o sistema só **prepara** a ação no momento do erro).
 
-#### a) `TelefonesLojasCard`
-- Coluna nova **Papel hierárquico** (select inline: Operacional / Supervisor / Diretor).
-- Badge colorido na linha quando supervisor/diretor.
-- O wizard de cadastro em lote (`BulkUserProvisioningWizard`) já lê dessa tabela; passa o papel automaticamente para `user_roles.papel_loja`.
+### Arquivos tocados (Bloco 2)
 
-#### b) `BotFluxosCard` + `BotMenuCard`
-- Adicionar `supervisor` e `diretor` aos selects de `tipo_bot`.
-- Filtro por `tipo_bot` no topo do card já existe — só ampliar.
-- Nas opções de menu, indicar visualmente quando a opção é "compartilhada" entre níveis (chip "também visível para supervisor / diretor").
+- `supabase/functions/manage-whatsapp-templates/index.ts` — submeter `retomada_consultor_v1` UTILITY à Meta via action `create`
+- Migration: `INSERT` em `whatsapp_templates` (status `pending` até Meta aprovar) + alias `retomada_consultor` em `template_aliases`
+- `src/components/atendimentos/ReconectarTemplateButton.tsx` — props `defaultTemplate`/`prefilledVars`, prioridade
+- `src/hooks/useAtendimentos.ts` (ou local equivalente do `send-whatsapp` no chat) — interceptar 422 `outside_24h_window`
+- Novo: `src/components/atendimentos/JanelaFechadaDialog.tsx` — AlertDialog descrito acima
+- Memória nova: `mem://integracao/retomada-consultor-pos-janela-24h`
 
-#### c) Novo card opcional: `BotPapelHierarquiaCard`
-- Mostra a tabela de **resolução de menu** (a tabela 2.2 acima) em formato de matriz.
-- Permite reordenar a ordem em que os `tipo_bot` são empilhados, caso no futuro queiramos um diretor que NÃO veja o menu de loja, por exemplo.
+### A confirmar antes de submeter à Meta
 
-### 2.5 Fluxos novos a cadastrar (proposta de catálogo inicial)
-
-`tipo_bot=supervisor`:
-
-| chave | nome | setor_destino |
-|---|---|---|
-| `aprovar_excecao_cpf` | Aprovar Exceção CPF | Financeiro |
-| `consultar_meta_loja` | Consultar Meta da Loja | Financeiro |
-| `autorizar_estorno_supervisao` | Autorizar Estorno (alçada supervisor) | Financeiro |
-| `relatorio_diario_loja` | Relatório Diário da Loja | Atendimento Corporativo |
-| `falar_diretoria` | Falar com Diretoria | Atendimento Corporativo |
-
-`tipo_bot=diretor`:
-
-| chave | nome | setor_destino |
-|---|---|---|
-| `aprovar_excecao_diretoria` | Aprovar Exceção (alçada diretoria) | Financeiro |
-| `consolidado_redes` | Consolidado Multi-loja | Financeiro |
-| `liberar_acesso_excepcional` | Liberar Acesso Excepcional | TI |
-| `auditoria_supervisores` | Auditoria de Decisões de Supervisores | Atendimento Corporativo |
-
-(Lista preliminar — podemos refinar depois com você. O importante agora é a estrutura.)
-
-### 2.6 Wizard "Nova Demanda" (Messenger app interno)
-
-`AcionarLojaDialog` e `DemandaLojaPanel` listam fluxos a partir de `bot_fluxos` para um operador escolher. Hoje filtram só os 14 fluxos. Após a mudança:
-
-- Quando o **autor da demanda** é supervisor/diretor (lido de `user_roles.papel_loja` + `papel_hierarquico`), o select adiciona os fluxos exclusivos de supervisor/diretor.
-- Quando o **destino** é supervisor/diretor, idem.
-
-### 2.7 Migração de dados / compatibilidade
-
-- Migration:
-  - `ALTER TABLE telefones_lojas ADD COLUMN papel_hierarquico text NOT NULL DEFAULT 'operacional' CHECK (...)`.
-  - Sem mudança nos 14 registros existentes (todos ficam `operacional`, comportamento idêntico ao de hoje).
-- `bot_fluxos` e `bot_menu_opcoes` ganham linhas novas (semente) para `tipo_bot=supervisor` e `tipo_bot=diretor`.
-- Engine `bot-lojas` reescreve `tipoBot` único para `tipoBots[]` agregados — modo `operacional` continua resolvendo só `[<tipo_bot>]`, então não muda nada para quem está hoje em produção.
-
----
-
-## 3. Como isso encaixa no plano de permissões web (1 linha por área)
-
-| Área | Web (módulos visíveis) | Bot (menu Messenger) | Fonte |
-|---|---|---|---|
-| Operadora de loja | `/lojas`, `/mensagens` | menu `loja` | `user_roles.papel_loja='operador'` + `telefones_lojas.papel_hierarquico='operacional'` |
-| Supervisor de loja | + Dashboard, opcionalmente CRM read-only, escopo multi-loja | menu `[supervisor, loja]` | `papel_loja='supervisor'` (web) + `papel_hierarquico='supervisor'` (bot) |
-| Diretor | tudo (sem `/configuracoes`) | menu `[diretor, supervisor, loja, departamento]` | `role='diretoria'` (web) + `papel_hierarquico='diretor'` (bot) |
-
-Quem cadastra a pessoa na tela de `/configuracoes` define os dois lados de uma vez (web + bot) — fonte única de verdade.
-
----
-
-## 4. Questões que ainda precisam ser respondidas (mantenho as 4 anteriores e adiciono 2)
-
-1. **Diretoria** vê tudo no web (read-only) ou só dashboards consolidados?
-2. **Supervisor de loja** deve ver CRM/Atendimentos das lojas dele?
-3. Múltiplas lojas para um supervisor: N linhas em `user_roles` (recomendado) ou tabela nova?
-4. `role='operador'` continua existindo ou consolida em admin/diretoria?
-5. **(NOVO)** Os fluxos exclusivos de supervisor/diretor que listei na 2.5 — quais você confirma para o catálogo inicial e quais são mais prioritários?
-6. **(NOVO)** Quando um supervisor cobre múltiplas lojas, o menu do bot deve perguntar "qual loja?" antes de cada operação (igual ao menu `departamento` faz hoje)? Ou ele opera sempre sobre uma loja "padrão" cadastrada e troca via comando `trocar loja`?
-
-Após as respostas, eu encadeio: migration (`telefones_lojas.papel_hierarquico` + seeds), engine (`bot-lojas` agregando menus), web (`useAuth` + `TopNavigation` + `AppLayout`), UI de configuração (`TelefonesLojasCard`, `BotFluxosCard`, `BotMenuCard`, `BulkUserProvisioningWizard`, `GestaoUsuariosCard`) e `sso-login` no mesmo passo.
+1. Body acima OK ou prefere ainda mais curto/longo?
+2. `{{2}}` = primeiro nome do consultor (ex.: "Marina") ou nome completo?
+3. Quando o consultor não tem nome em `profiles.nome`, fallback para "consultor das Óticas Diniz" — ok?
