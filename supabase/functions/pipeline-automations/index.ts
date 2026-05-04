@@ -97,6 +97,21 @@ serve(async (req) => {
       agendamento = ag;
       contato_id = ag?.contato_id;
       atendimento_id = ag?.atendimento_id;
+
+      // Se cliente já confirmou o agendamento, NÃO disparar mensagens/templates
+      // automáticos (evita "Seu agendamento foi confirmado" duplicado).
+      if (ag?.metadata?.cliente_confirmou_at) {
+        const before = automacoes.length;
+        automacoes = automacoes.filter((a: any) => !["enviar_mensagem", "enviar_template"].includes(a.tipo_acao));
+        if (automacoes.length < before) {
+          console.log(`[AUTOMATIONS] Filtered ${before - automacoes.length} send-actions: cliente já confirmou`);
+        }
+        if (!automacoes.length) {
+          return new Response(JSON.stringify({ status: "skipped_cliente_confirmou" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
     } else if (entity_type === "solicitacao") {
       // For solicitacoes (financeiro pipeline), get contato from the solicitacao
       const { data: sol } = await supabase
