@@ -4,8 +4,10 @@ import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
 import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
 import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
+import { JanelaFechadaDialog } from "@/components/atendimentos/JanelaFechadaDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
+import { useAuth } from "@/hooks/useAuth";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
 import { AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -153,6 +155,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const createMensagem = useCreateMensagem();
   const { data: atendimentos } = useAtendimentos();
   const atendimento = atendimentos?.find((a: any) => a.id === id) as any;
+  const { profile } = useAuth();
+  const consultorNome = profile?.nome?.split(" ")[0] || "consultor das Óticas Diniz";
 
   const [msgText, setMsgText] = useState("");
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
@@ -162,6 +166,10 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [resumoOpen, setResumoOpen] = useState(false);
   const [demandasOpen, setDemandasOpen] = useState(false);
   const [acionarOpen, setAcionarOpen] = useState(false);
+  const [janelaFechadaOpen, setJanelaFechadaOpen] = useState(false);
+  const [janelaFechadaHoras, setJanelaFechadaHoras] = useState(0);
+  const [reconectarOpen, setReconectarOpen] = useState(false);
+  const [reconectarDefaultTemplate, setReconectarDefaultTemplate] = useState<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
@@ -190,9 +198,24 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           body: {
             atendimento_id: id,
             texto,
-            remetente_nome: "Operador",
+            remetente_nome: profile?.nome || "Operador",
           },
         });
+
+        // Intercepta 422 outside_24h_window: prepara reabertura via template
+        const errPayload = (error as any)?.context?.body || data;
+        const errStr = typeof errPayload === "string" ? errPayload : JSON.stringify(errPayload || {});
+        if (errStr.includes("outside_24h_window")) {
+          let horas = 0;
+          try {
+            const parsed = typeof errPayload === "string" ? JSON.parse(errPayload) : errPayload;
+            horas = parsed?.hours_since_last_inbound ?? 0;
+          } catch { /* noop */ }
+          setJanelaFechadaHoras(horas);
+          setJanelaFechadaOpen(true);
+          // Preserva o rascunho do consultor — não limpa msgText
+          return;
+        }
 
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
@@ -202,7 +225,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           atendimento_id: id,
           conteudo: texto,
           direcao: msgDirecao,
-          remetente_nome: "Operador",
+          remetente_nome: profile?.nome || "Operador",
         });
       }
 
@@ -361,15 +384,41 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           />
 
           {atendimento?.canal === "whatsapp" && atendimento?.contato_id && (
-            <ReconectarTemplateButton
-              atendimentoId={id}
-              contatoId={atendimento.contato_id}
-              contatoNome={atendimento.contato?.nome}
-              ultimoInboundAt={
-                mensagens?.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.created_at ?? null
-              }
-              topicoPadrao={atendimento.solicitacao?.assunto || "seu atendimento"}
-            />
+            <>
+              <ReconectarTemplateButton
+                atendimentoId={id}
+                contatoId={atendimento.contato_id}
+                contatoNome={atendimento.contato?.nome}
+                ultimoInboundAt={
+                  mensagens?.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.created_at ?? null
+                }
+                topicoPadrao={atendimento.solicitacao?.assunto || "seu atendimento"}
+                consultorNome={consultorNome}
+                defaultTemplate={reconectarDefaultTemplate}
+                open={reconectarOpen || undefined}
+                onOpenChange={(o) => {
+                  setReconectarOpen(o);
+                  if (!o) setReconectarDefaultTemplate(undefined);
+                }}
+                forceVisible={reconectarOpen}
+              />
+              <JanelaFechadaDialog
+                open={janelaFechadaOpen}
+                onOpenChange={setJanelaFechadaOpen}
+                hoursSinceInbound={janelaFechadaHoras}
+                rascunhoPreservado={!!msgText.trim()}
+                onEnviarRetomada={() => {
+                  setReconectarDefaultTemplate("retomada_consultor_v1");
+                  setJanelaFechadaOpen(false);
+                  setReconectarOpen(true);
+                }}
+                onEscolherOutro={() => {
+                  setReconectarDefaultTemplate(undefined);
+                  setJanelaFechadaOpen(false);
+                  setReconectarOpen(true);
+                }}
+              />
+            </>
           )}
         </div>
       </div>
