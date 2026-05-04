@@ -2595,11 +2595,19 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       const lastInLow = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
       const explicitChange = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInLow);
       if (hasAgendamentoAtivo && !explicitChange) {
+        const _lojaAg = agAtivoRecentEarly?.loja_nome || "";
+        // Detecta pedido EXPLÍCITO de preço/orçamento na mensagem atual.
+        // Só nesse caso permitimos rodar consultar_lentes/consultar_lentes_contato de novo.
+        const explicitPriceAsk = /\b(or[çc]amento|pre[çc]o|valor|quanto (custa|sai|fica|d[áa]|ficar[ií]a)|tem (de )?(quanto|por quanto)|sai por quanto)\b/i.test(lastInLow);
         messages.push({
           role: "system",
-          content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja ou cancelar.`
+          content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}${_lojaAg ? " na " + _lojaAg : ""}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja ou cancelar.
+
+⛔ PROIBIDO chamar consultar_lentes/consultar_lentes_contato apenas porque o cliente mencionou um tratamento, material, cor, marca ou estilo (transitions, fotossensível, filtro azul, antirreflexo, índice, preto, tartaruga, dourado, clássica, gatinho, varilux etc.). Trate como PREFERÊNCIA registrada para a visita — anote brevemente (ex.: "Anotado, vou separar opções com Transitions 😉") e reafirme o agendamento. ${explicitPriceAsk ? "EXCEÇÃO: o cliente pediu preço/orçamento explicitamente AGORA — pode rodar consultar_lentes para informar o valor, mas SEM perguntar região/bairro/loja." : "Só rode consultar_lentes/consultar_lentes_contato se o cliente pedir EXPLICITAMENTE preço/orçamento/quanto custa."}
+
+⛔ PROIBIDO perguntar "em qual região/bairro você está?", "qual a loja mais próxima?", "onde você fica?" — a loja JÁ ESTÁ DEFINIDA no agendamento (${_lojaAg || "ver AGENDAMENTOS"}). PROIBIDO encerrar mensagem com "posso te indicar a loja mais próxima?" ou variantes. Sempre fechar reafirmando a visita já marcada.`
         });
-        console.log(`[GUARDRAIL-HINT] Agendamento ativo sem pedido de mudança — injetando hint anti-duplicação`);
+        console.log(`[GUARDRAIL-HINT] Agendamento ativo sem pedido de mudança — injetando hint anti-duplicação (loja=${_lojaAg}, priceAsk=${explicitPriceAsk})`);
       }
     }
 
@@ -2769,10 +2777,20 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.log(`[TOOL] ${fn}:`, JSON.stringify(args).substring(0, 300));
 
       if (fn === "responder") {
-        // Merge proximo_passo into resposta if not already included
+        // Merge proximo_passo into resposta if not already included.
+        // Evita duplicar pergunta: se a `resposta` já termina com '?' E o
+        // `proximo_passo` também é pergunta, descarta o proximo_passo (o
+        // modelo costuma reformular a mesma pergunta com outras palavras).
         resposta = args.resposta || "";
-        if (args.proximo_passo && !resposta.includes(args.proximo_passo)) {
-          resposta = resposta.trimEnd().replace(/[.!]$/, "") + ". " + args.proximo_passo;
+        const _respTail = resposta.slice(-150).trim();
+        const _respJaPergunta = /\?\s*$/.test(_respTail);
+        const _ppEhPergunta = !!args.proximo_passo && /\?/.test(args.proximo_passo);
+        if (
+          args.proximo_passo &&
+          !resposta.includes(args.proximo_passo) &&
+          !(_respJaPergunta && _ppEhPergunta)
+        ) {
+          resposta = resposta.trimEnd().replace(/[.!]$/, "") + " " + args.proximo_passo;
         }
         intencao = args.intencao || "outro";
         pipeline_coluna = args.coluna_pipeline || "Novo Contato";
@@ -3497,8 +3515,15 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               if (tc.function?.name === "responder") {
                 const retryArgs = JSON.parse(tc.function?.arguments || "{}");
                 retryResposta = retryArgs.resposta || "";
-                if (retryArgs.proximo_passo && !retryResposta.includes(retryArgs.proximo_passo)) {
-                  retryResposta = retryResposta.trimEnd().replace(/[.!]$/, "") + ". " + retryArgs.proximo_passo;
+                const _rTail = retryResposta.slice(-150).trim();
+                const _rJaPergunta = /\?\s*$/.test(_rTail);
+                const _rPpPergunta = !!retryArgs.proximo_passo && /\?/.test(retryArgs.proximo_passo);
+                if (
+                  retryArgs.proximo_passo &&
+                  !retryResposta.includes(retryArgs.proximo_passo) &&
+                  !(_rJaPergunta && _rPpPergunta)
+                ) {
+                  retryResposta = retryResposta.trimEnd().replace(/[.!]$/, "") + " " + retryArgs.proximo_passo;
                 }
                 intencao = retryArgs.intencao || intencao;
                 pipeline_coluna = retryArgs.coluna_pipeline || pipeline_coluna;
