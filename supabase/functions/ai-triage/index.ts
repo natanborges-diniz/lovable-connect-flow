@@ -932,6 +932,26 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "consultar_lentes_estimativa",
+      description: "Devolve uma FAIXA ESTIMADA de preços (econômica/intermediária/premium) para óculos quando o cliente declarou o tipo de lente (multifocal/progressiva/visão simples) e forneceu pelo menos o esférico, MAS ainda falta a ADIÇÃO e/ou o cilindro/eixo. Use ANTES de pedir os dados que faltam — nunca trave o cliente sem dar uma estimativa. NÃO use se já há receita completa salva (use consultar_lentes). NÃO use para lentes de contato.",
+      parameters: {
+        type: "object",
+        properties: {
+          rx_type: { type: "string", enum: ["single_vision", "progressive"], description: "Tipo de lente declarado pelo cliente. 'progressive' para multifocal/progressiva; 'single_vision' para visão simples." },
+          sphere_od: { type: "number", description: "Esférico do olho direito informado pelo cliente (use sinal: -2.75 para miopia, +1.50 para hipermetropia)." },
+          sphere_oe: { type: "number", description: "Esférico do olho esquerdo informado pelo cliente." },
+          cylinder_hint: { type: "number", description: "Cilindro se o cliente mencionou um valor (ex: -1.25). Se ele só disse 'tem astigmatismo' sem número, OMITA este campo (a tool presume um cilindro padrão)." },
+          filtro_blue: { type: "boolean", description: "Cliente pediu filtro de luz azul." },
+          filtro_photo: { type: "boolean", description: "Cliente pediu lente fotossensível/transitions." },
+        },
+        required: ["rx_type"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "consultar_lentes_contato",
       description: "Busca opções de LENTES DE CONTATO compatíveis com a receita do cliente e calcula o plano (caixas necessárias, duração, combo 3+1). Use quando o cliente pedir orçamento/preço de LENTES DE CONTATO. Se o cilíndrico for ≥ 0.75 em qualquer olho, filtra automaticamente lentes TÓRICAS (que são SOB ENCOMENDA). Prioriza marca DNZ quando compatível. NÃO use para óculos (use consultar_lentes para óculos).",
       parameters: {
