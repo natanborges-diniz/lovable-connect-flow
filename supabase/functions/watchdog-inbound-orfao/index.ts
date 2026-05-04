@@ -89,6 +89,24 @@ serve(async (req) => {
     let recovered = 0;
     for (const o of orfaos) {
       try {
+        // Skip se cliente acabou de confirmar agendamento (evita re-disparo após "SIM")
+        const { data: agConf } = await supabase
+          .from("agendamentos")
+          .select("id, metadata")
+          .eq("contato_id", o.contato_id)
+          .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+          .order("created_at", { ascending: false })
+          .limit(3);
+        const recemConfirmou = (agConf || []).some((ag: any) => {
+          const at = ag?.metadata?.cliente_confirmou_at;
+          if (!at) return false;
+          return now - new Date(at).getTime() < 60 * 60 * 1000; // <1h
+        });
+        if (recemConfirmou) {
+          console.log(`[ORFAO-WATCHDOG] skip ${o.atendimento_id}: cliente confirmou agendamento <1h`);
+          continue;
+        }
+
         // Marca trigger antes de chamar (evita corrida)
         await supabase
           .from("atendimentos")
