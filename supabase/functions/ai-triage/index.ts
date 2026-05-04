@@ -229,7 +229,7 @@ function detectPendingIntent(
         ? (isLC
             ? "Cliente quer ORÇAMENTO de LENTES DE CONTATO e já há receita salva. OBRIGATÓRIO: use consultar_lentes_contato AGORA e apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta. Se cliente mencionar esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva), MAS sem omitir quinzenal/mensal — o cliente decide. Termine perguntando a região pra indicar a loja. NUNCA encerrar pedindo só marca/tipo se já há receita."
             : "Cliente quer ORÇAMENTO e já há receita salva. Use consultar_lentes para responder com opções.")
-        : "Cliente quer ORÇAMENTO mas falta receita. Peça foto da receita uma única vez.",
+        : "Cliente quer ORÇAMENTO mas não há receita salva. Se ele já declarou TIPO de lente (multifocal/progressiva/visão simples) E pelo menos o esférico, use IMEDIATAMENTE consultar_lentes_estimativa pra dar uma faixa de preços; só depois peça o que falta (ADD/CIL/AX). Se não declarou tipo nem esférico, peça foto da receita uma única vez.",
     };
   }
   if (/\b(endere[çc]o|onde fica|onde [eé]|como chegar|fica onde|qual loja|maps)\b/i.test(joined)) {
