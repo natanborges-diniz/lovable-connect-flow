@@ -24,9 +24,20 @@ interface Props {
   ultimoInboundAt?: string | null;
   /** Tópico padrão para preencher {{2}} (ex: "seu orçamento de óculos") */
   topicoPadrao?: string;
+  /** Nome do consultor logado, usado em templates como retomada_consultor ({{2}}) */
+  consultorNome?: string;
+  /** Template para pré-selecionar ao abrir (ex: "retomada_consultor_v1") */
+  defaultTemplate?: string;
+  /** Controle externo do popover (para abrir programaticamente após erro 422) */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Esconde o botão "Reconectar" — útil quando o controle é 100% externo */
+  hideTrigger?: boolean;
+  /** Força exibição mesmo dentro da janela de 24h (quando aberto via 422) */
+  forceVisible?: boolean;
 }
 
-const PRIORIDADE = ["retomada_contexto_1", "retomada_contexto_2", "noshow_reagendamento", "retomada_despedida"];
+const PRIORIDADE = ["retomada_consultor_v1", "retomada_consultor", "retomada_contexto_1", "retomada_contexto_2", "noshow_reagendamento", "retomada_despedida"];
 
 export function ReconectarTemplateButton({
   atendimentoId,
@@ -34,8 +45,19 @@ export function ReconectarTemplateButton({
   contatoNome,
   ultimoInboundAt,
   topicoPadrao = "seu atendimento",
+  consultorNome,
+  defaultTemplate,
+  open: openProp,
+  onOpenChange,
+  hideTrigger,
+  forceVisible,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = openProp ?? openInternal;
+  const setOpen = (v: boolean) => {
+    setOpenInternal(v);
+    onOpenChange?.(v);
+  };
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
