@@ -2939,6 +2939,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         pipeline_coluna = "Orçamento";
         const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args);
         resposta = quoteResult.resposta;
+      } else if (fn === "consultar_lentes_estimativa") {
+        // ── QUOTE ESTIMATE: receita parcial, nunca bloquear orçamento ──
+        intencao = "orcamento";
+        pipeline_coluna = "Orçamento";
+        const estResult = await runConsultarLentesEstimativa(supabase, args || {});
+        resposta = estResult.resposta;
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
         // (Guardrail antigo "LC não exige visita" foi removido: catálogo de LC está
         // no banco, IA orça e direciona à loja como qualquer outro pedido.
