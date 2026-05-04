@@ -384,15 +384,41 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           />
 
           {atendimento?.canal === "whatsapp" && atendimento?.contato_id && (
-            <ReconectarTemplateButton
-              atendimentoId={id}
-              contatoId={atendimento.contato_id}
-              contatoNome={atendimento.contato?.nome}
-              ultimoInboundAt={
-                mensagens?.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.created_at ?? null
-              }
-              topicoPadrao={atendimento.solicitacao?.assunto || "seu atendimento"}
-            />
+            <>
+              <ReconectarTemplateButton
+                atendimentoId={id}
+                contatoId={atendimento.contato_id}
+                contatoNome={atendimento.contato?.nome}
+                ultimoInboundAt={
+                  mensagens?.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.created_at ?? null
+                }
+                topicoPadrao={atendimento.solicitacao?.assunto || "seu atendimento"}
+                consultorNome={consultorNome}
+                defaultTemplate={reconectarDefaultTemplate}
+                open={reconectarOpen || undefined}
+                onOpenChange={(o) => {
+                  setReconectarOpen(o);
+                  if (!o) setReconectarDefaultTemplate(undefined);
+                }}
+                forceVisible={reconectarOpen}
+              />
+              <JanelaFechadaDialog
+                open={janelaFechadaOpen}
+                onOpenChange={setJanelaFechadaOpen}
+                hoursSinceInbound={janelaFechadaHoras}
+                rascunhoPreservado={!!msgText.trim()}
+                onEnviarRetomada={() => {
+                  setReconectarDefaultTemplate("retomada_consultor_v1");
+                  setJanelaFechadaOpen(false);
+                  setReconectarOpen(true);
+                }}
+                onEscolherOutro={() => {
+                  setReconectarDefaultTemplate(undefined);
+                  setJanelaFechadaOpen(false);
+                  setReconectarOpen(true);
+                }}
+              />
+            </>
           )}
         </div>
       </div>
