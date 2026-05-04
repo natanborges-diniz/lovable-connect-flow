@@ -155,6 +155,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const createMensagem = useCreateMensagem();
   const { data: atendimentos } = useAtendimentos();
   const atendimento = atendimentos?.find((a: any) => a.id === id) as any;
+  const { profile } = useAuth();
+  const consultorNome = profile?.nome?.split(" ")[0] || "consultor das Óticas Diniz";
 
   const [msgText, setMsgText] = useState("");
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
@@ -164,6 +166,10 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [resumoOpen, setResumoOpen] = useState(false);
   const [demandasOpen, setDemandasOpen] = useState(false);
   const [acionarOpen, setAcionarOpen] = useState(false);
+  const [janelaFechadaOpen, setJanelaFechadaOpen] = useState(false);
+  const [janelaFechadaHoras, setJanelaFechadaHoras] = useState(0);
+  const [reconectarOpen, setReconectarOpen] = useState(false);
+  const [reconectarDefaultTemplate, setReconectarDefaultTemplate] = useState<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
