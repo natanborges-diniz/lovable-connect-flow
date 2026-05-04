@@ -210,56 +210,167 @@ function dentroDeJanelaComunicacaoCliente(now: Date): boolean {
 }
 
 // ═══════════════════════════════════════════
-// Helper: Reenvio de lembrete ao cliente
+// Helper: Lembrete VÉSPERA — 1 mensagem às 08h SP no dia anterior ao agendamento.
+// Idempotente via metadata.lembrete_enviado_at. Pula clientes que já confirmaram.
 // ═══════════════════════════════════════════
-async function processLembreteRetry(
-  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[],
-  horasReenvio: number
+async function processLembreteVespera(
+  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[]
 ) {
-  // Guard de janela: nunca dispara lembrete fora de 08:00–21:00 SP.
+  const spNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  // Roda só entre 08:00 e 08:59 SP. Cron de 5 em 5 min cobre.
+  if (spNow.getHours() !== 8) return;
   if (!dentroDeJanelaComunicacaoCliente(now)) return;
 
-  const { data: pendentes } = await supabase
+  // Janela "amanhã em SP" → ISO UTC
+  const startSP = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate() + 1, 0, 0, 0);
+  const endSP = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate() + 1, 23, 59, 59);
+  const toUtcIso = (d: Date) => new Date(d.getTime() + 3 * 60 * 60 * 1000).toISOString();
+
+  const { data: paraLembrar } = await supabase
     .from("agendamentos")
-    .select("id, contato_id, atendimento_id, data_horario, updated_at, loja_nome")
-    .eq("status", "lembrete_enviado")
-    .eq("tentativas_lembrete", 1);
+    .select("id, contato_id, atendimento_id, data_horario, loja_nome, metadata, status")
+    .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+    .is("loja_confirmou_presenca", null)
+    .gte("data_horario", toUtcIso(startSP))
+    .lte("data_horario", toUtcIso(endSP));
 
-  for (const ag of pendentes || []) {
-    const lastUpdate = new Date(ag.updated_at);
-    const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
-    const hoursUntilAppointment = (new Date(ag.data_horario).getTime() - now.getTime()) / (1000 * 60 * 60);
+  for (const ag of paraLembrar || []) {
+    const md = (ag.metadata || {}) as Record<string, any>;
+    if (md.lembrete_enviado_at) continue;
+    if (md.cliente_confirmou_at) continue;
+    if (!ag.atendimento_id) continue;
 
-    if (hoursSinceUpdate < horasReenvio && hoursUntilAppointment > 2) continue;
-
-    if (ag.atendimento_id) {
-      const { data: recentInbound } = await supabase
-        .from("mensagens")
-        .select("id")
-        .eq("atendimento_id", ag.atendimento_id)
-        .eq("direcao", "inbound")
-        .gt("created_at", lastUpdate.toISOString())
-        .limit(1);
-      if (recentInbound?.length) continue;
-    }
+    // Lock atômico
+    const stampNow = new Date().toISOString();
+    const { data: locked } = await supabase
+      .from("agendamentos")
+      .update({ metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "vespera" } })
+      .eq("id", ag.id)
+      .is("metadata->>lembrete_enviado_at", null)
+      .select("id")
+      .maybeSingle();
+    if (!locked) continue;
 
     const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
-    const firstName = contato?.nome?.split(" ")[0] || "Cliente";
-    const quando = resolveQuando(ag.data_horario, now);
+    const firstName = contato?.nome?.split(" ")[0] || "";
+    const dt = new Date(ag.data_horario);
+    const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const lojaTxt = ag.loja_nome ? `*${ag.loja_nome}*` : "*Óticas Diniz*";
+    const msg = `Bom dia${firstName ? ", " + firstName : ""}! 👋 Passando pra confirmar sua visita amanhã às *${hora}* na ${lojaTxt}. Posso confirmar?`;
 
-    if (ag.atendimento_id) {
-      const msg = `Oi ${firstName}, ainda não conseguimos confirmar sua visita *${quando}* na *${ag.loja_nome}*. Podemos manter? Responda SIM ou se preferir reagendar, é só dizer 😊`;
-      await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
-      });
-    }
+    const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
+    });
 
-    await supabase.from("agendamentos").update({ tentativas_lembrete: 2 }).eq("id", ag.id);
-    results.push(`lembrete_2:${ag.id}`);
+    await supabase.from("agendamentos").update({
+      status: "lembrete_enviado",
+      tentativas_lembrete: 1,
+      metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "vespera", lembrete_ok: sendRes.ok },
+    }).eq("id", ag.id);
+
+    await supabase.from("eventos_crm").insert({
+      contato_id: ag.contato_id,
+      tipo: sendRes.ok ? "lembrete_vespera_enviado" : "lembrete_vespera_falha",
+      descricao: `Lembrete véspera ${sendRes.ok ? "enviado" : "falhou"} (${hora} ${ag.loja_nome || ""})`,
+      referencia_id: ag.id,
+      referencia_tipo: "agendamento",
+    });
+    results.push(`lembrete_vespera:${ag.id}`);
   }
 }
+
+// ═══════════════════════════════════════════
+// Helper: Lembrete 1H ANTES — para agendamentos do MESMO DIA que faltam ~1h.
+// Pula se foi marcado com <60min de antecedência ou se cliente já confirmou.
+// Idempotente via metadata.lembrete_enviado_at.
+// ═══════════════════════════════════════════
+async function processLembrete1hAntes(
+  supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[]
+) {
+  if (!dentroDeJanelaComunicacaoCliente(now)) return;
+
+  // Janela: agendamentos com data_horario entre now+55min e now+65min
+  const lo = new Date(now.getTime() + 55 * 60 * 1000).toISOString();
+  const hi = new Date(now.getTime() + 65 * 60 * 1000).toISOString();
+
+  const { data: agora } = await supabase
+    .from("agendamentos")
+    .select("id, contato_id, atendimento_id, data_horario, loja_nome, metadata, status, created_at")
+    .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+    .is("loja_confirmou_presenca", null)
+    .gte("data_horario", lo)
+    .lte("data_horario", hi);
+
+  for (const ag of agora || []) {
+    const md = (ag.metadata || {}) as Record<string, any>;
+    if (md.lembrete_enviado_at) continue;
+    if (md.cliente_confirmou_at) continue;
+    if (!ag.atendimento_id) continue;
+
+    // Antecedência de criação vs. horário do agendamento
+    const created = new Date(ag.created_at).getTime();
+    const dataAg = new Date(ag.data_horario).getTime();
+    const antecedenciaMin = (dataAg - created) / (1000 * 60);
+
+    if (antecedenciaMin < 60) {
+      // Marcado com menos de 1h de antecedência → não envia lembrete.
+      await supabase.from("agendamentos").update({
+        metadata: { ...md, lembrete_skip_motivo: "janela_curta", lembrete_skipped_at: new Date().toISOString() },
+      }).eq("id", ag.id);
+      await supabase.from("eventos_crm").insert({
+        contato_id: ag.contato_id,
+        tipo: "lembrete_1h_skip_janela_curta",
+        descricao: `Lembrete 1h antes pulado: agendamento marcado com ${Math.round(antecedenciaMin)}min de antecedência (${ag.loja_nome || ""})`,
+        referencia_id: ag.id,
+        referencia_tipo: "agendamento",
+      });
+      results.push(`lembrete_1h_skip:${ag.id}`);
+      continue;
+    }
+
+    // Lock atômico
+    const stampNow = new Date().toISOString();
+    const { data: locked } = await supabase
+      .from("agendamentos")
+      .update({ metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "1h_antes" } })
+      .eq("id", ag.id)
+      .is("metadata->>lembrete_enviado_at", null)
+      .select("id")
+      .maybeSingle();
+    if (!locked) continue;
+
+    const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
+    const firstName = contato?.nome?.split(" ")[0] || "";
+    const dt = new Date(ag.data_horario);
+    const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const lojaTxt = ag.loja_nome ? `*${ag.loja_nome}*` : "*Óticas Diniz*";
+    const msg = `Oi${firstName ? ", " + firstName : ""}! 👋 Passando pra lembrar da sua visita hoje às *${hora}* na ${lojaTxt}. Posso confirmar?`;
+
+    const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
+    });
+
+    await supabase.from("agendamentos").update({
+      status: "lembrete_enviado",
+      tentativas_lembrete: 1,
+      metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "1h_antes", lembrete_ok: sendRes.ok },
+    }).eq("id", ag.id);
+
+    await supabase.from("eventos_crm").insert({
+      contato_id: ag.contato_id,
+      tipo: sendRes.ok ? "lembrete_1h_enviado" : "lembrete_1h_falha",
+      descricao: `Lembrete 1h antes ${sendRes.ok ? "enviado" : "falhou"} (${hora} ${ag.loja_nome || ""})`,
+      referencia_id: ag.id,
+      referencia_tipo: "agendamento",
+    });
+    results.push(`lembrete_1h:${ag.id}`);
+  }
+}
+
 
 // ═══════════════════════════════════════════
 // Helper: Primeira cobrança à loja
