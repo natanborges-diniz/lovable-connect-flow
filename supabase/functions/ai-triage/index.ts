@@ -229,7 +229,7 @@ function detectPendingIntent(
         ? (isLC
             ? "Cliente quer ORÇAMENTO de LENTES DE CONTATO e já há receita salva. OBRIGATÓRIO: use consultar_lentes_contato AGORA e apresente 2-3 opções com descartes VARIADOS (mín. 2 categorias entre diária + quinzenal + mensal) na MESMA resposta. Se cliente mencionar esporte/academia/corrida/futebol/natação, recomende a DIÁRIA como mais indicada (frase curta, consultiva), MAS sem omitir quinzenal/mensal — o cliente decide. Termine perguntando a região pra indicar a loja. NUNCA encerrar pedindo só marca/tipo se já há receita."
             : "Cliente quer ORÇAMENTO e já há receita salva. Use consultar_lentes para responder com opções.")
-        : "Cliente quer ORÇAMENTO mas falta receita. Peça foto da receita uma única vez.",
+        : "Cliente quer ORÇAMENTO mas não há receita salva. Se ele já declarou TIPO de lente (multifocal/progressiva/visão simples) E pelo menos o esférico, use IMEDIATAMENTE consultar_lentes_estimativa pra dar uma faixa de preços; só depois peça o que falta (ADD/CIL/AX). Se não declarou tipo nem esférico, peça foto da receita uma única vez.",
     };
   }
   if (/\b(endere[çc]o|onde fica|onde [eé]|como chegar|fica onde|qual loja|maps)\b/i.test(joined)) {
@@ -932,6 +932,26 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "consultar_lentes_estimativa",
+      description: "Devolve uma FAIXA ESTIMADA de preços (econômica/intermediária/premium) para óculos quando o cliente declarou o tipo de lente (multifocal/progressiva/visão simples) e forneceu pelo menos o esférico, MAS ainda falta a ADIÇÃO e/ou o cilindro/eixo. Use ANTES de pedir os dados que faltam — nunca trave o cliente sem dar uma estimativa. NÃO use se já há receita completa salva (use consultar_lentes). NÃO use para lentes de contato.",
+      parameters: {
+        type: "object",
+        properties: {
+          rx_type: { type: "string", enum: ["single_vision", "progressive"], description: "Tipo de lente declarado pelo cliente. 'progressive' para multifocal/progressiva; 'single_vision' para visão simples." },
+          sphere_od: { type: "number", description: "Esférico do olho direito informado pelo cliente (use sinal: -2.75 para miopia, +1.50 para hipermetropia)." },
+          sphere_oe: { type: "number", description: "Esférico do olho esquerdo informado pelo cliente." },
+          cylinder_hint: { type: "number", description: "Cilindro se o cliente mencionou um valor (ex: -1.25). Se ele só disse 'tem astigmatismo' sem número, OMITA este campo (a tool presume um cilindro padrão)." },
+          filtro_blue: { type: "boolean", description: "Cliente pediu filtro de luz azul." },
+          filtro_photo: { type: "boolean", description: "Cliente pediu lente fotossensível/transitions." },
+        },
+        required: ["rx_type"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "consultar_lentes_contato",
       description: "Busca opções de LENTES DE CONTATO compatíveis com a receita do cliente e calcula o plano (caixas necessárias, duração, combo 3+1). Use quando o cliente pedir orçamento/preço de LENTES DE CONTATO. Se o cilíndrico for ≥ 0.75 em qualquer olho, filtra automaticamente lentes TÓRICAS (que são SOB ENCOMENDA). Prioriza marca DNZ quando compatível. NÃO use para óculos (use consultar_lentes para óculos).",
       parameters: {
@@ -1089,6 +1109,17 @@ function buildContinuityBlock(inboundCount: number): string {
 - NUNCA repita saudações formais ou apresentações em conversas que já tiveram troca de mensagens.`;
 }
 
+function buildOrcamentoParcialBlock(): string {
+  return `# ORÇAMENTO COM RECEITA PARCIAL — NUNCA TRAVAR O CLIENTE
+- Se o cliente declarou TIPO DE LENTE (multifocal, progressiva, visão simples) e forneceu pelo menos o ESFÉRICO de cada olho, MAS faltam ADIÇÃO/CIL/AX:
+  → SEMPRE use a tool *consultar_lentes_estimativa* ANTES de pedir os dados que faltam.
+  → Passe rx_type='progressive' para multifocal/progressiva ou 'single_vision' para visão simples; passe sphere_od/sphere_oe com os sinais corretos (negativo p/ miopia, positivo p/ hipermetropia).
+  → Se o cliente disse só "tem astigmatismo" sem número, NÃO preencha cylinder_hint (a tool presume um cilindro padrão pra estimativa).
+  → A tool devolve 3 faixas (Econômica/Intermediária/Premium) já marcadas como "valores estimativos" — envie a resposta como veio e na MESMA mensagem pergunte os dados que faltam.
+- PROIBIDO responder somente "preciso da ADD pra fechar" ou "sem o cilindro não consigo orçar". Sempre dê a faixa primeiro.
+- Se o cliente NÃO declarou tipo nem esférico, peça foto da receita uma vez só (não use a tool de estimativa).`;
+}
+
 function buildRegionalCoverageBlock(): string {
   return `# COBERTURA REGIONAL — ESCADA DE PERSUASÃO
 - Você atende APENAS em Osasco e região (Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville).
@@ -1198,6 +1229,7 @@ function buildSystemPromptFromCompiled(opts: {
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
   s.push(buildLentesContatoKnowledgeBlock());
+  s.push(buildOrcamentoParcialBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
@@ -1286,6 +1318,7 @@ function buildSystemPrompt(opts: {
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
   s.push(buildLentesContatoKnowledgeBlock());
+  s.push(buildOrcamentoParcialBlock());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
@@ -2919,6 +2952,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         pipeline_coluna = "Orçamento";
         const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args);
         resposta = quoteResult.resposta;
+      } else if (fn === "consultar_lentes_estimativa") {
+        // ── QUOTE ESTIMATE: receita parcial, nunca bloquear orçamento ──
+        intencao = "orcamento";
+        pipeline_coluna = "Orçamento";
+        const estResult = await runConsultarLentesEstimativa(supabase, args || {});
+        resposta = estResult.resposta;
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
         // (Guardrail antigo "LC não exige visita" foi removido: catálogo de LC está
         // no banco, IA orça e direciona à loja como qualquer outro pedido.
@@ -4036,6 +4075,116 @@ async function runConsultarLentes(
     return { resposta: "Já te mandei as opções acima 😊 Quer que eu detalhe alguma delas, ou prefere agendar uma visita pra ver as armações pessoalmente?" };
   }
   return { resposta: quoteMsg };
+}
+
+// ── Estimativa multifocal/visão simples com receita PARCIAL ──
+// Usado quando o cliente declara o tipo de lente (multifocal/progressiva/visão simples)
+// e fornece pelo menos a esfera, mas falta ADD e/ou CIL/AX. Em vez de travar pedindo
+// dados, devolve uma faixa estimada (econômica / intermediária / premium) e segue
+// pedindo o que falta. NUNCA grava receita — é só uma simulação de mercado.
+async function runConsultarLentesEstimativa(
+  supabase: any,
+  args: {
+    rx_type?: "single_vision" | "progressive";
+    sphere_od?: number | null;
+    sphere_oe?: number | null;
+    cylinder_hint?: number | null; // se cliente disse "tem astigmatismo" sem valor, passamos 0.75
+    filtro_blue?: boolean;
+    filtro_photo?: boolean;
+  },
+): Promise<{ resposta: string }> {
+  const rxType = args?.rx_type === "progressive" ? "progressive" : "single_vision";
+  const sphereCandidates = [args?.sphere_od, args?.sphere_oe].filter(
+    (v): v is number => typeof v === "number" && !Number.isNaN(v),
+  );
+  if (sphereCandidates.length === 0) {
+    return {
+      resposta:
+        "Pra estimar pelo menos uma faixa de valores, me confirma o esférico (grau) de cada olho? Pode ser só os números, sem precisar da receita inteira agora 😊",
+    };
+  }
+  const worstSphere = sphereCandidates.reduce((a, b) => (Math.abs(a) > Math.abs(b) ? a : b), 0);
+  // Cliente disse "astigmatismo" mas não deu CIL → presume cilindro pequeno (-0.75)
+  // pra não excluir lentes tóricas básicas. Se passou um valor, usa-o.
+  const worstCyl =
+    typeof args?.cylinder_hint === "number" && !Number.isNaN(args.cylinder_hint)
+      ? Math.abs(args.cylinder_hint) * -1
+      : -0.75;
+
+  const categories =
+    rxType === "progressive"
+      ? ["progressive", "occupational"]
+      : ["single_vision", "single_vision_digital", "single_vision_stock"];
+
+  // Para multifocal varremos 3 ADDs típicas (+1.50 / +2.00 / +2.50) e juntamos resultados;
+  // para visão simples, basta uma rodada.
+  const addsToTry = rxType === "progressive" ? [1.5, 2.0, 2.5] : [null];
+  const collected: any[] = [];
+  for (const add of addsToTry) {
+    let q = supabase
+      .from("pricing_table_lentes")
+      .select("brand, family, treatment, index_name, blue, photo, price_brl, priority")
+      .eq("active", true)
+      .in("category", categories)
+      .gt("price_brl", 0)
+      .lte("sphere_min", worstSphere)
+      .gte("sphere_max", worstSphere)
+      .lte("cylinder_min", worstCyl)
+      .gte("cylinder_max", worstCyl);
+    if (rxType === "progressive" && add !== null) {
+      q = q.lte("add_min", add).gte("add_max", add);
+    }
+    if (args?.filtro_blue === true) q = q.eq("blue", true);
+    if (args?.filtro_photo === true) q = q.eq("photo", true);
+    const { data } = await q.order("price_brl", { ascending: true }).limit(20);
+    if (Array.isArray(data)) collected.push(...data);
+  }
+
+  if (collected.length === 0) {
+    console.log(`[QUOTE-EST] Sem matches para sphere=${worstSphere} cyl=${worstCyl} type=${rxType}`);
+    return {
+      resposta:
+        "Pra esse grau específico preciso confirmar a disponibilidade direto na loja. Em qual região/bairro você está? Já te indico a unidade mais próxima 😊",
+    };
+  }
+
+  // Dedup por brand+family+treatment+blue+photo, fica só o menor preço de cada combinação.
+  const uniqMap = new Map<string, any>();
+  for (const l of collected) {
+    const key = `${l.brand}|${l.family}|${l.treatment}|${l.blue ? 1 : 0}|${l.photo ? 1 : 0}`;
+    const cur = uniqMap.get(key);
+    if (!cur || Number(l.price_brl) < Number(cur.price_brl)) uniqMap.set(key, l);
+  }
+  const sorted = Array.from(uniqMap.values()).sort(
+    (a, b) => Number(a.price_brl) - Number(b.price_brl),
+  );
+  const economy = sorted[0];
+  const premium = sorted[sorted.length - 1];
+  const mid = sorted.length >= 3 ? sorted[Math.floor(sorted.length / 2)] : null;
+
+  const fmt = (v: number) =>
+    `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const tipoLabel = rxType === "progressive" ? "multifocal" : "visão simples";
+  const sphereDisp = sphereCandidates.length === 2
+    ? `OD ${args?.sphere_od ?? "—"} / OE ${args?.sphere_oe ?? "—"}`
+    : `${sphereCandidates[0]}`;
+
+  let msg = `Com o que você passou (${sphereDisp}${typeof args?.cylinder_hint === "number" ? ` + cil ${args.cylinder_hint}` : " com astigmatismo"}), uma estimativa de ${tipoLabel} com antirreflexo:\n\n`;
+  msg += `🟢 *Econômica* — ${economy.brand} ${economy.family}: a partir de ${fmt(Number(economy.price_brl))}\n`;
+  if (mid && mid !== economy && mid !== premium) {
+    msg += `🟡 *Intermediária* — ${mid.brand} ${mid.family}: a partir de ${fmt(Number(mid.price_brl))}\n`;
+  }
+  if (premium !== economy) {
+    msg += `💎 *Premium* — ${premium.brand} ${premium.family}: a partir de ${fmt(Number(premium.price_brl))}\n`;
+  }
+  msg += `\n_Valores estimativos — com a ${rxType === "progressive" ? "ADIÇÃO e o cilindro/eixo" : "receita"} exatos eu fecho o orçamento certinho._\n\n`;
+  msg += rxType === "progressive"
+    ? "Consegue me enviar foto da receita ou os números de ADD e CIL/AX de cada olho?"
+    : "Consegue me confirmar o cilindro e eixo de cada olho (ou enviar foto da receita)?";
+
+  console.log(`[QUOTE-EST] ${tipoLabel} sphere=${worstSphere} cyl=${worstCyl} → ${sorted.length} produtos únicos`);
+  return { resposta: msg };
 }
 
 // Detecta e sanitiza vazamento de instruções internas no texto enviado ao cliente
