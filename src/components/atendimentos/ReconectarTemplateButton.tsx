@@ -99,14 +99,17 @@ export function ReconectarTemplateButton({
           });
           setTemplates(lista);
           if (lista.length > 0 && !selectedNome) {
-            // Pré-seleciona o primeiro prioritário disponível
-            const padrao = lista.find((t) => PRIORIDADE.includes(t.nome)) || lista[0];
+            const fromDefault = defaultTemplate ? lista.find((t) => t.nome === defaultTemplate) : null;
+            const padrao = fromDefault || lista.find((t) => PRIORIDADE.includes(t.nome)) || lista[0];
             setSelectedNome(padrao.nome);
+            if (padrao.nome.startsWith("retomada_consultor") && consultorNome) {
+              setParam2(consultorNome);
+            }
           }
         }
         setLoading(false);
       });
-  }, [open]);
+  }, [open, defaultTemplate, consultorNome]);
 
   const selected = templates.find((t) => t.nome === selectedNome);
 
