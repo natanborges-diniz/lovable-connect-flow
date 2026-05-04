@@ -1,73 +1,67 @@
+## Contexto
+
+Anna Paula informou:
+- ESF: -2,75 OD / -2,25 OE
+- "tem astigmatismo e um pouco de miopia" (sem CIL/AX)
+- Quer **multifocal + antirreflexo**
+
+A IA respondeu corretamente "preciso da ADD e dos cilindros pra fechar" — mas só ofereceu o piso "a partir de R$298", sem mostrar uma **faixa estimada** com os dados que ela já tem. Resultado: a cliente sente que não foi orçada.
+
+A regra atual `consultar_lentes` exige `add_min/add_max` para retornar produtos progressivos. Quando ADD ausente, a IA cai no fallback "a partir de R$X" e fica travada pedindo dados.
+
 ## Objetivo
 
-Quando o agendamento passar para `confirmado` (cliente confirmou via WhatsApp ou IA), enviar **automaticamente** um aviso à loja correspondente pelo Atrium Messenger (notificação in-app + push), contendo: nome do cliente, horário/data, loja, e resumo do atendimento.
+Quando o cliente sinaliza **multifocal** mas faltam ADD e/ou CIL, a IA deve:
+1. Confirmar o que entendeu (ESF que ela passou, astigmatismo presente).
+2. Apresentar **3 faixas estimadas** (econômica / intermediária / premium) usando ESF informado + ADD presumida média (+1.50 a +2.50) e marcando "estimativa — fechamos com receita completa".
+3. Continuar pedindo CIL/AX/ADD em paralelo, mas sem bloquear o orçamento estimado.
 
-Hoje a loja só é cutucada **depois** do horário ("compareceu?"). Não existe aviso antecipado.
+## Mudanças
 
-## Fluxo proposto
+### 1. `supabase/functions/ai-triage/index.ts`
 
-```text
-Cliente confirma "sim/ok/confirmado"
-        │
-        ▼
-whatsapp-webhook OU ai-triage marca agendamento.status = 'confirmado'
-        │
-        ▼
-[NOVO] dispara helper notificar-loja-agendamento
-        │
-        ├─ Resolve destinatários da loja via resolver_destinatarios_loja(loja_nome)
-        ├─ Monta título + mensagem com resumo
-        └─ INSERT em notificacoes (1 por usuário)
-                 │
-                 ▼ (trigger trg_push_nova_notificacao já existe)
-        Push FCM/APNs + badge in-app no Atrium Messenger
+**a) Nova helper `estimateMultifocalRange(rx_parcial)`**
+- Se `rx_type === "progressive"` OU mensagem do cliente contém `"multifocal" | "progressiva"`, e `add` ausente:
+  - Roda `consultar_lentes` 3 vezes com `add=1.50`, `add=2.00`, `add=2.50` mantendo ESF/CIL informados (CIL=0 se ausente).
+  - Pega `min`, `mediana` e `max` dos preços retornados.
+  - Retorna objeto `{ economica, intermediaria, premium, observacao: "estimativa — confirmamos com ADD/CIL exatos" }`.
+
+**b) System prompt (`buildSystemPrompt`)**
+Adicionar bloco "Orçamento parcial":
+```
+- Se cliente pediu MULTIFOCAL/PROGRESSIVA mas falta ADD ou CIL:
+  → use a tool consultar_lentes_estimativa com os dados parciais.
+  → Apresente 3 faixas: "Econômica a partir de R$X | Intermediária a partir de R$Y | Premium a partir de R$Z".
+  → SEMPRE diga "valores estimativos; com a receita completa eu fecho o exato."
+  → Em seguida peça ADD e CIL/AX em UMA mensagem só (não em duas).
+- NUNCA responda só "preciso da ADD pra fechar" sem antes apresentar a faixa estimada.
 ```
 
-## Nova edge function: `notificar-loja-agendamento`
+**c) Nova tool `consultar_lentes_estimativa`** — wrapper que chama `consultar_lentes` 3x e devolve o range, registrada junto às outras tools (linha ~840).
 
-Recebe `{ agendamento_id }`, idempotente via `metadata.aviso_loja_enviado_at`.
+### 2. `supabase/functions/ai-triage/index.ts` — anti-loop
 
-Conteúdo da notificação:
+No detector de loop (`watchdog-loop-ia`), adicionar exceção: se as 2 últimas outbound foram "preciso da ADD" e a inbound seguinte trouxe ESF, considerar progresso e disparar a estimativa em vez de escalar.
 
-- **Título:** `📅 Novo agendamento confirmado — {Nome do Cliente}`
-- **Mensagem:**
-  ```
-  Cliente {nome} confirmou visita
-  🗓 {dia da semana}, {DD/MM} às {HH:MM}
-  📞 {telefone do cliente}
-  
-  Resumo:
-  {resumo gerado pelo summarize-atendimento OU últimas observações do agendamento}
-  ```
+### 3. Memory
 
-O resumo vem de:
-1. Se `agendamento.atendimento_id` tem resumo recente em `metadata.resumo_ia`, usa.
-2. Senão chama `summarize-atendimento` para gerar agora (síncrono, leve).
-3. Fallback: usa `agendamento.observacoes` ou texto curto.
+Criar `mem://ia/orcamento-multifocal-parcial.md` documentando a regra: "dados parciais NUNCA bloqueiam orçamento — sempre apresentar faixa estimada antes de pedir o que falta."
 
-## Pontos de disparo (2 lugares)
-
-1. **`whatsapp-webhook/index.ts`** (linha ~485): logo após o `update({ status: "confirmado" })`, invocar a nova EF.
-2. **`ai-triage/index.ts`** (linha ~3362): mesmo padrão, após marcar `status: "confirmado"` no fluxo dia-D.
-
-Ambos chamam via `fetch` para `notificar-loja-agendamento` em background (não bloqueia resposta ao cliente).
-
-## Idempotência
-
-- Antes de enviar: ler `agendamentos.metadata.aviso_loja_enviado_at`. Se existir, retorna `{skipped: true}`.
-- Após enviar: gravar `metadata.aviso_loja_enviado_at = now()` e inserir evento em `eventos_crm` (`tipo: 'aviso_loja_agendamento'`).
-
-## Edge case: loja sem destinatários
-
-Se `resolver_destinatarios_loja` retornar vazio (caso da DINIZ ANTONIO AGU hoje, que não tem usuários app vinculados), criar **tarefa interna** para o supervisor com título "⚠️ Configurar usuários da loja {X} — agendamento confirmado sem destinatário" + log no `eventos_crm`. Assim nenhum agendamento fica sem aviso.
-
-## Memória a salvar
-
-Nova entrada `mem://agendamentos/aviso-loja-pos-confirmacao`:
-> Após cliente confirmar agendamento (`status=confirmado` via WA-webhook ou ai-triage), `notificar-loja-agendamento` envia push+notificação in-app via Atrium Messenger aos usuários da loja com nome, horário e resumo. Idempotente via `metadata.aviso_loja_enviado_at`. Se loja sem destinatários → tarefa para supervisor.
+Atualizar `mem://index.md` adicionando o novo memory abaixo de "Lentes Contato Orçamento".
 
 ## Fora de escopo
 
-- Editor visual de template do aviso (texto fica no código por enquanto).
-- Aviso para mudanças de horário/reagendamento (foco aqui é só confirmação inicial).
-- Notificar loja via WhatsApp template — explicitamente vetado pela regra "Canal Único: B2B = App Atrium".
+- Não mexe em pipeline, agendamento, ou cadastro de receita.
+- Não cria nova tabela — usa `pricing_table_lentes` existente.
+- Não altera lentes de contato (já tem fluxo próprio com `consultar_lentes_contato`).
+
+## Resposta imediata para Anna Paula
+
+Após implementação, na próxima mensagem dela a IA responderá algo como:
+
+> Com o que você passou (-2,75 OD / -2,25 OE com astigmatismo), uma estimativa de multifocal com antirreflexo:
+> • Econômica a partir de R$ 298
+> • Intermediária a partir de R$ 698
+> • Premium (Varilux/Zeiss) a partir de R$ 1.498
+>
+> *Valores estimativos — com a ADIÇÃO e o cilindro/eixo exatos eu fecho o orçamento certinho.* Consegue me enviar foto da receita ou os números de ADD e CIL/AX de cada olho?
