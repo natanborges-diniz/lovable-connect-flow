@@ -1229,6 +1229,7 @@ function buildSystemPromptFromCompiled(opts: {
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
   s.push(buildLentesContatoKnowledgeBlock());
+  s.push(buildOrcamentoParcialBlock());
 
   // Replace slots in compiled prompt
   let prompt = opts.compiledPrompt;
