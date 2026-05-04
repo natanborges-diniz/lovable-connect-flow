@@ -1,80 +1,161 @@
-# Cadência de retomada (humano) + janela noturna 22h–08h
+## 1. Como o bot do Messenger funciona hoje
 
-## O que muda
+A engine vive em `bot-lojas/index.ts`, alimentada por duas tabelas configuráveis:
 
-### 1. Nova cadência humano (templates Meta)
+- **`bot_fluxos`** — 14 fluxos cadastrados, cada um com um `tipo_bot` e um `setor_destino_id`. Hoje: 13 com `tipo_bot='loja'` + 1 (`compra_funcionario`) com `tipo_bot='colaborador'`.
+- **`bot_menu_opcoes`** — opções que aparecem no menu, filtradas por `tipo_bot` + `parent_id` (para submenus).
 
-Em `vendas-recuperacao-cron/index.ts`, ramo `processHumano`:
-
-| Fase | Quando | Ação |
-|---|---|---|
-| 1ª retomada | **4h** sem resposta | Template `retomada_contexto_1` |
-| 2ª retomada | **24h** após a 1ª | Template `retomada_contexto_2` |
-| Despedida | **4h** após a 2ª | Template `retomada_despedida` + encerra atendimento (modo→ia) + Perdidos |
-
-Defaults atualizados:
-- `HUMANO_DELAY_HOURS = [4, 24]` (era `[24, 48]`)
-- `HUMANO_FINAL_WAIT_HOURS = 4` (era `24`)
-- `HUMANO_MAX_TENTATIVAS = 2`, cooldown 24h (mantidos)
-
-Os campos da UI em **Configurações → Agendamentos Automáticos** (`humano_delay_primeira`, `humano_delay_segunda`, `humano_espera_final`) continuam editáveis — só os valores iniciais mudam.
-
-### 2. Janela noturna: nada sai entre 22:00 e 08:00 (SP)
-
-Regra única para envios outbound automáticos ao cliente:
-- **Permitido**: 08:00–21:59 (America/Sao_Paulo), todos os dias.
-- **Bloqueado**: 22:00–07:59. Se a hora calculada de envio cair nesse intervalo, **adia para 08:00 do próximo dia** (ou para 08:00 do mesmo dia, se ainda for antes das 8h).
-- O contador de tentativa só incrementa quando o template realmente é enviado — o adiamento não consome fase.
-
-Aplicada a:
-
-**a) Templates de retomada** (`vendas-recuperacao-cron`, ramo humano):
-- Antes do `fetch` do template, verifica janela. Fora da janela: pula essa execução do cron, registra evento `retomada_adiada_janela_noturna` em `eventos_crm` com o horário previsto de envio. Próxima rodada do cron (5min) re-tenta; quando entrar em 08:00, dispara.
-- O lock otimista atual (`ultima_tentativa_at` gravado antes do fetch) só é gravado quando o envio sai — adiamento não toca o contador.
-
-**b) Cadência IA** (`vendas-recuperacao-cron`, ramo IA — 1h/24h/+1h):
-- Mesma janela aplicada. Mantém os delays atuais; só atrasa quando cair em 22–08.
-
-**c) Lembretes de agendamento** (`agendamentos-cron`, `processLembreteRetry` e `processLembreteDiaD`):
-- Helper hoje permite 08–21h todo dia. Vai virar **08–21:59** com o mesmo helper compartilhado. (Efeito prático: mantém o que já existe; só consolida em uma única função reusada.)
-
-### 3. Helper compartilhado
-
-Criar uma função única em cada edge function (não há "lib" compartilhada entre EFs no Deno deploy, então duplica o helper local em ambas):
-
+A engine resolve o `tipo_bot` em uma única linha (`bot-lojas/index.ts:464`):
 ```ts
-// Janela permitida: 08:00–21:59 America/Sao_Paulo
-function dentroDaJanelaEnvio(now: Date): boolean
-function proximoSlotEnvio(now: Date): Date  // próxima 08:00 SP
+const tipoBot = loja_info?.tipo_bot || "loja";
 ```
 
-Usado em `vendas-recuperacao-cron` (IA + Humano) e `agendamentos-cron` (lembretes).
+`loja_info` vem de `telefones_lojas` matching pelo telefone do remetente. Ou seja: **o menu disponível depende exclusivamente do registro em `telefones_lojas`**, e os `tipo_bot` possíveis são `loja`, `colaborador`, `departamento`.
 
-### 4. Eventos de auditoria
+### Inventário atual do menu
 
-Quando um envio for adiado pela janela:
-- `eventos_crm` tipo `retomada_adiada_janela_noturna` (humano e IA)
-- `eventos_crm` tipo `lembrete_adiado_janela_noturna` (lembretes)
+| `tipo_bot` | Usado por | Conteúdo |
+|---|---|---|
+| `loja` | Telefones de lojas físicas (operadoras de balcão) | 13 fluxos diretos: gerar boleto, link de pagamento, estornos, devoluções, autorização Dataweb, suporte TI, impressão, confirmar comparecimento etc. |
+| `colaborador` | Telefones de funcionários individuais | 2 fluxos: Compra de Funcionário, Suporte Técnico |
+| `departamento` | Telefones de "departamentos" / pessoas-chave | Menu **hierárquico** com 3 submenus (Financeiro, TI, Operacional), cada submenu com seus próprios subfluxos. É o menu mais completo. |
 
-Metadata inclui: fase prevista, template/lembrete, horário adiado, próximo slot.
+### O problema real
 
-### 5. Memória atualizada
+Não existe ainda o conceito de **supervisor** ou **diretor** no bot. Um supervisor que use o WhatsApp/Messenger é tratado como `loja` ou `colaborador` (depende de como foi cadastrado em `telefones_lojas`). Resultado:
 
-- `mem://crm/recuperacao-ia-anti-abandono` — atualizar tabela humano para 4h/24h/+4h e adicionar nota sobre janela noturna 22–08.
-- `mem://agendamentos/janela-comunicacao-e-d-day` — alinhar para 08–21:59 (já está nesse range, só consolidar texto).
+- Supervisor de loja só vê o menu mínimo da loja (mesmo subset de uma operadora de balcão).
+- Diretor vê só o que estiver no `tipo_bot` do telefone dele.
+- Não há jeito de dar a um supervisor acesso ao **menu de departamento** (que é o mais completo) sem trocar o `tipo_bot` do registro inteiro.
 
-## Detalhes técnicos
+---
 
-- Timezone calculado via `Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false })` — padrão já usado em `ai-triage` e watchdogs.
-- Adiamento NÃO altera `ultima_tentativa_at`; o cron de 5min reentrará assim que cruzar 08:00.
-- Cooldown anti-interferência humano (24h após outbound de operador) continua igual.
-- Reativação automática IA pós-retomada no `whatsapp-webhook` continua igual.
-- Nenhuma migração de banco — só edge functions + memória.
+## 2. Como vamos resolver
 
-## Fora do escopo
+A proposta é tratar **hierarquia** como uma dimensão própria do bot, igual à hierarquia que vamos criar no app web. Em vez de duplicar fluxos por papel, **somamos** opções por papel.
 
-- Não muda templates Meta (continuam `retomada_contexto_1/2` e `retomada_despedida`).
-- Não muda colunas elegíveis (Novo Contato, Lead, Orçamento, Qualificado, Retorno).
-- Não muda frequência do cron (5min) — só a lógica de quando disparar.
-- Não toca em `bot-lojas` / mensagens internas B2B.
-- Não muda a janela de **escalada humana** (Seg-Sex 09–18, Sáb 08–12) que controla a mensagem do Gael ao escalar — é janela diferente, sobre outro fluxo.
+### 2.1 Novos `tipo_bot`
+
+Adicionar dois novos valores ao catálogo `bot_menu_opcoes.tipo_bot` / `bot_fluxos.tipo_bot`:
+
+- `supervisor` — supervisor de uma ou mais lojas. Vê o menu de `loja` **mais** opções de gestão (relatórios, autorizações, estornos sem aprovação, etc.).
+- `diretor` — diretoria. Vê tudo que `supervisor` vê + opções estratégicas (consolidados, aprovação de exceções, impersonar loja).
+
+Roles existentes (`loja`, `colaborador`, `departamento`) continuam intactos.
+
+### 2.2 Resolução do menu por papel (engine)
+
+Trocar a linha única `tipoBot = loja_info?.tipo_bot || "loja"` por uma **resolução em camadas** que carrega múltiplos `tipo_bot` e concatena o menu na ordem hierárquica:
+
+```text
+papel detectado    →    tipo_bot carregados (na ordem)
+─────────────────       ──────────────────────────────
+loja               →    [loja]
+colaborador        →    [colaborador]
+departamento       →    [departamento]
+supervisor         →    [supervisor, loja]                     ← supervisor herda menu de loja
+diretor            →    [diretor, supervisor, loja, departamento]  ← diretor vê tudo
+```
+
+A função `loadMenuOpcoes(tipoBot, parentId)` vira `loadMenuOpcoesAggregated(tipoBots[], parentId)` e:
+1. Busca opções com `tipo_bot IN (...)` e `parent_id = ...`.
+2. Deduplica por `chave` (a primeira ocorrência ganha — quem está mais alto na lista vence).
+3. Reordena por `ordem` dentro de cada `tipo_bot`, mas mantendo o agrupamento.
+
+Submenus (parent_id) seguem o mesmo padrão.
+
+### 2.3 Como o telefone "vira" supervisor/diretor
+
+Adicionar uma coluna em `telefones_lojas`:
+
+```text
+papel_hierarquico text NOT NULL DEFAULT 'operacional'
+  CHECK (papel_hierarquico IN ('operacional','supervisor','diretor'))
+```
+
+- `operacional` (default): comportamento atual — `tipo_bot` é o que dita o menu.
+- `supervisor`: engine carrega `[supervisor, <tipo_bot original>]`.
+- `diretor`: engine carrega `[diretor, supervisor, <tipo_bot original>, departamento]`.
+
+Mantém o `tipo_bot` atual fazendo sentido (loja/colaborador/departamento descreve o **contexto operacional** — de qual ângulo a pessoa fala). `papel_hierarquico` descreve **o nível de poder**. Uma supervisora cadastrada como `tipo_bot=loja, papel_hierarquico=supervisor` ganha tudo o que a operadora vê + as ferramentas de supervisão.
+
+Esse mesmo campo amarra com o `user_roles.papel_loja` proposto no plano de permissões web — uma única fonte de verdade.
+
+### 2.4 Configuração visual no painel `/configuracoes`
+
+#### a) `TelefonesLojasCard`
+- Coluna nova **Papel hierárquico** (select inline: Operacional / Supervisor / Diretor).
+- Badge colorido na linha quando supervisor/diretor.
+- O wizard de cadastro em lote (`BulkUserProvisioningWizard`) já lê dessa tabela; passa o papel automaticamente para `user_roles.papel_loja`.
+
+#### b) `BotFluxosCard` + `BotMenuCard`
+- Adicionar `supervisor` e `diretor` aos selects de `tipo_bot`.
+- Filtro por `tipo_bot` no topo do card já existe — só ampliar.
+- Nas opções de menu, indicar visualmente quando a opção é "compartilhada" entre níveis (chip "também visível para supervisor / diretor").
+
+#### c) Novo card opcional: `BotPapelHierarquiaCard`
+- Mostra a tabela de **resolução de menu** (a tabela 2.2 acima) em formato de matriz.
+- Permite reordenar a ordem em que os `tipo_bot` são empilhados, caso no futuro queiramos um diretor que NÃO veja o menu de loja, por exemplo.
+
+### 2.5 Fluxos novos a cadastrar (proposta de catálogo inicial)
+
+`tipo_bot=supervisor`:
+
+| chave | nome | setor_destino |
+|---|---|---|
+| `aprovar_excecao_cpf` | Aprovar Exceção CPF | Financeiro |
+| `consultar_meta_loja` | Consultar Meta da Loja | Financeiro |
+| `autorizar_estorno_supervisao` | Autorizar Estorno (alçada supervisor) | Financeiro |
+| `relatorio_diario_loja` | Relatório Diário da Loja | Atendimento Corporativo |
+| `falar_diretoria` | Falar com Diretoria | Atendimento Corporativo |
+
+`tipo_bot=diretor`:
+
+| chave | nome | setor_destino |
+|---|---|---|
+| `aprovar_excecao_diretoria` | Aprovar Exceção (alçada diretoria) | Financeiro |
+| `consolidado_redes` | Consolidado Multi-loja | Financeiro |
+| `liberar_acesso_excepcional` | Liberar Acesso Excepcional | TI |
+| `auditoria_supervisores` | Auditoria de Decisões de Supervisores | Atendimento Corporativo |
+
+(Lista preliminar — podemos refinar depois com você. O importante agora é a estrutura.)
+
+### 2.6 Wizard "Nova Demanda" (Messenger app interno)
+
+`AcionarLojaDialog` e `DemandaLojaPanel` listam fluxos a partir de `bot_fluxos` para um operador escolher. Hoje filtram só os 14 fluxos. Após a mudança:
+
+- Quando o **autor da demanda** é supervisor/diretor (lido de `user_roles.papel_loja` + `papel_hierarquico`), o select adiciona os fluxos exclusivos de supervisor/diretor.
+- Quando o **destino** é supervisor/diretor, idem.
+
+### 2.7 Migração de dados / compatibilidade
+
+- Migration:
+  - `ALTER TABLE telefones_lojas ADD COLUMN papel_hierarquico text NOT NULL DEFAULT 'operacional' CHECK (...)`.
+  - Sem mudança nos 14 registros existentes (todos ficam `operacional`, comportamento idêntico ao de hoje).
+- `bot_fluxos` e `bot_menu_opcoes` ganham linhas novas (semente) para `tipo_bot=supervisor` e `tipo_bot=diretor`.
+- Engine `bot-lojas` reescreve `tipoBot` único para `tipoBots[]` agregados — modo `operacional` continua resolvendo só `[<tipo_bot>]`, então não muda nada para quem está hoje em produção.
+
+---
+
+## 3. Como isso encaixa no plano de permissões web (1 linha por área)
+
+| Área | Web (módulos visíveis) | Bot (menu Messenger) | Fonte |
+|---|---|---|---|
+| Operadora de loja | `/lojas`, `/mensagens` | menu `loja` | `user_roles.papel_loja='operador'` + `telefones_lojas.papel_hierarquico='operacional'` |
+| Supervisor de loja | + Dashboard, opcionalmente CRM read-only, escopo multi-loja | menu `[supervisor, loja]` | `papel_loja='supervisor'` (web) + `papel_hierarquico='supervisor'` (bot) |
+| Diretor | tudo (sem `/configuracoes`) | menu `[diretor, supervisor, loja, departamento]` | `role='diretoria'` (web) + `papel_hierarquico='diretor'` (bot) |
+
+Quem cadastra a pessoa na tela de `/configuracoes` define os dois lados de uma vez (web + bot) — fonte única de verdade.
+
+---
+
+## 4. Questões que ainda precisam ser respondidas (mantenho as 4 anteriores e adiciono 2)
+
+1. **Diretoria** vê tudo no web (read-only) ou só dashboards consolidados?
+2. **Supervisor de loja** deve ver CRM/Atendimentos das lojas dele?
+3. Múltiplas lojas para um supervisor: N linhas em `user_roles` (recomendado) ou tabela nova?
+4. `role='operador'` continua existindo ou consolida em admin/diretoria?
+5. **(NOVO)** Os fluxos exclusivos de supervisor/diretor que listei na 2.5 — quais você confirma para o catálogo inicial e quais são mais prioritários?
+6. **(NOVO)** Quando um supervisor cobre múltiplas lojas, o menu do bot deve perguntar "qual loja?" antes de cada operação (igual ao menu `departamento` faz hoje)? Ou ele opera sempre sobre uma loja "padrão" cadastrada e troca via comando `trocar loja`?
+
+Após as respostas, eu encadeio: migration (`telefones_lojas.papel_hierarquico` + seeds), engine (`bot-lojas` agregando menus), web (`useAuth` + `TopNavigation` + `AppLayout`), UI de configuração (`TelefonesLojasCard`, `BotFluxosCard`, `BotMenuCard`, `BulkUserProvisioningWizard`, `GestaoUsuariosCard`) e `sso-login` no mesmo passo.
