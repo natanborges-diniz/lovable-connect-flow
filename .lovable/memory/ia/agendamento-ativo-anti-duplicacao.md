@@ -14,9 +14,12 @@ Se há agendamento em status `agendado`/`lembrete_enviado`/`confirmado` para o c
 
 ## Implementação (`supabase/functions/ai-triage/index.ts`)
 
-1. **Hint pré-LLM** (antes do `callAI`): se `hasAgendamentoAtivo && !explicitChange`, injeta system message proibindo chamadas das tools de agendamento e perguntas de cancelamento.
+1. **Hint pré-LLM** (antes do `callAI`): se `hasAgendamentoAtivo && !explicitChange`, injeta system message proibindo: (a) chamadas a `agendar_visita`/`reagendar_visita`; (b) perguntas de cancelamento; (c) chamadas a `consultar_lentes`/`consultar_lentes_contato` apenas porque o cliente mencionou tratamento/material/cor/marca/estilo (transitions, filtro azul, preto, clássica, varilux etc.) — tratar como PREFERÊNCIA registrada para a visita; (d) perguntas de região/bairro/"loja mais próxima" (a loja já está fixada). Exceção (c): se o cliente pedir preço/orçamento explicitamente AGORA, libera consultar_lentes mas mantém proibição de perguntar região.
 2. **Loop-detector + intent agendar**: quando `forcedIntent.tool === "agendar_cliente_intent"` e há agendamento ativo, troca o prompt forçado por reafirmação do existente.
 3. **Guardrail no executor de `agendar_visita`**: antes de criar o registro, se já existe ativo e o cliente não pediu mudança, retorna mensagem "Tudo certo, seu agendamento segue mantido — {agendamentoFmt}" e grava `agendamento_duplicado_evitado`. **Exceção:** `isDiaDReschedule = true` libera o agendamento (cliente respondeu ao lembrete dia-D pedindo remarcar).
+
+## Anti-duplicação `resposta` + `proximo_passo`
+No merge das tool args (`responder` e retry), se `resposta` já termina com `?` E `proximo_passo` também é pergunta, o `proximo_passo` é descartado — evita "Qual você prefere?. Qual horário você prefere: ...?" no mesmo balão.
 
 ## Lembrete dia-D (08:00 SP) e respostas
 
