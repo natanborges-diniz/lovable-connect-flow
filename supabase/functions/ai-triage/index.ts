@@ -3374,6 +3374,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             pipeline_coluna_id: "d4f84dce-1434-4383-81e6-aae433a0a72a",
             updated_at: new Date().toISOString(),
           }).eq("id", contatoId);
+          // Notifica a loja via Atrium Messenger (background)
+          fetch(`${SUPABASE_URL}/functions/v1/notificar-loja-agendamento`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ agendamento_id: agDiaD.id }),
+          }).catch((e) => console.warn("[ai-triage] notificar-loja-agendamento falhou:", e));
         } catch (e) {
           console.error("[DIA-D] erro ao marcar confirmado:", e);
         }
