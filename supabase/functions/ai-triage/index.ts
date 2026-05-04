@@ -3394,16 +3394,39 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     // ── 9. POST-LLM VALIDATION (Phase 3) ──
     if (resposta && !precisa_humano) {
+      // ── ANTI-DUPLICAÇÃO DE DESPEDIDA: se o último outbound já é a frase canônica
+      // de encerramento ("Te espero ... 👋 Qualquer dúvida é só me chamar." ou
+      // "Qualquer coisa estou por aqui 👋 Qualquer dúvida é só me chamar."), e o
+      // cliente respondeu de novo curto/agradecimento/negativa, NÃO reenvia.
+      // Cliente pode mandar "Não" + "Obg" em sequência — uma despedida basta.
+      const _lastOut = String((recentOutbound || []).slice(-1)[0] || "");
+      const _despedidaJaEnviada = /Qualquer d[úu]vida [ée] s[óo] me chamar/i.test(_lastOut)
+        && (/Te espero/i.test(_lastOut) || /Qualquer coisa estou por aqui/i.test(_lastOut));
+      if (_despedidaJaEnviada && (isThanksClose || isShortNoToHelp || isThanksOnly || SHORT_NO_RE.test(msgTrim2))) {
+        console.log("[CLOSE-DEDUP] Despedida já enviada no último outbound — silenciando reenvio");
+        try {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "despedida_duplicada_evitada",
+            descricao: "Cliente respondeu após despedida final; IA suprimiu reenvio",
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+            metadata: { last_outbound: _lastOut.substring(0, 200), inbound: msgTrim2.substring(0, 100) },
+          });
+        } catch (_) { /* noop */ }
+        resposta = "";
+      }
+
       // ── OVERRIDE DETERMINÍSTICO: para fluxos canônicos curtos, ignoramos a saída do LLM
       // e injetamos a frase canônica. O LLM frequentemente adiciona segunda pergunta ou
       // varia o texto além do permitido nesses contextos de encerramento.
       const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
-      if (isThanksClose && agendamentoFmt) {
+      if (resposta && isThanksClose && agendamentoFmt) {
         resposta = `De nada${_nomePrim ? ", " + _nomePrim : ""}! Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`;
         intencao = "encerramento_pos_agendamento";
         validatorFlags.push("override_thanks_close");
         console.log("[OVERRIDE] thanks_close → despedida pós-agendamento");
-      } else if (isShortNoToHelp) {
+      } else if (resposta && isShortNoToHelp) {
         resposta = `Combinado${_nomePrim ? ", " + _nomePrim : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar.`;
         intencao = "encerramento_pos_agendamento";
         validatorFlags.push("override_short_no_to_help");
