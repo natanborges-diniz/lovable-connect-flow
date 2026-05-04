@@ -480,9 +480,14 @@ serve(async (req) => {
         if (agendamentoPendente) {
           console.log(`Auto-confirming agendamento ${agendamentoPendente.id} based on keyword "${normalizedText}"`);
 
-          // Update agendamento status to confirmado
+          // Update agendamento status to confirmado (preservando metadata existente)
+          const _mdAtual = (agendamentoPendente.metadata || {}) as Record<string, any>;
           await supabase.from("agendamentos")
-            .update({ status: "confirmado", confirmacao_enviada: true })
+            .update({
+              status: "confirmado",
+              confirmacao_enviada: true,
+              metadata: { ..._mdAtual, cliente_confirmou_at: new Date().toISOString() },
+            })
             .eq("id", agendamentoPendente.id);
 
           // Register CRM event
