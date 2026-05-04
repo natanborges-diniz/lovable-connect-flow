@@ -4038,6 +4038,116 @@ async function runConsultarLentes(
   return { resposta: quoteMsg };
 }
 
+// ── Estimativa multifocal/visão simples com receita PARCIAL ──
+// Usado quando o cliente declara o tipo de lente (multifocal/progressiva/visão simples)
+// e fornece pelo menos a esfera, mas falta ADD e/ou CIL/AX. Em vez de travar pedindo
+// dados, devolve uma faixa estimada (econômica / intermediária / premium) e segue
+// pedindo o que falta. NUNCA grava receita — é só uma simulação de mercado.
+async function runConsultarLentesEstimativa(
+  supabase: any,
+  args: {
+    rx_type?: "single_vision" | "progressive";
+    sphere_od?: number | null;
+    sphere_oe?: number | null;
+    cylinder_hint?: number | null; // se cliente disse "tem astigmatismo" sem valor, passamos 0.75
+    filtro_blue?: boolean;
+    filtro_photo?: boolean;
+  },
+): Promise<{ resposta: string }> {
+  const rxType = args?.rx_type === "progressive" ? "progressive" : "single_vision";
+  const sphereCandidates = [args?.sphere_od, args?.sphere_oe].filter(
+    (v): v is number => typeof v === "number" && !Number.isNaN(v),
+  );
+  if (sphereCandidates.length === 0) {
+    return {
+      resposta:
+        "Pra estimar pelo menos uma faixa de valores, me confirma o esférico (grau) de cada olho? Pode ser só os números, sem precisar da receita inteira agora 😊",
+    };
+  }
+  const worstSphere = sphereCandidates.reduce((a, b) => (Math.abs(a) > Math.abs(b) ? a : b), 0);
+  // Cliente disse "astigmatismo" mas não deu CIL → presume cilindro pequeno (-0.75)
+  // pra não excluir lentes tóricas básicas. Se passou um valor, usa-o.
+  const worstCyl =
+    typeof args?.cylinder_hint === "number" && !Number.isNaN(args.cylinder_hint)
+      ? Math.abs(args.cylinder_hint) * -1
+      : -0.75;
+
+  const categories =
+    rxType === "progressive"
+      ? ["progressive", "occupational"]
+      : ["single_vision", "single_vision_digital", "single_vision_stock"];
+
+  // Para multifocal varremos 3 ADDs típicas (+1.50 / +2.00 / +2.50) e juntamos resultados;
+  // para visão simples, basta uma rodada.
+  const addsToTry = rxType === "progressive" ? [1.5, 2.0, 2.5] : [null];
+  const collected: any[] = [];
+  for (const add of addsToTry) {
+    let q = supabase
+      .from("pricing_table_lentes")
+      .select("brand, family, treatment, index_name, blue, photo, price_brl, priority")
+      .eq("active", true)
+      .in("category", categories)
+      .gt("price_brl", 0)
+      .lte("sphere_min", worstSphere)
+      .gte("sphere_max", worstSphere)
+      .lte("cylinder_min", worstCyl)
+      .gte("cylinder_max", worstCyl);
+    if (rxType === "progressive" && add !== null) {
+      q = q.lte("add_min", add).gte("add_max", add);
+    }
+    if (args?.filtro_blue === true) q = q.eq("blue", true);
+    if (args?.filtro_photo === true) q = q.eq("photo", true);
+    const { data } = await q.order("price_brl", { ascending: true }).limit(20);
+    if (Array.isArray(data)) collected.push(...data);
+  }
+
+  if (collected.length === 0) {
+    console.log(`[QUOTE-EST] Sem matches para sphere=${worstSphere} cyl=${worstCyl} type=${rxType}`);
+    return {
+      resposta:
+        "Pra esse grau específico preciso confirmar a disponibilidade direto na loja. Em qual região/bairro você está? Já te indico a unidade mais próxima 😊",
+    };
+  }
+
+  // Dedup por brand+family+treatment+blue+photo, fica só o menor preço de cada combinação.
+  const uniqMap = new Map<string, any>();
+  for (const l of collected) {
+    const key = `${l.brand}|${l.family}|${l.treatment}|${l.blue ? 1 : 0}|${l.photo ? 1 : 0}`;
+    const cur = uniqMap.get(key);
+    if (!cur || Number(l.price_brl) < Number(cur.price_brl)) uniqMap.set(key, l);
+  }
+  const sorted = Array.from(uniqMap.values()).sort(
+    (a, b) => Number(a.price_brl) - Number(b.price_brl),
+  );
+  const economy = sorted[0];
+  const premium = sorted[sorted.length - 1];
+  const mid = sorted.length >= 3 ? sorted[Math.floor(sorted.length / 2)] : null;
+
+  const fmt = (v: number) =>
+    `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const tipoLabel = rxType === "progressive" ? "multifocal" : "visão simples";
+  const sphereDisp = sphereCandidates.length === 2
+    ? `OD ${args?.sphere_od ?? "—"} / OE ${args?.sphere_oe ?? "—"}`
+    : `${sphereCandidates[0]}`;
+
+  let msg = `Com o que você passou (${sphereDisp}${typeof args?.cylinder_hint === "number" ? ` + cil ${args.cylinder_hint}` : " com astigmatismo"}), uma estimativa de ${tipoLabel} com antirreflexo:\n\n`;
+  msg += `🟢 *Econômica* — ${economy.brand} ${economy.family}: a partir de ${fmt(Number(economy.price_brl))}\n`;
+  if (mid && mid !== economy && mid !== premium) {
+    msg += `🟡 *Intermediária* — ${mid.brand} ${mid.family}: a partir de ${fmt(Number(mid.price_brl))}\n`;
+  }
+  if (premium !== economy) {
+    msg += `💎 *Premium* — ${premium.brand} ${premium.family}: a partir de ${fmt(Number(premium.price_brl))}\n`;
+  }
+  msg += `\n_Valores estimativos — com a ${rxType === "progressive" ? "ADIÇÃO e o cilindro/eixo" : "receita"} exatos eu fecho o orçamento certinho._\n\n`;
+  msg += rxType === "progressive"
+    ? "Consegue me enviar foto da receita ou os números de ADD e CIL/AX de cada olho?"
+    : "Consegue me confirmar o cilindro e eixo de cada olho (ou enviar foto da receita)?";
+
+  console.log(`[QUOTE-EST] ${tipoLabel} sphere=${worstSphere} cyl=${worstCyl} → ${sorted.length} produtos únicos`);
+  return { resposta: msg };
+}
+
 // Detecta e sanitiza vazamento de instruções internas no texto enviado ao cliente
 function sanitizeLeakedInstructions(texto: string): string {
   if (!texto) return texto;
