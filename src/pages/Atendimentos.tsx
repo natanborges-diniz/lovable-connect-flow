@@ -198,9 +198,24 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           body: {
             atendimento_id: id,
             texto,
-            remetente_nome: "Operador",
+            remetente_nome: profile?.nome || "Operador",
           },
         });
+
+        // Intercepta 422 outside_24h_window: prepara reabertura via template
+        const errPayload = (error as any)?.context?.body || data;
+        const errStr = typeof errPayload === "string" ? errPayload : JSON.stringify(errPayload || {});
+        if (errStr.includes("outside_24h_window")) {
+          let horas = 0;
+          try {
+            const parsed = typeof errPayload === "string" ? JSON.parse(errPayload) : errPayload;
+            horas = parsed?.hours_since_last_inbound ?? 0;
+          } catch { /* noop */ }
+          setJanelaFechadaHoras(horas);
+          setJanelaFechadaOpen(true);
+          // Preserva o rascunho do consultor — não limpa msgText
+          return;
+        }
 
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
@@ -210,7 +225,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           atendimento_id: id,
           conteudo: texto,
           direcao: msgDirecao,
-          remetente_nome: "Operador",
+          remetente_nome: profile?.nome || "Operador",
         });
       }
 
