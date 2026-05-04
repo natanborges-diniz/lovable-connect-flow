@@ -1109,6 +1109,17 @@ function buildContinuityBlock(inboundCount: number): string {
 - NUNCA repita saudações formais ou apresentações em conversas que já tiveram troca de mensagens.`;
 }
 
+function buildOrcamentoParcialBlock(): string {
+  return `# ORÇAMENTO COM RECEITA PARCIAL — NUNCA TRAVAR O CLIENTE
+- Se o cliente declarou TIPO DE LENTE (multifocal, progressiva, visão simples) e forneceu pelo menos o ESFÉRICO de cada olho, MAS faltam ADIÇÃO/CIL/AX:
+  → SEMPRE use a tool *consultar_lentes_estimativa* ANTES de pedir os dados que faltam.
+  → Passe rx_type='progressive' para multifocal/progressiva ou 'single_vision' para visão simples; passe sphere_od/sphere_oe com os sinais corretos (negativo p/ miopia, positivo p/ hipermetropia).
+  → Se o cliente disse só "tem astigmatismo" sem número, NÃO preencha cylinder_hint (a tool presume um cilindro padrão pra estimativa).
+  → A tool devolve 3 faixas (Econômica/Intermediária/Premium) já marcadas como "valores estimativos" — envie a resposta como veio e na MESMA mensagem pergunte os dados que faltam.
+- PROIBIDO responder somente "preciso da ADD pra fechar" ou "sem o cilindro não consigo orçar". Sempre dê a faixa primeiro.
+- Se o cliente NÃO declarou tipo nem esférico, peça foto da receita uma vez só (não use a tool de estimativa).`;
+}
+
 function buildRegionalCoverageBlock(): string {
   return `# COBERTURA REGIONAL — ESCADA DE PERSUASÃO
 - Você atende APENAS em Osasco e região (Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville).
