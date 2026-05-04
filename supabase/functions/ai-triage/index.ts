@@ -883,7 +883,7 @@ const TOOLS = [
         type: "object",
         properties: {
           loja_nome: { type: "string", description: "Nome da loja escolhida (precisa estar na lista LOJAS DISPONÍVEIS)." },
-          data_horario: { type: "string", description: "Data e hora COMPLETAS no formato ISO 8601 (ex: 2026-03-25T14:00:00-03:00). Sem hora ou sem data, NÃO chame esta tool." },
+          data_horario: { type: "string", description: "Data e hora COMPLETAS no formato ISO 8601 com TIMEZONE OBRIGATÓRIO (sufixo -03:00 para horário de Brasília). Ex: 2026-03-25T14:00:00-03:00. PROIBIDO enviar sem o offset (ex: '2026-03-25T14:00:00') — será rejeitado. Sem hora ou sem data, NÃO chame esta tool." },
           observacoes: { type: "string", description: "Observações adicionais sobre a visita." },
           resposta: { type: "string", description: "Mensagem confirmando o agendamento ao cliente." },
         },
