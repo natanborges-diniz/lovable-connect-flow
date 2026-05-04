@@ -1318,6 +1318,7 @@ function buildSystemPrompt(opts: {
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
   s.push(buildLentesContatoKnowledgeBlock());
+  s.push(buildOrcamentoParcialBlock());
 
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
