@@ -470,7 +470,7 @@ serve(async (req) => {
         // Check if contato has an agendamento in lembrete_enviado
         const { data: agendamentoPendente } = await supabase
           .from("agendamentos")
-          .select("id, data_horario, loja_nome")
+          .select("id, data_horario, loja_nome, metadata")
           .eq("contato_id", contato.id)
           .eq("status", "lembrete_enviado")
           .order("data_horario", { ascending: true })
