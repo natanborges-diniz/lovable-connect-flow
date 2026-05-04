@@ -2125,6 +2125,10 @@ export type Database = {
       }
     }
     Functions: {
+      desanitize_corporate_contact: {
+        Args: { _telefone: string }
+        Returns: Json
+      }
       fn_send_push: {
         Args: {
           _body: string
