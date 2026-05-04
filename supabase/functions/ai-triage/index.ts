@@ -3399,7 +3399,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           const md = (agDiaD.metadata || {}) as Record<string, any>;
           await supabase.from("agendamentos").update({
             status: "confirmado",
-            metadata: { ...md, confirmado_pelo_cliente_at: new Date().toISOString() },
+            metadata: { ...md, confirmado_pelo_cliente_at: new Date().toISOString(), cliente_confirmou_at: new Date().toISOString() },
           }).eq("id", agDiaD.id);
           await supabase.from("eventos_crm").insert({
             contato_id: contatoId,
