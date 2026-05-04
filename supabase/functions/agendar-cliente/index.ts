@@ -22,6 +22,16 @@ serve(async (req) => {
       throw new Error("contato_id, loja_nome and data_horario are required");
     }
 
+    // Exige timezone explícito para evitar interpretar horário local como UTC
+    // (bug "agendado às 17:30 SP" virar "20:30 SP" depois do render).
+    if (!/[+-]\d{2}:?\d{2}$|Z$/.test(String(data_horario))) {
+      console.warn(`[agendar-cliente] data_horario sem timezone: ${data_horario}`);
+      return new Response(JSON.stringify({
+        error: "data_horario_sem_timezone",
+        motivo: "Use ISO 8601 com offset (ex: 2026-05-04T17:30:00-03:00)",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // Get contato info
     const { data: contato } = await supabase
       .from("contatos")

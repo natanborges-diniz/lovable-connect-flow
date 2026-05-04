@@ -1,65 +1,84 @@
+## Diagnóstico
 
-## Problema observado
+Olhando o agendamento `b67174ef…` (Fran, DINIZ ANTONIO AGU, 17:30 SP), três bugs distintos aconteceram:
 
-No diálogo da Fran (agendou às 16:55 para hoje 17:30), o sistema disparou DUAS mensagens "Oi Fran, ainda não conseguimos confirmar..." em sequência (16:59 e 17:00), mesmo após ela já ter confirmado verbalmente ("Sim", "obg"). Isso acontece porque hoje o `agendamentos-cron` tem três caminhos de lembrete sobrepostos:
+### Bug 1 — Lembretes duplicados às 17:00
+- Os dois "Oi Fran, ainda não conseguimos confirmar..." em 20:00:02 UTC (40 ms de diferença) vieram do **antigo** `processLembreteRetry`, que ainda estava deployado quando o cron rodou. Nosso commit que removeu esse fluxo só foi feito 24 min depois.
+- **Já corrigido em código** (cron novo só roda véspera 08h e 1h-antes com lock atômico + skip <60min). Não precisa nova alteração aqui — só validar pós-deploy.
 
-1. **Fluxo A** (linha 49-67): transiciona qualquer agendamento de hoje/amanhã para `status=lembrete_enviado` com `tentativas_lembrete=1`, sem enviar mensagem. Mas a transição "consome" o slot da 1ª tentativa silenciosamente.
-2. **Fluxo B — `processLembreteRetry`** (linha 234-281): envia "ainda não conseguimos confirmar" quando `tentativas_lembrete=1` e (passou `HORAS_REENVIO_LEMBRETE` desde update **OU** falta menos de 2h para o atendimento). Para a Fran, faltavam ~33min → disparou imediatamente, e duplicou porque dois ticks do cron rodaram antes do `tentativas_lembrete=2` ser persistido.
-3. **Fluxo B2 — `processLembreteDiaD`** (linha 524): envia "Bom dia, passando pra lembrar..." às 08h SP do dia da visita.
+### Bug 2 — "Seu agendamento foi confirmado ✅ … hoje às 20:30 ⏰ 20:30"
+Causa raiz: a automação `pipeline_automacoes` `2a9f41ef…` com `status_alvo = 'agendado'` (texto: "Perfeito {{primeiro_nome}}! Seu agendamento foi confirmado ✅…") **dispara em qualquer transição que termine em `agendado`**, inclusive o caminho inverso `lembrete_enviado → agendado` (foi o que ocorreu em 20:11:59, evento `automacao_pipeline status_anterior=lembrete_enviado, status_novo=agendado`).
 
-Não há nenhuma checagem de "cliente já confirmou" e nem de "agendamento marcado com menos de Xh de antecedência → não mandar lembrete".
+Consequências:
+- Mensagem é enviada **sem o cliente ter confirmado nada** — viola a política de "1 lembrete só".
+- O placeholder `{{quando}}/{{hora}}` foi renderizado como `20:30`, indicando que naquele instante o `data_horario` estava gravado como `2026-05-04T20:30:00` interpretado como SP local (= 23:30 UTC), provavelmente por uma reentrada de `agendar_visita` com a string que o cliente repetiu. Quando a IA realmente chamou de novo às 20:28 com o horário certo, o valor foi normalizado de volta. Mas a mensagem-fantasma já tinha saído com o texto errado.
 
-## Política nova (decisão do usuário)
+### Bug 3 — IA ecoou "Obg." 17 segundos depois do cliente
+Mensagens 20:12:30 outbound "Obg." e 20:12:47 inbound "Obg" — a IA enviou "Obg." **antes** do cliente. Isso é o agente respondendo após "Seu agendamento foi confirmado…" como se fosse um encerramento. Provavelmente disparado pela mesma automação que mudou status para `agendado` e re-fired a triage.
 
-| Caso | Lembrete |
-|---|---|
-| Agendamento para HOJE, marcado com ≥ 1h de antecedência | **1 único** lembrete, **1h antes** do horário |
-| Agendamento para HOJE, marcado com < 1h de antecedência | **NENHUM** lembrete |
-| Agendamento para dia futuro | **1 único** lembrete na **véspera** (08h SP do dia anterior) |
-| Cliente já respondeu confirmando depois do agendamento | **NENHUM** lembrete adicional |
+## Plano de correção
 
-Sempre 1 lembrete máximo por agendamento. Sem reenvio. Sem segunda tentativa.
+### 1) Desligar / reescrever a automação `2a9f41ef…` (`status_alvo = agendado`)
+Esta automação é a fonte do "Seu agendamento foi confirmado" não solicitado. Opções:
+- **Recomendado**: desativar (`ativo = false`) via migration SQL. A IA já manda a confirmação no momento certo (após `agendar_visita`), e a automação `e254400e…` (`status_alvo = confirmado`) já cobre o caso "cliente confirmou".
+- Migration:
+  ```sql
+  UPDATE pipeline_automacoes
+  SET ativo = false, updated_at = now()
+  WHERE id = '2a9f41ef-93cd-4339-a2f5-beb53171d700';
+  ```
 
-## Mudanças
+### 2) Bloquear automação para transições "regressivas" em `pipeline-automations`
+Mesmo desativando a regra acima, o cron / outras rotas podem rebaixar status (`lembrete_enviado → agendado`). Adicionar guarda na função:
+```ts
+// Em pipeline-automations/index.ts, dentro da branch entity_type === "agendamento":
+const ORDEM = { agendado: 1, lembrete_enviado: 2, confirmado: 3, no_show: 4, recuperacao: 5, venda_fechada: 6 };
+if (status_anterior && status_novo && ORDEM[status_novo] < ORDEM[status_anterior]) {
+  console.log(`[AUTOMATIONS] Skip regressive transition ${status_anterior} → ${status_novo}`);
+  return new Response(JSON.stringify({ status: "skipped_regressive" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+```
 
-### 1. `supabase/functions/agendamentos-cron/index.ts`
+### 3) Skip se `metadata.cliente_confirmou_at` existir
+Se cliente já confirmou, NENHUMA automação por status deve disparar mensagens duplicadas:
+```ts
+if (entity_type === "agendamento" && agendamento?.metadata?.cliente_confirmou_at) {
+  // pula automações de envio (mensagem/template) — mantém apenas tarefa/notificação interna se houver
+  automacoes = automacoes.filter(a => !["enviar_mensagem","enviar_template"].includes(a.tipo_acao));
+}
+```
 
-**Remover completamente:**
-- Fluxo A atual (transição cega para `lembrete_enviado` 24h-48h antes) — ele pré-marca `tentativas_lembrete=1` sem nem enviar mensagem, gerando confusão e duplicação.
-- Fluxo B `processLembreteRetry` (e a chamada na linha 72) — reenvio "ainda não conseguimos confirmar" deixa de existir.
+### 4) Endurecer `agendar-cliente` contra `data_horario` sem TZ
+Para prevenir que o `Bug 2 - parte horário` reapareça, exigir offset/`Z` no input:
+```ts
+if (!/[+-]\d{2}:?\d{2}$|Z$/.test(String(data_horario))) {
+  return new Response(JSON.stringify({ error: "data_horario sem timezone — use ISO 8601 com offset" }), { status: 400, headers: corsHeaders });
+}
+```
+E reforçar a description da tool em `ai-triage` para "OBRIGATÓRIO sufixo `-03:00`".
 
-**Substituir por dois fluxos novos e simples, idempotentes via `metadata.lembrete_enviado_at`:**
+### 5) Bloquear ai-triage de auto-disparar em watchdog logo após confirmação
+O watchdog re-firou a triage às 20:28 (5 min depois do "Eu já confimei" em 20:00, que tinha sido escalado). Como o cliente JÁ confirmou via SIM no webhook, adicionar guard no `watchdog-inbound-orfao`:
+```ts
+// se existe agendamento ativo com cliente_confirmou_at no último 1h → não re-fire
+```
 
-- **`processLembreteVespera`** — roda às 08h SP. Para cada agendamento com `data_horario` no dia seguinte, status em (`agendado`,`confirmado`), `loja_confirmou_presenca` nulo, sem `metadata.lembrete_enviado_at` e sem `metadata.cliente_confirmou_at`: envia 1 mensagem "Oi {nome}, passando pra confirmar sua visita amanhã às *{hora}* na *{loja}*. Posso confirmar?" via `send-whatsapp`, grava `metadata.lembrete_enviado_at` com lock atômico (mesmo padrão do `processLembreteDiaD` atual), atualiza `status='lembrete_enviado'` e `tentativas_lembrete=1`. Marca evento `lembrete_vespera_enviado` no CRM.
+### 6) Validação manual pós-deploy
+- Criar agendamento de teste para hoje +30min → não deve ter lembrete (`janela_curta`).
+- Criar para hoje +90min → 1 lembrete às T-60min, nenhum a mais.
+- Cliente responde SIM → recebe "Show, presença confirmada" (regra `confirmado`) UMA vez. NÃO recebe "Seu agendamento foi confirmado…".
+- Mover manualmente de `lembrete_enviado` → `agendado` no DB → automação não dispara (regressive guard).
 
-- **`processLembrete1hAntes`** — roda a cada 5 min. Para cada agendamento com `data_horario` entre `now+55min` e `now+65min` (janela tolerante de ~10min), mesmas guardas acima:
-  - Calcula `created_at` ou `metadata.agendado_em` vs `data_horario`. Se a diferença for **< 60 min** (cliente marcou com <1h de antecedência), grava `metadata.lembrete_skip_motivo='janela_curta'` e segue sem enviar.
-  - Caso contrário, envia "Oi {nome}, passando pra lembrar da sua visita hoje às *{hora}* na *{loja}*. Posso confirmar?" e segue o mesmo padrão de lock + evento `lembrete_1h_enviado`.
+## Arquivos a alterar
 
-**Substituir `processLembreteDiaD` pelo `processLembrete1hAntes`** — o lembrete das 08h dia-D some, porque o usuário quer só 1h antes para o dia atual.
+1. **Migration nova** — desativa pipeline_automacao `2a9f41ef…`
+2. **`supabase/functions/pipeline-automations/index.ts`** — guard regressivo + skip se `cliente_confirmou_at`
+3. **`supabase/functions/agendar-cliente/index.ts`** — exige offset no `data_horario`
+4. **`supabase/functions/ai-triage/index.ts`** — reforça description da tool `agendar_visita`
+5. **`supabase/functions/watchdog-inbound-orfao/index.ts`** — pula contatos com agendamento confirmado recente
+6. **Memória** — atualiza `mem://agendamentos/janela-comunicacao-e-d-day.md` com as novas guardas (regressivo + cliente_confirmou_at) e adiciona core rule "Automação por status_alvo NUNCA dispara em transição regressiva nem se cliente_confirmou_at existir".
 
-**Detecção "cliente já confirmou":** quando `whatsapp-webhook` ou `ai-triage` detecta confirmação do cliente (regex "sim/ok/confirmado/beleza" + agendamento ativo) e marca `agendamentos.status='confirmado'`, também gravar `metadata.cliente_confirmou_at = now()`. Os dois novos fluxos pulam qualquer agendamento que tenha esse campo. (Hoje só há `metadata.aviso_loja_enviado_at`, então adicionar essa flag é trivial.)
-
-### 2. `supabase/functions/whatsapp-webhook/index.ts` e `supabase/functions/ai-triage/index.ts`
-
-No ponto onde já marcam `status='confirmado'` e disparam `notificar-loja-agendamento` (já documentado em `mem://agendamentos/aviso-loja-pos-confirmacao`), adicionar no mesmo update do metadata: `cliente_confirmou_at: new Date().toISOString()`.
-
-### 3. Memória
-
-- Atualizar `mem://agendamentos/janela-comunicacao-e-d-day.md` (existe na lista) para refletir a nova regra: "1 lembrete; véspera para futuros, 1h antes para hoje, nada se <1h de antecedência".
-- Atualizar `mem://agendamentos/cadencia-noshow-e-cobranca-loja.md` removendo qualquer referência a 2ª tentativa de lembrete.
-- Adicionar entrada no `mem://index.md` Core: "Lembretes ao cliente: 1 único — véspera 08h ou 1h antes. <1h de antecedência → nenhum. Cliente que já confirmou nunca recebe."
-
-### 4. Não mexer
-
-- Cobrança à loja (`processFirstStoreCharge`, `processSecondStoreChargeNextMorning`, `processStoreTimeout`) — fluxo separado, continua como está.
-- `notificar-loja-agendamento` — já é correto.
-- Recuperação no-show / abandono — fluxo separado.
-
-## Como verificar depois
-
-1. Criar agendamento para hoje com `data_horario` faltando 30min → não deve disparar lembrete; evento `lembrete_skip_motivo=janela_curta` no CRM.
-2. Criar agendamento para hoje faltando 2h → 1 lembrete chega quando faltar ~1h.
-3. Criar agendamento para amanhã → 1 lembrete às 08h de hoje.
-4. Cliente responde "sim" antes do horário do lembrete → nenhuma mensagem dispara.
-5. Cron rodando 5min depois do lembrete enviado → não duplica (lock via `metadata.lembrete_enviado_at`).
+## O que NÃO mexer
+- Fluxos da cron de lembrete (`processLembreteVespera`, `processLembrete1hAntes`) — já corretos.
+- Webhook handler de SIM/confirmação — já grava `cliente_confirmou_at`.
+- Templates WhatsApp aprovados.

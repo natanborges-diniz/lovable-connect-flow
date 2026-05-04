@@ -21,6 +21,24 @@ serve(async (req) => {
 
     console.log(`[AUTOMATIONS] ${entity_type} ${entity_id}: ${status_anterior || coluna_anterior_id} → ${status_novo || coluna_id}`);
 
+    // ─── Guard: bloquear transições regressivas em agendamentos ───
+    // Ex.: lembrete_enviado → agendado não deve disparar a automação de "confirmado"
+    // (acontece quando agendar_visita roda novamente sobre um agendamento já existente).
+    if (entity_type === "agendamento" && status_anterior && status_novo) {
+      const ORDEM: Record<string, number> = {
+        agendado: 1, lembrete_enviado: 2, confirmado: 3,
+        no_show: 4, recuperacao: 5, venda_fechada: 6,
+      };
+      const ordAnt = ORDEM[status_anterior] ?? 0;
+      const ordNov = ORDEM[status_novo] ?? 0;
+      if (ordAnt > 0 && ordNov > 0 && ordNov < ordAnt) {
+        console.log(`[AUTOMATIONS] Skip regressive transition ${status_anterior} → ${status_novo}`);
+        return new Response(JSON.stringify({ status: "skipped_regressive" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // ─── Check homologação mode ───
     const { data: homoConfig } = await supabase
       .from("configuracoes_ia")
@@ -79,6 +97,21 @@ serve(async (req) => {
       agendamento = ag;
       contato_id = ag?.contato_id;
       atendimento_id = ag?.atendimento_id;
+
+      // Se cliente já confirmou o agendamento, NÃO disparar mensagens/templates
+      // automáticos (evita "Seu agendamento foi confirmado" duplicado).
+      if (ag?.metadata?.cliente_confirmou_at) {
+        const before = automacoes.length;
+        automacoes = automacoes.filter((a: any) => !["enviar_mensagem", "enviar_template"].includes(a.tipo_acao));
+        if (automacoes.length < before) {
+          console.log(`[AUTOMATIONS] Filtered ${before - automacoes.length} send-actions: cliente já confirmou`);
+        }
+        if (!automacoes.length) {
+          return new Response(JSON.stringify({ status: "skipped_cliente_confirmou" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
     } else if (entity_type === "solicitacao") {
       // For solicitacoes (financeiro pipeline), get contato from the solicitacao
       const { data: sol } = await supabase
