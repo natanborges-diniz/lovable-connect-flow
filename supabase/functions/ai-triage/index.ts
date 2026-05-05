@@ -2698,6 +2698,16 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.log(`[RX-CORRECTION] Forcing consultar_lentes with corrected prescription`);
     }
 
+    // ── REGRA ANTI-ALUCINAÇÃO DE DATA + TOOL OBRIGATÓRIA (universal) ──
+    messages.push({
+      role: "system",
+      content: `[REGRAS ESTRITAS DE AGENDAMENTO]
+1) PROIBIDO citar data/dia da semana/horário/loja de agendamento que NÃO esteja na seção AGENDAMENTOS DESTE CLIENTE acima${agendamentoFmt ? ` (única fonte da verdade: "${agendamentoFmt}")` : " (seção VAZIA — não invente nenhuma data/loja; faça despedida sem data se for o caso)"}.
+2) Se for confirmar/marcar/reagendar uma visita (data + hora + loja), você DEVE chamar a tool agendar_visita ou reagendar_visita ANTES de prometer ao cliente — mesmo que pareça redundante. Nunca prometa data/hora sem persistir via tool.
+3) PROIBIDO reescrever uma data já confirmada com outra "lembrada" do histórico. Use SEMPRE a data da seção AGENDAMENTOS DESTE CLIENTE.
+4) Após a despedida ("Te espero…", "Combinado…", "Foi um prazer…"), NÃO emende novas perguntas (estilo, cor, material, plaquetas, filtro azul, transitions, etc.). A conversa está encerrada.`,
+    });
+
     // ── HINT ANTI-DUPLICAÇÃO: agendamento ativo + sem pedido explícito de mudança ──
     {
       const lastInLow = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
