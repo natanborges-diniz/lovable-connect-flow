@@ -557,21 +557,26 @@ async function sendStoreChargeMessage(
   const clienteName = contato?.nome || "Cliente";
 
   const titulo = isSecondAttempt
-    ? `⚠️ Pendência de confirmação — ${clienteName}`
+    ? `⚠️ 2ª cobrança — ${clienteName} compareceu?`
     : `📋 Confirme comparecimento — ${clienteName}`;
   const mensagem = isSecondAttempt
-    ? `Cliente ${clienteName} (agendado às ${hora}) ainda sem confirmação. Atualize no app.`
-    : `Cliente ${clienteName} tinha agendamento às ${hora}. Compareceu?`;
+    ? `Cliente ${clienteName} (agendado às ${hora}) ainda sem confirmação. Toque para responder: Compareceu / Não compareceu / Venda fechada.`
+    : `Cliente ${clienteName} tinha agendamento às ${hora}. Toque para responder: Compareceu / Não compareceu / Venda fechada.`;
 
   const { data: dests } = await supabase
     .rpc("resolver_destinatarios_loja", { _loja_nome: ag.loja_nome });
   const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
 
+  // Tipo padronizado para o Messenger renderizar os 3 botões de ação
+  const tipoNotif = isSecondAttempt
+    ? "cobranca_comparecimento_loja_2"
+    : "cobranca_comparecimento_loja";
+
   for (const d of list) {
     await supabase.from("notificacoes").insert({
       usuario_id: d.user_id,
       setor_id: d.setor_id,
-      tipo: "agendamento_confirmacao",
+      tipo: tipoNotif,
       titulo,
       mensagem,
       referencia_id: ag.id,
