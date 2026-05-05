@@ -1747,35 +1747,8 @@ serve(async (req) => {
       return jsonResponse({ status: "ok", tools_used: ["router_subject_change"], intencao: "outro", precisa_humano: false, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
     }
 
-    // ── 3.5. PRE-LLM ROUTER: "modelos / armações" → presencial (não listar lentes) ──
-    // Cliente pedindo modelos de óculos/armações deve receber convite presencial,
-    // nunca uma lista de lentes (catálogo de armações é físico). Determinístico.
-    {
-      const tArm = norm(currentMsg);
-      const isArmacaoIntent =
-        /\b(modelo|modelos|armac|armaç|armacao|armação|armações|armacoes)\b/.test(tArm) ||
-        /\b(oculos|óculos)\b.*\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b/.test(tArm) ||
-        /\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b.*\b(oculos|óculos)\b/.test(tArm);
-      const isLentePedido = /\b(lente|lentes|grau|orcamento de lente|orçamento de lente)\b/.test(tArm);
-      if (isArmacaoIntent && !isLentePedido) {
-        console.log("[ROUTER] Armações/modelos detected — convite presencial determinístico");
-        const armMsg =
-          "Sobre armações, a gente trabalha com várias marcas e estilos (Ray-Ban, Oakley, Vogue, Carolina Herrera, linha Diniz exclusiva, infantis e esportivas) 😊\n\n" +
-          "Como o caimento muda muito de rosto pra rosto, o ideal é provar pessoalmente — separamos várias opções pra você no balcão.\n\n" +
-          "Quer agendar uma visita? Temos:\n📍 *Antônio Agú* (centro Osasco)\n📍 *União Osasco* (shopping)\n📍 *SuperShopping* (até 22h)\n\nQual fica melhor pra você?";
-        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, armMsg);
-        // Mark in metadata to avoid loop on next turn
-        try {
-          const { data: ctMeta } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
-          const newMeta = { ...(ctMeta?.metadata || {}), armacoes_orientado: true, armacoes_orientado_at: new Date().toISOString() };
-          await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contatoId);
-        } catch (e) {
-          console.warn("[ROUTER armações] Failed to mark metadata:", e);
-        }
-        await logEvent(supabase, contatoId, atendimento_id, "router_armacoes_presencial", currentMsg);
-        return jsonResponse({ status: "ok", tools_used: ["router_armacoes_presencial"], intencao: "armacoes", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
-      }
-    }
+    // ── 3.5. PRE-LLM ROUTER: "modelos / armações" — movido para DEPOIS das queries paralelas (~linha 1820)
+    //         para que possa consultar o agendamento ativo e variar a resposta. ──
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
     const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes, contatoMetaRes] = await Promise.all([
@@ -1813,6 +1786,52 @@ serve(async (req) => {
     const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
+
+    // ── 3.5b. POST-DATA ROUTER: "modelos / armações" → presencial ──
+    // Movido pra cá (depois das queries) pra que possa consultar agendamento ativo.
+    {
+      const tArm = norm(currentMsg);
+      const isArmacaoIntent =
+        /\b(modelo|modelos|armac|armaç|armacao|armação|armações|armacoes)\b/.test(tArm) ||
+        /\b(oculos|óculos)\b.*\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b/.test(tArm) ||
+        /\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b.*\b(oculos|óculos)\b/.test(tArm);
+      const isLentePedido = /\b(lente|lentes|grau|orcamento de lente|orçamento de lente)\b/.test(tArm);
+      if (isArmacaoIntent && !isLentePedido) {
+        // Detecta agendamento ativo já registrado (futuro ≤6h tolerância)
+        const _NOW_RT = Date.now();
+        const _ROUTER_TOL = 6 * 3600 * 1000;
+        const _agAtivoRouter = (agendamentosAtivos || [])
+          .filter((a: any) => ["agendado", "confirmado", "lembrete_enviado"].includes(a.status) && a.data_horario)
+          .filter((a: any) => new Date(a.data_horario).getTime() >= (_NOW_RT - _ROUTER_TOL))
+          .sort((x: any, y: any) => new Date(x.data_horario).getTime() - new Date(y.data_horario).getTime())[0];
+
+        let armMsg: string;
+        if (_agAtivoRouter) {
+          // Já tem agendamento — não oferecer loja de novo, apenas reafirmar e prometer separar.
+          const dt = new Date(_agAtivoRouter.data_horario);
+          const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+          const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+          const _np = contatoNomeAtual ? `, ${contatoNomeAtual.split(" ")[0]}` : "";
+          armMsg = `Já está tudo certo${_np}! Te espero ${dataFmt} às ${horaFmt} na ${_agAtivoRouter.loja_nome} — vou separar modelos pra você provar lá no balcão 😉 Qualquer dúvida é só me chamar 👋`;
+          console.log("[ROUTER armações] Agendamento ativo — reafirmando sem oferecer nova loja");
+        } else {
+          armMsg =
+            "Sobre armações, a gente trabalha com várias marcas e estilos (Ray-Ban, Oakley, Vogue, Carolina Herrera, linha Diniz exclusiva, infantis e esportivas) 😊\n\n" +
+            "Como o caimento muda muito de rosto pra rosto, o ideal é provar pessoalmente — separamos várias opções pra você no balcão.\n\n" +
+            "Quer agendar uma visita? Temos:\n📍 *Antônio Agú* (centro Osasco)\n📍 *União Osasco* (shopping)\n📍 *SuperShopping* (até 22h)\n\nQual fica melhor pra você?";
+          console.log("[ROUTER armações] Sem agendamento — convite presencial padrão");
+        }
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, armMsg);
+        try {
+          const newMeta = { ...(contatoMeta || {}), armacoes_orientado: true, armacoes_orientado_at: new Date().toISOString() };
+          await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contatoId);
+        } catch (e) {
+          console.warn("[ROUTER armações] Failed to mark metadata:", e);
+        }
+        await logEvent(supabase, contatoId, atendimento_id, "router_armacoes_presencial", currentMsg);
+        return jsonResponse({ status: "ok", tools_used: ["router_armacoes_presencial"], intencao: "armacoes", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+      }
+    }
 
     // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
     let receitas: any[] = [];
@@ -2269,11 +2288,84 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     } catch { /* ignore */ }
 
     if (isThanksClose || isShortNoToHelp || isExplicitClose) {
-      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} → DESPEDIDA forçada`);
+      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} → DESPEDIDA determinística`);
+
+      // ── DESPEDIDA DETERMINÍSTICA (não passa pelo LLM, evita alucinação de data/loja) ──
+      const _firstName = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      const _commaName = _firstName ? `, ${_firstName}` : "";
+      let despedidaMsg: string;
+      if (isExplicitClose) {
+        const _tail = agendamentoFmt ? ` — te espero ${agendamentoFmt}` : "";
+        despedidaMsg = `Foi um prazer te atender${_commaName}! 🙏 Obrigado pelo contato${_tail}. Qualquer coisa, é só me chamar 👋`;
+      } else if (isThanksClose) {
+        const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
+        despedidaMsg = `De nada${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+      } else {
+        // isShortNoToHelp
+        const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
+        despedidaMsg = `Combinado${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+      }
+
+      // Anti-duplicação: se último outbound já é uma despedida canônica, silencia
+      const lastOut = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+      const jaDespediu =
+        /foi um prazer te atender|qualquer dúvida é só me chamar|qualquer coisa estou por aqui/i.test(lastOut)
+        && /👋/.test(lastOut);
+      if (jaDespediu) {
+        console.log("[CLOSE-DEDUP] Despedida canônica já enviada — silenciando reenvio");
+        try {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "despedida_duplicada_evitada",
+            descricao: "CLOSE-DEDUP: cliente respondeu curto após despedida canônica",
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+            metadata: { last_inbound: msgTrim2.substring(0, 200) },
+          });
+        } catch { /* ignore */ }
+        return jsonResponse({ status: "ok", tools_used: ["close_dedup"], intencao: "despedida", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+      }
+
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, despedidaMsg);
+      await logEvent(supabase, contatoId, atendimento_id, "despedida_deterministica", `${isExplicitClose ? "explicit" : isThanksClose ? "thanks" : "shortNoToHelp"}; agFmt=${agendamentoFmt || "vazio"}`);
+      return jsonResponse({ status: "ok", tools_used: ["despedida_deterministica"], intencao: "despedida", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
     }
+
+    // ── SILÊNCIO PÓS-AGENDAMENTO ──
+    // Se já há agendamento ativo + último outbound foi despedida canônica
+    // + cliente respondeu curto/sem novo intent → não reenvia nada.
+    // Só sai desse modo se cliente trouxer novo intent (pergunta, palavra-chave de produto/preço/remarcar, foto, áudio).
+    {
+      const _lastOut = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+      const _despediuJa = /qualquer dúvida é só me chamar|qualquer coisa estou por aqui|foi um prazer te atender/i.test(_lastOut)
+        && /👋/.test(_lastOut);
+      if (hasAgendamentoAtivo && _despediuJa) {
+        const _msgLow = String(currentMsg || "").toLowerCase().trim();
+        const _hasQuestion = /\?/.test(_msgLow);
+        const NEW_INTENT_RE = /\b(pre[çc]o|valor|or[çc]amento|quanto|remarcar|reagendar|cancelar|mudar|trocar|antecipar|adiar|endere[çc]o|como (chego|chegar|faço)|esperar|vai ter|tem (que|disponível)|estacionament|garagem|metr[ôo]|[ôo]nibus|abre|fecha|funciona|atende|hor[áa]rio|receita|foto|imagem|grau|lente|lentes|lc|contato|multifoc|progress|antirreflex|filtro|transitions|fotossensiv|kodak|essilor|zeiss|hoya|varilux|ray.?ban|oakley|vogue|carolina|infantil|esport)/i;
+        const _hasNewIntent = _hasQuestion || NEW_INTENT_RE.test(_msgLow) || isImageContext;
+        if (!_hasNewIntent) {
+          console.log("[POS-AGENDAMENTO-SILENCIO] Cliente respondeu sem novo intent após despedida — silenciando");
+          try {
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "pos_agendamento_silencio",
+              descricao: "Silêncio mantido após despedida + agendamento ativo — sem novo intent",
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+              metadata: { last_inbound: _msgLow.substring(0, 200), agendamento_fmt: agendamentoFmt },
+            });
+          } catch { /* ignore */ }
+          return jsonResponse({ status: "ok", tools_used: ["pos_agendamento_silencio"], intencao: "silencio", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+        }
+        console.log("[POS-AGENDAMENTO-SILENCIO] Cliente trouxe novo intent — seguindo fluxo normal");
+      }
+    }
+
     if (isDiaDConfirm || isDiaDReschedule) {
       console.log(`[DIA-D] resposta detectada confirm=${isDiaDConfirm} resched=${isDiaDReschedule} ag=${agDiaD?.id}`);
     }
+
 
     const messages: any[] = [
       { role: "system", content: systemPrompt },
@@ -2605,6 +2697,16 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       });
       console.log(`[RX-CORRECTION] Forcing consultar_lentes with corrected prescription`);
     }
+
+    // ── REGRA ANTI-ALUCINAÇÃO DE DATA + TOOL OBRIGATÓRIA (universal) ──
+    messages.push({
+      role: "system",
+      content: `[REGRAS ESTRITAS DE AGENDAMENTO]
+1) PROIBIDO citar data/dia da semana/horário/loja de agendamento que NÃO esteja na seção AGENDAMENTOS DESTE CLIENTE acima${agendamentoFmt ? ` (única fonte da verdade: "${agendamentoFmt}")` : " (seção VAZIA — não invente nenhuma data/loja; faça despedida sem data se for o caso)"}.
+2) Se for confirmar/marcar/reagendar uma visita (data + hora + loja), você DEVE chamar a tool agendar_visita ou reagendar_visita ANTES de prometer ao cliente — mesmo que pareça redundante. Nunca prometa data/hora sem persistir via tool.
+3) PROIBIDO reescrever uma data já confirmada com outra "lembrada" do histórico. Use SEMPRE a data da seção AGENDAMENTOS DESTE CLIENTE.
+4) Após a despedida ("Te espero…", "Combinado…", "Foi um prazer…"), NÃO emende novas perguntas (estilo, cor, material, plaquetas, filtro azul, transitions, etc.). A conversa está encerrada.`,
+    });
 
     // ── HINT ANTI-DUPLICAÇÃO: agendamento ativo + sem pedido explícito de mudança ──
     {
@@ -3858,6 +3960,90 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       });
     }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+
+    // ── 10.05. DETECTOR PÓS-LLM: agendamento prometido sem tool disparada ──
+    // Se a resposta da IA contém promessa de agendamento (data + hora + loja) mas a tool
+    // agendar_visita NÃO foi chamada e não há linha em `agendamentos` cobrindo essa data,
+    // dispara `agendar-cliente` em background pra persistir. Idempotente.
+    try {
+      const _toolNames: string[] = Array.isArray(toolCalls) ? toolCalls.map((t: any) => t?.function?.name).filter(Boolean) : [];
+      const _toolFiredAg = _toolNames.includes("agendar_visita") || _toolNames.includes("reagendar_visita");
+      const respLow = String(resposta || "").toLowerCase();
+      const promessaRe = /(agendamento confirmado|te (esperamos|espero)|ficou (re)?agendado|fica reagendado|ficou marcad[ao]|deixei marcad[ao]|ag(endei|endado) (para|pra)|marquei (para|pra) (voc[eê]|vc))/i;
+      const temPromessa = promessaRe.test(respLow);
+      if (!_toolFiredAg && temPromessa && Array.isArray(lojas) && lojas.length > 0) {
+        // Extrair data DD/MM
+        const dateMatch = String(resposta).match(/\b(\d{2})\/(\d{2})(?:\/(\d{2,4}))?\b/);
+        // Extrair hora HH:MM ou HHh ou HHhMM
+        const timeMatch = String(resposta).match(/\b(\d{1,2})\s*(?:h(?:oras?)?|:)\s*(\d{0,2})\b/i);
+        // Match loja por nome (subset case-insensitive)
+        const respUp = String(resposta).toUpperCase();
+        const lojaMatch = (lojas as any[]).find((l: any) => {
+          const nome = String(l.nome_loja || "").toUpperCase();
+          if (!nome) return false;
+          // Tokens distintivos: pegar última palavra significativa (>3 chars)
+          const tokens = nome.split(/\s+/).filter((t: string) => t.length > 3);
+          return tokens.some((t: string) => respUp.includes(t));
+        });
+        if (dateMatch && timeMatch && lojaMatch) {
+          const dd = dateMatch[1].padStart(2, "0");
+          const mm = dateMatch[2].padStart(2, "0");
+          const yyyyRaw = dateMatch[3];
+          const now = new Date();
+          let yyyy: number;
+          if (yyyyRaw) {
+            yyyy = yyyyRaw.length === 2 ? 2000 + Number(yyyyRaw) : Number(yyyyRaw);
+          } else {
+            // Inferir ano: se data < hoje no ano corrente, é provavelmente do próximo ano
+            yyyy = now.getFullYear();
+            const tentative = new Date(`${yyyy}-${mm}-${dd}T12:00:00-03:00`).getTime();
+            if (tentative < now.getTime() - 24 * 3600 * 1000) yyyy += 1;
+          }
+          const hh = String(Math.min(23, Math.max(0, Number(timeMatch[1])))).padStart(2, "0");
+          const mn = String(timeMatch[2] && timeMatch[2].length > 0 ? Number(timeMatch[2]) : 0).padStart(2, "0");
+          const dataIso = `${yyyy}-${mm}-${dd}T${hh}:${mn}:00-03:00`;
+
+          // Anti-duplicação: já existe agendamento para essa loja+data?
+          const targetDate = `${yyyy}-${mm}-${dd}`;
+          const jaExiste = (agendamentosAtivos || []).some((a: any) =>
+            String(a.loja_nome || "").toLowerCase() === String(lojaMatch.nome_loja || "").toLowerCase() &&
+            String(a.data_horario || "").substring(0, 10) === targetDate &&
+            ["agendado", "confirmado", "lembrete_enviado"].includes(a.status)
+          );
+          if (!jaExiste) {
+            console.log(`[POS-LLM-AGENDA] IA prometeu agendamento sem tool — persistindo: ${lojaMatch.nome_loja} ${dataIso}`);
+            // Fire-and-forget (não bloqueia resposta)
+            fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contato_id: contatoId,
+                atendimento_id,
+                loja_nome: lojaMatch.nome_loja,
+                loja_telefone: lojaMatch.telefone || null,
+                data_horario: dataIso,
+                observacoes: "Agendamento auto-persistido (IA prometeu sem disparar tool)",
+              }),
+            }).catch((e) => console.error("[POS-LLM-AGENDA] agendar-cliente bg call failed:", e));
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "agendamento_auto_persistido",
+              descricao: `Detector pós-LLM disparou agendar-cliente: ${lojaMatch.nome_loja} ${dataIso}`,
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+              metadata: { loja_nome: lojaMatch.nome_loja, data_horario: dataIso, source: "post_llm_detector" },
+            }).catch(() => { /* noop */ });
+          } else {
+            console.log("[POS-LLM-AGENDA] Já existe agendamento para essa data/loja — skip");
+          }
+        } else {
+          console.log(`[POS-LLM-AGENDA] Promessa detectada mas extração incompleta: date=${!!dateMatch} time=${!!timeMatch} loja=${!!lojaMatch}`);
+        }
+      }
+    } catch (e) {
+      console.error("[POS-LLM-AGENDA] detector falhou:", e);
+    }
+
 
     // ── 10.1. AUDIO NUDGE — gently encourage text over audio ──
     if (isTranscribedAudio) {
