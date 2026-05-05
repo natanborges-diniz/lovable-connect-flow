@@ -152,7 +152,7 @@ serve(async (req) => {
           const msg = `Tudo bem${firstName ? ", " + firstName : ""}! Como não consegui retorno, vou encerrar este atendimento por aqui. Se quiser remarcar sua visita${ag.loja_nome ? " na " + ag.loja_nome : ""}, é só me chamar. Um abraço! 👋`;
           await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
             method: "POST",
-            headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
           });
           await supabase.from("agendamentos").update({
