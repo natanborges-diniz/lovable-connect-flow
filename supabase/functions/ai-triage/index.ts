@@ -2258,8 +2258,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
     } catch { /* ignore */ }
 
-    if (isThanksClose || isShortNoToHelp) {
-      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} → DESPEDIDA forçada`);
+    if (isThanksClose || isShortNoToHelp || isExplicitClose) {
+      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} → DESPEDIDA forçada`);
     }
     if (isDiaDConfirm || isDiaDReschedule) {
       console.log(`[DIA-D] resposta detectada confirm=${isDiaDConfirm} resched=${isDiaDReschedule} ag=${agDiaD?.id}`);
