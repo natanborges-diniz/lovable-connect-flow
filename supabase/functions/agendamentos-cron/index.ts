@@ -65,22 +65,23 @@ serve(async (req) => {
 
     // ═══════════════════════════════════════════
     // F) COBRANÇAS AGENDADAS (noshow_agendar_para)
-    // ═══════════════════════════════════════════
-    const { data: cobrancasAgendadas } = await supabase
-      .from("agendamentos")
-      .select("id")
-      .in("status", ["agendado", "lembrete_enviado", "confirmado"])
-      .is("loja_confirmou_presenca", null)
-      .not("noshow_agendar_para", "is", null)
-      .lte("noshow_agendar_para", now.toISOString());
+    await safeRun("F_cobrancas_agendadas", async () => {
+      const { data: cobrancasAgendadas } = await supabase
+        .from("agendamentos")
+        .select("id")
+        .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+        .is("loja_confirmou_presenca", null)
+        .not("noshow_agendar_para", "is", null)
+        .lte("noshow_agendar_para", now.toISOString());
 
-    for (const ag of cobrancasAgendadas || []) {
-      await supabase.from("agendamentos").update({
-        status: "no_show",
-        noshow_agendar_para: null,
-      }).eq("id", ag.id);
-      results.push(`cobranca_executada:${ag.id}`);
-    }
+      for (const ag of cobrancasAgendadas || []) {
+        await supabase.from("agendamentos").update({
+          status: "no_show",
+          noshow_agendar_para: null,
+        }).eq("id", ag.id);
+        results.push(`cobranca_executada:${ag.id}`);
+      }
+    });
 
     // ═══════════════════════════════════════════
     // G) RECUPERAÇÃO CLIENTE — 3 tentativas (imediata + 24h + 24h) e abandono em 72h com despedida
