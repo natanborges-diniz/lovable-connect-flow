@@ -33,13 +33,14 @@ serve(async (req) => {
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    const { agendamento_id } = await req.json();
+    const { agendamento_id, evento } = await req.json();
     if (!agendamento_id) {
       return new Response(JSON.stringify({ error: "agendamento_id required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const eventoLabel: "novo" | "confirmado" = evento === "novo" ? "novo" : "confirmado";
 
     // 1) Carrega agendamento + contato
     const { data: ag, error: agErr } = await supabase
