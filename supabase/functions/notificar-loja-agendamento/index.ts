@@ -57,10 +57,11 @@ serve(async (req) => {
       });
     }
 
-    const md = (ag.metadata || {}) as Record<string, unknown>;
-    if (md.aviso_loja_enviado_at) {
+    const md = (ag.metadata || {}) as Record<string, any>;
+    const idemKey = eventoLabel === "novo" ? "aviso_loja_novo_at" : "aviso_loja_confirmado_at";
+    if (md[idemKey]) {
       return new Response(
-        JSON.stringify({ skipped: true, reason: "ja_enviado", em: md.aviso_loja_enviado_at }),
+        JSON.stringify({ skipped: true, reason: "ja_enviado", evento: eventoLabel, em: md[idemKey] }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
