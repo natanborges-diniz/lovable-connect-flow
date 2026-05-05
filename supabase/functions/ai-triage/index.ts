@@ -2192,8 +2192,18 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
     const isShortYes = (!!pendingComparativoOffer && SHORT_YES_RE.test(msgTrim2)) || isLongYes;
 
-    // Detecta agendamento ativo
-    const agAtivoRecentEarly = (agendamentosAtivos || []).find((a: any) => ["agendado","confirmado"].includes(a.status)) || (agendamentosAtivos || [])[0];
+    // Detecta agendamento ativo — prioriza FUTURO (mais próximo de agora) e inclui status `lembrete_enviado`.
+    // Evita assinar despedida com agendamento passado quando há outro futuro.
+    const _NOW_MS_AG = Date.now();
+    const _TOLERANCIA_AG_MS = 6 * 3600 * 1000; // 6h: ainda válido se foi hoje cedo
+    const _ATIVOS_STATUS = ["agendado", "confirmado", "lembrete_enviado"];
+    const _agendamentosFuturos = (agendamentosAtivos || [])
+      .filter((a: any) => _ATIVOS_STATUS.includes(a.status) && a.data_horario)
+      .filter((a: any) => new Date(a.data_horario).getTime() >= (_NOW_MS_AG - _TOLERANCIA_AG_MS))
+      .sort((x: any, y: any) => new Date(x.data_horario).getTime() - new Date(y.data_horario).getTime());
+    const agAtivoRecentEarly = _agendamentosFuturos[0]
+      || (agendamentosAtivos || []).find((a: any) => _ATIVOS_STATUS.includes(a.status))
+      || (agendamentosAtivos || [])[0];
     const hasAgendamentoAtivo = !!agAtivoRecentEarly?.data_horario;
 
     // Detecta segunda negativa consecutiva à pergunta canônica "posso ajudar em mais alguma coisa"

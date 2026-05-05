@@ -12,6 +12,9 @@ Se há agendamento em status `agendado`/`lembrete_enviado`/`confirmado` para o c
 - Não oferece cancelamento.
 - Trata "Agendar", "Manter", "Sim", "Ok", "Confirmado", "Obg" como confirmação do existente: "Tudo certo, te espero {agendamentoFmt} 👋" e segue comparativo/encerramento.
 
+## Seleção do agendamento ativo (agAtivoRecentEarly)
+Quando o contato tem múltiplos agendamentos, o ai-triage prioriza o **futuro mais próximo** (`data_horario ≥ now − 6h`) ordenado crescente. Status considerados ativos: `agendado`, `confirmado`, `lembrete_enviado`. Fallback: primeiro com status ativo; depois primeiro registro. Evita assinar despedida (`Te espero {agendamentoFmt}`) com agendamento PASSADO quando existe outro futuro pendente — bug observado: cliente com `confirmado` antigo + `lembrete_enviado` novo recebia despedida com data antiga.
+
 ## Implementação (`supabase/functions/ai-triage/index.ts`)
 
 1. **Hint pré-LLM** (antes do `callAI`): se `hasAgendamentoAtivo && !explicitChange`, injeta system message proibindo: (a) chamadas a `agendar_visita`/`reagendar_visita`; (b) perguntas de cancelamento; (c) chamadas a `consultar_lentes`/`consultar_lentes_contato` apenas porque o cliente mencionou tratamento/material/cor/marca/estilo (transitions, filtro azul, preto, clássica, varilux etc.) — tratar como PREFERÊNCIA registrada para a visita; (d) perguntas de região/bairro/"loja mais próxima" (a loja já está fixada). Exceção (c): se o cliente pedir preço/orçamento explicitamente AGORA, libera consultar_lentes mas mantém proibição de perguntar região.

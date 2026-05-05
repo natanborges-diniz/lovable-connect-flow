@@ -1,77 +1,73 @@
 ## Problema
 
-Quando o cliente diz explicitamente algo como **"Encerrar atendimento"**, **"Pode encerrar"**, **"Finalizar"**, etc., a IA não tem um detector dedicado. Hoje só existem heurísticas para:
-- `isThanksOnly` ("obg", "valeu") — exige `hasAgendamentoAtivo`
-- `isShortNoToHelp` (cliente diz "não" após pergunta "posso te ajudar em mais alguma coisa?")
-- `isThanksClose` (agradecimento + agendamento ativo)
+Na conversa da Franciana, a despedida final ficou:
 
-Se o cliente vier direto com "encerrar atendimento" sem ter passado por essas condições (ex.: sem agendamento ativo, ou no meio de outra conversa), a IA cai no LLM e pode responder qualquer coisa em vez de despedida + agradecimento.
+> "Combinado, Fran! Te espero **segunda-feira, 04/05 às 17:30 na DINIZ ANTONIO AGU** 👋"
 
-## Solução
+quando o agendamento real era **quarta 06/05 às 15:00 no Super Shopping**.
 
-Adicionar em `supabase/functions/ai-triage/index.ts` um novo detector determinístico **`isExplicitClose`** que captura comandos explícitos de encerramento e dispara uma despedida calorosa com agradecimento — independente de ter agendamento ativo ou não.
+## Causa
 
-### 1. Novo regex (próximo às linhas 2179-2209)
+A cliente tem 2 agendamentos no banco:
+- **Antônio Agú** — 04/05 17:30, status `confirmado` (antigo, já passou)
+- **Super Shopping** — 06/05 15:00, status `lembrete_enviado` (atual, recém-lembrado pelo cron dia-D)
 
+Em `supabase/functions/ai-triage/index.ts`:
+
+1. **Linha 1795** — query traz os 5 agendamentos ordenados por `data_horario DESC` e inclui status `lembrete_enviado`. OK.
+
+2. **Linha 2196** — escolha do "agendamento ativo" para popular `agendamentoFmt`:
+   ```ts
+   const agAtivoRecentEarly = (agendamentosAtivos || [])
+     .find(a => ["agendado","confirmado"].includes(a.status))
+     || (agendamentosAtivos || [])[0];
+   ```
+   Bug: `lembrete_enviado` **não está** na lista do `.find()`. Resultado: o filtro pula o agendamento de quarta (status `lembrete_enviado`) e casa com o de segunda (`confirmado` antigo). Ainda que casasse, não há filtro temporal — agendamento passado entra como "ativo".
+
+3. Como toda a lógica de despedida (`isThanksClose`, `isShortNoToHelp`, `isExplicitClose`, hint de agendamento ativo) usa `agendamentoFmt`, a IA assinou com o agendamento errado.
+
+## Correção
+
+Editar `supabase/functions/ai-triage/index.ts` linhas 2195-2197 para:
+
+1. Considerar `lembrete_enviado` como agendamento ativo (mesmo nível de `agendado`/`confirmado`).
+2. Ignorar agendamentos cujo `data_horario` já passou (com tolerância de algumas horas para casos dia-D ainda em andamento).
+3. Escolher o **mais próximo no futuro** (menor `data_horario` ≥ agora ou recente), não o primeiro retornado pelo banco.
+
+Algoritmo:
 ```ts
-const EXPLICIT_CLOSE_RE = /^(pode (encerrar|finalizar|fechar)( o)?( atendimento| chat| conversa)?|encerrar( atendimento)?|finalizar( atendimento)?|fechar( atendimento)?|encerra( a[ií])?|encerra ai|pode (fechar|encerrar) por aqui|j[aá] resolveu|era (s[oó] )?isso( mesmo)?,? obrigad[oa])$/i;
-const isExplicitClose = EXPLICIT_CLOSE_RE.test(msgTrim2);
+const NOW_MS = Date.now();
+const TOLERANCIA_MS = 6 * 3600 * 1000; // 6h: ainda válido se agendamento foi hoje cedo
+const ATIVOS_STATUS = ["agendado", "confirmado", "lembrete_enviado"];
+
+const agendamentosFuturos = (agendamentosAtivos || [])
+  .filter(a => ATIVOS_STATUS.includes(a.status))
+  .filter(a => {
+    if (!a.data_horario) return false;
+    return new Date(a.data_horario).getTime() >= (NOW_MS - TOLERANCIA_MS);
+  })
+  .sort((x, y) => new Date(x.data_horario).getTime() - new Date(y.data_horario).getTime());
+
+const agAtivoRecentEarly = agendamentosFuturos[0]
+  || (agendamentosAtivos || []).find(a => ATIVOS_STATUS.includes(a.status))
+  || (agendamentosAtivos || [])[0];
 ```
 
-### 2. Hint pro LLM (junto ao bloco que injeta `[FLUXO DESPEDIDA PÓS-AGENDAMENTO]`, ~linha 2331)
-
-```ts
-isExplicitClose
-  ? `[FLUXO ENCERRAMENTO EXPLÍCITO] Cliente pediu para encerrar o atendimento. Despeça-se de forma calorosa, AGRADEÇA o contato e NÃO pergunte mais nada. Use exatamente esta estrutura: "Foi um prazer te atender${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! 🙏 Obrigado pelo contato${agendamentoFmt ? ` — te espero ${agendamentoFmt}` : ""}. Qualquer coisa, é só me chamar 👋". Tool responder, proximo_passo vazio.`
-  : ...
-```
-
-### 3. Override determinístico (junto aos overrides ~linha 3424)
-
-```ts
-if (resposta && isExplicitClose) {
-  const _despedida = agendamentoFmt
-    ? `Foi um prazer te atender${_nomePrim ? ", " + _nomePrim : ""}! 🙏 Obrigado pelo contato — te espero ${agendamentoFmt}. Qualquer coisa, é só me chamar 👋`
-    : `Foi um prazer te atender${_nomePrim ? ", " + _nomePrim : ""}! 🙏 Obrigado pelo contato. Qualquer coisa, é só me chamar 👋`;
-  resposta = _despedida;
-  intencao = "encerramento_explicito";
-  validatorFlags.push("override_explicit_close");
-  console.log("[OVERRIDE] explicit_close → despedida + agradecimento");
-}
-```
-
-### 4. Integrar com a dedup já existente (linha 3405)
-
-Adicionar `isExplicitClose` à lista de gatilhos que detecta despedida duplicada, para que o cliente não receba duas despedidas se mandar "encerrar" + "obg" em sequência:
-
-```ts
-if (_despedidaJaEnviada && (isThanksClose || isShortNoToHelp || isThanksOnly || isExplicitClose || SHORT_NO_RE.test(msgTrim2))) { ... }
-```
-
-Também atualizar o regex `_despedidaJaEnviada` para reconhecer a nova frase canônica:
-```ts
-const _despedidaJaEnviada =
-  /Qualquer d[úu]vida [ée] s[óo] me chamar|Qualquer coisa,? [ée] s[óo] me chamar/i.test(_lastOut)
-  && (/Te espero|Qualquer coisa estou por aqui|Foi um prazer te atender/i.test(_lastOut));
-```
-
-### 5. Bypass do early-return (linha 2257)
-
-Estender o gate `if (isThanksClose || isShortNoToHelp)` para também aceitar `isExplicitClose`, garantindo que o fluxo de despedida pegue antes de qualquer outra regra (ex.: pergunta proativa).
-
-## Arquivos alterados
-
-- `supabase/functions/ai-triage/index.ts` (5 edits localizados)
-
-Sem migrations. Sem mudanças em UI.
+Mantém fallback caso nenhum esteja no futuro (para não quebrar fluxos antigos).
 
 ## Validação
 
-- "Encerrar atendimento" sem agendamento → "Foi um prazer te atender, X! 🙏 Obrigado pelo contato. Qualquer coisa, é só me chamar 👋"
-- "Pode encerrar" com agendamento ativo → mesma frase + "te espero {data}"
-- "Encerrar" + "Obg" em sequência → segunda mensagem suprimida pela dedup já existente
-- Evento `eventos_crm.tipo='encerramento_explicito'` registrado via `validatorFlags`
+- Cenário Fran: futuros = [Super Shopping 06/05]; antigo Antônio Agú 04/05 fica filtrado → `agendamentoFmt` = "quarta-feira, 06/05 às 15:00 na DINIZ SUPER SHOPPING". ✅
+- Cliente com apenas 1 agendamento futuro `agendado` → mesmo comportamento de hoje.
+- Cliente com agendamento passado `confirmado` e nenhum futuro → fallback retorna o passado (não regride).
+- Cliente sem agendamentos → `hasAgendamentoAtivo = false`, despedida sem horário.
+
+## Arquivo alterado
+
+- `supabase/functions/ai-triage/index.ts` — 1 edição localizada (linhas 2195-2197).
+
+Sem migrations, sem mudanças de UI, sem novos secrets.
 
 ## Memória
 
-Atualizar `mem://crm/fluxo-encerramento-atendimento` (ou criar se não existir) descrevendo o detector `isExplicitClose` e a frase canônica.
+Atualizar `mem://ia/agendamento-ativo-anti-duplicacao` adicionando: "Seleção do agendamento ativo prioriza agendamento FUTURO (data_horario ≥ now − 6h) ordenado crescente; status `lembrete_enviado` conta como ativo junto com `agendado`/`confirmado`. Evita assinar despedida com agendamento passado quando há outro futuro."
