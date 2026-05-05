@@ -1787,6 +1787,52 @@ serve(async (req) => {
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
 
+    // ── 3.5b. POST-DATA ROUTER: "modelos / armações" → presencial ──
+    // Movido pra cá (depois das queries) pra que possa consultar agendamento ativo.
+    {
+      const tArm = norm(currentMsg);
+      const isArmacaoIntent =
+        /\b(modelo|modelos|armac|armaç|armacao|armação|armações|armacoes)\b/.test(tArm) ||
+        /\b(oculos|óculos)\b.*\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b/.test(tArm) ||
+        /\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b.*\b(oculos|óculos)\b/.test(tArm);
+      const isLentePedido = /\b(lente|lentes|grau|orcamento de lente|orçamento de lente)\b/.test(tArm);
+      if (isArmacaoIntent && !isLentePedido) {
+        // Detecta agendamento ativo já registrado (futuro ≤6h tolerância)
+        const _NOW_RT = Date.now();
+        const _ROUTER_TOL = 6 * 3600 * 1000;
+        const _agAtivoRouter = (agendamentosAtivos || [])
+          .filter((a: any) => ["agendado", "confirmado", "lembrete_enviado"].includes(a.status) && a.data_horario)
+          .filter((a: any) => new Date(a.data_horario).getTime() >= (_NOW_RT - _ROUTER_TOL))
+          .sort((x: any, y: any) => new Date(x.data_horario).getTime() - new Date(y.data_horario).getTime())[0];
+
+        let armMsg: string;
+        if (_agAtivoRouter) {
+          // Já tem agendamento — não oferecer loja de novo, apenas reafirmar e prometer separar.
+          const dt = new Date(_agAtivoRouter.data_horario);
+          const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+          const horaFmt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+          const _np = contatoNomeAtual ? `, ${contatoNomeAtual.split(" ")[0]}` : "";
+          armMsg = `Já está tudo certo${_np}! Te espero ${dataFmt} às ${horaFmt} na ${_agAtivoRouter.loja_nome} — vou separar modelos pra você provar lá no balcão 😉 Qualquer dúvida é só me chamar 👋`;
+          console.log("[ROUTER armações] Agendamento ativo — reafirmando sem oferecer nova loja");
+        } else {
+          armMsg =
+            "Sobre armações, a gente trabalha com várias marcas e estilos (Ray-Ban, Oakley, Vogue, Carolina Herrera, linha Diniz exclusiva, infantis e esportivas) 😊\n\n" +
+            "Como o caimento muda muito de rosto pra rosto, o ideal é provar pessoalmente — separamos várias opções pra você no balcão.\n\n" +
+            "Quer agendar uma visita? Temos:\n📍 *Antônio Agú* (centro Osasco)\n📍 *União Osasco* (shopping)\n📍 *SuperShopping* (até 22h)\n\nQual fica melhor pra você?";
+          console.log("[ROUTER armações] Sem agendamento — convite presencial padrão");
+        }
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, armMsg);
+        try {
+          const newMeta = { ...(contatoMeta || {}), armacoes_orientado: true, armacoes_orientado_at: new Date().toISOString() };
+          await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contatoId);
+        } catch (e) {
+          console.warn("[ROUTER armações] Failed to mark metadata:", e);
+        }
+        await logEvent(supabase, contatoId, atendimento_id, "router_armacoes_presencial", currentMsg);
+        return jsonResponse({ status: "ok", tools_used: ["router_armacoes_presencial"], intencao: "armacoes", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+      }
+    }
+
     // ── Normalize receitas: support legacy ultima_receita + new receitas[] ──
     let receitas: any[] = [];
     if (Array.isArray(contatoMeta.receitas) && contatoMeta.receitas.length > 0) {
