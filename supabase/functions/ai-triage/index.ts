@@ -1747,35 +1747,8 @@ serve(async (req) => {
       return jsonResponse({ status: "ok", tools_used: ["router_subject_change"], intencao: "outro", precisa_humano: false, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
     }
 
-    // ── 3.5. PRE-LLM ROUTER: "modelos / armações" → presencial (não listar lentes) ──
-    // Cliente pedindo modelos de óculos/armações deve receber convite presencial,
-    // nunca uma lista de lentes (catálogo de armações é físico). Determinístico.
-    {
-      const tArm = norm(currentMsg);
-      const isArmacaoIntent =
-        /\b(modelo|modelos|armac|armaç|armacao|armação|armações|armacoes)\b/.test(tArm) ||
-        /\b(oculos|óculos)\b.*\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b/.test(tArm) ||
-        /\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b.*\b(oculos|óculos)\b/.test(tArm);
-      const isLentePedido = /\b(lente|lentes|grau|orcamento de lente|orçamento de lente)\b/.test(tArm);
-      if (isArmacaoIntent && !isLentePedido) {
-        console.log("[ROUTER] Armações/modelos detected — convite presencial determinístico");
-        const armMsg =
-          "Sobre armações, a gente trabalha com várias marcas e estilos (Ray-Ban, Oakley, Vogue, Carolina Herrera, linha Diniz exclusiva, infantis e esportivas) 😊\n\n" +
-          "Como o caimento muda muito de rosto pra rosto, o ideal é provar pessoalmente — separamos várias opções pra você no balcão.\n\n" +
-          "Quer agendar uma visita? Temos:\n📍 *Antônio Agú* (centro Osasco)\n📍 *União Osasco* (shopping)\n📍 *SuperShopping* (até 22h)\n\nQual fica melhor pra você?";
-        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, armMsg);
-        // Mark in metadata to avoid loop on next turn
-        try {
-          const { data: ctMeta } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
-          const newMeta = { ...(ctMeta?.metadata || {}), armacoes_orientado: true, armacoes_orientado_at: new Date().toISOString() };
-          await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contatoId);
-        } catch (e) {
-          console.warn("[ROUTER armações] Failed to mark metadata:", e);
-        }
-        await logEvent(supabase, contatoId, atendimento_id, "router_armacoes_presencial", currentMsg);
-        return jsonResponse({ status: "ok", tools_used: ["router_armacoes_presencial"], intencao: "armacoes", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
-      }
-    }
+    // ── 3.5. PRE-LLM ROUTER: "modelos / armações" — movido para DEPOIS das queries paralelas (~linha 1820)
+    //         para que possa consultar o agendamento ativo e variar a resposta. ──
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
     const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes, contatoMetaRes] = await Promise.all([
