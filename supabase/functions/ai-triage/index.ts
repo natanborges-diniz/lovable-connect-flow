@@ -3406,9 +3406,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       // cliente respondeu de novo curto/agradecimento/negativa, NÃO reenvia.
       // Cliente pode mandar "Não" + "Obg" em sequência — uma despedida basta.
       const _lastOut = String((recentOutbound || []).slice(-1)[0] || "");
-      const _despedidaJaEnviada = /Qualquer d[úu]vida [ée] s[óo] me chamar/i.test(_lastOut)
-        && (/Te espero/i.test(_lastOut) || /Qualquer coisa estou por aqui/i.test(_lastOut));
-      if (_despedidaJaEnviada && (isThanksClose || isShortNoToHelp || isThanksOnly || SHORT_NO_RE.test(msgTrim2))) {
+      const _despedidaJaEnviada = /Qualquer d[úu]vida [ée] s[óo] me chamar|Qualquer coisa,? [ée] s[óo] me chamar/i.test(_lastOut)
+        && (/Te espero/i.test(_lastOut) || /Qualquer coisa estou por aqui/i.test(_lastOut) || /Foi um prazer te atender/i.test(_lastOut));
+      if (_despedidaJaEnviada && (isThanksClose || isShortNoToHelp || isThanksOnly || isExplicitClose || SHORT_NO_RE.test(msgTrim2))) {
         console.log("[CLOSE-DEDUP] Despedida já enviada no último outbound — silenciando reenvio");
         try {
           await supabase.from("eventos_crm").insert({
@@ -3427,7 +3427,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       // e injetamos a frase canônica. O LLM frequentemente adiciona segunda pergunta ou
       // varia o texto além do permitido nesses contextos de encerramento.
       const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
-      if (resposta && isThanksClose && agendamentoFmt) {
+      if (resposta && isExplicitClose) {
+        resposta = agendamentoFmt
+          ? `Foi um prazer te atender${_nomePrim ? ", " + _nomePrim : ""}! 🙏 Obrigado pelo contato — te espero ${agendamentoFmt}. Qualquer coisa, é só me chamar 👋`
+          : `Foi um prazer te atender${_nomePrim ? ", " + _nomePrim : ""}! 🙏 Obrigado pelo contato. Qualquer coisa, é só me chamar 👋`;
+        intencao = "encerramento_explicito";
+        validatorFlags.push("override_explicit_close");
+        console.log("[OVERRIDE] explicit_close → despedida + agradecimento");
+      } else if (resposta && isThanksClose && agendamentoFmt) {
         resposta = `De nada${_nomePrim ? ", " + _nomePrim : ""}! Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`;
         intencao = "encerramento_pos_agendamento";
         validatorFlags.push("override_thanks_close");
