@@ -2332,10 +2332,12 @@ A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada a
 ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.` : "Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"}"`,
           }]
         : []),
-      ...((isShortNo || isShortNoToHelp || isThanksClose)
+      ...((isShortNo || isShortNoToHelp || isThanksClose || isExplicitClose)
         ? [{
             role: "system",
-            content: (isShortNoToHelp || isThanksClose)
+            content: isExplicitClose
+              ? `[FLUXO ENCERRAMENTO EXPLÍCITO] O cliente PEDIU para encerrar o atendimento. Despeça-se de forma calorosa, AGRADEÇA o contato e NÃO faça nenhuma pergunta. Use EXATAMENTE: "Foi um prazer te atender${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! 🙏 Obrigado pelo contato${agendamentoFmt ? ` — te espero ${agendamentoFmt}` : ""}. Qualquer coisa, é só me chamar 👋". Use a tool responder com proximo_passo vazio.`
+              : (isShortNoToHelp || isThanksClose)
               ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente ${isThanksClose ? "agradeceu após o agendamento confirmado" : "já dispensou ajuda adicional"}. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "${isThanksClose ? "De nada" : "Combinado"}${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
               : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta. NÃO insista, NÃO repita a oferta, NÃO faça mais de uma pergunta. Responda EXATAMENTE: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". Sem listar opções. Sem segunda pergunta. Use a tool responder.`,
           }]
