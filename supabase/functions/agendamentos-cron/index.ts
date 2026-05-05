@@ -44,33 +44,24 @@ serve(async (req) => {
   const now = new Date();
   const results: string[] = [];
 
+  const safeRun = async (label: string, fn: () => Promise<void>) => {
+    try { await fn(); } catch (e) {
+      console.error(`[CRON][${label}] erro:`, e);
+      results.push(`${label}_error:${e instanceof Error ? e.message : "unknown"}`);
+    }
+  };
+
   try {
-    // ═══════════════════════════════════════════
-    // A) LEMBRETE VÉSPERA — 08h SP, 1 mensagem para agendamentos de amanhã
-    // ═══════════════════════════════════════════
-    await processLembreteVespera(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
-
-    // ═══════════════════════════════════════════
-    // B) LEMBRETE 1H ANTES — 1 mensagem ~1h antes do horário (mesmo dia)
-    //    Pula agendamentos marcados com <1h de antecedência.
-    // ═══════════════════════════════════════════
-    await processLembrete1hAntes(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
-
-
-    // ═══════════════════════════════════════════
-    // C) COBRANÇA À LOJA — 2h após o horário marcado
-    // ═══════════════════════════════════════════
-    await processFirstStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_PRIMEIRA_COBRANCA_LOJA);
-
-    // ═══════════════════════════════════════════
-    // D) SEGUNDA COBRANÇA À LOJA — 10:00 SP do dia seguinte
-    // ═══════════════════════════════════════════
-    await processSecondStoreChargeNextMorning(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
-
-    // ═══════════════════════════════════════════
-    // E) TIMEOUT DA LOJA — 48h sem resposta = tarefa interna ao supervisor
-    // ═══════════════════════════════════════════
-    await processStoreTimeout(supabase, now, results, HORAS_TIMEOUT_LOJA);
+    // A) LEMBRETE VÉSPERA — 08h SP
+    await safeRun("A_lembrete_vespera", () => processLembreteVespera(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results));
+    // B) LEMBRETE 1H ANTES
+    await safeRun("B_lembrete_1h", () => processLembrete1hAntes(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results));
+    // C) 1ª COBRANÇA LOJA
+    await safeRun("C_cobranca_1", () => processFirstStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_PRIMEIRA_COBRANCA_LOJA));
+    // D) 2ª COBRANÇA LOJA — 10:00 SP D+1
+    await safeRun("D_cobranca_2", () => processSecondStoreChargeNextMorning(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results));
+    // E) TIMEOUT LOJA
+    await safeRun("E_timeout_loja", () => processStoreTimeout(supabase, now, results, HORAS_TIMEOUT_LOJA));
 
     // ═══════════════════════════════════════════
     // F) COBRANÇAS AGENDADAS (noshow_agendar_para)
