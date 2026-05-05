@@ -2178,6 +2178,10 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // Detecta agradecimento puro (ex: "obg", "obrigado", "valeu", "ok obrigado")
     const isThanksOnly = /^(obg|obrigad[oa]|valeu|vlw|brigad[oa]|tks|thx|muito obrigad[oa]|ok obrigad[oa]|t[aá] bom obrigad[oa])$/i.test(msgTrim);
 
+    // Detecta pedido EXPLÍCITO de encerramento (ex: "encerrar atendimento", "pode encerrar", "finalizar")
+    const EXPLICIT_CLOSE_RE = /^(pode (encerrar|finalizar|fechar)( o)?( atendimento| chat| conversa)?|encerrar( o)?( atendimento| chat| conversa)?|finalizar( o)?( atendimento| chat| conversa)?|fechar( o)?( atendimento| chat| conversa)?|encerra( a[ií])?|encerra ai|pode (fechar|encerrar) por aqui|j[aá] resolveu|era (s[oó] )?isso( mesmo)?,?\s*(obrigad[oa])?)$/i;
+    const isExplicitClose = EXPLICIT_CLOSE_RE.test(msgTrim2);
+
     // Resposta curta SIM/NÃO à oferta pendente (usa msgTrim2 para tolerar "Não. Obg.")
     const SHORT_YES_RE = /^(sim|isso|pode|pode sim|claro|claro que sim|por favor|adoraria|vamos|bora|manda|manda ver|quero|quero ver|quero sim|show|massa|beleza|ok|tá|ta|tá bom|ta bom|perfeito|com certeza|👍|👌)$/i;
     const SHORT_NO_RE = /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o|s[oó] isso|era s[oó] isso|sem mais)$/i;
