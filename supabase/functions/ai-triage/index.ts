@@ -3951,6 +3951,90 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     }
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
+    // ── 10.05. DETECTOR PÓS-LLM: agendamento prometido sem tool disparada ──
+    // Se a resposta da IA contém promessa de agendamento (data + hora + loja) mas a tool
+    // agendar_visita NÃO foi chamada e não há linha em `agendamentos` cobrindo essa data,
+    // dispara `agendar-cliente` em background pra persistir. Idempotente.
+    try {
+      const _toolsUsed: string[] = (typeof tools_used !== "undefined" && Array.isArray(tools_used)) ? tools_used : [];
+      const _toolFiredAg = _toolsUsed.includes("agendar_visita") || _toolsUsed.includes("reagendar_visita");
+      const respLow = String(resposta || "").toLowerCase();
+      const promessaRe = /(agendamento confirmado|te (esperamos|espero)|ficou (re)?agendado|fica reagendado|ficou marcad[ao]|deixei marcad[ao]|ag(endei|endado) (para|pra)|marquei (para|pra) (voc[eê]|vc))/i;
+      const temPromessa = promessaRe.test(respLow);
+      if (!_toolFiredAg && temPromessa && Array.isArray(lojas) && lojas.length > 0) {
+        // Extrair data DD/MM
+        const dateMatch = String(resposta).match(/\b(\d{2})\/(\d{2})(?:\/(\d{2,4}))?\b/);
+        // Extrair hora HH:MM ou HHh ou HHhMM
+        const timeMatch = String(resposta).match(/\b(\d{1,2})\s*(?:h(?:oras?)?|:)\s*(\d{0,2})\b/i);
+        // Match loja por nome (subset case-insensitive)
+        const respUp = String(resposta).toUpperCase();
+        const lojaMatch = (lojas as any[]).find((l: any) => {
+          const nome = String(l.nome_loja || "").toUpperCase();
+          if (!nome) return false;
+          // Tokens distintivos: pegar última palavra significativa (>3 chars)
+          const tokens = nome.split(/\s+/).filter((t: string) => t.length > 3);
+          return tokens.some((t: string) => respUp.includes(t));
+        });
+        if (dateMatch && timeMatch && lojaMatch) {
+          const dd = dateMatch[1].padStart(2, "0");
+          const mm = dateMatch[2].padStart(2, "0");
+          const yyyyRaw = dateMatch[3];
+          const now = new Date();
+          let yyyy: number;
+          if (yyyyRaw) {
+            yyyy = yyyyRaw.length === 2 ? 2000 + Number(yyyyRaw) : Number(yyyyRaw);
+          } else {
+            // Inferir ano: se data < hoje no ano corrente, é provavelmente do próximo ano
+            yyyy = now.getFullYear();
+            const tentative = new Date(`${yyyy}-${mm}-${dd}T12:00:00-03:00`).getTime();
+            if (tentative < now.getTime() - 24 * 3600 * 1000) yyyy += 1;
+          }
+          const hh = String(Math.min(23, Math.max(0, Number(timeMatch[1])))).padStart(2, "0");
+          const mn = String(timeMatch[2] && timeMatch[2].length > 0 ? Number(timeMatch[2]) : 0).padStart(2, "0");
+          const dataIso = `${yyyy}-${mm}-${dd}T${hh}:${mn}:00-03:00`;
+
+          // Anti-duplicação: já existe agendamento para essa loja+data?
+          const targetDate = `${yyyy}-${mm}-${dd}`;
+          const jaExiste = (agendamentosAtivos || []).some((a: any) =>
+            String(a.loja_nome || "").toLowerCase() === String(lojaMatch.nome_loja || "").toLowerCase() &&
+            String(a.data_horario || "").substring(0, 10) === targetDate &&
+            ["agendado", "confirmado", "lembrete_enviado"].includes(a.status)
+          );
+          if (!jaExiste) {
+            console.log(`[POS-LLM-AGENDA] IA prometeu agendamento sem tool — persistindo: ${lojaMatch.nome_loja} ${dataIso}`);
+            // Fire-and-forget (não bloqueia resposta)
+            fetch(`${SUPABASE_URL}/functions/v1/agendar-cliente`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contato_id: contatoId,
+                atendimento_id,
+                loja_nome: lojaMatch.nome_loja,
+                loja_telefone: lojaMatch.telefone || null,
+                data_horario: dataIso,
+                observacoes: "Agendamento auto-persistido (IA prometeu sem disparar tool)",
+              }),
+            }).catch((e) => console.error("[POS-LLM-AGENDA] agendar-cliente bg call failed:", e));
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "agendamento_auto_persistido",
+              descricao: `Detector pós-LLM disparou agendar-cliente: ${lojaMatch.nome_loja} ${dataIso}`,
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+              metadata: { loja_nome: lojaMatch.nome_loja, data_horario: dataIso, source: "post_llm_detector" },
+            }).catch(() => { /* noop */ });
+          } else {
+            console.log("[POS-LLM-AGENDA] Já existe agendamento para essa data/loja — skip");
+          }
+        } else {
+          console.log(`[POS-LLM-AGENDA] Promessa detectada mas extração incompleta: date=${!!dateMatch} time=${!!timeMatch} loja=${!!lojaMatch}`);
+        }
+      }
+    } catch (e) {
+      console.error("[POS-LLM-AGENDA] detector falhou:", e);
+    }
+
+
     // ── 10.1. AUDIO NUDGE — gently encourage text over audio ──
     if (isTranscribedAudio) {
       // Count how many audio messages this contact has sent in this atendimento
