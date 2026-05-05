@@ -1,106 +1,69 @@
 
-## Contexto
+# Correções na conversa "Fran" — 3 falhas distintas
 
-As lojas operam **exclusivamente** pelo InFoco Messenger (Atrium Messenger). Este projeto (Atrium-Link) só envia para o Messenger via `notificacoes` + push e via ações em `agendamentos`. Os bugs/buracos identificados:
+A análise da conversa + dados no banco mostrou três problemas independentes que precisam ser corrigidos em conjunto. O ponto crítico que conecta tudo: **a tool `agendar_cliente` nunca foi disparada**, então o agendamento de 06/05 15:00 no Super Shopping **nunca foi persistido na tabela `agendamentos`** (consultei: zero linhas para o telefone 5584994244323).
 
-1. Aviso de novo agendamento à loja só dispara quando o cliente confirma um lembrete dia-D. Quando o Gael agenda direto na conversa, a loja **não recebe nada**.
-2. `agendamentos-cron` quebra com `ReferenceError: SERVICE_KEY is not defined` no bloco G — interrompe recuperação, despedida e abandono.
-3. Lembrete pode disparar 2x (véspera 08h + 1h antes) sem checar deduplicação cruzada.
-4. Não existe forma fácil, dentro do Atrium-Link, de auditar a evidência da conversa cliente × IA × cron.
-5. A loja recebe avisos mas não responde — não há cobrança ativa de comparecimento/no-show/venda fechada com botões diretos no card de notificação no Messenger.
+Sem registro, todo o sistema de "agendamento ativo / despedida com `Te espero {data}` / proibição de remarcar" cai por terra — daí a IA, na retomada da manhã, inventar "segunda-feira, 04/05 às 17:30 na DINIZ ANTONIO AGU".
 
 ---
 
-## Itens da correção (escopo aprovado: 1, 2, 3, 5 + nova régua de cobrança ativa)
+## Problema 1 — IA continua fazendo perguntas em série após o agendamento confirmado
 
-### 1) Aviso à loja no momento do agendamento (Messenger)
+**O que aconteceu:** Após o cliente dizer "Eu já marquei!!" e a IA reafirmar 06/05 15:00 Super Shopping, ela emendou 8 perguntas seguidas (estilo, cor, material, tamanho, plaquetas, filtro azul, ajudar em mais alguma, etc.). O usuário quer que, **logo após a confirmação do cliente, a IA se despeça e só volte a interagir se o cliente trouxer assunto novo**.
 
-- Em `supabase/functions/agendar-cliente/index.ts`, após `INSERT` bem-sucedido em `agendamentos`, invocar `notificar-loja-agendamento` em background (mesmo padrão já usado em `ai-triage` e `whatsapp-webhook`).
-- A EF `notificar-loja-agendamento` já é idempotente via `metadata.aviso_loja_enviado_at`, então invocações redundantes (no agendamento + na confirmação dia-D) não duplicam.
-- Ajustar título/mensagem para deixar claro o estado: "📅 Novo agendamento — {cliente}" no momento do agendar; "✅ Cliente confirmou — {cliente}" no dia-D (passar um parâmetro `evento: "novo" | "confirmado"`).
+**Causa raiz:** o ROUTER de "armações/modelos" (linha 1750) já faz convite presencial — mas, quando o cliente diz "Pode separar modelos" depois do agendamento estar fechado, ele entra no ROUTER de novo, gera resposta nova ("Ray-Ban, Oakley… Antônio Agú / União / Super") e ali a IA volta a perguntar "qual loja". A partir daí cada resposta curta da Fran ("Gatinho", "Dourado", "Metal fino", "Delicado", "Sem") vira um turno LLM normal — o guardrail `[AGENDAMENTO ATIVO]` (linha 2613) só dispara se `hasAgendamentoAtivo=true`, que é falso (nada na tabela).
 
-### 2) Corrigir `agendamentos-cron` (SERVICE_KEY)
+**Correções:**
+1. **Persistir o agendamento de fato (root cause)** — ver Problema 3.
+2. No ROUTER de armações (linhas 1750-1778), se já existir agendamento ativo na tabela `agendamentos`, **substituir a resposta padrão** por: `"Já está tudo certo, {nome}! Te espero {data} {hora} na {loja} — vou separar modelos pra você provar lá no balcão. Qualquer dúvida é só me chamar 👋"` e marcar `armacoes_orientado=true` para o próximo turno cair no guardrail de "preferência registrada" e não em pergunta nova.
+3. Adicionar nova flag `isPostAgendamentoSilenceMode` em `ai-triage`: ativada quando (a) há agendamento ativo na tabela, (b) último outbound da IA já contém uma das frases canônicas de despedida (`Te espero`, `Combinado`, `Foi um prazer`), (c) cliente respondeu curto (≤3 palavras) ou outra mensagem sem novo intent claro (sem perguntas, sem palavras-chave de preço/produto/remarcar).
+   - Quando ativa: bloqueia o LLM, não envia nada (silêncio total — fica logado como `[POS-AGENDAMENTO-SILENCIO]`).
+   - Só sai desse modo se o cliente trouxer **novo intent**: pergunta com "?", palavras-chave (`preço`, `valor`, `remarcar`, `cancelar`, `endereço`, `como chegar`, `vai ter…`, foto, áudio, pergunta sobre receita).
 
-- Linha 155 (bloco G) usa `SERVICE_KEY` fora do escopo. Trocar por `SUPABASE_SERVICE_ROLE_KEY` (já declarada no `serve()`).
-- Auditar todas as helpers (`processLembreteVespera`, `processLembrete1hAntes`, `processFirstStoreCharge`, `processSecondStoreChargeNextMorning`) e padronizar o nome do parâmetro como `SERVICE_KEY` na assinatura mas passar `SUPABASE_SERVICE_ROLE_KEY` no call site — como já é feito.
-- Adicionar `try/catch` por bloco (A→G) para que falha em um não interrompa os demais.
+## Problema 2 — Na retomada da manhã, a IA "modificou" o agendamento
 
-### 3) Deduplicação do lembrete
+**O que aconteceu:** templates `retomada_contexto_1` foram disparados. Cliente respondeu "Não". A IA finalizou com `"Combinado, Fran! Te espero segunda-feira, 04/05 às 17:30 na DINIZ ANTONIO AGU"` — data/loja **inexistentes** (alucinação pura — não há esse registro em `agendamentos`).
 
-Em `agendamentos-cron`, antes de disparar o lembrete 1h-antes:
-- Pular se `tentativas_lembrete >= 1` **e** `metadata.lembrete_vespera_at` existe.
-- Pular se `data_horario - now < 60 min` (antecedência insuficiente).
-- Pular se `metadata.cliente_confirmou_at` existe (regra de memória já estabelecida).
-- Marcar `metadata.lembrete_1h_at` ao enviar para auditoria cruzada.
+**Causa raiz:** sem agendamento persistido, o bloco `agendamentoFmt` (linhas 2240-2248) ficou vazio, mas o LLM, vendo no histórico "te espero quarta 06/05 15:00 Super Shopping", deveria ter usado isso. Em vez disso, alucinou uma data antiga. Pior: **o despedida do `[FLUXO DESPEDIDA PÓS-AGENDAMENTO]` (linha 2351) usa `agendamentoFmt` vazio como fallback `"Qualquer coisa estou por aqui"`** — mas o LLM ignorou o template literal e chutou uma data.
 
-### 5) Nova régua de cobrança ativa da loja no Messenger
+**Correções:**
+1. Tornar a despedida pós-agendamento **determinística** (não passa pelo LLM). Quando `isThanksClose || isShortNoToHelp || isExplicitClose` for true, em vez de só injetar instrução system e deixar o LLM responder, gerar a string final em código e enviar via `sendWhatsApp` direto, dando `return jsonResponse(...)` antes de chamar o LLM. Isso elimina qualquer alucinação de data/loja.
+2. A string usa **exclusivamente** `agendamentoFmt` da query da tabela `agendamentos`. Se não houver agendamento ativo, despedida sem data: `"Combinado, {nome}! Qualquer dúvida é só me chamar 👋"` — proibido o LLM tentar reconstruir do histórico.
+3. Adicionar regra explícita no prompt do LLM (quando ele for de fato chamado): "PROIBIDO citar data/horário/loja de agendamento que não esteja na seção AGENDAMENTOS ATIVOS abaixo. Se a seção estiver vazia, NÃO mencione nenhuma data específica na despedida."
 
-Hoje a loja recebe `notificacoes` informativas mas precisa entrar em `LojaAgenda.tsx` para agir. Vamos transformar cada cobrança em **ação direta no Messenger**:
+## Problema 3 — Agendamento nunca persistido (root cause de tudo)
 
-**Backend (Atrium-Link):**
+**O que aconteceu:** Quando a IA disse "ficou reagendado para quarta, 06/05, às 15:00 na loja do Super Shopping Osasco" (22:21), ela **não chamou a tool `agendar_cliente`**. Confirmei consultando `mensagens.metadata->'tool'` para o atendimento — nenhuma com `agendar_cliente`. A frase com card "📍 Agendamento confirmado" foi gerada como texto puro pelo LLM, sem persistência.
 
-- Nova EF `loja-acao-agendamento` (`verify_jwt = true`) que aceita `{ agendamento_id, acao: "compareceu" | "noshow" | "venda_fechada", payload? }` vindo do Messenger autenticado. Ela:
-  - Atualiza `agendamentos.status` e `loja_confirmou_presenca` conforme ação.
-  - Insere `eventos_crm` apropriado (`loja_confirmou_comparecimento` / `loja_marcou_noshow` / `venda_fechada`).
-  - Para `venda_fechada`, persiste `valor_venda`, `numero_venda`, `numeros_os[]`.
-  - Garante idempotência (checa status atual antes de mutar).
+**Causa raiz:** o LLM julgou que estava só "reafirmando" um agendamento e não disparou a tool. Não há guardrail que force a tool quando há loja+data+hora explícitas na fala da IA mas nenhuma linha em `agendamentos`.
 
-- Reformular o conteúdo das notificações de cobrança (`processFirstStoreCharge` e `processSecondStoreChargeNextMorning`):
-  - Tipo passa a ser `cobranca_comparecimento_loja`.
-  - `metadata` da `notificacoes` carrega `agendamento_id` + `acoes_disponiveis: ["compareceu","noshow","venda_fechada"]`.
-
-- Após `loja_silenciou` (timeout 48h), em vez de só virar `no_show`, criar **tarefa de alta prioridade no setor da loja** com checklist:
-  - "Ligar para cliente"
-  - "Atualizar status manualmente (compareceu / no-show)"
-  - "Registrar motivo do no-show".
-
-**Frontend (InFoco Messenger — projeto cross):**
-
-Mudanças no projeto `InFoco Messenger` (precisa rodar lá; será feita após aprovação deste plano voltando àquele projeto):
-
-- Em `NotificacoesList.tsx`, quando `tipo === "agendamento_confirmado_loja"` ou `cobranca_comparecimento_loja`, renderizar um **card de ação** com 3 botões:
-  - ✅ "Cliente compareceu" → chama `loja-acao-agendamento` com `acao=compareceu`.
-  - ❌ "Não compareceu (no-show)" → `acao=noshow`.
-  - 💰 "Venda fechada" → abre dialog (valor, número da venda, OS) e chama `acao=venda_fechada`.
-- Ao acionar, marca a notificação como lida + mostra toast + atualiza realtime em `agendamentos`.
-- Em `LojaAgenda.tsx`, no card do dia, exibir badge "🔔 Aguardando confirmação" para agendamentos com cobrança ativa, ligando ao mesmo dialog.
-
-### Régua reforçada
-
-```text
-T0  Agendamento criado    → push "Novo agendamento" + card no Messenger
-T-1d 08h SP                → lembrete cliente (1x)
-T-1h                        → lembrete cliente (se não enviado e ≥60min)
-T+2h sem status loja       → 1ª cobrança ativa (3 botões no Messenger)
-T+1d 10h SP sem resposta   → 2ª cobrança ativa
-T+48h sem resposta         → tarefa supervisor + status no_show automático
-T+24h pós no_show          → IA tenta cliente (cadência 3x/72h)
-```
+**Correções:**
+1. **Detector pós-resposta**: depois do LLM gerar a resposta, se o texto contém `Agendamento confirmado` / `te esperamos` / `ficou (re)agendado` + extrai data + hora + nome de loja, e **não há linha em `agendamentos`** com essa data para esse contato, disparar `agendar-cliente` em background com os dados extraídos. Idempotente (a EF já tem proteção anti-duplicação por mem `agendamento-ativo-anti-duplicacao`).
+2. Adicionar regex de extração: `/(?:quarta|terça|segunda|quinta|sexta|sábado|domingo|amanhã|hoje)?,?\s*(\d{2}\/\d{2})(?:\/\d{2,4})?,?\s*(?:às\s*)?(\d{1,2}[h:]\d{0,2})/` + match de loja contra `telefones_lojas.loja_nome`.
+3. Reforçar no prompt do LLM: "Se você está prestes a CONFIRMAR um agendamento (data+hora+loja), você DEVE chamar a tool `agendar_cliente` ANTES — mesmo que esteja apenas reafirmando o que o cliente acabou de dizer. NUNCA prometa data/hora sem persistir."
 
 ---
 
-## Itens fora deste plano
+## Arquivos a alterar
 
-- **Item 4 (visualização do diálogo cliente × IA × cron)** — você pediu para deixar fora desta rodada. Quando quiser, adicionamos um filtro "Atividade de IA/Sistema" na tela de Atendimentos com um toggle no header.
+| Arquivo | Mudança |
+|---|---|
+| `supabase/functions/ai-triage/index.ts` | (a) Router armações com guardrail de agendamento ativo (~1760); (b) flag `isPostAgendamentoSilenceMode` + early return silencioso; (c) despedida pós-agendamento determinística (não-LLM) com early return; (d) detector pós-LLM que dispara `agendar-cliente` se texto contém promessa de data/hora/loja sem persistência; (e) regra anti-alucinação de data no system prompt. |
+| `.lovable/memory/ia/pos-agendamento-silencio.md` (novo) | Documentar o modo de silêncio pós-agendamento e o detector de tool não-disparada. |
+| `.lovable/memory/index.md` | Adicionar referência ao novo memory + atualizar Core com "Pós-agendamento: silêncio total até cliente trazer novo intent". |
+| `.lovable/memory/ia/agendamento-ativo-anti-duplicacao.md` | Acrescentar "Detector pós-LLM auto-dispara agendar_cliente se IA confirmar data/hora/loja sem chamar a tool." |
 
 ---
 
-## Arquivos afetados
+## Não vou tocar
 
-**Atrium-Link (este projeto):**
-- `supabase/functions/agendar-cliente/index.ts` — invocar `notificar-loja-agendamento` no insert + passar `evento: "novo"`.
-- `supabase/functions/notificar-loja-agendamento/index.ts` — aceitar `evento` para variar título/copy.
-- `supabase/functions/agendamentos-cron/index.ts` — fix `SERVICE_KEY`, dedup lembrete, try/catch por bloco, payload de cobrança com `acoes_disponiveis`, tarefa no timeout.
-- `supabase/functions/loja-acao-agendamento/index.ts` (NOVA) — endpoint autenticado para a loja agir.
-- `supabase/config.toml` — registrar a nova função (sem override; padrão `verify_jwt = true`).
+- Tool `agendar_cliente` em si (lógica idempotente já está OK, ver memory).
+- Cron jobs / templates de retomada.
+- Fluxo do ROUTER de armações para clientes **sem** agendamento ativo (continua igual).
 
-**InFoco Messenger (projeto cross — fica para a próxima rodada lá):**
-- `src/pages/NotificacoesList.tsx` — card de ação com 3 botões.
-- `src/pages/LojaAgenda.tsx` — badge "Aguardando confirmação" + dialog de venda fechada.
-- Hook novo `useAcaoAgendamento.ts` chamando a EF.
+## Como validar depois
 
-## Memórias a atualizar
-- `mem://agendamentos/cadencia-noshow-e-cobranca-loja.md` — incluir fluxo dos 3 botões e EF `loja-acao-agendamento`.
-- `mem://agendamentos/aviso-loja-pos-confirmacao.md` — registrar que dispara também no momento do agendamento (evento "novo").
-
-Pode aprovar que eu começo pelos itens do Atrium-Link (1, 2, 3 e backend do 5). Depois eu volto ao **InFoco Messenger** e implemento o frontend dos 3 botões.
+1. Cliente novo agenda visita → checar linha em `agendamentos` (regression test).
+2. Cliente confirma agendamento → IA manda despedida → cliente diz "obg" → **silêncio** (sem nova mensagem).
+3. Cliente fala "Pode separar modelos" depois de confirmado → IA reafirma agendamento + "vou separar pra você provar lá", sem nova bateria de perguntas.
+4. Retomada do dia seguinte: se cliente disser "não" no template, despedida usa `agendamentoFmt` real OU genérico — nunca data inventada.
