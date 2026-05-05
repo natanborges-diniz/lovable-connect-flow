@@ -2288,11 +2288,84 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     } catch { /* ignore */ }
 
     if (isThanksClose || isShortNoToHelp || isExplicitClose) {
-      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} → DESPEDIDA forçada`);
+      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} → DESPEDIDA determinística`);
+
+      // ── DESPEDIDA DETERMINÍSTICA (não passa pelo LLM, evita alucinação de data/loja) ──
+      const _firstName = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      const _commaName = _firstName ? `, ${_firstName}` : "";
+      let despedidaMsg: string;
+      if (isExplicitClose) {
+        const _tail = agendamentoFmt ? ` — te espero ${agendamentoFmt}` : "";
+        despedidaMsg = `Foi um prazer te atender${_commaName}! 🙏 Obrigado pelo contato${_tail}. Qualquer coisa, é só me chamar 👋`;
+      } else if (isThanksClose) {
+        const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
+        despedidaMsg = `De nada${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+      } else {
+        // isShortNoToHelp
+        const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
+        despedidaMsg = `Combinado${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+      }
+
+      // Anti-duplicação: se último outbound já é uma despedida canônica, silencia
+      const lastOut = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+      const jaDespediu =
+        /foi um prazer te atender|qualquer dúvida é só me chamar|qualquer coisa estou por aqui/i.test(lastOut)
+        && /👋/.test(lastOut);
+      if (jaDespediu) {
+        console.log("[CLOSE-DEDUP] Despedida canônica já enviada — silenciando reenvio");
+        try {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "despedida_duplicada_evitada",
+            descricao: "CLOSE-DEDUP: cliente respondeu curto após despedida canônica",
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+            metadata: { last_inbound: msgTrim2.substring(0, 200) },
+          });
+        } catch { /* ignore */ }
+        return jsonResponse({ status: "ok", tools_used: ["close_dedup"], intencao: "despedida", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+      }
+
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, despedidaMsg);
+      await logEvent(supabase, contatoId, atendimento_id, "despedida_deterministica", `${isExplicitClose ? "explicit" : isThanksClose ? "thanks" : "shortNoToHelp"}; agFmt=${agendamentoFmt || "vazio"}`);
+      return jsonResponse({ status: "ok", tools_used: ["despedida_deterministica"], intencao: "despedida", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
     }
+
+    // ── SILÊNCIO PÓS-AGENDAMENTO ──
+    // Se já há agendamento ativo + último outbound foi despedida canônica
+    // + cliente respondeu curto/sem novo intent → não reenvia nada.
+    // Só sai desse modo se cliente trouxer novo intent (pergunta, palavra-chave de produto/preço/remarcar, foto, áudio).
+    {
+      const _lastOut = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+      const _despediuJa = /qualquer dúvida é só me chamar|qualquer coisa estou por aqui|foi um prazer te atender/i.test(_lastOut)
+        && /👋/.test(_lastOut);
+      if (hasAgendamentoAtivo && _despediuJa) {
+        const _msgLow = String(currentMsg || "").toLowerCase().trim();
+        const _hasQuestion = /\?/.test(_msgLow);
+        const NEW_INTENT_RE = /\b(pre[çc]o|valor|or[çc]amento|quanto|remarcar|reagendar|cancelar|mudar|trocar|antecipar|adiar|endere[çc]o|como (chego|chegar|faço)|esperar|vai ter|tem (que|disponível)|estacionament|garagem|metr[ôo]|[ôo]nibus|abre|fecha|funciona|atende|hor[áa]rio|receita|foto|imagem|grau|lente|lentes|lc|contato|multifoc|progress|antirreflex|filtro|transitions|fotossensiv|kodak|essilor|zeiss|hoya|varilux|ray.?ban|oakley|vogue|carolina|infantil|esport)/i;
+        const _hasNewIntent = _hasQuestion || NEW_INTENT_RE.test(_msgLow) || isImageContext;
+        if (!_hasNewIntent) {
+          console.log("[POS-AGENDAMENTO-SILENCIO] Cliente respondeu sem novo intent após despedida — silenciando");
+          try {
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "pos_agendamento_silencio",
+              descricao: "Silêncio mantido após despedida + agendamento ativo — sem novo intent",
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+              metadata: { last_inbound: _msgLow.substring(0, 200), agendamento_fmt: agendamentoFmt },
+            });
+          } catch { /* ignore */ }
+          return jsonResponse({ status: "ok", tools_used: ["pos_agendamento_silencio"], intencao: "silencio", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+        }
+        console.log("[POS-AGENDAMENTO-SILENCIO] Cliente trouxe novo intent — seguindo fluxo normal");
+      }
+    }
+
     if (isDiaDConfirm || isDiaDReschedule) {
       console.log(`[DIA-D] resposta detectada confirm=${isDiaDConfirm} resched=${isDiaDReschedule} ag=${agDiaD?.id}`);
     }
+
 
     const messages: any[] = [
       { role: "system", content: systemPrompt },
