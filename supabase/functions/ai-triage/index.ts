@@ -3956,8 +3956,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // agendar_visita NÃO foi chamada e não há linha em `agendamentos` cobrindo essa data,
     // dispara `agendar-cliente` em background pra persistir. Idempotente.
     try {
-      const _toolsUsed: string[] = (typeof tools_used !== "undefined" && Array.isArray(tools_used)) ? tools_used : [];
-      const _toolFiredAg = _toolsUsed.includes("agendar_visita") || _toolsUsed.includes("reagendar_visita");
+      const _toolNames: string[] = Array.isArray(toolCalls) ? toolCalls.map((t: any) => t?.function?.name).filter(Boolean) : [];
+      const _toolFiredAg = _toolNames.includes("agendar_visita") || _toolNames.includes("reagendar_visita");
       const respLow = String(resposta || "").toLowerCase();
       const promessaRe = /(agendamento confirmado|te (esperamos|espero)|ficou (re)?agendado|fica reagendado|ficou marcad[ao]|deixei marcad[ao]|ag(endei|endado) (para|pra)|marquei (para|pra) (voc[eê]|vc))/i;
       const temPromessa = promessaRe.test(respLow);
