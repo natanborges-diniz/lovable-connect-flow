@@ -157,7 +157,7 @@ serve(async (req) => {
         .update({
           metadata: {
             ...md,
-            aviso_loja_enviado_at: new Date().toISOString(),
+            [idemKey]: new Date().toISOString(),
             aviso_loja_status: "sem_destinatario",
           },
         })
@@ -170,10 +170,11 @@ serve(async (req) => {
     }
 
     // 5) Insere notificações (trigger trg_push_nova_notificacao envia push automaticamente)
+    const tipoNotif = eventoLabel === "novo" ? "agendamento_novo_loja" : "agendamento_confirmado_loja";
     const notifs = list.map((d) => ({
       usuario_id: d.user_id,
       setor_id: d.setor_id,
-      tipo: "agendamento_confirmado_loja",
+      tipo: tipoNotif,
       titulo,
       mensagem,
       referencia_id: ag.id,
@@ -187,7 +188,7 @@ serve(async (req) => {
       .update({
         metadata: {
           ...md,
-          aviso_loja_enviado_at: new Date().toISOString(),
+          [idemKey]: new Date().toISOString(),
           aviso_loja_destinatarios: list.length,
         },
       })
@@ -195,11 +196,11 @@ serve(async (req) => {
 
     await supabase.from("eventos_crm").insert({
       contato_id: ag.contato_id,
-      tipo: "aviso_loja_agendamento",
-      descricao: `Aviso de agendamento confirmado entregue a ${list.length} usuário(s) da ${ag.loja_nome}`,
+      tipo: eventoLabel === "novo" ? "aviso_loja_novo_agendamento" : "aviso_loja_agendamento",
+      descricao: `Aviso de agendamento (${eventoLabel}) entregue a ${list.length} usuário(s) da ${ag.loja_nome}`,
       referencia_id: ag.id,
       referencia_tipo: "agendamento",
-      metadata: { loja_nome: ag.loja_nome, destinatarios: list.length },
+      metadata: { loja_nome: ag.loja_nome, destinatarios: list.length, evento: eventoLabel },
     });
 
     return new Response(
