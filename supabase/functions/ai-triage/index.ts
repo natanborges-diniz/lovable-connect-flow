@@ -2178,6 +2178,10 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // Detecta agradecimento puro (ex: "obg", "obrigado", "valeu", "ok obrigado")
     const isThanksOnly = /^(obg|obrigad[oa]|valeu|vlw|brigad[oa]|tks|thx|muito obrigad[oa]|ok obrigad[oa]|t[aá] bom obrigad[oa])$/i.test(msgTrim);
 
+    // Detecta pedido EXPLÍCITO de encerramento (ex: "encerrar atendimento", "pode encerrar", "finalizar")
+    const EXPLICIT_CLOSE_RE = /^(pode (encerrar|finalizar|fechar)( o)?( atendimento| chat| conversa)?|encerrar( o)?( atendimento| chat| conversa)?|finalizar( o)?( atendimento| chat| conversa)?|fechar( o)?( atendimento| chat| conversa)?|encerra( a[ií])?|encerra ai|pode (fechar|encerrar) por aqui|j[aá] resolveu|era (s[oó] )?isso( mesmo)?,?\s*(obrigad[oa])?)$/i;
+    const isExplicitClose = EXPLICIT_CLOSE_RE.test(msgTrim2);
+
     // Resposta curta SIM/NÃO à oferta pendente (usa msgTrim2 para tolerar "Não. Obg.")
     const SHORT_YES_RE = /^(sim|isso|pode|pode sim|claro|claro que sim|por favor|adoraria|vamos|bora|manda|manda ver|quero|quero ver|quero sim|show|massa|beleza|ok|tá|ta|tá bom|ta bom|perfeito|com certeza|👍|👌)$/i;
     const SHORT_NO_RE = /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o|s[oó] isso|era s[oó] isso|sem mais)$/i;
@@ -2254,8 +2258,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
     } catch { /* ignore */ }
 
-    if (isThanksClose || isShortNoToHelp) {
-      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} → DESPEDIDA forçada`);
+    if (isThanksClose || isShortNoToHelp || isExplicitClose) {
+      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} → DESPEDIDA forçada`);
     }
     if (isDiaDConfirm || isDiaDReschedule) {
       console.log(`[DIA-D] resposta detectada confirm=${isDiaDConfirm} resched=${isDiaDReschedule} ag=${agDiaD?.id}`);
@@ -2328,10 +2332,12 @@ A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada a
 ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.` : "Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"}"`,
           }]
         : []),
-      ...((isShortNo || isShortNoToHelp || isThanksClose)
+      ...((isShortNo || isShortNoToHelp || isThanksClose || isExplicitClose)
         ? [{
             role: "system",
-            content: (isShortNoToHelp || isThanksClose)
+            content: isExplicitClose
+              ? `[FLUXO ENCERRAMENTO EXPLÍCITO] O cliente PEDIU para encerrar o atendimento. Despeça-se de forma calorosa, AGRADEÇA o contato e NÃO faça nenhuma pergunta. Use EXATAMENTE: "Foi um prazer te atender${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! 🙏 Obrigado pelo contato${agendamentoFmt ? ` — te espero ${agendamentoFmt}` : ""}. Qualquer coisa, é só me chamar 👋". Use a tool responder com proximo_passo vazio.`
+              : (isShortNoToHelp || isThanksClose)
               ? `[FLUXO DESPEDIDA PÓS-AGENDAMENTO] Cliente ${isThanksClose ? "agradeceu após o agendamento confirmado" : "já dispensou ajuda adicional"}. ENCERRE o atendimento de forma calorosa e curta, SEM nenhuma pergunta. Use exatamente esta estrutura: "${isThanksClose ? "De nada" : "Combinado"}${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! ${agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui"} 👋 Qualquer dúvida é só me chamar." NÃO pergunte mais nada. NÃO ofereça mais opções. Use a tool responder com proximo_passo vazio.`
               : `[FLUXO DISPENSA COMPARATIVO] Cliente respondeu "não" à sua oferta. NÃO insista, NÃO repita a oferta, NÃO faça mais de uma pergunta. Responda EXATAMENTE: "Tranquilo${contatoNomeAtual ? ", " + contatoNomeAtual.split(" ")[0] : ""}! Posso te ajudar em mais alguma coisa antes de finalizar?". Sem listar opções. Sem segunda pergunta. Use a tool responder.`,
           }]
@@ -3400,9 +3406,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       // cliente respondeu de novo curto/agradecimento/negativa, NÃO reenvia.
       // Cliente pode mandar "Não" + "Obg" em sequência — uma despedida basta.
       const _lastOut = String((recentOutbound || []).slice(-1)[0] || "");
-      const _despedidaJaEnviada = /Qualquer d[úu]vida [ée] s[óo] me chamar/i.test(_lastOut)
-        && (/Te espero/i.test(_lastOut) || /Qualquer coisa estou por aqui/i.test(_lastOut));
-      if (_despedidaJaEnviada && (isThanksClose || isShortNoToHelp || isThanksOnly || SHORT_NO_RE.test(msgTrim2))) {
+      const _despedidaJaEnviada = /Qualquer d[úu]vida [ée] s[óo] me chamar|Qualquer coisa,? [ée] s[óo] me chamar/i.test(_lastOut)
+        && (/Te espero/i.test(_lastOut) || /Qualquer coisa estou por aqui/i.test(_lastOut) || /Foi um prazer te atender/i.test(_lastOut));
+      if (_despedidaJaEnviada && (isThanksClose || isShortNoToHelp || isThanksOnly || isExplicitClose || SHORT_NO_RE.test(msgTrim2))) {
         console.log("[CLOSE-DEDUP] Despedida já enviada no último outbound — silenciando reenvio");
         try {
           await supabase.from("eventos_crm").insert({
@@ -3421,7 +3427,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       // e injetamos a frase canônica. O LLM frequentemente adiciona segunda pergunta ou
       // varia o texto além do permitido nesses contextos de encerramento.
       const _nomePrim = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
-      if (resposta && isThanksClose && agendamentoFmt) {
+      if (resposta && isExplicitClose) {
+        resposta = agendamentoFmt
+          ? `Foi um prazer te atender${_nomePrim ? ", " + _nomePrim : ""}! 🙏 Obrigado pelo contato — te espero ${agendamentoFmt}. Qualquer coisa, é só me chamar 👋`
+          : `Foi um prazer te atender${_nomePrim ? ", " + _nomePrim : ""}! 🙏 Obrigado pelo contato. Qualquer coisa, é só me chamar 👋`;
+        intencao = "encerramento_explicito";
+        validatorFlags.push("override_explicit_close");
+        console.log("[OVERRIDE] explicit_close → despedida + agradecimento");
+      } else if (resposta && isThanksClose && agendamentoFmt) {
         resposta = `De nada${_nomePrim ? ", " + _nomePrim : ""}! Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.`;
         intencao = "encerramento_pos_agendamento";
         validatorFlags.push("override_thanks_close");
