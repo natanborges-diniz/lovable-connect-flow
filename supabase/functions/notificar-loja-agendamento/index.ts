@@ -113,9 +113,14 @@ serve(async (req) => {
     const clienteNome = contato?.nome || "Cliente";
     const clienteTel = contato?.telefone ? ` 📞 ${contato.telefone}` : "";
 
-    const titulo = `📅 Agendamento confirmado — ${clienteNome}`;
+    const titulo = eventoLabel === "novo"
+      ? `📅 Novo agendamento — ${clienteNome}`
+      : `✅ Cliente confirmou — ${clienteNome}`;
+    const acaoLabel = eventoLabel === "novo"
+      ? `Cliente *${clienteNome}* foi agendado na *${ag.loja_nome}*.`
+      : `Cliente *${clienteNome}* confirmou presença na *${ag.loja_nome}*.`;
     const mensagem =
-      `Cliente *${clienteNome}* confirmou presença na *${ag.loja_nome}*.\n` +
+      `${acaoLabel}\n` +
       `🗓 ${dataLabel} às ${horaLabel}${clienteTel}\n\n` +
       `*Resumo do atendimento:*\n${resumo}`;
 
