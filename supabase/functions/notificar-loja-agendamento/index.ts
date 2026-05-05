@@ -33,13 +33,14 @@ serve(async (req) => {
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    const { agendamento_id } = await req.json();
+    const { agendamento_id, evento } = await req.json();
     if (!agendamento_id) {
       return new Response(JSON.stringify({ error: "agendamento_id required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const eventoLabel: "novo" | "confirmado" = evento === "novo" ? "novo" : "confirmado";
 
     // 1) Carrega agendamento + contato
     const { data: ag, error: agErr } = await supabase
@@ -56,10 +57,11 @@ serve(async (req) => {
       });
     }
 
-    const md = (ag.metadata || {}) as Record<string, unknown>;
-    if (md.aviso_loja_enviado_at) {
+    const md = (ag.metadata || {}) as Record<string, any>;
+    const idemKey = eventoLabel === "novo" ? "aviso_loja_novo_at" : "aviso_loja_confirmado_at";
+    if (md[idemKey]) {
       return new Response(
-        JSON.stringify({ skipped: true, reason: "ja_enviado", em: md.aviso_loja_enviado_at }),
+        JSON.stringify({ skipped: true, reason: "ja_enviado", evento: eventoLabel, em: md[idemKey] }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -111,9 +113,14 @@ serve(async (req) => {
     const clienteNome = contato?.nome || "Cliente";
     const clienteTel = contato?.telefone ? ` 📞 ${contato.telefone}` : "";
 
-    const titulo = `📅 Agendamento confirmado — ${clienteNome}`;
+    const titulo = eventoLabel === "novo"
+      ? `📅 Novo agendamento — ${clienteNome}`
+      : `✅ Cliente confirmou — ${clienteNome}`;
+    const acaoLabel = eventoLabel === "novo"
+      ? `Cliente *${clienteNome}* foi agendado na *${ag.loja_nome}*.`
+      : `Cliente *${clienteNome}* confirmou presença na *${ag.loja_nome}*.`;
     const mensagem =
-      `Cliente *${clienteNome}* confirmou presença na *${ag.loja_nome}*.\n` +
+      `${acaoLabel}\n` +
       `🗓 ${dataLabel} às ${horaLabel}${clienteTel}\n\n` +
       `*Resumo do atendimento:*\n${resumo}`;
 
@@ -150,7 +157,7 @@ serve(async (req) => {
         .update({
           metadata: {
             ...md,
-            aviso_loja_enviado_at: new Date().toISOString(),
+            [idemKey]: new Date().toISOString(),
             aviso_loja_status: "sem_destinatario",
           },
         })
@@ -163,10 +170,11 @@ serve(async (req) => {
     }
 
     // 5) Insere notificações (trigger trg_push_nova_notificacao envia push automaticamente)
+    const tipoNotif = eventoLabel === "novo" ? "agendamento_novo_loja" : "agendamento_confirmado_loja";
     const notifs = list.map((d) => ({
       usuario_id: d.user_id,
       setor_id: d.setor_id,
-      tipo: "agendamento_confirmado_loja",
+      tipo: tipoNotif,
       titulo,
       mensagem,
       referencia_id: ag.id,
@@ -180,7 +188,7 @@ serve(async (req) => {
       .update({
         metadata: {
           ...md,
-          aviso_loja_enviado_at: new Date().toISOString(),
+          [idemKey]: new Date().toISOString(),
           aviso_loja_destinatarios: list.length,
         },
       })
@@ -188,11 +196,11 @@ serve(async (req) => {
 
     await supabase.from("eventos_crm").insert({
       contato_id: ag.contato_id,
-      tipo: "aviso_loja_agendamento",
-      descricao: `Aviso de agendamento confirmado entregue a ${list.length} usuário(s) da ${ag.loja_nome}`,
+      tipo: eventoLabel === "novo" ? "aviso_loja_novo_agendamento" : "aviso_loja_agendamento",
+      descricao: `Aviso de agendamento (${eventoLabel}) entregue a ${list.length} usuário(s) da ${ag.loja_nome}`,
       referencia_id: ag.id,
       referencia_tipo: "agendamento",
-      metadata: { loja_nome: ag.loja_nome, destinatarios: list.length },
+      metadata: { loja_nome: ag.loja_nome, destinatarios: list.length, evento: eventoLabel },
     });
 
     return new Response(

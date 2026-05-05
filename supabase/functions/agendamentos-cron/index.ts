@@ -44,145 +44,132 @@ serve(async (req) => {
   const now = new Date();
   const results: string[] = [];
 
+  const safeRun = async (label: string, fn: () => Promise<void>) => {
+    try { await fn(); } catch (e) {
+      console.error(`[CRON][${label}] erro:`, e);
+      results.push(`${label}_error:${e instanceof Error ? e.message : "unknown"}`);
+    }
+  };
+
   try {
-    // ═══════════════════════════════════════════
-    // A) LEMBRETE VÉSPERA — 08h SP, 1 mensagem para agendamentos de amanhã
-    // ═══════════════════════════════════════════
-    await processLembreteVespera(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
-
-    // ═══════════════════════════════════════════
-    // B) LEMBRETE 1H ANTES — 1 mensagem ~1h antes do horário (mesmo dia)
-    //    Pula agendamentos marcados com <1h de antecedência.
-    // ═══════════════════════════════════════════
-    await processLembrete1hAntes(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
-
-
-    // ═══════════════════════════════════════════
-    // C) COBRANÇA À LOJA — 2h após o horário marcado
-    // ═══════════════════════════════════════════
-    await processFirstStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_PRIMEIRA_COBRANCA_LOJA);
-
-    // ═══════════════════════════════════════════
-    // D) SEGUNDA COBRANÇA À LOJA — 10:00 SP do dia seguinte
-    // ═══════════════════════════════════════════
-    await processSecondStoreChargeNextMorning(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results);
-
-    // ═══════════════════════════════════════════
-    // E) TIMEOUT DA LOJA — 48h sem resposta = tarefa interna ao supervisor
-    // ═══════════════════════════════════════════
-    await processStoreTimeout(supabase, now, results, HORAS_TIMEOUT_LOJA);
+    // A) LEMBRETE VÉSPERA — 08h SP
+    await safeRun("A_lembrete_vespera", () => processLembreteVespera(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results));
+    // B) LEMBRETE 1H ANTES
+    await safeRun("B_lembrete_1h", () => processLembrete1hAntes(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results));
+    // C) 1ª COBRANÇA LOJA
+    await safeRun("C_cobranca_1", () => processFirstStoreCharge(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results, HORAS_PRIMEIRA_COBRANCA_LOJA));
+    // D) 2ª COBRANÇA LOJA — 10:00 SP D+1
+    await safeRun("D_cobranca_2", () => processSecondStoreChargeNextMorning(supabase, now, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, results));
+    // E) TIMEOUT LOJA
+    await safeRun("E_timeout_loja", () => processStoreTimeout(supabase, now, results, HORAS_TIMEOUT_LOJA));
 
     // ═══════════════════════════════════════════
     // F) COBRANÇAS AGENDADAS (noshow_agendar_para)
-    // ═══════════════════════════════════════════
-    const { data: cobrancasAgendadas } = await supabase
-      .from("agendamentos")
-      .select("id")
-      .in("status", ["agendado", "lembrete_enviado", "confirmado"])
-      .is("loja_confirmou_presenca", null)
-      .not("noshow_agendar_para", "is", null)
-      .lte("noshow_agendar_para", now.toISOString());
+    await safeRun("F_cobrancas_agendadas", async () => {
+      const { data: cobrancasAgendadas } = await supabase
+        .from("agendamentos")
+        .select("id")
+        .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+        .is("loja_confirmou_presenca", null)
+        .not("noshow_agendar_para", "is", null)
+        .lte("noshow_agendar_para", now.toISOString());
 
-    for (const ag of cobrancasAgendadas || []) {
-      await supabase.from("agendamentos").update({
-        status: "no_show",
-        noshow_agendar_para: null,
-      }).eq("id", ag.id);
-      results.push(`cobranca_executada:${ag.id}`);
-    }
+      for (const ag of cobrancasAgendadas || []) {
+        await supabase.from("agendamentos").update({
+          status: "no_show",
+          noshow_agendar_para: null,
+        }).eq("id", ag.id);
+        results.push(`cobranca_executada:${ag.id}`);
+      }
+    });
 
-    // ═══════════════════════════════════════════
-    // G) RECUPERAÇÃO CLIENTE — 3 tentativas (imediata + 24h + 24h) e abandono em 72h com despedida
-    // ═══════════════════════════════════════════
-    const { data: emRecuperacao } = await supabase
-      .from("agendamentos")
-      .select("id, contato_id, tentativas_recuperacao, updated_at, atendimento_id, status, metadata, loja_nome")
-      .in("status", ["no_show", "recuperacao"]);
+    // G) RECUPERAÇÃO CLIENTE — 3 tentativas + abandono em 72h com despedida
+    await safeRun("G_recuperacao", async () => {
+      const { data: emRecuperacao } = await supabase
+        .from("agendamentos")
+        .select("id, contato_id, tentativas_recuperacao, updated_at, atendimento_id, status, metadata, loja_nome")
+        .in("status", ["no_show", "recuperacao"]);
 
-    for (const ag of emRecuperacao || []) {
-      const lastUpdate = new Date(ag.updated_at);
-      const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
+      for (const ag of emRecuperacao || []) {
+        const lastUpdate = new Date(ag.updated_at);
+        const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
 
-      // Cliente respondeu? Move para "recuperacao" e deixa IA conduzir.
-      if (ag.atendimento_id) {
-        const { data: recentInbound } = await supabase
-          .from("mensagens")
-          .select("id")
-          .eq("atendimento_id", ag.atendimento_id)
-          .eq("direcao", "inbound")
-          .gt("created_at", lastUpdate.toISOString())
-          .limit(1);
+        if (ag.atendimento_id) {
+          const { data: recentInbound } = await supabase
+            .from("mensagens")
+            .select("id")
+            .eq("atendimento_id", ag.atendimento_id)
+            .eq("direcao", "inbound")
+            .gt("created_at", lastUpdate.toISOString())
+            .limit(1);
 
-        if (recentInbound?.length) {
-          if (ag.status !== "recuperacao") {
-            await supabase.from("agendamentos").update({ status: "recuperacao" }).eq("id", ag.id);
+          if (recentInbound?.length) {
+            if (ag.status !== "recuperacao") {
+              await supabase.from("agendamentos").update({ status: "recuperacao" }).eq("id", ag.id);
+            }
+            continue;
           }
+        }
+
+        const tentativas = ag.tentativas_recuperacao || 0;
+
+        if (tentativas <= 1 && hoursSinceUpdate >= HORAS_SEGUNDA_RECUPERACAO) {
+          await supabase.from("agendamentos").update({
+            tentativas_recuperacao: 2,
+            status: "recuperacao",
+          }).eq("id", ag.id);
+          results.push(`recuperacao_2:${ag.id}`);
           continue;
         }
-      }
 
-      const tentativas = ag.tentativas_recuperacao || 0;
-
-      // 2ª tentativa após HORAS_SEGUNDA_RECUPERACAO
-      if (tentativas <= 1 && hoursSinceUpdate >= HORAS_SEGUNDA_RECUPERACAO) {
-        await supabase.from("agendamentos").update({
-          tentativas_recuperacao: 2,
-          status: "recuperacao",
-        }).eq("id", ag.id);
-        results.push(`recuperacao_2:${ag.id}`);
-        continue;
-      }
-
-      // 3ª tentativa após mais HORAS_TERCEIRA_RECUPERACAO
-      if (tentativas === 2 && hoursSinceUpdate >= HORAS_TERCEIRA_RECUPERACAO) {
-        await supabase.from("agendamentos").update({
-          tentativas_recuperacao: 3,
-          status: "recuperacao",
-        }).eq("id", ag.id);
-        results.push(`recuperacao_3:${ag.id}`);
-        continue;
-      }
-
-      // Após MAX tentativas, espera HORAS_ABANDONO desde a 1ª e envia despedida fixa
-      if (tentativas >= MAX_TENTATIVAS_RECUPERACAO && hoursSinceUpdate >= HORAS_ABANDONO) {
-        const md = (ag.metadata || {}) as Record<string, any>;
-        if (!md.despedida_enviada_at && ag.atendimento_id && dentroDeJanelaComunicacaoCliente(now)) {
-          const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
-          const firstName = contato?.nome?.split(" ")[0] || "";
-          const msg = `Tudo bem${firstName ? ", " + firstName : ""}! Como não consegui retorno, vou encerrar este atendimento por aqui. Se quiser remarcar sua visita${ag.loja_nome ? " na " + ag.loja_nome : ""}, é só me chamar. Um abraço! 👋`;
-          await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
-          });
+        if (tentativas === 2 && hoursSinceUpdate >= HORAS_TERCEIRA_RECUPERACAO) {
           await supabase.from("agendamentos").update({
-            metadata: { ...md, despedida_enviada_at: new Date().toISOString() },
+            tentativas_recuperacao: 3,
+            status: "recuperacao",
           }).eq("id", ag.id);
-          await supabase.from("eventos_crm").insert({
-            contato_id: ag.contato_id,
-            tipo: "agendamento_despedida_enviada",
-            descricao: `Despedida enviada antes de marcar como abandonado (${ag.loja_nome || ""})`,
-            referencia_id: ag.id,
-            referencia_tipo: "agendamento",
-          });
-          results.push(`despedida:${ag.id}`);
-          continue; // marca abandonado no próximo ciclo (1h depois)
+          results.push(`recuperacao_3:${ag.id}`);
+          continue;
         }
-        // Se já enviou despedida há ≥1h, encerra
-        const despedidaAt = md.despedida_enviada_at ? new Date(md.despedida_enviada_at) : null;
-        if (despedidaAt && (now.getTime() - despedidaAt.getTime()) >= 60 * 60 * 1000) {
-          await supabase.from("agendamentos").update({ status: "abandonado" }).eq("id", ag.id);
-          await supabase.from("eventos_crm").insert({
-            contato_id: ag.contato_id,
-            tipo: "agendamento_perdido",
-            descricao: `Cliente declarado perdido após 3 tentativas + despedida (${ag.loja_nome || ""})`,
-            referencia_id: ag.id,
-            referencia_tipo: "agendamento",
-          });
-          results.push(`abandonado:${ag.id}`);
+
+        if (tentativas >= MAX_TENTATIVAS_RECUPERACAO && hoursSinceUpdate >= HORAS_ABANDONO) {
+          const md = (ag.metadata || {}) as Record<string, any>;
+          if (!md.despedida_enviada_at && ag.atendimento_id && dentroDeJanelaComunicacaoCliente(now)) {
+            const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
+            const firstName = contato?.nome?.split(" ")[0] || "";
+            const msg = `Tudo bem${firstName ? ", " + firstName : ""}! Como não consegui retorno, vou encerrar este atendimento por aqui. Se quiser remarcar sua visita${ag.loja_nome ? " na " + ag.loja_nome : ""}, é só me chamar. Um abraço! 👋`;
+            await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
+            });
+            await supabase.from("agendamentos").update({
+              metadata: { ...md, despedida_enviada_at: new Date().toISOString() },
+            }).eq("id", ag.id);
+            await supabase.from("eventos_crm").insert({
+              contato_id: ag.contato_id,
+              tipo: "agendamento_despedida_enviada",
+              descricao: `Despedida enviada antes de marcar como abandonado (${ag.loja_nome || ""})`,
+              referencia_id: ag.id,
+              referencia_tipo: "agendamento",
+            });
+            results.push(`despedida:${ag.id}`);
+            continue;
+          }
+          const despedidaAt = md.despedida_enviada_at ? new Date(md.despedida_enviada_at) : null;
+          if (despedidaAt && (now.getTime() - despedidaAt.getTime()) >= 60 * 60 * 1000) {
+            await supabase.from("agendamentos").update({ status: "abandonado" }).eq("id", ag.id);
+            await supabase.from("eventos_crm").insert({
+              contato_id: ag.contato_id,
+              tipo: "agendamento_perdido",
+              descricao: `Cliente declarado perdido após 3 tentativas + despedida (${ag.loja_nome || ""})`,
+              referencia_id: ag.id,
+              referencia_tipo: "agendamento",
+            });
+            results.push(`abandonado:${ag.id}`);
+          }
         }
       }
-    }
+    });
 
     console.log(`[CRON] Processed: ${results.join(", ") || "nothing"}`);
     await supabase.from("cron_jobs").update({ ultimo_disparo: new Date().toISOString() }).eq("funcao_alvo", "agendamentos-cron");
@@ -557,21 +544,26 @@ async function sendStoreChargeMessage(
   const clienteName = contato?.nome || "Cliente";
 
   const titulo = isSecondAttempt
-    ? `⚠️ Pendência de confirmação — ${clienteName}`
+    ? `⚠️ 2ª cobrança — ${clienteName} compareceu?`
     : `📋 Confirme comparecimento — ${clienteName}`;
   const mensagem = isSecondAttempt
-    ? `Cliente ${clienteName} (agendado às ${hora}) ainda sem confirmação. Atualize no app.`
-    : `Cliente ${clienteName} tinha agendamento às ${hora}. Compareceu?`;
+    ? `Cliente ${clienteName} (agendado às ${hora}) ainda sem confirmação. Toque para responder: Compareceu / Não compareceu / Venda fechada.`
+    : `Cliente ${clienteName} tinha agendamento às ${hora}. Toque para responder: Compareceu / Não compareceu / Venda fechada.`;
 
   const { data: dests } = await supabase
     .rpc("resolver_destinatarios_loja", { _loja_nome: ag.loja_nome });
   const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
 
+  // Tipo padronizado para o Messenger renderizar os 3 botões de ação
+  const tipoNotif = isSecondAttempt
+    ? "cobranca_comparecimento_loja_2"
+    : "cobranca_comparecimento_loja";
+
   for (const d of list) {
     await supabase.from("notificacoes").insert({
       usuario_id: d.user_id,
       setor_id: d.setor_id,
-      tipo: "agendamento_confirmacao",
+      tipo: tipoNotif,
       titulo,
       mensagem,
       referencia_id: ag.id,

@@ -187,6 +187,13 @@ serve(async (req) => {
       metadata: { loja_nome, data_horario, loja_telefone },
     });
 
+    // Notifica a loja imediatamente via Atrium Messenger (background, idempotente)
+    fetch(`${SUPABASE_URL}/functions/v1/notificar-loja-agendamento`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ agendamento_id: agendamento.id, evento: "novo" }),
+    }).catch((e) => console.warn("[agendar-cliente] notificar-loja-agendamento falhou:", e));
+
     return new Response(JSON.stringify({ status: "ok", agendamento }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
