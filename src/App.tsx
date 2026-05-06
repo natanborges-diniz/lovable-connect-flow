@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
 import PipelineFinanceiro from "./pages/PipelineFinanceiro";
+import PagamentosLink from "./pages/PagamentosLink";
 import PipelineAgendamentos from "./pages/PipelineAgendamentos";
 import PipelineTI from "./pages/PipelineTI";
 import PipelineInterno from "./pages/PipelineInterno";
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/crm/conversas" element={<Atendimentos />} />
               <Route path="/crm/contatos" element={<Contatos />} />
               <Route path="/financeiro" element={<PipelineFinanceiro />} />
+              <Route path="/financeiro/pagamentos" element={<PagamentosLink />} />
               <Route path="/lojas" element={<PipelineAgendamentos />} />
               <Route path="/ti" element={<PipelineTI />} />
               <Route path="/interno" element={<PipelineInterno />} />

@@ -92,6 +92,44 @@ serve(async (req) => {
 
     await supabase.from("solicitacoes").update(updateData).eq("id", solicitacao.id);
 
+    // Espelha em pagamentos_link (fonte de verdade financeira)
+    try {
+      const newStatus = status === "PAGO" ? "pago"
+                      : status === "CANCELADO" ? "estornado"
+                      : status === "EXPIRADO" ? "expirado"
+                      : "enviado";
+      const phone = String(existingMeta.cliente_whatsapp || "").replace(/\D/g, "");
+      let contatoIdResolved: string | null = solicitacao.contato_id || null;
+      if (!contatoIdResolved && phone) {
+        const { data: c } = await supabase.from("contatos").select("id").eq("telefone", phone).maybeSingle();
+        contatoIdResolved = c?.id || null;
+      }
+      await supabase.from("pagamentos_link").upsert({
+        payment_link_id,
+        solicitacao_id: solicitacao.id,
+        contato_id: contatoIdResolved,
+        loja_nome: (existingMeta.alias_loja as string)?.replace(/^DINIZ\s+/i, "Diniz ") || null,
+        cod_empresa: existingMeta.cod_empresa as string || null,
+        alias_loja: existingMeta.alias_loja as string || null,
+        cliente_nome: nome_cliente || existingMeta.cliente as string || null,
+        cliente_telefone: phone || null,
+        valor: valor ? Number(valor) : (existingMeta.valor ? Number(String(existingMeta.valor).replace(/[^0-9.]/g,"")) : null),
+        parcelas: installments || (existingMeta.parcelas ? Number(existingMeta.parcelas) : null),
+        descricao: descricao || existingMeta.descricao as string || null,
+        status: newStatus,
+        tid: tid || null,
+        nsu: nsu || null,
+        authorization_code: authorization || null,
+        last4: last4 || null,
+        link_url: existingMeta.url as string || null,
+        pago_at: status === "PAGO" ? now.toISOString() : null,
+        enviado_at: existingMeta.enviado_at as string || null,
+        metadata: updatedMeta,
+      }, { onConflict: "payment_link_id" });
+    } catch (mirrorErr) {
+      console.error("[payment-webhook] Failed mirror pagamentos_link:", mirrorErr);
+    }
+
     const nsuLabel = nsu ? ` | NSU: ${nsu}` : "";
     await supabase.from("eventos_crm").insert({
       contato_id: solicitacao.contato_id,

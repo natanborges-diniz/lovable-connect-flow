@@ -1358,6 +1358,134 @@ export type Database = {
           },
         ]
       }
+      pagamentos_link: {
+        Row: {
+          alias_loja: string | null
+          atendimento_id: string | null
+          authorization_code: string | null
+          bandeira: string | null
+          cliente_nome: string | null
+          cliente_telefone: string | null
+          cod_empresa: string | null
+          comprovante_anexo_id: string | null
+          comprovante_recebido_at: string | null
+          contato_id: string | null
+          created_at: string
+          descricao: string | null
+          enviado_at: string | null
+          expirado_at: string | null
+          id: string
+          last4: string | null
+          link_url: string | null
+          loja_nome: string | null
+          metadata: Json
+          nsu: string | null
+          pago_at: string | null
+          parcelas: number | null
+          payment_link_id: string
+          solicitacao_id: string | null
+          status: string
+          tid: string | null
+          updated_at: string
+          valor: number | null
+        }
+        Insert: {
+          alias_loja?: string | null
+          atendimento_id?: string | null
+          authorization_code?: string | null
+          bandeira?: string | null
+          cliente_nome?: string | null
+          cliente_telefone?: string | null
+          cod_empresa?: string | null
+          comprovante_anexo_id?: string | null
+          comprovante_recebido_at?: string | null
+          contato_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          enviado_at?: string | null
+          expirado_at?: string | null
+          id?: string
+          last4?: string | null
+          link_url?: string | null
+          loja_nome?: string | null
+          metadata?: Json
+          nsu?: string | null
+          pago_at?: string | null
+          parcelas?: number | null
+          payment_link_id: string
+          solicitacao_id?: string | null
+          status?: string
+          tid?: string | null
+          updated_at?: string
+          valor?: number | null
+        }
+        Update: {
+          alias_loja?: string | null
+          atendimento_id?: string | null
+          authorization_code?: string | null
+          bandeira?: string | null
+          cliente_nome?: string | null
+          cliente_telefone?: string | null
+          cod_empresa?: string | null
+          comprovante_anexo_id?: string | null
+          comprovante_recebido_at?: string | null
+          contato_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          enviado_at?: string | null
+          expirado_at?: string | null
+          id?: string
+          last4?: string | null
+          link_url?: string | null
+          loja_nome?: string | null
+          metadata?: Json
+          nsu?: string | null
+          pago_at?: string | null
+          parcelas?: number | null
+          payment_link_id?: string
+          solicitacao_id?: string | null
+          status?: string
+          tid?: string | null
+          updated_at?: string
+          valor?: number | null
+        }
+        Relationships: []
+      }
+      pagamentos_link_eventos: {
+        Row: {
+          created_at: string
+          id: string
+          pagamento_id: string
+          payload: Json
+          status_anterior: string | null
+          status_novo: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          pagamento_id: string
+          payload?: Json
+          status_anterior?: string | null
+          status_novo: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          pagamento_id?: string
+          payload?: Json
+          status_anterior?: string | null
+          status_novo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pagamentos_link_eventos_pagamento_id_fkey"
+            columns: ["pagamento_id"]
+            isOneToOne: false
+            referencedRelation: "pagamentos_link"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pipeline_automacoes: {
         Row: {
           ativo: boolean

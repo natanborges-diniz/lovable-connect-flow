@@ -2054,6 +2054,13 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           if (sol) {
             const newMeta = { ...(sol.metadata || {}), comprovante_recebido_at: new Date().toISOString() };
             await supabase.from("solicitacoes").update({ metadata: newMeta }).eq("id", sol.id);
+            // Espelha em pagamentos_link
+            const pli = (sol.metadata as any)?.payment_link_id;
+            if (pli) {
+              await supabase.from("pagamentos_link")
+                .update({ comprovante_recebido_at: new Date().toISOString() })
+                .eq("payment_link_id", pli);
+            }
           }
         } catch (e) {
           console.error("[COMPROVANTE] failed to mark solicitacao:", e);
