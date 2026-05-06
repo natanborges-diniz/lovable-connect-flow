@@ -101,6 +101,32 @@ function detectRxConfirmation(text: string): boolean {
   return /^(sim|confere|isso|perfeito|certinho|certo|correto|exato|t[áa]\s+certo|ok|positivo|👍|👌|✅|tudo certo|isso mesmo)\b/.test(t);
 }
 
+function detectRxRejeicao(text: string): boolean {
+  const t = String(text || "").toLowerCase().trim();
+  if (!t) return false;
+  return /^(n[ãa]o|errad|incorret|nao confere|t[áa]\s+errad|errou|nao\s*[eé]\s+isso|n[ãa]o\s*[eé]\s+isso)\b/.test(t)
+    || /\b(t[áa]\s+errad|n[ãa]o\s+confere|nao\s*[eé]\s+isso|errou|esses?\s+valores?\s+est[aã]o\s+errad)\b/.test(t);
+}
+
+function isReceitaPending(metadata: any): boolean {
+  return metadata?.receita_confirmacao?.pending === true;
+}
+
+function isReceitaForaDaFaixa(rx: any): boolean {
+  if (!rx?.eyes) return false;
+  const od = rx.eyes.od || {};
+  const oe = rx.eyes.oe || {};
+  const sphereMax = Math.max(Math.abs(Number(od.sphere) || 0), Math.abs(Number(oe.sphere) || 0));
+  const cylMax = Math.max(Math.abs(Number(od.cylinder) || 0), Math.abs(Number(oe.cylinder) || 0));
+  const addMax = Math.max(Math.abs(Number(od.add) || 0), Math.abs(Number(oe.add) || 0));
+  if (sphereMax > 12) return true;
+  if (cylMax > 4) return true;
+  if (rx.rx_type === "progressive" && addMax > 3.5) return true;
+  return false;
+}
+
+const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Seu grau é mais alto e exige uma lente sob encomenda — vou chamar um Consultor especializado pra te passar opções e prazo certinho 🤝";
+
 function detectCtaAgendamentoYes(text: string): boolean {
   const t = String(text || "").toLowerCase().trim();
   if (!t) return false;
