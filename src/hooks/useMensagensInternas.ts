@@ -174,3 +174,59 @@ export function useMarcarLidas() {
     },
   });
 }
+
+export function useEditMensagemInterna() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      novoConteudo,
+      conteudoAnterior,
+      metadata,
+    }: {
+      id: string;
+      novoConteudo: string;
+      conteudoAnterior: string;
+      metadata?: Record<string, any> | null;
+    }) => {
+      const historico = Array.isArray((metadata as any)?.historico_edicoes)
+        ? [...(metadata as any).historico_edicoes]
+        : [];
+      historico.push({ at: new Date().toISOString(), conteudo_anterior: conteudoAnterior });
+      const newMeta = { ...(metadata || {}), historico_edicoes: historico };
+      const { error } = await supabase
+        .from("mensagens_internas")
+        .update({
+          conteudo: novoConteudo,
+          editada_at: new Date().toISOString(),
+          metadata: newMeta,
+        } as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mensagens-conversa"] });
+      qc.invalidateQueries({ queryKey: ["conversas-internas"] });
+    },
+  });
+}
+
+export function useDeleteMensagemInterna() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, userId }: { id: string; userId: string }) => {
+      const { error } = await supabase
+        .from("mensagens_internas")
+        .update({
+          deletada_at: new Date().toISOString(),
+          deletada_por: userId,
+        } as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mensagens-conversa"] });
+      qc.invalidateQueries({ queryKey: ["conversas-internas"] });
+    },
+  });
+}
