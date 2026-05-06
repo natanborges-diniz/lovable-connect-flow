@@ -191,17 +191,58 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [mensagens]);
 
+  const handlePickAttachment = (file: File | null) => {
+    if (!file) return;
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      toast.error("Formato não suportado. Envie JPG, PNG ou WEBP.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB. Reduza antes de enviar.");
+      return;
+    }
+    setAttachment(file);
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachmentPreview(URL.createObjectURL(file));
+  };
+
+  const clearAttachment = () => {
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachment(null);
+    setAttachmentPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleSend = async () => {
     const texto = msgText.trim();
-    if (!texto) return;
+    if (!texto && !attachment) return;
 
     try {
       if (msgDirecao === "outbound" && atendimento?.canal === "whatsapp") {
         setSendingOutbound(true);
+
+        // Upload anexo (se houver) antes de chamar send-whatsapp
+        let mediaUrl: string | undefined;
+        let mimeType: string | undefined;
+        if (attachment) {
+          setUploadingAttachment(true);
+          const ext = attachment.name.split(".").pop()?.toLowerCase() || "jpg";
+          const path = `outbound/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("mensagens-anexos")
+            .upload(path, attachment, { contentType: attachment.type, upsert: false });
+          setUploadingAttachment(false);
+          if (upErr) throw new Error("Falha no upload: " + upErr.message);
+          const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+          mediaUrl = pub.publicUrl;
+          mimeType = attachment.type;
+        }
+
         const { data, error } = await supabase.functions.invoke("send-whatsapp", {
           body: {
             atendimento_id: id,
-            texto,
+            ...(mediaUrl ? { media_url: mediaUrl, mime_type: mimeType, caption: texto || undefined } : { texto }),
             remetente_nome: profile?.nome || "Operador",
           },
         });
@@ -217,14 +258,18 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           } catch { /* noop */ }
           setJanelaFechadaHoras(horas);
           setJanelaFechadaOpen(true);
-          // Preserva o rascunho do consultor — não limpa msgText
+          // Preserva rascunho e anexo para retry via template
           return;
         }
 
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        toast.success("Mensagem enviada ao WhatsApp com sucesso");
+        toast.success(mediaUrl ? "Imagem enviada ao WhatsApp" : "Mensagem enviada ao WhatsApp com sucesso");
       } else {
+        if (!texto) {
+          toast.error("Notas internas não suportam anexo. Digite um texto.");
+          return;
+        }
         await createMensagem.mutateAsync({
           atendimento_id: id,
           conteudo: texto,
@@ -234,12 +279,15 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
       }
 
       setMsgText("");
+      clearAttachment();
     } catch (e: any) {
       toast.error("Falha ao enviar mensagem: " + (e?.message || "Erro desconhecido"));
     } finally {
       setSendingOutbound(false);
+      setUploadingAttachment(false);
     }
   };
+
 
   const direcaoColors: Record<string, string> = {
     inbound: "bg-muted text-foreground",
