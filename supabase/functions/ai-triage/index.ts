@@ -4290,17 +4290,29 @@ async function runConsultarLentes(
   const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(20);
 
   if (!lenses || lenses.length === 0) {
-    console.log(`[QUOTE] No matching lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
+    const filtrosAplicados = {
+      rx_type: rxType,
+      sphere: worstSphere,
+      cylinder: worstCylinder,
+      add: maxAdd,
+      filtro_blue: !!args?.filtro_blue,
+      filtro_photo: !!args?.filtro_photo,
+      preferencia_marca: args?.preferencia_marca || null,
+      receita_label: rxMeta?.label || null,
+    };
+    console.log(`[QUOTE-ZERO] ${JSON.stringify({ tool: "consultar_lentes", contato_id: contatoId, atendimento_id: atendimentoId, ...filtrosAplicados })}`);
 
     // Loga evento explícito pra auditoria (caso Cleber 2026-05-06 — gap real do catálogo).
     try {
       await supabase.from("eventos_crm").insert({
         contato_id: contatoId,
-        tipo: "consultar_lentes_zero_linhas",
+        tipo: "consultar_lentes_zero_resultados",
         descricao: `consultar_lentes não encontrou lentes para ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd ?? "—"}`,
-        metadata: { rx_type: rxType, sphere: worstSphere, cylinder: worstCylinder, add: maxAdd, filtro_blue: !!args?.filtro_blue, filtro_photo: !!args?.filtro_photo },
+        metadata: { tool: "consultar_lentes", ...filtrosAplicados },
+        referencia_tipo: atendimentoId ? "atendimento" : null,
+        referencia_id: atendimentoId || null,
       });
-    } catch (e) { console.warn("[QUOTE] failed to log consultar_lentes_zero_linhas", e); }
+    } catch (e) { console.warn("[QUOTE] failed to log consultar_lentes_zero_resultados", e); }
 
     // FALLBACK AUTOMÁTICO PRA ESTIMATIVA — caso Cleber 2026-05-06.
     // Catálogo não cobre a combinação exata? Em vez de empurrar pra loja sem dar valor,
@@ -4315,9 +4327,19 @@ async function runConsultarLentes(
           // NÃO passa cylinder_hint — a estimativa usa default conservador e procura faixa ampla.
           filtro_blue: args?.filtro_blue === true ? true : undefined,
           filtro_photo: args?.filtro_photo === true ? true : undefined,
-        });
+        }, contatoId, atendimentoId);
         if (est?.resposta && !/preciso confirmar a disponibilidade/i.test(est.resposta)) {
           console.log(`[QUOTE] zero-linhas → fallback estimativa OK`);
+          try {
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "consultar_lentes_fallback_estimativa_acionado",
+              descricao: `Fallback acionado: catálogo zerou para ${rxType} sphere=${worstSphere} cyl=${worstCylinder}, estimativa cobriu`,
+              metadata: { origem: "consultar_lentes_zero", ...filtrosAplicados },
+              referencia_tipo: atendimentoId ? "atendimento" : null,
+              referencia_id: atendimentoId || null,
+            });
+          } catch (e) { console.warn("[QUOTE] failed to log fallback_acionado", e); }
           // Marca explicitamente que foi estimativa por gap, mantém pergunta de região no fim.
           const prefix = `Pra esse grau específico (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
           return { resposta: prefix + est.resposta };
