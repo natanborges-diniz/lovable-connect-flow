@@ -116,3 +116,12 @@ Travou em "posso te mostrar uma base?" / auto-chain não disparou — ambos corr
 
 ### Franciana 2026-05-06 (forced retry pulava confirmação)
 Cliente mandou nova receita; modelo não chamou `interpretar_receita` no 1º turno e caiu no FORCED RETRY (bloco 9.4). Esse ramo salvava receita mas devolvia mensagem hardcoded "Prontinho, consegui ler... Em qual região?" — pulando a confirmação dos valores que o caminho normal já fazia. **Fix:** ramo de sucesso do retry agora marca `metadata.receita_confirmacao.pending=true`, insere evento `receita_confirmacao_solicitada` (source=`ocr_forced_retry`) e usa `buildMsgConfirmarReceita(...)`. Comportamento idêntico ao caminho normal.
+
+## 🆕 Mai/2026 — Gate de confirmação BLOQUEANTE pós-OCR (caso Franciana 2)
+Toda receita lida via OCR fica com `contatos.metadata.receita_confirmacao.pending=true` (com `fora_da_faixa` calculado). Gate pré-LLM em `ai-triage`:
+- **Confirmação** (`detectRxConfirmation`: sim/isso/confere/perfeito/ok…) → limpa pending. Se `fora_da_faixa` (|esf|>12, |cil|>4 ou ADD>3.5 progressivo) → escala determinística para Consultor com `MSG_ESCALADA_GRAU_FORA_FAIXA` (respeita horário humano), evento `escalada_grau_fora_faixa`. Caso contrário libera o fluxo (LLM cota normalmente).
+- **Rejeição** (`detectRxRejeicao`: não/errado/errou…) → 1ª vez repete `buildMsgConfirmarReceita(rx,true)` + abre porta para correção por texto; 2ª vez manda `MSG_PEDIR_RECEITA_TEXTO`. Loga `receita_rejeitada_cliente`.
+- **Outra coisa** sem ser correção válida → repete `buildMsgConfirmarReceita`. Não chama LLM.
+- **Defesa em depth**: `runConsultarLentes` e `runConsultarLentesEstimativa` checam `isReceitaPending` no início e retornam `buildMsgConfirmarReceita`, logando `consultar_lentes_bloqueado_pendente_confirmacao` — garante que mesmo se LLM ignorar, nenhum preço sai.
+
+**Caso Franciana 2 (06/05 20:27):** OCR leu OD esf -13.50 / OE esf -20.50 (extremo). `consultar_lentes` zerou, fallback estimativa zerou, IA escalou direto com "preciso que um Consultor finalize" — sem nunca pedir confirmação ao cliente. Erros de OCR para mais/para menos passavam batido. Com o gate, agora SEMPRE pergunta "Está certinho?" antes de qualquer cotação ou escalada; só após confirmação positiva escala (e com mensagem específica de grau sob encomenda).
