@@ -4211,6 +4211,7 @@ async function runConsultarLentes(
   contatoId: string,
   recentOutbound: string[],
   args: any,
+  atendimentoId?: string,
 ): Promise<{ resposta: string }> {
   const { data: contatoRx } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
   const contatoRxMeta = (contatoRx?.metadata as Record<string, any>) || {};
