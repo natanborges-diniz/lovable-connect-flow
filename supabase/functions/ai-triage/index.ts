@@ -63,6 +63,96 @@ function mensagemEscaladaForaHorario(nomePrim: string): string {
 // para destravar o fluxo sem repetir "estou analisando" e sem escalar.
 const MSG_PEDIR_RECEITA_TEXTO = "Tô tendo dificuldade de ler os valores na foto 😅 Pode me passar por texto, por favor?\n\nPreciso de:\n• *OD* (olho direito): esférico / cilíndrico / eixo (e adição se tiver)\n• *OE* (olho esquerdo): esférico / cilíndrico / eixo (e adição se tiver)\n\nEx: *OD -2,00 cil -0,75 eixo 180* / *OE -1,75 cil -0,50 eixo 170*\n\nSe preferir, mande outra foto com a receita inteira no enquadramento e boa iluminação 📸";
 
+// ═══════════════════════════════════════════
+// CONFIRMAÇÃO PÓS-OCR + CTA AGENDAMENTO + ESCOLHA CIDADE → LOJA (Mai/2026)
+// ═══════════════════════════════════════════
+const MSG_CTA_AGENDAMENTO = "Posso agendar uma visita pra você ver pessoalmente e fechar o pedido? 😊";
+const MSG_LISTA_CIDADES = "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n\n🏙️ Osasco\n🏙️ Carapicuíba\n🏙️ Itapevi\n🏙️ Barueri";
+
+// Mapeamento cidade → lojas (nomes exatos em telefones_lojas.nome_loja).
+const CIDADE_TO_LOJAS: Record<string, string[]> = {
+  osasco: ["DINIZ ANTONIO AGU","DINIZ PRIMITIVA I","DINIZ PRIMITIVA II","DINIZ STO ANTONIO","DINIZ SUPER SHOPPING","DINIZ UNIÃO"],
+  carapicuiba: ["DINIZ CARAPICUIBA"],
+  itapevi: ["DINIZ ITAPEVI"],
+  barueri: ["DINIZ BARUERI"],
+};
+
+function fmtRxLine(eye: any, name: string): string {
+  const esf = (eye?.sphere ?? null);
+  const cil = (eye?.cylinder ?? null);
+  const eixo = (eye?.axis ?? null);
+  const add = (typeof eye?.add === "number" && eye.add !== 0) ? ` ADD +${eye.add}` : "";
+  const fmtNum = (v: any) => (v == null ? "?" : (Number(v) === 0 ? "0,00" : (Number(v) > 0 ? "+" : "") + Number(v).toFixed(2).replace(".", ",")));
+  return `👁️ *${name}*: ESF ${fmtNum(esf)} CIL ${fmtNum(cil)} EIXO ${eixo ?? "?"}°${add}`;
+}
+
+function buildMsgConfirmarReceita(rx: any, isCorrection: boolean): string {
+  const od = rx?.eyes?.od || {};
+  const oe = rx?.eyes?.oe || {};
+  const head = isCorrection ? "Anotei! Ficou assim:" : "Li sua receita assim, confere? 😊";
+  const tail = isCorrection ? "Agora tá certo? ✅" : "Está certinho?";
+  return `${head}\n${fmtRxLine(od, "OD")}\n${fmtRxLine(oe, "OE")}\n\n${tail}`;
+}
+
+function detectRxConfirmation(text: string): boolean {
+  const t = String(text || "").toLowerCase().trim();
+  if (!t) return false;
+  if (/\b(n[ãa]o|errad|incorret|tá errado|nao confere)\b/.test(t)) return false;
+  return /^(sim|confere|isso|perfeito|certinho|certo|correto|exato|t[áa]\s+certo|ok|positivo|👍|👌|✅|tudo certo|isso mesmo)\b/.test(t);
+}
+
+function detectCtaAgendamentoYes(text: string): boolean {
+  const t = String(text || "").toLowerCase().trim();
+  if (!t) return false;
+  return /^(sim|quero|bora|vamos|pode|claro|gostaria|agendar|marcar|com certeza|por favor|pfv|👍|✅|positivo|topo)\b/.test(t)
+    || /\b(quero agendar|pode agendar|pode marcar|quero marcar|vamos agendar)\b/.test(t);
+}
+
+function detectCtaAgendamentoNo(text: string): boolean {
+  const t = String(text || "").toLowerCase().trim();
+  if (!t) return false;
+  return /^(n[ãa]o|depois|agora n[ãa]o|deixa|vou pensar|talvez)\b/.test(t)
+    || /\b(depois eu (te )?falo|outra hora|n[ãa]o quero agendar|n[ãa]o agora)\b/.test(t);
+}
+
+function detectCidadeEscolhida(text: string): string | null {
+  const t = String(text || "").toLowerCase();
+  if (!t) return null;
+  if (/\bosasco\b/.test(t)) return "osasco";
+  if (/\bcarapicu[ií]ba\b|\bcarapic[uú]iba\b/.test(t)) return "carapicuiba";
+  if (/\bitapevi\b/.test(t)) return "itapevi";
+  if (/\bbarueri\b/.test(t)) return "barueri";
+  return null;
+}
+
+function detectLojaEscolhida(text: string, lojaNomes: string[]): string | null {
+  const t = String(text || "").toLowerCase();
+  if (!t) return null;
+  // Tokens marcantes de cada loja
+  const tokens: Record<string, RegExp[]> = {
+    "DINIZ ANTONIO AGU": [/\bant[oô]nio\s+ag[uú]\b/, /\bantonio\s+agu\b/, /\bag[uú]\b/],
+    "DINIZ PRIMITIVA I": [/\bprimitiva\s*(1|i|um|uma|primeira)\b/],
+    "DINIZ PRIMITIVA II": [/\bprimitiva\s*(2|ii|dois|duas|segunda)\b/],
+    "DINIZ STO ANTONIO": [/\bst[oa]\.?\s*ant[oô]nio\b/, /\bsanto\s+ant[oô]nio\b/],
+    "DINIZ SUPER SHOPPING": [/\bsuper[\s-]*shopping\b/, /\bsupershopping\b/],
+    "DINIZ UNIÃO": [/\buni[ãa]o\b/],
+    "DINIZ CARAPICUIBA": [/\bcarapicu[ií]ba\b/],
+    "DINIZ ITAPEVI": [/\bitapevi\b/],
+    "DINIZ BARUERI": [/\bbarueri\b/, /\bvinte\s*e\s*seis\b/, /\b26\s*de\s*mar[cç]o\b/],
+  };
+  for (const nome of lojaNomes) {
+    const pats = tokens[nome] || [];
+    if (pats.some((re) => re.test(t))) return nome;
+  }
+  return null;
+}
+
+function fmtLojaLinha(loja: any): string {
+  const nome = loja?.nome_loja || "";
+  const end = (loja?.endereco || "").toString().trim();
+  return end ? `🏬 *${nome}* — ${end}` : `🏬 *${nome}*`;
+}
+
 // Regex para detectar mensagens "estou analisando / recebi sua receita"
 const MSG_ANALISANDO_RE = /recebi sua receita|peguei a imagem|t[oôó]\s*lendo|estou analisando|analisando aqui/i;
 
