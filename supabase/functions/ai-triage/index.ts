@@ -4933,6 +4933,31 @@ async function runConsultarLentesEstimativa(
   contatoId?: string,
   atendimentoId?: string,
 ): Promise<{ resposta: string }> {
+  // Defesa: bloqueia estimativa enquanto cliente não confirmou a receita lida via OCR.
+  if (contatoId) {
+    try {
+      const { data: cRx } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+      const cMeta = (cRx?.metadata as Record<string, any>) || {};
+      if (isReceitaPending(cMeta)) {
+        const lastRx = Array.isArray(cMeta.receitas) && cMeta.receitas.length > 0
+          ? cMeta.receitas[cMeta.receitas.length - 1]
+          : (cMeta.ultima_receita || null);
+        if (atendimentoId) {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "consultar_lentes_bloqueado_pendente_confirmacao",
+            descricao: `Tool consultar_lentes_estimativa bloqueada — receita aguardando confirmação`,
+            metadata: { tool: "consultar_lentes_estimativa" },
+            referencia_tipo: "atendimento", referencia_id: atendimentoId,
+          });
+        }
+        const respPend = lastRx
+          ? buildMsgConfirmarReceita(lastRx, false)
+          : "Antes de te passar as faixas, preciso que você confirme os valores que li da receita 😊";
+        return { resposta: respPend };
+      }
+    } catch (_) { /* noop */ }
+  }
   const rxType = args?.rx_type === "progressive" ? "progressive" : "single_vision";
   const sphereCandidates = [args?.sphere_od, args?.sphere_oe].filter(
     (v): v is number => typeof v === "number" && !Number.isNaN(v),
