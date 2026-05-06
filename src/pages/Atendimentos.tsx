@@ -183,8 +183,6 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Realtime subscription
-  useEffect(() => {
   // Realtime subscription (INSERT + UPDATE para refletir edições/exclusões)
   useEffect(() => {
     const channel = supabase
