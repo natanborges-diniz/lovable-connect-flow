@@ -2684,6 +2684,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // ignorou e rodou consultar_lentes de novo trazendo Eyezen/ZEISS R$1985-2190
     // em vez de recapitular DNZ/DMAX/HOYA do orçamento humano anterior).
     let forceResponderTool = false;
+    let forceConsultarLentesTool = false; // Fase 3: forçar tool_choice quando região responde orçamento prometido
     if (referenciaOpcao.test(lastInboundText) && ultimoOutboundComOrcamento) {
       messages.push({
         role: "system",
