@@ -113,3 +113,6 @@ Travou em "posso te mostrar uma base?" / auto-chain não disparou — ambos corr
 - Watchdog ignora outbounds humanas.
 - Loop detector só age com ≥3 outbound recentes.
 - Eventos detalhados em `eventos_crm` para auditoria de TODAS as fases.
+
+### Franciana 2026-05-06 (forced retry pulava confirmação)
+Cliente mandou nova receita; modelo não chamou `interpretar_receita` no 1º turno e caiu no FORCED RETRY (bloco 9.4). Esse ramo salvava receita mas devolvia mensagem hardcoded "Prontinho, consegui ler... Em qual região?" — pulando a confirmação dos valores que o caminho normal já fazia. **Fix:** ramo de sucesso do retry agora marca `metadata.receita_confirmacao.pending=true`, insere evento `receita_confirmacao_solicitada` (source=`ocr_forced_retry`) e usa `buildMsgConfirmarReceita(...)`. Comportamento idêntico ao caminho normal.
