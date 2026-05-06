@@ -2806,15 +2806,43 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         }
       }
     } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita" || forcedIntent.tool === "responder_pedindo_receita")) {
+      const isRegionTrigger = /respondeu regi[aã]o/i.test(forcedIntent.reason || "");
       const hint = forcedIntent.tool === "consultar_lentes"
-        ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere."
+        ? (isRegionTrigger
+            ? "[SISTEMA: REGIÃO RECEBIDA APÓS ORÇAMENTO PROMETIDO] Cliente acabou de responder a região/bairro que VOCÊ pediu na mensagem anterior, e há receita salva. AÇÃO OBRIGATÓRIA AGORA (NÃO ADIE): chame consultar_lentes IMEDIATAMENTE com a receita mais recente. PROIBIDO mandar 'obrigado pela região, já vou separar', 'preciso confirmar na loja', 'vou verificar com um especialista' ou qualquer mensagem de espera — o orçamento sai NESTE turno, junto com a indicação da loja mais próxima da região informada. PROIBIDO escalar pra humano."
+            : "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere.")
         : forcedIntent.tool === "consultar_lentes_contato"
         ? "[SISTEMA: INTENT CLARO — LENTES DE CONTATO] Cliente pediu orçamento de LENTES DE CONTATO e há receita salva. Use consultar_lentes_contato AGORA (NÃO consultar_lentes — esse é para óculos), apresente 2-3 opções com descartes VARIADOS (diária + quinzenal/mensal), priorize DNZ, e termine perguntando a região. PROIBIDO repetir 'posso seguir por dois caminhos'. PROIBIDO escalar para humano."
         : forcedIntent.tool === "interpretar_receita"
         ? "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há imagem pendente. Use interpretar_receita AGORA — não pergunte se pode analisar."
         : `[SISTEMA: INTENT CLARO — ORÇAMENTO SEM RECEITA UTILIZÁVEL] Cliente pediu orçamento ${isLCContextGlobal ? "de LENTES DE CONTATO" : ""} mas não há receita válida salva. PROIBIDO escalar. PROIBIDO chamar consultar_lentes/consultar_lentes_contato. AÇÃO: use *responder* pedindo nova foto da receita ${isLCContextGlobal ? "de lentes de contato" : ""} mais nítida E ofereça clínica parceira: "Se preferir, posso indicar uma clínica parceira aqui pertinho — o valor do exame vira desconto." NÃO diga que está montando opções.`;
       messages.push({ role: "system", content: hint });
-      console.log(`[INTENT-FORCE] Hinting ${forcedIntent.tool} (no loop, but clear intent)`);
+      console.log(`[INTENT-FORCE] Hinting ${forcedIntent.tool} (no loop, but clear intent)${isRegionTrigger ? " [REGION-TRIGGER]" : ""}`);
+
+      // ── FASE 3: Re-disparar tool após resposta de região ──
+      // Quando o trigger é resposta de região, força tool_choice=consultar_lentes no gateway
+      // pra impedir o LLM de ignorar o hint e devolver texto puro
+      // (ex.: "obrigado pela região, vou separar"). Bloqueia forceResponderTool — preço prevalece.
+      if (isRegionTrigger && forcedIntent.tool === "consultar_lentes") {
+        forceConsultarLentesTool = true;
+        forceResponderTool = false;
+        try {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "regiao_pos_orcamento_forcando_tool",
+            descricao: "Cliente respondeu região após orçamento prometido — forçando tool_choice=consultar_lentes",
+            metadata: {
+              tool: "consultar_lentes",
+              reason: forcedIntent.reason,
+              last_inbound: lastInboundText.substring(0, 200),
+              last_outbound: lastOutboundForIntent.substring(0, 200),
+            },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+        } catch (e) { console.warn("[REGION-TRIGGER] failed to log event", e); }
+        console.log(`[REGION-TRIGGER] Forçando tool_choice=consultar_lentes`);
+      }
     }
 
     // ── 7. CALL LOVABLE AI GATEWAY (gpt-5) ──
