@@ -227,8 +227,11 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         let mimeType: string | undefined;
         if (attachment) {
           setUploadingAttachment(true);
+          const { data: userData } = await supabase.auth.getUser();
+          const uid = userData?.user?.id;
+          if (!uid) throw new Error("Sessão expirada. Faça login novamente.");
           const ext = attachment.name.split(".").pop()?.toLowerCase() || "jpg";
-          const path = `outbound/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const path = `${uid}/atendimentos/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
           const { error: upErr } = await supabase.storage
             .from("mensagens-anexos")
             .upload(path, attachment, { contentType: attachment.type, upsert: false });
