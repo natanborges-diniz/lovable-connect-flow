@@ -4666,6 +4666,28 @@ async function runConsultarLentes(
   const { data: contatoRx } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
   const contatoRxMeta = (contatoRx?.metadata as Record<string, any>) || {};
 
+  // Defesa: bloqueia cotação enquanto cliente não confirmou a receita lida via OCR.
+  if (isReceitaPending(contatoRxMeta)) {
+    const lastRx = Array.isArray(contatoRxMeta.receitas) && contatoRxMeta.receitas.length > 0
+      ? contatoRxMeta.receitas[contatoRxMeta.receitas.length - 1]
+      : (contatoRxMeta.ultima_receita || null);
+    try {
+      if (atendimentoId) {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consultar_lentes_bloqueado_pendente_confirmacao",
+          descricao: `Tool consultar_lentes bloqueada — receita aguardando confirmação do cliente`,
+          metadata: { tool: "consultar_lentes", rx_label: contatoRxMeta.receita_confirmacao?.rx_label },
+          referencia_tipo: "atendimento", referencia_id: atendimentoId,
+        });
+      }
+    } catch (_) { /* noop */ }
+    const respPend = lastRx
+      ? buildMsgConfirmarReceita(lastRx, false)
+      : "Antes de te passar as opções, preciso que você confirme os valores que li da sua receita 😊";
+    return { resposta: respPend };
+  }
+
   let allRx: any[] = [];
   if (Array.isArray(contatoRxMeta.receitas) && contatoRxMeta.receitas.length > 0) {
     allRx = contatoRxMeta.receitas;
