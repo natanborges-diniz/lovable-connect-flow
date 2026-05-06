@@ -85,3 +85,15 @@ Operador mandou às 16:48 três marcas (DNZ HDI / DMAX BlueGuard / HOYA Hi-Visio
 **Gap operacional pendente** (não corrigido em código): popular `pricing_table_lentes` com DMAX BlueGuard 1.60 single_vision, HOYA Hi-Vision LongLife 1.67, e ao menos 1 fotossensível Transitions entry. Sem isso operadores continuarão citando marcas que a tool não conhece.
 
 **Recuperação Paulo:** atendimento `26464d89` — operador enviou DNZ HDI R$520 + DNZ Free Form R$690 + esclareceu fotossensível, marcado modo=humano. Auditoria em `eventos_crm` (`recuperacao_manual_lentes`).
+
+### Cleber 2026-05-06 (atendimento 7e7c5bf9) — gap de catálogo Hoya + zero-linhas silencioso + 2 fallbacks idênticos
+Receita lida OK (OD +4.25/-1.25 Add+3, OE +5.50/-4.25 Add+3 — multifocal, hipermetrópico, cilindro alto OE). IA prometeu "já vou separar opções", pediu região, recebeu "Osasco, Vila Ayrosa" → respondeu 3× evasivas ("preciso confirmar na loja", "valores presenciais na Antônio Agú", "vou te mostrar 2-3 alternativas"), depois 2× "Conta pra mim com mais detalhes" idênticas, então escalou.
+
+**Causa raiz:** `pricing_table_lentes` não tem nenhuma linha multifocal Hoya/DNZ/DMAX que cubra simultaneamente esf +5.50 E cil -4.25 (combinação extrema). `runConsultarLentes` retornou zero, caiu no template "preciso confirmar a disponibilidade direto na loja" — mantém engajamento mas não entrega valor.
+
+**Correções aplicadas:**
+1. **Reforma Hoya Abr/2025 aplicada** — 857 linhas (Nulux iD, MyStyle, MySelf, LifeStyle 4/4i, Maxxee, Sportive, Surfaçadas + Prontas), preservando Hoyalux D+. Cobre cilindros até -6.00 nas linhas individuais, mas ainda não cobre a combinação esf+5.5 cil-4.25 multifocal — gap real do fabricante.
+2. **`runConsultarLentes` zero-linhas → fallback automático para `runConsultarLentesEstimativa`** (`ai-triage/index.ts` ~linha 4281). Em vez de cair direto no "confirmar na loja", roda a estimativa com tipo+esférico (sem cilindro), devolve faixas Econ/Inter/Premium prefixadas com "Pra esse grau específico (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço". Loga `eventos_crm` tipo `consultar_lentes_zero_linhas` pra auditoria.
+3. **`pickFallback` checagem ESTRITA de identidade exata nas últimas 3 outbounds** — antes da checagem por similaridade 0.6. Se a IA mandou exatamente a mesma frase do pool, escala imediatamente. Resolve o caso 2× "Conta pra mim..." idênticas que escapou da similaridade.
+
+**Pendente:** auto-disparar `consultar_lentes` no turno seguinte quando IA prometeu orçamento ("já vou separar", "vou te mostrar opções") e o turno seguinte é resposta de região — hoje detector "região após orçamento" só reage à última outbound da IA pedindo região, promessa-sem-pergunta passa batido.
