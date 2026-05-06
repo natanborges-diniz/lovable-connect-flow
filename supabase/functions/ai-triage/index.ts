@@ -4000,6 +4000,82 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // ── FASE 4: ANTI-LOOP ENDURECIDO PÓS-LLM ──
+    // Compara a resposta gerada com a última outbound usando Jaccard de tokens >3 chars.
+    // Se sim > 0.80, escala IMEDIATAMENTE pra humano (handoff <30s, sem esperar 5min do watchdog).
+    //
+    // GUARDRAILS (só dispara quando faz sentido):
+    //  G1. Não roda se a resposta veio de tool determinística (consultar_lentes, agendar_visita,
+    //      interpretar_receita, despedida) — esses templates podem repetir legitimamente
+    //      (ex.: orçamento da MESMA receita).
+    //  G2. Não roda se já é uma escalada / fora-horário / mensagem deterministic (já saíram
+    //      por outros caminhos antes deste ponto).
+    //  G3. Não roda na 1ª interação (inboundCount <= 1) — saudação tem variantes parecidas
+    //      e não é loop real.
+    //  G4. Já houve retry intra-turno (bypass via metadata.fase4_retry)? Escala direto.
+    //  G5. Última outbound humana (não-IA)? Pula — humano pode repetir intencionalmente.
+    try {
+      const _toolNamesPhase4: string[] = Array.isArray(toolCalls)
+        ? toolCalls.map((t: any) => t?.function?.name).filter(Boolean)
+        : [];
+      const _toolDeterministica = _toolNamesPhase4.some((n) =>
+        ["consultar_lentes", "consultar_lentes_contato", "consultar_lentes_estimativa",
+         "agendar_visita", "reagendar_visita", "interpretar_receita"].includes(n)
+      );
+      const _isEscaladaJa = !!precisa_humano || validatorFlags.includes("escalada_fora_horario");
+      const lastOutboundPhase4 = (recentOutbound || []).slice(-1)[0] || "";
+      const respNormPhase4 = norm(String(resposta || ""));
+      const lastOutNormPhase4 = norm(lastOutboundPhase4);
+      const podeRodarPhase4 =
+        !_toolDeterministica &&
+        !_isEscaladaJa &&
+        inboundCount > 1 &&
+        respNormPhase4.length > 20 &&
+        lastOutNormPhase4.length > 20;
+
+      if (podeRodarPhase4) {
+        const simPhase4 = computeSimilarity(respNormPhase4, lastOutNormPhase4);
+        if (simPhase4 > 0.80) {
+          console.log(`[PHASE4-LOOP] Resposta gerada com sim=${(simPhase4 * 100).toFixed(0)}% vs última outbound — escalando imediatamente`);
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "loop_ia_pos_llm_jaccard",
+            descricao: `Anti-loop pós-LLM: resposta nova com similaridade ${(simPhase4 * 100).toFixed(0)}% — handoff imediato`,
+            metadata: {
+              similarity: simPhase4,
+              tools_chamadas: _toolNamesPhase4,
+              resposta_proposta: String(resposta || "").substring(0, 300),
+              ultima_outbound: lastOutboundPhase4.substring(0, 300),
+            },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+
+          await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+
+          const _np4 = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+          const escMsg4 = isHorarioHumano()
+            ? "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊"
+            : mensagemEscaladaForaHorario(_np4);
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, escMsg4);
+
+          return jsonResponse({
+            status: "ok",
+            tools_used: ["loop_pos_llm_escalation"],
+            intencao: "outro",
+            precisa_humano: true,
+            pipeline_coluna_sugerida: "Novo Contato",
+            modo: "humano",
+            similarity: simPhase4,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[PHASE4-LOOP] guardrail falhou — seguindo com envio normal", e);
+    }
+
     await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
 
     // ── 10.05. DETECTOR PÓS-LLM: agendamento prometido sem tool disparada ──
