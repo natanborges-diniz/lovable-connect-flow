@@ -3096,13 +3096,13 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // ── QUOTE ENGINE: triggered by client interest ──
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
-        const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args);
+        const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args, atendimento_id);
         resposta = quoteResult.resposta;
       } else if (fn === "consultar_lentes_estimativa") {
         // ── QUOTE ESTIMATE: receita parcial, nunca bloquear orçamento ──
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
-        const estResult = await runConsultarLentesEstimativa(supabase, args || {});
+        const estResult = await runConsultarLentesEstimativa(supabase, args || {}, contatoId, atendimento_id);
         resposta = estResult.resposta;
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
         // (Guardrail antigo "LC não exige visita" foi removido: catálogo de LC está
@@ -4211,6 +4211,7 @@ async function runConsultarLentes(
   contatoId: string,
   recentOutbound: string[],
   args: any,
+  atendimentoId?: string,
 ): Promise<{ resposta: string }> {
   const { data: contatoRx } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
   const contatoRxMeta = (contatoRx?.metadata as Record<string, any>) || {};
@@ -4289,17 +4290,29 @@ async function runConsultarLentes(
   const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(20);
 
   if (!lenses || lenses.length === 0) {
-    console.log(`[QUOTE] No matching lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
+    const filtrosAplicados = {
+      rx_type: rxType,
+      sphere: worstSphere,
+      cylinder: worstCylinder,
+      add: maxAdd,
+      filtro_blue: !!args?.filtro_blue,
+      filtro_photo: !!args?.filtro_photo,
+      preferencia_marca: args?.preferencia_marca || null,
+      receita_label: rxMeta?.label || null,
+    };
+    console.log(`[QUOTE-ZERO] ${JSON.stringify({ tool: "consultar_lentes", contato_id: contatoId, atendimento_id: atendimentoId, ...filtrosAplicados })}`);
 
     // Loga evento explícito pra auditoria (caso Cleber 2026-05-06 — gap real do catálogo).
     try {
       await supabase.from("eventos_crm").insert({
         contato_id: contatoId,
-        tipo: "consultar_lentes_zero_linhas",
+        tipo: "consultar_lentes_zero_resultados",
         descricao: `consultar_lentes não encontrou lentes para ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd ?? "—"}`,
-        metadata: { rx_type: rxType, sphere: worstSphere, cylinder: worstCylinder, add: maxAdd, filtro_blue: !!args?.filtro_blue, filtro_photo: !!args?.filtro_photo },
+        metadata: { tool: "consultar_lentes", ...filtrosAplicados },
+        referencia_tipo: atendimentoId ? "atendimento" : null,
+        referencia_id: atendimentoId || null,
       });
-    } catch (e) { console.warn("[QUOTE] failed to log consultar_lentes_zero_linhas", e); }
+    } catch (e) { console.warn("[QUOTE] failed to log consultar_lentes_zero_resultados", e); }
 
     // FALLBACK AUTOMÁTICO PRA ESTIMATIVA — caso Cleber 2026-05-06.
     // Catálogo não cobre a combinação exata? Em vez de empurrar pra loja sem dar valor,
@@ -4314,9 +4327,19 @@ async function runConsultarLentes(
           // NÃO passa cylinder_hint — a estimativa usa default conservador e procura faixa ampla.
           filtro_blue: args?.filtro_blue === true ? true : undefined,
           filtro_photo: args?.filtro_photo === true ? true : undefined,
-        });
+        }, contatoId, atendimentoId);
         if (est?.resposta && !/preciso confirmar a disponibilidade/i.test(est.resposta)) {
           console.log(`[QUOTE] zero-linhas → fallback estimativa OK`);
+          try {
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "consultar_lentes_fallback_estimativa_acionado",
+              descricao: `Fallback acionado: catálogo zerou para ${rxType} sphere=${worstSphere} cyl=${worstCylinder}, estimativa cobriu`,
+              metadata: { origem: "consultar_lentes_zero", ...filtrosAplicados },
+              referencia_tipo: atendimentoId ? "atendimento" : null,
+              referencia_id: atendimentoId || null,
+            });
+          } catch (e) { console.warn("[QUOTE] failed to log fallback_acionado", e); }
           // Marca explicitamente que foi estimativa por gap, mantém pergunta de região no fim.
           const prefix = `Pra esse grau específico (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
           return { resposta: prefix + est.resposta };
@@ -4395,6 +4418,8 @@ async function runConsultarLentesEstimativa(
     filtro_blue?: boolean;
     filtro_photo?: boolean;
   },
+  contatoId?: string,
+  atendimentoId?: string,
 ): Promise<{ resposta: string }> {
   const rxType = args?.rx_type === "progressive" ? "progressive" : "single_vision";
   const sphereCandidates = [args?.sphere_od, args?.sphere_oe].filter(
@@ -4444,7 +4469,27 @@ async function runConsultarLentesEstimativa(
   }
 
   if (collected.length === 0) {
-    console.log(`[QUOTE-EST] Sem matches para sphere=${worstSphere} cyl=${worstCyl} type=${rxType}`);
+    const filtrosAplicados = {
+      rx_type: rxType,
+      sphere: worstSphere,
+      cylinder: worstCyl,
+      adds_tested: addsToTry,
+      filtro_blue: !!args?.filtro_blue,
+      filtro_photo: !!args?.filtro_photo,
+    };
+    console.log(`[QUOTE-ZERO] ${JSON.stringify({ tool: "consultar_lentes_estimativa", contato_id: contatoId, atendimento_id: atendimentoId, ...filtrosAplicados })}`);
+    if (contatoId) {
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consultar_lentes_zero_resultados",
+          descricao: `consultar_lentes_estimativa não encontrou faixa para ${rxType} sphere=${worstSphere} cyl=${worstCyl}`,
+          metadata: { tool: "consultar_lentes_estimativa", ...filtrosAplicados },
+          referencia_tipo: atendimentoId ? "atendimento" : null,
+          referencia_id: atendimentoId || null,
+        });
+      } catch (e) { console.warn("[QUOTE-EST] failed to log zero_resultados", e); }
+    }
     return {
       resposta:
         "Pra esse grau específico preciso confirmar a disponibilidade direto na loja. Em qual região/bairro você está? Já te indico a unidade mais próxima 😊",
