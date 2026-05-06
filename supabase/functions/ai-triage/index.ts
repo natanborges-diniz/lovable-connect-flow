@@ -2005,6 +2005,84 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       console.log(`[RX-VALID] Receita salva existe mas é INVÁLIDA (rx_type/eyes vazios) — tratando como sem receita`);
     }
 
+    // ── 4.5. PRIORIDADE: COMPROVANTE DE PAGAMENTO ──
+    // Se a imagem inbound chegou logo após o envio de um link de pagamento,
+    // tratar como COMPROVANTE — não como receita ocular. Sem isso, o motor
+    // dispara interpretar_receita em comprovantes e a conversa morre.
+    // Caso Ivani Mendes Ferreira (06/05): link pago → IA respondeu "Recebi sua receita".
+    if (lastIsImage) {
+      const PAYMENT_TEMPLATE_RE = /\[Template:\s*link_pagamento[^\]]*\]/i;
+      const recentPaymentLink = (recentOutbound || []).slice(-10).some((m: any) => PAYMENT_TEMPLATE_RE.test(String(m || "")));
+      let hasOpenPaymentSolicitation = false;
+      if (!recentPaymentLink) {
+        try {
+          const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+          const { data: paySols } = await supabase
+            .from("solicitacoes")
+            .select("id, metadata, status, created_at")
+            .eq("contato_id", contatoId)
+            .eq("tipo", "link_pagamento")
+            .gte("created_at", since)
+            .limit(5);
+          hasOpenPaymentSolicitation = (paySols || []).some((s: any) => {
+            const meta = s.metadata || {};
+            return !meta.comprovante_recebido_at && s.status !== "concluida" && s.status !== "cancelada";
+          });
+        } catch (e) {
+          console.error("[COMPROVANTE] solicitacoes lookup failed:", e);
+        }
+      }
+      const isPaymentReceiptContext = recentPaymentLink || hasOpenPaymentSolicitation;
+      if (isPaymentReceiptContext) {
+        console.log("[COMPROVANTE] Imagem após link de pagamento — tratando como comprovante, não receita");
+        const respostaComp = "Recebi seu comprovante 🙌 Vou validar com a equipe e te confirmo já já. Qualquer coisa, é só me chamar por aqui.";
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respostaComp);
+        // Escala para humano (Financeiro valida TID/NSU manualmente)
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+        // Marca a solicitação de pagamento como tendo recebido comprovante
+        try {
+          const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+          const { data: paySols } = await supabase
+            .from("solicitacoes")
+            .select("id, metadata")
+            .eq("contato_id", contatoId)
+            .eq("tipo", "link_pagamento")
+            .gte("created_at", since)
+            .order("created_at", { ascending: false })
+            .limit(1);
+          const sol = paySols?.[0];
+          if (sol) {
+            const newMeta = { ...(sol.metadata || {}), comprovante_recebido_at: new Date().toISOString() };
+            await supabase.from("solicitacoes").update({ metadata: newMeta }).eq("id", sol.id);
+          }
+        } catch (e) {
+          console.error("[COMPROVANTE] failed to mark solicitacao:", e);
+        }
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "comprovante_pagamento_recebido",
+          descricao: "Cliente enviou imagem após link de pagamento — escalado para validação manual",
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+          metadata: { trigger: recentPaymentLink ? "recent_template" : "open_solicitation" },
+        }).catch(() => { /* noop */ });
+        // Limpa lock de IA e retorna
+        try {
+          const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+          delete m.ia_lock;
+          await supabase.from("atendimentos").update({ metadata: m }).eq("id", atendimento_id);
+        } catch (_) { /* noop */ }
+        return jsonResponse({
+          status: "ok",
+          tools_used: ["comprovante_pagamento"],
+          intencao: "comprovante_pagamento",
+          precisa_humano: true,
+          modo: "humano",
+          validator_flags: ["payment_receipt_short_circuit"],
+        });
+      }
+    }
+
     // ── 5. BUILD CONTEXT ──
     const sentTopics = extractSentTopics(recentOutbound);
 
