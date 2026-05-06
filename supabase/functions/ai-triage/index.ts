@@ -3310,6 +3310,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                   rx_label: rxLabel,
                   asked_at: new Date().toISOString(),
                   correction_count: 0,
+                  fora_da_faixa: isReceitaForaDaFaixa(rxWithLabel),
                 },
               },
             }).eq("id", contatoId);
