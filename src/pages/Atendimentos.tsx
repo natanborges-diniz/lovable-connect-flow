@@ -170,6 +170,10 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [janelaFechadaHoras, setJanelaFechadaHoras] = useState(0);
   const [reconectarOpen, setReconectarOpen] = useState(false);
   const [reconectarDefaultTemplate, setReconectarDefaultTemplate] = useState<string | undefined>(undefined);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
