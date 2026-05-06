@@ -4081,18 +4081,38 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                   referencia_tipo: "atendimento", referencia_id: atendimento_id,
                 });
 
-                const sphereTxt = (eye: any) => typeof eye?.sphere === "number" ? `esf ${eye.sphere > 0 ? "+" : ""}${eye.sphere.toFixed(2)}` : "";
-                const cylTxt = (eye: any) => typeof eye?.cylinder === "number" && eye.cylinder !== 0 ? ` cil ${eye.cylinder.toFixed(2)}` : "";
-                const odSummary = `OD ${sphereTxt(od)}${cylTxt(od)}`.trim();
-                const oeSummary = `OE ${sphereTxt(oe)}${cylTxt(oe)}`.trim();
-                const ctxLC = isLCContextGlobal ? "lentes de contato" : "lentes";
+                // Espelha caminho normal: pede confirmação ao cliente antes de seguir.
+                try {
+                  const { data: c3 } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+                  const m3 = (c3?.metadata as Record<string, any>) || {};
+                  await supabase.from("contatos").update({
+                    metadata: {
+                      ...m3,
+                      receita_confirmacao: {
+                        pending: true,
+                        rx_label: rxLabel,
+                        asked_at: new Date().toISOString(),
+                        correction_count: 0,
+                      },
+                    },
+                  }).eq("id", contatoId);
+                } catch (e) { console.warn("[FORCE-INTERPRETAR][RX-CONFIRM] failed to mark pending", e); }
 
-                resposta = `Prontinho, consegui ler sua receita 😊\n${odSummary}\n${oeSummary}\n\nJá vou separar opções de ${ctxLC} compatíveis. Em qual região/bairro você está pra eu indicar a loja mais próxima?`;
+                await supabase.from("eventos_crm").insert({
+                  contato_id: contatoId,
+                  tipo: "receita_confirmacao_solicitada",
+                  descricao: `Solicitando confirmação cliente (forced retry). ${rxType} OD esf=${od.sphere ?? "?"} OE esf=${oe.sphere ?? "?"}`,
+                  metadata: { rx_label: rxLabel, source: "ocr_forced_retry" },
+                  referencia_tipo: "atendimento", referencia_id: atendimento_id,
+                });
+
+                resposta = buildMsgConfirmarReceita({ ...rxData, label: rxLabel }, false);
                 intencao = isLCContextGlobal ? "orcamento_lc" : "orcamento";
                 pipeline_coluna = "Orçamento";
                 precisa_humano = false;
                 validatorFlags.push("forced_interpretar_receita_retry_ok");
-                console.log(`[FORCE-INTERPRETAR] Receita salva via retry (lc=${isLCContextGlobal})`);
+                validatorFlags.push("receita_confirmacao_solicitada");
+                console.log(`[FORCE-INTERPRETAR] Receita salva via retry (lc=${isLCContextGlobal}) — pedindo confirmação`);
               } else {
                 resposta = "Consegui abrir sua receita, mas não estou conseguindo ler os valores com clareza 😅 Pode me passar por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? Assim já te passo as opções certinhas.";
                 intencao = "receita_oftalmologica";
