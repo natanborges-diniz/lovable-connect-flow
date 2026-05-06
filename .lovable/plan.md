@@ -1,66 +1,81 @@
-# Anexo de imagem no card de conversa do cliente
+## Editar e excluir mensagens enviadas
 
-## Objetivo
+Habilita o autor de uma mensagem a **editar** ou **excluir** o que enviou, em três escopos:
 
-Permitir que o operador envie **fotos** ao cliente direto do card de conversa (`/crm/conversas` → `src/pages/Atendimentos.tsx`), com legenda opcional, usando WhatsApp Meta Official.
+1. **Conversa com cliente** (CRM `/crm/conversas` → `mensagens`)
+2. **Mensagens internas 1:1** (`/mensagens` → `mensagens_internas`)
+3. **Demandas de loja** (thread interno → `demanda_mensagens`)
 
-## Estado atual
+Permissão: **somente o autor** da mensagem. Admin não entra nessa entrega (pode entrar depois se necessário).
 
-- Composer só tem textarea + botão Enviar — **não há input de anexo**.
-- A UI já **renderiza** imagens recebidas (linhas 434–462): lê `metadata.media_url` + `tipo_conteudo='image'`.
-- Edge function `send-whatsapp` só aceita `{ atendimento_id, texto }` e chama Meta com `type: "text"`.
-- Bucket `mensagens-anexos` (público) e `whatsapp-media` (público) já existem — usaremos `mensagens-anexos`.
+## Regras de produto
 
-## Mudanças
+- **Janela de edição/exclusão**: 15 minutos após o envio. Depois disso, mensagem fica imutável (evita reescrever histórico de auditoria).
+- **Editar**: substitui o conteúdo, marca `editada_at` e guarda o conteúdo anterior em `metadata.historico_edicoes[]`. UI mostra tag "(editada)" com tooltip do horário.
+- **Excluir**: soft-delete. Marca `deletada_at` + `deletada_por`. UI renderiza "🚫 Mensagem apagada" no lugar do conteúdo. Não apaga o registro do banco (auditoria).
+- **WhatsApp (cliente)**: a Meta **não permite apagar/editar** mensagem já entregue ao cliente via API. Então:
+  - Edição/exclusão **só afeta o histórico interno** (CRM).
+  - Aviso visual no menu: "Isso só corrige o registro interno. O cliente continua vendo a mensagem original no WhatsApp."
+  - Para mensagens com `direcao='inbound'` (recebidas do cliente) → **bloqueado** (operador não edita o que o cliente disse).
+- **Anexos**: excluir mensagem com imagem mantém o arquivo no Storage (não removemos para não quebrar links em outros lugares). Edição não permite trocar anexo, só legenda/texto.
 
-### 1. Composer com anexo (`src/pages/Atendimentos.tsx`)
+## Mudanças no banco (1 migration)
 
-- Estado novo: `attachment: File | null`, `attachmentPreview: string | null`, `uploadingAttachment: boolean`.
-- Botão **📎 Paperclip** ao lado do textarea (visível só quando `canal === 'whatsapp'` e `msgDirecao === 'outbound'`).
-- `<input type="file" accept="image/jpeg,image/png,image/webp" hidden ref={...}>` acionado pelo botão.
-- Validações no client: tipo de imagem permitido, tamanho ≤ 5MB (limite prático Meta = 5MB para imagem).
-- Mini-preview acima do textarea com a thumb e um "X" para cancelar; o textarea vira "legenda (opcional)".
-- `handleSend` ganha branch:
-  - Se há `attachment`: faz `supabase.storage.from('mensagens-anexos').upload(...)` em `outbound/{atendimento_id}/{timestamp}-{nome}`, pega `getPublicUrl`, e invoca `send-whatsapp` com `{ atendimento_id, media_url, mime_type, caption: texto || undefined, remetente_nome }` (texto fica opcional).
-  - Mantém intercept atual de `outside_24h_window` (não muda).
-- Após sucesso: limpa `attachment`, `attachmentPreview`, `msgText`.
+Adicionar colunas em `mensagens`, `mensagens_internas` e `demanda_mensagens`:
 
-### 2. Edge function `send-whatsapp` (`supabase/functions/send-whatsapp/index.ts`)
+- `editada_at timestamptz null`
+- `deletada_at timestamptz null`
+- `deletada_por uuid null`
+- `metadata.historico_edicoes` (jsonb array já existente em `metadata` nas três tabelas — apenas convenção, sem schema novo)
 
-- Aceitar payload estendido:
-  ```ts
-  { atendimento_id, texto?, media_url?, mime_type?, caption?, remetente_nome? }
-  ```
-- Validação: exige `texto` **ou** `media_url`. Se ambos vierem, `media_url` ganha e `texto`/`caption` viram caption.
-- Mantém guard de janela 24h.
-- Branch novo `sendImageViaMeta(phone, mediaUrl, caption?)` chamando Graph API com:
-  ```json
-  { "type": "image", "image": { "link": "<url pública>", "caption": "<opcional>" } }
-  ```
-- Insere em `mensagens` com `tipo_conteudo='image'`, `conteudo = caption || '[image]'`, `metadata = { whatsapp_message_id, provedor, media_url, mime_type }` — formato compatível com o renderer existente.
+Em `mensagens_internas`, adicionar policy de UPDATE para o autor:
+```
+CREATE POLICY "Authors can edit/delete own messages"
+ON mensagens_internas FOR UPDATE TO authenticated
+USING (remetente_id = auth.uid())
+WITH CHECK (remetente_id = auth.uid());
+```
 
-### 3. Storage / RLS
+`mensagens` e `demanda_mensagens` já têm policy `authenticated ALL` permissiva — não precisa mexer.
 
-- Bucket `mensagens-anexos` já é público (Meta consegue baixar). Sem mudança de bucket.
-- Adicionar policy de **INSERT/SELECT** em `storage.objects` para `bucket_id = 'mensagens-anexos'` e `auth.role() = 'authenticated'` (verifico se já existe; se sim, pula). Migração via tool de migração caso falte.
+## UI — padrão único nos três componentes
 
-## Detalhes técnicos
+Em cada bolha de mensagem **outbound/própria** dentro da janela de 15min, aparece um menu de 3 pontinhos (`MoreVertical`) ao passar o mouse, com:
 
-- **Render**: o componente atual já trata `tipo_conteudo === 'image'` lendo `metadata.media_url`. Para outbound a mensagem aparecerá no lado direito automaticamente porque `direcao` continua sendo `outbound`.
-- **Limites Meta**: imagem JPEG/PNG ≤ 5MB, caption ≤ 1024 chars. UI valida ambos.
-- **WebP**: Meta aceita, mas alguns clientes WhatsApp renderizam mal — manter no `accept` mas avisar via toast se cair em fallback.
-- **Erros**: erros de upload/Meta exibem `toast.error` mantendo o anexo selecionado para retry.
-- **Não muda**: bridge interna (DemandaThreadView), receitas/IA, watchdogs.
+- **Editar** — abre o conteúdo no textarea com botões "Salvar" / "Cancelar".
+- **Excluir** — `AlertDialog` de confirmação ("Excluir esta mensagem? Em conversas com clientes, ele continuará vendo a original no WhatsApp.").
+
+Renderização:
+- `deletada_at != null` → bolha cinza claro com ícone 🚫 e texto "Mensagem apagada" (e quando for imagem, esconde a thumb).
+- `editada_at != null` → texto + chip discreto "editada" com tooltip mostrando `editada_at`.
+
+Arquivos tocados:
+- `src/pages/Atendimentos.tsx` — bolhas WhatsApp (linhas ~430-460 da renderização). Bloqueia menu quando `direcao === 'inbound'` ou fora da janela.
+- `src/pages/Mensagens.tsx` — bolhas do chat 1:1.
+- `src/components/atendimentos/DemandaThreadView.tsx` — bolhas do thread de demanda.
+
+Componente compartilhado novo: `src/components/shared/MessageActionsMenu.tsx` recebendo `{ messageId, autorId, createdAt, onEdit, onDelete, disabled }` para evitar duplicar a lógica de janela/owner nos três pontos.
+
+Hooks novos em `src/hooks/useAtendimentos.ts`, `useMensagensInternas.ts` e `useDemandas.ts`:
+- `useEditMensagem()` / `useDeleteMensagem()` — fazem UPDATE direto via supabase client (RLS já filtra por autor).
+- Cada update preenche `metadata.historico_edicoes` com `[{ at, conteudo_anterior }]` antes de gravar o novo `conteudo`.
+
+## Realtime
+
+Os três componentes já assinam mudanças nas tabelas. Adicionar listener `UPDATE` (além do `INSERT` atual) para refletir edição/exclusão em todos os clientes abertos. Garante a regra de registrar `.on(...)` antes do `.subscribe()`.
 
 ## Fora de escopo
 
-- Envio de PDF/áudio/vídeo (só imagem nesta entrega).
-- Múltiplas imagens por mensagem (1 por vez).
-- Compressão client-side (deixamos para próxima iteração se 5MB virar atrito).
+- Tentativa de delete via Meta WhatsApp API (não suportado em produção pela Cloud API).
+- Edição/exclusão por admin de mensagens de outros usuários.
+- Apagar arquivo do Storage ao excluir mensagem com anexo.
+- Editar/excluir mensagens da IA ou geradas por automação (nenhum operador é autor → menu não aparece).
 
 ## Validação
 
-1. Abrir um atendimento com janela 24h aberta, anexar JPG, enviar com e sem legenda → mensagem aparece no card e chega no WhatsApp.
-2. Anexar arquivo > 5MB → toast bloqueia antes do upload.
-3. Enviar fora da janela 24h → mantém comportamento atual de `JanelaFechadaDialog` (não tenta enviar mídia).
-4. Conferir que mensagem inserida tem `tipo_conteudo='image'` e renderiza com a thumb clicável (link no `metadata.media_url`).
+1. Em `/crm/conversas`, enviar texto, editar dentro de 1min → bolha mostra "(editada)", outros operadores veem update via realtime.
+2. Excluir após 5min → vira "🚫 Mensagem apagada".
+3. Tentar editar após 16min → menu não aparece.
+4. Mensagem `inbound` (cliente) → menu não aparece nunca.
+5. Em `/mensagens`, usuário B tenta editar mensagem do usuário A → RLS rejeita (verificar no console).
+6. Em demanda, excluir mensagem com anexo de imagem → texto somemenu  some, arquivo no Storage continua acessível por URL direta (esperado).
