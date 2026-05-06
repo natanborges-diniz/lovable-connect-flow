@@ -2066,14 +2066,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
         if (foraDaFaixa) {
           const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
-          let respFinal = MSG_ESCALADA_GRAU_FORA_FAIXA;
-          try {
-            if (typeof (globalThis as any).isHorarioHumano === "function" && !(globalThis as any).isHorarioHumano()) {
-              respFinal = (globalThis as any).mensagemEscaladaForaHorario(_np);
-            } else if (typeof isHorarioHumano === "function" && !isHorarioHumano()) {
-              respFinal = mensagemEscaladaForaHorario(_np);
-            }
-          } catch (_) { /* keep default */ }
+          const respFinal = isHorarioHumano() ? MSG_ESCALADA_GRAU_FORA_FAIXA : mensagemEscaladaForaHorario(_np);
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respFinal);
           await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
           await supabase.from("eventos_crm").insert({
