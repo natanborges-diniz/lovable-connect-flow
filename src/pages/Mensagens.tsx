@@ -5,6 +5,8 @@ import {
   useMensagensConversa,
   useEnviarMensagem,
   useMarcarLidas,
+  useEditMensagemInterna,
+  useDeleteMensagemInterna,
   type Conversa,
 } from "@/hooks/useMensagensInternas";
 import { useQuery } from "@tanstack/react-query";
@@ -14,12 +16,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Send, Plus, MessageCircle, Search } from "lucide-react";
+import { Send, Plus, MessageCircle, Search, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
+import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
+import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
+import { toast } from "sonner";
 
 export default function Mensagens() {
   const { user } = useAuth();
