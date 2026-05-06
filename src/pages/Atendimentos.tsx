@@ -6,7 +6,7 @@ import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
 import { JanelaFechadaDialog } from "@/components/atendimentos/JanelaFechadaDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
+import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem, useEditMensagem, useDeleteMensagem } from "@/hooks/useAtendimentos";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
 import { AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
@@ -19,7 +19,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon } from "lucide-react";
+import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban } from "lucide-react";
+import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
+import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -153,10 +155,15 @@ export default function Atendimentos() {
 function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange: (s: StatusAtendimento) => void }) {
   const { data: mensagens, refetch } = useMensagens(id);
   const createMensagem = useCreateMensagem();
+  const editMensagem = useEditMensagem();
+  const deleteMensagem = useDeleteMensagem();
   const { data: atendimentos } = useAtendimentos();
   const atendimento = atendimentos?.find((a: any) => a.id === id) as any;
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const uid = user?.id ?? null;
   const consultorNome = profile?.nome?.split(" ")[0] || "consultor das Óticas Diniz";
+
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [msgText, setMsgText] = useState("");
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
@@ -178,9 +185,14 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
 
   // Realtime subscription
   useEffect(() => {
+  // Realtime subscription (INSERT + UPDATE para refletir edições/exclusões)
+  useEffect(() => {
     const channel = supabase
       .channel(`mensagens-${id}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens", filter: `atendimento_id=eq.${id}` }, () => {
+        refetch();
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "mensagens", filter: `atendimento_id=eq.${id}` }, () => {
         refetch();
       })
       .subscribe();
