@@ -435,6 +435,38 @@ serve(async (req) => {
       metadata: { protocolo, alias_loja: nomeLoja, cod_empresa: codEmpresa },
     });
 
+    // ── Espelha em pagamentos_link (rastreabilidade financeira) ──
+    if (tipoSolicitacao === "link_pagamento" && (extraMetadata as any).payment_link_id) {
+      try {
+        const phone = String((extraMetadata as any).cliente_whatsapp || "").replace(/\D/g, "");
+        let contatoIdResolved: string | null = contatoClienteId || contatoId;
+        if (!contatoIdResolved && phone) {
+          const { data: c } = await supabase.from("contatos").select("id").eq("telefone", phone).maybeSingle();
+          contatoIdResolved = c?.id || null;
+        }
+        const envioOk = (respostaCliente as any).cliente_envio_status === "enviado";
+        await supabase.from("pagamentos_link").upsert({
+          payment_link_id: (extraMetadata as any).payment_link_id,
+          solicitacao_id: solicitacao.id,
+          contato_id: contatoIdResolved,
+          loja_nome: nomeLoja?.replace(/^DINIZ\s+/i, "Diniz "),
+          alias_loja: nomeLoja,
+          cod_empresa: codEmpresa,
+          cliente_nome: (dados as any).cliente || null,
+          cliente_telefone: phone || null,
+          valor: (dados as any).valor ? Number(String((dados as any).valor).replace(/[^0-9.]/g, "")) : null,
+          parcelas: (dados as any).parcelas ? Number((dados as any).parcelas) : null,
+          descricao: (dados as any).descricao || null,
+          status: envioOk ? "enviado" : "criado",
+          link_url: (extraMetadata as any).url || null,
+          enviado_at: envioOk ? new Date().toISOString() : null,
+          metadata: { ...dados, ...extraMetadata, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
+        }, { onConflict: "payment_link_id" });
+      } catch (mErr) {
+        console.error("[criar-solicitacao-loja] mirror pagamentos_link falhou", mErr);
+      }
+    }
+
     // ── Notificações in-app para o setor destino (canal único = app) ──
     const setorId = (fluxo as any).setor_destino_id;
     if (setorId) {
