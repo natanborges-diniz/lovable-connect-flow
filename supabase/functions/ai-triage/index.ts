@@ -2112,9 +2112,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         });
         let respRej: string;
         if (newCount >= 2) {
-          respRej = (typeof MSG_PEDIR_RECEITA_TEXTO !== "undefined" && MSG_PEDIR_RECEITA_TEXTO)
-            ? MSG_PEDIR_RECEITA_TEXTO
-            : "Sem problema! Pra eu garantir o orçamento certinho, pode me passar por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? 📝";
+          respRej = MSG_PEDIR_RECEITA_TEXTO;
         } else {
           respRej = lastRx
             ? buildMsgConfirmarReceita(lastRx, true) + "\n\nSe estiver errado, pode me passar os valores corretos por texto que eu atualizo aqui 😊"
