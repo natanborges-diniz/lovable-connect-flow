@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink } from "lucide-react";
+import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -170,6 +170,10 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [janelaFechadaHoras, setJanelaFechadaHoras] = useState(0);
   const [reconectarOpen, setReconectarOpen] = useState(false);
   const [reconectarDefaultTemplate, setReconectarDefaultTemplate] = useState<string | undefined>(undefined);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Realtime subscription
@@ -187,17 +191,61 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [mensagens]);
 
+  const handlePickAttachment = (file: File | null) => {
+    if (!file) return;
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      toast.error("Formato não suportado. Envie JPG, PNG ou WEBP.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB. Reduza antes de enviar.");
+      return;
+    }
+    setAttachment(file);
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachmentPreview(URL.createObjectURL(file));
+  };
+
+  const clearAttachment = () => {
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachment(null);
+    setAttachmentPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleSend = async () => {
     const texto = msgText.trim();
-    if (!texto) return;
+    if (!texto && !attachment) return;
 
     try {
       if (msgDirecao === "outbound" && atendimento?.canal === "whatsapp") {
         setSendingOutbound(true);
+
+        // Upload anexo (se houver) antes de chamar send-whatsapp
+        let mediaUrl: string | undefined;
+        let mimeType: string | undefined;
+        if (attachment) {
+          setUploadingAttachment(true);
+          const { data: userData } = await supabase.auth.getUser();
+          const uid = userData?.user?.id;
+          if (!uid) throw new Error("Sessão expirada. Faça login novamente.");
+          const ext = attachment.name.split(".").pop()?.toLowerCase() || "jpg";
+          const path = `${uid}/atendimentos/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("mensagens-anexos")
+            .upload(path, attachment, { contentType: attachment.type, upsert: false });
+          setUploadingAttachment(false);
+          if (upErr) throw new Error("Falha no upload: " + upErr.message);
+          const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+          mediaUrl = pub.publicUrl;
+          mimeType = attachment.type;
+        }
+
         const { data, error } = await supabase.functions.invoke("send-whatsapp", {
           body: {
             atendimento_id: id,
-            texto,
+            ...(mediaUrl ? { media_url: mediaUrl, mime_type: mimeType, caption: texto || undefined } : { texto }),
             remetente_nome: profile?.nome || "Operador",
           },
         });
@@ -213,14 +261,18 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           } catch { /* noop */ }
           setJanelaFechadaHoras(horas);
           setJanelaFechadaOpen(true);
-          // Preserva o rascunho do consultor — não limpa msgText
+          // Preserva rascunho e anexo para retry via template
           return;
         }
 
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        toast.success("Mensagem enviada ao WhatsApp com sucesso");
+        toast.success(mediaUrl ? "Imagem enviada ao WhatsApp" : "Mensagem enviada ao WhatsApp com sucesso");
       } else {
+        if (!texto) {
+          toast.error("Notas internas não suportam anexo. Digite um texto.");
+          return;
+        }
         await createMensagem.mutateAsync({
           atendimento_id: id,
           conteudo: texto,
@@ -230,12 +282,15 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
       }
 
       setMsgText("");
+      clearAttachment();
     } catch (e: any) {
       toast.error("Falha ao enviar mensagem: " + (e?.message || "Erro desconhecido"));
     } finally {
       setSendingOutbound(false);
+      setUploadingAttachment(false);
     }
   };
+
 
   const direcaoColors: Record<string, string> = {
     inbound: "bg-muted text-foreground",
@@ -474,6 +529,20 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
 
       {/* Footer fixo - composer */}
       <div className="border-t p-3 shrink-0 bg-background">
+        {attachmentPreview && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 p-2">
+            <img src={attachmentPreview} alt="Pré-visualização do anexo" className="h-14 w-14 rounded object-cover" />
+            <div className="flex-1 min-w-0 text-xs">
+              <p className="truncate font-medium">{attachment?.name}</p>
+              <p className="text-muted-foreground">
+                {attachment ? (attachment.size / 1024).toFixed(0) : 0} KB • legenda opcional abaixo
+              </p>
+            </div>
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={clearAttachment} aria-label="Remover anexo">
+              <XIcon className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <div className="flex-1 min-w-0 space-y-1">
             <div className="flex gap-1">
@@ -483,14 +552,47 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             <Textarea
               value={msgText}
               onChange={(e) => setMsgText(e.target.value)}
-              placeholder={msgDirecao === "internal" ? "Nota interna (não visível ao contato)..." : "Digite sua mensagem..."}
+              placeholder={
+                msgDirecao === "internal"
+                  ? "Nota interna (não visível ao contato)..."
+                  : attachment
+                    ? "Legenda da imagem (opcional)..."
+                    : "Digite sua mensagem..."
+              }
               rows={2}
               className="resize-none"
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             />
           </div>
-          <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending || sendingOutbound} size="icon" className="h-10 w-10 shrink-0">
-            {sendingOutbound ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {msgDirecao === "outbound" && atendimento?.canal === "whatsapp" && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => handlePickAttachment(e.target.files?.[0] || null)}
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sendingOutbound || uploadingAttachment}
+                aria-label="Anexar imagem"
+                title="Anexar imagem"
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          <Button
+            onClick={handleSend}
+            disabled={(!msgText.trim() && !attachment) || createMensagem.isPending || sendingOutbound || uploadingAttachment}
+            size="icon"
+            className="h-10 w-10 shrink-0"
+          >
+            {sendingOutbound || uploadingAttachment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>
       </div>

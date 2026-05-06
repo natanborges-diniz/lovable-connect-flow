@@ -12,11 +12,25 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { atendimento_id, texto, remetente_nome } = await req.json();
+    const body = await req.json();
+    const {
+      atendimento_id,
+      texto,
+      remetente_nome,
+      media_url,
+      mime_type,
+      caption,
+    }: {
+      atendimento_id?: string;
+      texto?: string;
+      remetente_nome?: string;
+      media_url?: string;
+      mime_type?: string;
+      caption?: string;
+    } = body || {};
 
-    if (!atendimento_id || !texto) {
-      throw new Error("atendimento_id and texto are required");
-    }
+    if (!atendimento_id) throw new Error("atendimento_id is required");
+    if (!texto && !media_url) throw new Error("texto or media_url is required");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -43,7 +57,7 @@ serve(async (req) => {
       );
     }
 
-    // Guard 24h Meta: se a última mensagem inbound foi >24h, bloqueia texto livre (precisa template).
+    // Guard 24h Meta
     const { data: lastInbound } = await supabase
       .from("mensagens")
       .select("created_at")
@@ -67,16 +81,27 @@ serve(async (req) => {
       }
     }
 
-    const apiResult = await sendViaMeta(cleanPhone, texto);
-    console.log(`[send-whatsapp] Sent via meta_official:`, apiResult?.messages?.[0]?.id);
+    const isImage = !!media_url;
+    const finalCaption = (caption ?? texto ?? "").trim();
+
+    const apiResult = isImage
+      ? await sendImageViaMeta(cleanPhone, media_url!, finalCaption || undefined)
+      : await sendTextViaMeta(cleanPhone, texto!);
+
+    console.log(`[send-whatsapp] Sent via meta_official (${isImage ? "image" : "text"}):`, apiResult?.messages?.[0]?.id);
 
     const { error: msgErr } = await supabase.from("mensagens").insert({
       atendimento_id,
       direcao: "outbound",
-      conteudo: texto,
+      conteudo: isImage ? (finalCaption || "[image]") : texto!,
+      tipo_conteudo: isImage ? "image" : "text",
       remetente_nome: remetente_nome || "Operador",
       provedor: "meta_official",
-      metadata: { whatsapp_message_id: apiResult.messages?.[0]?.id || null, provedor: "meta_official" },
+      metadata: {
+        whatsapp_message_id: apiResult.messages?.[0]?.id || null,
+        provedor: "meta_official",
+        ...(isImage ? { media_url, mime_type: mime_type || null } : {}),
+      },
     });
 
     if (msgErr) console.error("[send-whatsapp] Failed to save message:", msgErr);
@@ -115,13 +140,17 @@ function bodyToString(body: any): string {
   try { return JSON.stringify(body); } catch { return String(body); }
 }
 
-async function sendViaMeta(phone: string, text: string) {
+function getMetaCreds() {
   const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
   const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
   if (!accessToken || !phoneNumberId) {
     throw new Error("Meta WhatsApp credentials not configured (WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID)");
   }
+  return { accessToken, phoneNumberId };
+}
 
+async function sendTextViaMeta(phone: string, text: string) {
+  const { accessToken, phoneNumberId } = getMetaCreds();
   const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
@@ -131,6 +160,32 @@ async function sendViaMeta(phone: string, text: string) {
       to: phone,
       type: "text",
       text: { preview_url: false, body: text },
+    }),
+  });
+
+  const result = await readResponseBody(res);
+  if (!res.ok) {
+    throw new Error(`Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`);
+  }
+  return result;
+}
+
+async function sendImageViaMeta(phone: string, mediaUrl: string, caption?: string) {
+  const { accessToken, phoneNumberId } = getMetaCreds();
+  // Meta limita caption a 1024 chars
+  const safeCaption = caption ? caption.slice(0, 1024) : undefined;
+  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: phone,
+      type: "image",
+      image: {
+        link: mediaUrl,
+        ...(safeCaption ? { caption: safeCaption } : {}),
+      },
     }),
   });
 
