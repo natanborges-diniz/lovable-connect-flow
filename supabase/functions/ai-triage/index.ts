@@ -2031,6 +2031,119 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       console.log(`[RX-VALID] Receita salva existe mas é INVÁLIDA (rx_type/eyes vazios) — tratando como sem receita`);
     }
 
+    // ── 4.4. GATE DE CONFIRMAÇÃO DE RECEITA (Mai/2026) ──
+    // Toda receita lida via OCR fica com metadata.receita_confirmacao.pending=true
+    // até o cliente confirmar ("sim", "confere"...) ou corrigir. Enquanto pending,
+    // bloqueia cotação/agendamento/escalada normais. Só após "sim":
+    //   - dentro da faixa  → libera fluxo (LLM cota normalmente)
+    //   - fora da faixa    → escala determinística para Consultor
+    if (isReceitaPending(contatoMeta) && !lastIsImage) {
+      const rxLabel = contatoMeta.receita_confirmacao?.rx_label || null;
+      const foraDaFaixa = contatoMeta.receita_confirmacao?.fora_da_faixa === true;
+      const correctionCount = Number(contatoMeta.receita_confirmacao?.correction_count || 0);
+      const lastRx = receitas[receitas.length - 1] || null;
+
+      if (detectRxConfirmation(lastInboundText)) {
+        try {
+          await supabase.from("contatos").update({
+            metadata: {
+              ...contatoMeta,
+              receita_confirmacao: {
+                ...contatoMeta.receita_confirmacao,
+                pending: false,
+                confirmed_at: new Date().toISOString(),
+              },
+            },
+          }).eq("id", contatoId);
+        } catch (_) { /* noop */ }
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "receita_confirmada_cliente",
+          descricao: `Cliente confirmou receita ${rxLabel || ""}${foraDaFaixa ? " (fora da faixa)" : ""}`,
+          metadata: { rx_label: rxLabel, fora_da_faixa: foraDaFaixa, rx: lastRx },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+
+        if (foraDaFaixa) {
+          const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+          let respFinal = MSG_ESCALADA_GRAU_FORA_FAIXA;
+          try {
+            if (typeof (globalThis as any).isHorarioHumano === "function" && !(globalThis as any).isHorarioHumano()) {
+              respFinal = (globalThis as any).mensagemEscaladaForaHorario(_np);
+            } else if (typeof isHorarioHumano === "function" && !isHorarioHumano()) {
+              respFinal = mensagemEscaladaForaHorario(_np);
+            }
+          } catch (_) { /* keep default */ }
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respFinal);
+          await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "escalada_grau_fora_faixa",
+            descricao: `Receita confirmada com grau fora da faixa do catálogo — escalada automática`,
+            metadata: {
+              rx_label: rxLabel,
+              od_sphere: lastRx?.eyes?.od?.sphere ?? null,
+              oe_sphere: lastRx?.eyes?.oe?.sphere ?? null,
+              od_cyl: lastRx?.eyes?.od?.cylinder ?? null,
+              oe_cyl: lastRx?.eyes?.oe?.cylinder ?? null,
+              rx_type: lastRx?.rx_type ?? null,
+            },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          console.log(`[RX-CONFIRMACAO] Confirmada FORA da faixa — escalando para humano`);
+          return jsonResponse({ status: "ok", tools_used: ["escalada_grau_fora_faixa"], intencao: "orcamento", precisa_humano: true, pipeline_coluna_sugerida: "Humano", modo: "humano" });
+        }
+
+        console.log(`[RX-CONFIRMACAO] Confirmada DENTRO da faixa — liberando fluxo normal`);
+        contatoMeta.receita_confirmacao = { ...contatoMeta.receita_confirmacao, pending: false, confirmed_at: new Date().toISOString() };
+      } else if (detectRxRejeicao(lastInboundText)) {
+        const newCount = correctionCount + 1;
+        try {
+          await supabase.from("contatos").update({
+            metadata: {
+              ...contatoMeta,
+              receita_confirmacao: {
+                ...contatoMeta.receita_confirmacao,
+                correction_count: newCount,
+                last_rejected_at: new Date().toISOString(),
+              },
+            },
+          }).eq("id", contatoId);
+        } catch (_) { /* noop */ }
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "receita_rejeitada_cliente",
+          descricao: `Cliente rejeitou leitura (tentativa ${newCount})`,
+          metadata: { rx_label: rxLabel, correction_count: newCount },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+        let respRej: string;
+        if (newCount >= 2) {
+          respRej = (typeof MSG_PEDIR_RECEITA_TEXTO !== "undefined" && MSG_PEDIR_RECEITA_TEXTO)
+            ? MSG_PEDIR_RECEITA_TEXTO
+            : "Sem problema! Pra eu garantir o orçamento certinho, pode me passar por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? 📝";
+        } else {
+          respRej = lastRx
+            ? buildMsgConfirmarReceita(lastRx, true) + "\n\nSe estiver errado, pode me passar os valores corretos por texto que eu atualizo aqui 😊"
+            : "Sem problema! Me passa os valores corretos por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? 📝";
+        }
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respRej);
+        console.log(`[RX-CONFIRMACAO] Rejeição ${newCount} — repedindo confirmação/texto`);
+        return jsonResponse({ status: "ok", tools_used: ["receita_rejeitada"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+      } else {
+        // Pode ser correção por texto — se for, deixa fluxo seguir; senão repete pergunta
+        const possibleCorrection = detectPrescriptionCorrection(lastInboundText);
+        if (!possibleCorrection) {
+          const respRep = lastRx
+            ? buildMsgConfirmarReceita(lastRx, false)
+            : "Antes de te passar as opções, preciso que você confirme os valores que li da sua receita. Pode dar uma olhada e me dizer se está certinho? 😊";
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respRep);
+          console.log(`[RX-CONFIRMACAO] Cliente desviou — repedindo confirmação`);
+          return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+        }
+      }
+    }
+
     // ── 4.5. PRIORIDADE: COMPROVANTE DE PAGAMENTO ──
     // Se a imagem inbound chegou logo após o envio de um link de pagamento,
     // tratar como COMPROVANTE — não como receita ocular. Sem isso, o motor
