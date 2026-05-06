@@ -1525,6 +1525,16 @@ function pickFallback(recentOutbound: string[]): string | null {
   const recentNorm = recentOutbound.slice(-10).map(norm);
   // ⚠️ Se já mandamos QUALQUER fallback genérico recentemente, escala (retorna null).
   // Caso Paulo Henrique 2026-04-27: 3× "Me explica melhor..." em loop.
+  // Caso Cleber 2026-05-06: 2× "Conta pra mim..." idênticas — threshold 0.6 deveria pegar
+  // mas algum race fez passar. Reforçamos com checagem ESTRITA de identidade exata
+  // contra as últimas 3 outbounds, ANTES da checagem por similaridade.
+  const last3Norm = recentNorm.slice(-3);
+  const exactRepeatInLast3 = VALIDATOR_FAILED_POOL.some((fb) => {
+    const fbNorm = norm(fb);
+    return last3Norm.some((prev) => prev === fbNorm);
+  });
+  if (exactRepeatInLast3) return null;
+
   const sentAnyFallback = VALIDATOR_FAILED_POOL.some((fb) => {
     const fbNorm = norm(fb);
     return recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
@@ -4280,6 +4290,42 @@ async function runConsultarLentes(
 
   if (!lenses || lenses.length === 0) {
     console.log(`[QUOTE] No matching lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}`);
+
+    // Loga evento explícito pra auditoria (caso Cleber 2026-05-06 — gap real do catálogo).
+    try {
+      await supabase.from("eventos_crm").insert({
+        contato_id: contatoId,
+        tipo: "consultar_lentes_zero_linhas",
+        descricao: `consultar_lentes não encontrou lentes para ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd ?? "—"}`,
+        metadata: { rx_type: rxType, sphere: worstSphere, cylinder: worstCylinder, add: maxAdd, filtro_blue: !!args?.filtro_blue, filtro_photo: !!args?.filtro_photo },
+      });
+    } catch (e) { console.warn("[QUOTE] failed to log consultar_lentes_zero_linhas", e); }
+
+    // FALLBACK AUTOMÁTICO PRA ESTIMATIVA — caso Cleber 2026-05-06.
+    // Catálogo não cobre a combinação exata? Em vez de empurrar pra loja sem dar valor,
+    // tenta a tool de estimativa (faixas econômica/intermediária/premium) com o tipo + esférico.
+    // Só cai no fallback "confirmar na loja" se a estimativa também não retornar nada.
+    if (rxType === "progressive" || rxType === "single_vision") {
+      try {
+        const est = await runConsultarLentesEstimativa(supabase, {
+          rx_type: rxType,
+          sphere_od: typeof od.sphere === "number" ? od.sphere : undefined,
+          sphere_oe: typeof oe.sphere === "number" ? oe.sphere : undefined,
+          // NÃO passa cylinder_hint — a estimativa usa default conservador e procura faixa ampla.
+          filtro_blue: args?.filtro_blue === true ? true : undefined,
+          filtro_photo: args?.filtro_photo === true ? true : undefined,
+        });
+        if (est?.resposta && !/preciso confirmar a disponibilidade/i.test(est.resposta)) {
+          console.log(`[QUOTE] zero-linhas → fallback estimativa OK`);
+          // Marca explicitamente que foi estimativa por gap, mantém pergunta de região no fim.
+          const prefix = `Pra esse grau específico (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
+          return { resposta: prefix + est.resposta };
+        }
+      } catch (e) {
+        console.warn("[QUOTE] estimativa fallback falhou", e);
+      }
+    }
+
     // ⚠️ NUNCA escalar para "Consultor" aqui. Encaminha pra loja física, mantém engajamento.
     return { resposta: args?.resposta_fallback || "Pra esses graus específicos preciso confirmar a disponibilidade direto na loja antes de te passar o valor exato 😊 Em qual região/bairro você está? Já te indico a unidade mais próxima pra você ver as opções pessoalmente." };
   }
