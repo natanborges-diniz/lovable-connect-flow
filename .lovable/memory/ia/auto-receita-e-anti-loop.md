@@ -1,6 +1,6 @@
 ---
 name: Auto-OCR + Anti-Loop + Fluxo Pós-Receita
-description: Image+quote intent triggers automatic interpretar_receita; loop detector forces tool execution or escalates; post-receita flow forces consultar_lentes → opções → região → agendamento; templates de tools NUNCA contêm escalada hardcoded; referência a opção FORÇA tool_choice=responder; template é gap-aware (esconde premium >2× se houver salto)
+description: Image+quote intent triggers automatic interpretar_receita; loop detector forces tool execution or escalates; post-receita flow forces consultar_lentes → opções → região → agendamento; templates de tools NUNCA contêm escalada hardcoded; referência a opção FORÇA tool_choice=responder; template é gap-aware (esconde premium >2× se houver salto); 4 fases anti-loop ai-triage Mai/2026
 type: feature
 ---
 
@@ -15,7 +15,7 @@ Quando `interpretar_receita` retorna receita válida em contexto de óculos, enc
 ## Pós-leitura — fluxo obrigatório
 4 passos: 1) `consultar_lentes` AGORA, 2) apresentar 2-3 opções (DNZ/DMAX/HOYA), 3) perguntar região, 4) sugerir agendamento.
 
-**PROIBIDO ESCALAR:** receita com esférico até ±10 e cilíndrico até ±4 é trivial. Escalar só se: (a) `consultar_lentes` retornou ZERO opções, (b) cliente pediu humano, (c) reclamação grave.
+**PROIBIDO ESCALAR:** receita com esférico até ±10 e cilíndrico até ±4 é trivial. Escalar só se: (a) `consultar_lentes` retornou ZERO opções E o fallback estimativa também não cobriu, (b) cliente pediu humano, (c) reclamação grave.
 
 ## OCR ilegível → pedir digitação (caso Renata 2026-04-28)
 Quando OCR falha (modelo não lê valores OU `rxType=unknown` OU receita totalmente vazia), a IA NÃO pode repetir "estou analisando" nem escalar — deve pedir os valores por texto. Constante `MSG_PEDIR_RECEITA_TEXTO` em `ai-triage/index.ts` é a frase canônica (OD/OE esf/cil/eixo/add com exemplo). Aplicada em 3 pontos:
@@ -26,18 +26,13 @@ Quando OCR falha (modelo não lê valores OU `rxType=unknown` OU receita totalme
 Parser `detectPrescriptionCorrection` (memory: `ia/correcao-receita-por-texto`) aceita os valores digitados e força `consultar_lentes`.
 
 ## ⚠️ Templates de tool NUNCA contêm escalada hardcoded
-**Lição Paulo Henrique 2ª rodada (2026-04-27 16:48):** mesmo com hint pós-receita reforçado, a IA continuou dizendo "vou encaminhar pra um Consultor" porque a string estava **dentro do template de `runConsultarLentes`** (linha 3859). Hint do prompt não vence texto fixo de tool. Regra: nenhum template de resposta de tool pode conter "Consultor", "vou encaminhar", "passar para alguém da equipe". Se quiser orientar à loja, use frase como "Posso te indicar a loja mais próxima pra você ver pessoalmente?".
-
-Pontos corrigidos no `ai-triage`:
-- **Linha 3859** (template de orçamento entregue): trocado por "Posso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está?"
-- **Linha 3840** (fallback "zero opções"): trocado por "Pra esses graus específicos preciso confirmar disponibilidade na loja antes de te passar o valor exato. Em qual região/bairro você está?" — mantém engajamento sem escalar.
-- **Linha 1300** (instrução do prompt MODO RESTRITO): removida a sugestão "Vou encaminhar para um Consultor" do system prompt. Substituída por "peça mais detalhes OU sugira agendamento na loja mais próxima".
+**Lição Paulo Henrique 2ª rodada (2026-04-27 16:48):** mesmo com hint pós-receita reforçado, a IA continuou dizendo "vou encaminhar pra um Consultor" porque a string estava **dentro do template de `runConsultarLentes`**. Hint do prompt não vence texto fixo de tool. Regra: nenhum template de resposta de tool pode conter "Consultor", "vou encaminhar", "passar para alguém da equipe". Use frases tipo "Posso te indicar a loja mais próxima pra você ver pessoalmente?".
 
 ## Referência a opções de orçamento anterior
-Caso "Quero orçamento da 1 e 2 por favor" (Paulo Henrique 16:49): cliente referencia opções do orçamento que o operador (humano OU IA) já enviou. Detector novo (`/\b(op[cç][aã]o\s*\d|da\s*\d(\s*[ee]\s*\d)?|n[uú]mero\s*\d|a\s+\d(\s*[ee]\s*\d)?\b)/i` + outbound recente com R$/marca conhecida) injeta hint forçando recapitulação SOMENTE das opções pedidas, sem rodar `consultar_lentes` de novo (que pode trazer outras opções, como aconteceu com Eyezen/Zeiss em vez de DNZ/DMAX/HOYA).
+Detector novo (regex de "opção N", "da 1 e 2", "número N" + outbound recente com R$/marca conhecida) injeta hint forçando recapitulação SOMENTE das opções pedidas, e SOBRESCREVE `tool_choice` para `{ type: "function", function: { name: "responder" } }` — LLM fica fisicamente impedido de chamar `consultar_lentes` de novo.
 
 ## VALIDATOR_FAILED_POOL — escala em 1 fallback
-**Lição Paulo Henrique 16:53:** "Me explica melhor a sua necessidade..." disparou 3× em loop quando o cliente bateu "Ol" 3×. `pickFallback` agora retorna `null` (escalada) já no SEGUNDO fallback consecutivo (antes permitia 5 antes de escalar).
+`pickFallback` retorna `null` (escalada) já no SEGUNDO fallback consecutivo (antes permitia 5).
 
 ## `detectForcedToolIntent` — região após orçamento prometido
 Se a última saída pediu região/bairro E há receita válida E o inbound parece resposta de região, retorna `consultar_lentes`. Garante que "Osasco centro", "Vila Yara" etc. disparem o orçamento.
@@ -56,44 +51,65 @@ Mapeamento determinístico:
 ## Watchdog (cron 2 min)
 `watchdog-loop-ia` verifica atendimentos `modo='ia'` cuja última msg é outbound de IA há >5min, com inbound prévio e similaridade >70% entre últimas 2 outbound.
 
+## ═══════════════════════════════════════════
+## 🆕 4 FASES anti-loop ai-triage (Mai/2026 — caso Cleber 2026-05-06)
+## ═══════════════════════════════════════════
+
+### Fase 1 — Logar zero-linhas
+`runConsultarLentes` e `runConsultarLentesEstimativa` aceitam `atendimentoId` e gravam `eventos_crm` tipo `consultar_lentes_zero_resultados` com filtros completos (`tool`, `rx_type`, `sphere`, `cylinder`, `add`, `filtro_blue`, `filtro_photo`, `preferencia_marca`, `receita_label`). Auditoria sem mudar comportamento.
+
+### Fase 2 — Fallback automático endurecido para `consultar_lentes_estimativa`
+Quando `consultar_lentes` retorna 0, `runConsultarLentes` chama `runConsultarLentesEstimativa` automaticamente, prefixando "Pra esse grau específico (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:". Loga `consultar_lentes_fallback_estimativa_acionado`.
+
+**Guardrails (G1-G4):**
+- G1. Prefixo "Pra esse grau específico" já apareceu nas últimas 3 outbounds → NÃO repete.
+- G2. Cliente pediu marca específica (`preferencia_marca`) → estimativa traria outras marcas e confundiria; pula.
+- G3. Filtros `blue`/`photo` propagam pra estimativa.
+- G4. Só roda em `single_vision` ou `progressive`.
+
+Cada skip loga `consultar_lentes_fallback_estimativa_skip` com `metadata.motivo`. Anti-duplicação extra: se resposta final (prefixo+estimativa) tem sim>0.85 com outbound recente, cai no fallback de loja.
+
+### Fase 3 — Re-disparar tool após resposta de região (force tool_choice)
+Quando `forcedIntent.reason` contém "respondeu região" e tool é `consultar_lentes`:
+- Injeta hint específico proibindo "obrigado pela região, vou separar" / "preciso confirmar na loja" / "vou verificar com um especialista".
+- Ativa `forceConsultarLentesTool=true` → `tool_choice: { type:"function", function:{ name:"consultar_lentes" }}` no gateway. LLM fica fisicamente impedido de devolver texto puro.
+- Zera `forceResponderTool` (preço prevalece sobre recapitulação).
+- Loga `regiao_pos_orcamento_forcando_tool` em `eventos_crm`.
+
+### Fase 4 — Anti-loop endurecido pós-LLM (Jaccard + handoff <30s)
+Logo antes do `sendWhatsApp` final, calcula `computeSimilarity` (Jaccard tokens >3) entre resposta nova e última outbound. Se sim>0.80 → escala IMEDIATAMENTE pra humano (não espera watchdog 5min).
+
+**Guardrails (G1-G5):**
+- G1. Tools determinísticas chamadas (`consultar_lentes*`, `agendar_visita`, `interpretar_receita`) → pula (orçamento da mesma receita pode repetir legítimo).
+- G2. Já é escalada (`precisa_humano=true` ou `escalada_fora_horario`) → pula.
+- G3. `inboundCount<=1` (saudação) → pula.
+- G4. Resposta ou outbound <20 chars normalizados → pula (evita falso positivo em "ok"/"beleza").
+- G5. `recentOutbound` em `ai-triage` já filtra apenas IA, então comparação é IA-vs-IA.
+
+Loga `loop_ia_pos_llm_jaccard` com `similarity`, `tools_chamadas`, `resposta_proposta`, `ultima_outbound`. Mensagem de escalada respeita horário comercial.
+
 ## Casos documentados
 
-### Rosana (2026-04)
-Travou em "posso te mostrar uma base?" 2× → escalou. Causa: faltava hint pós-receita. Corrigido.
+### Cleber 2026-05-06 (atendimento 7e7c5bf9) — gap de catálogo Hoya + zero-linhas silencioso + 2 fallbacks idênticos
+Receita lida OK (OD +4.25/-1.25 Add+3, OE +5.50/-4.25 Add+3). IA prometeu "já vou separar opções", pediu região, recebeu "Osasco, Vila Ayrosa" → respondeu 3× evasivas, depois 2× "Conta pra mim..." idênticas, escalou.
 
-### André (2026-04-27)
-Auto-chain não disparou (regex `wantsQuote` exigia keyword explícita). Corrigido: auto-chain default ON.
+**Causa raiz:** `pricing_table_lentes` não cobria a combinação extrema (esf+5.5, cil-4.25 multifocal).
 
-### Paulo Henrique 1ª rodada (2026-04-27 15:54-15:58)
-IA leu receita, perguntou região; cliente disse "Osasco centro"; IA escalou. Causa dupla: auto-chain não disparou + hint não proibia escalonamento. Corrigido: auto-chain default ON + detecção de "região após orçamento prometido" + hint reforçado.
+**Correções aplicadas (3 + 4 fases):**
+1. Reforma Hoya Abr/2025 (857 linhas Nulux iD, MyStyle, MySelf, LifeStyle 4/4i, Maxxee, Sportive, Surfaçadas + Prontas + Hoyalux D+).
+2. `runConsultarLentes` zero-linhas → fallback automático para `runConsultarLentesEstimativa` com prefixo + log.
+3. `pickFallback` checagem ESTRITA de identidade exata nas últimas 3 outbounds antes da similaridade.
+4. **Fases 1-4 anti-loop (este documento)** — logar zero-linhas, fallback endurecido, force-tool em região, anti-loop pós-LLM com handoff <30s.
 
-### Paulo Henrique 2ª rodada (2026-04-27 16:48-16:53)
-Operador mandou orçamento manual (DNZ/DMAX/HOYA). IA disse "vou separar as opções" sem rodar tool. Cliente: "Quero orçamento da 1 e 2" → IA escalou ("vou encaminhar para Consultor"). Cliente: "Ol" 3× → IA mandou opções *erradas* (Eyezen/Zeiss em vez de DNZ/DMAX/HOYA) com escalada hardcoded no fim. Depois 3× "Me explica melhor...". Causa raiz: 3 textos fixos no código (template do orçamento, fallback de zero opções, instrução do prompt) ignoravam o hint "PROIBIDO escalar". Corrigido: A) template sem escalada, B) fallback orientado a loja, C) prompt sem "Consultor", E) hint para referência a opção, F) `pickFallback` escala em 1 fallback.
+### Paulo Henrique 1ª/2ª/3ª rodadas (2026-04-27)
+- 1ª: faltava hint pós-receita + detecção "região após orçamento" → corrigido.
+- 2ª: 3 textos fixos no código (template orçamento, fallback zero, prompt) tinham escalada → removidos.
+- 3ª: hint REFERENCIA-OPCAO ignorado pelo LLM mesmo com tool_choice=required → fix com `forceResponderTool` sobrescrevendo `tool_choice`. Catálogo gap (DMAX/HOYA single_vision pra grau baixo) ainda pendente operacionalmente.
+
+### Rosana / André (2026-04)
+Travou em "posso te mostrar uma base?" / auto-chain não disparou — ambos corrigidos com auto-chain default ON + hint reforçado.
 
 ## Salvaguardas
 - Watchdog ignora outbounds humanas.
 - Loop detector só age com ≥3 outbound recentes.
-- Eventos detalhados em `eventos_crm` para auditoria.
-
-### Paulo Henrique 3ª rodada (2026-04-27 16:48-16:53) — hint REFERÊNCIA-OPÇÃO ignorado + gap de catálogo
-Operador mandou às 16:48 três marcas (DNZ HDI / DMAX BlueGuard / HOYA Hi-Vision) sem valores. Cliente: "Quero orçamento da 1 e 2". Hint REFERENCIA-OPCAO foi injetado mas a IA chamou `consultar_lentes` mesmo assim — devolveu **ESSILOR Eyezen Start R$1.985 + Eyezen Boost R$2.135 + ZEISS SmartLife R$2.190**, opções que nem estavam no orçamento humano. Loop "Me explica melhor..." 3× depois.
-
-**Causa dupla:**
-1. **Hint sozinho não basta** quando há tool_choice=required — LLM ainda escolhe `consultar_lentes` porque a intent original era "orçamento". Fix: quando detector REFERENCIA-OPCAO dispara, sobrescreve `tool_choice` para `{ type: "function", function: { name: "responder" } }`. LLM fica fisicamente impedido de chamar `consultar_lentes`.
-2. **Gap real no catálogo**: pra OD 0/-2 OE 0/-2.50 single_vision o catálogo tem DNZ R$520, DNZ Free Form R$690, depois pula direto pra ZEISS R$1.490+ e ESSILOR R$1.985+. Não há DMAX nem HOYA single_vision; nem fotossensível nessa faixa. Tool retornava as 3 opções (econômica/mid/premium) misturando entrada DNZ com ZEISS/ESSILOR caríssimos. Fix: template "gap-aware" — se `premium > economy * 2`, mostra só faixa de entrada (até 2× a econômica) e oferece detalhar premium sob demanda. Evita o efeito "DNZ R$520 ao lado de ZEISS R$1.949".
-
-**Gap operacional pendente** (não corrigido em código): popular `pricing_table_lentes` com DMAX BlueGuard 1.60 single_vision, HOYA Hi-Vision LongLife 1.67, e ao menos 1 fotossensível Transitions entry. Sem isso operadores continuarão citando marcas que a tool não conhece.
-
-**Recuperação Paulo:** atendimento `26464d89` — operador enviou DNZ HDI R$520 + DNZ Free Form R$690 + esclareceu fotossensível, marcado modo=humano. Auditoria em `eventos_crm` (`recuperacao_manual_lentes`).
-
-### Cleber 2026-05-06 (atendimento 7e7c5bf9) — gap de catálogo Hoya + zero-linhas silencioso + 2 fallbacks idênticos
-Receita lida OK (OD +4.25/-1.25 Add+3, OE +5.50/-4.25 Add+3 — multifocal, hipermetrópico, cilindro alto OE). IA prometeu "já vou separar opções", pediu região, recebeu "Osasco, Vila Ayrosa" → respondeu 3× evasivas ("preciso confirmar na loja", "valores presenciais na Antônio Agú", "vou te mostrar 2-3 alternativas"), depois 2× "Conta pra mim com mais detalhes" idênticas, então escalou.
-
-**Causa raiz:** `pricing_table_lentes` não tem nenhuma linha multifocal Hoya/DNZ/DMAX que cubra simultaneamente esf +5.50 E cil -4.25 (combinação extrema). `runConsultarLentes` retornou zero, caiu no template "preciso confirmar a disponibilidade direto na loja" — mantém engajamento mas não entrega valor.
-
-**Correções aplicadas:**
-1. **Reforma Hoya Abr/2025 aplicada** — 857 linhas (Nulux iD, MyStyle, MySelf, LifeStyle 4/4i, Maxxee, Sportive, Surfaçadas + Prontas), preservando Hoyalux D+. Cobre cilindros até -6.00 nas linhas individuais, mas ainda não cobre a combinação esf+5.5 cil-4.25 multifocal — gap real do fabricante.
-2. **`runConsultarLentes` zero-linhas → fallback automático para `runConsultarLentesEstimativa`** (`ai-triage/index.ts` ~linha 4281). Em vez de cair direto no "confirmar na loja", roda a estimativa com tipo+esférico (sem cilindro), devolve faixas Econ/Inter/Premium prefixadas com "Pra esse grau específico (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço". Loga `eventos_crm` tipo `consultar_lentes_zero_linhas` pra auditoria.
-3. **`pickFallback` checagem ESTRITA de identidade exata nas últimas 3 outbounds** — antes da checagem por similaridade 0.6. Se a IA mandou exatamente a mesma frase do pool, escala imediatamente. Resolve o caso 2× "Conta pra mim..." idênticas que escapou da similaridade.
-
-**Pendente:** auto-disparar `consultar_lentes` no turno seguinte quando IA prometeu orçamento ("já vou separar", "vou te mostrar opções") e o turno seguinte é resposta de região — hoje detector "região após orçamento" só reage à última outbound da IA pedindo região, promessa-sem-pergunta passa batido.
+- Eventos detalhados em `eventos_crm` para auditoria de TODAS as fases.
