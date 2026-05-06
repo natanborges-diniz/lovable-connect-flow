@@ -3096,13 +3096,13 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // ── QUOTE ENGINE: triggered by client interest ──
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
-        const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args);
+        const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args, atendimento_id);
         resposta = quoteResult.resposta;
       } else if (fn === "consultar_lentes_estimativa") {
         // ── QUOTE ESTIMATE: receita parcial, nunca bloquear orçamento ──
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
-        const estResult = await runConsultarLentesEstimativa(supabase, args || {});
+        const estResult = await runConsultarLentesEstimativa(supabase, args || {}, contatoId, atendimento_id);
         resposta = estResult.resposta;
       } else if (fn === "agendar_visita" || fn === "reagendar_visita") {
         // (Guardrail antigo "LC não exige visita" foi removido: catálogo de LC está
