@@ -1,39 +1,121 @@
-# Reforma do catálogo Hoya — aplicação
+## Plano final: Confirmação pós-OCR + CTA agendamento + escolha hierárquica cidade → loja
 
-## Contexto
+### Fluxo
 
-As 2 migrations preparadas ainda estão disponíveis em `/tmp/h1.sql` (428 linhas) e `/tmp/h2.sql` (429 linhas), totalizando 857 SKUs Hoya do catálogo Abr/2025. Elas resolvem o gap que impediu a IA de orçar a receita do Cleber (cilindro -4.25 multifocal não tinha cobertura).
+```text
+Foto → interpretar_receita → pending_confirmation=true
+   ▼
+IA pergunta: "Li assim, confere? OD ... OE ..."
+   ▼
+ ┌─ "sim" ────────────┐    ┌─ correção ─────┐
+ │ confirmed_at       │    │ atualiza valores│
+ │ → consultar_lentes │    │ pending=true   │
+ │   (mesmo turno)    │    │ re-pergunta    │ (loop)
+ └────────┬───────────┘    └────────────────┘
+          ▼
+   2-3 opções (DNZ/DMAX/HOYA) + R$
+   + CTA: "Quer agendar uma visita pra ver pessoalmente? 😊"
+          ▼
+   ┌─ "sim" ──┐         ┌─ "não/depois" → despedida + silêncio
+   ▼
+   IA envia LISTA DE CIDADES:
+     🏙️ Osasco
+     🏙️ Carapicuíba
+     🏙️ Itapevi
+     🏙️ Barueri
+     "Em qual cidade fica melhor pra você?"
+          ▼
+   cliente escolhe cidade
+          ▼
+   ┌─────────────────────────────────────────────────────┐
+   │ Osasco (6 lojas) → IA lista as 6 c/ endereço:       │
+   │   🏬 *DINIZ ANTONIO AGU* — {endereco} ({horário})   │
+   │   🏬 *DINIZ PRIMITIVA I* — ...                       │
+   │   🏬 *DINIZ PRIMITIVA II* — ...                      │
+   │   🏬 *DINIZ STO ANTONIO* — ...                       │
+   │   🏬 *DINIZ SUPER SHOPPING* — ...                    │
+   │   🏬 *DINIZ UNIÃO* — ...                             │
+   │   "Qual fica melhor pra você?"                       │
+   │                                                      │
+   │ Carapicuíba → loja única DINIZ CARAPICUIBA           │
+   │   IA já confirma a loja + endereço + pergunta dia/hora│
+   │                                                      │
+   │ Itapevi → loja única DINIZ ITAPEVI (mesmo padrão)    │
+   │ Barueri → loja única DINIZ BARUERI (mesmo padrão)    │
+   └─────────────────────────────────────────────────────┘
+          ▼
+   cliente escolhe loja (ou já vem definida) → pergunta dia/hora
+          ▼
+   agendar_visita / agendar_cliente → confirmação → despedida
+```
 
-A estratégia é: **deletar** todo o Hoya atual **exceto a família `Hoyalux D+`** (preservar) e re-inserir o catálogo novo.
+### Mapeamento cidade → lojas (hardcoded no código + memória)
 
-## Etapas
+| Cidade        | Lojas                                                                                                       |
+|---------------|-------------------------------------------------------------------------------------------------------------|
+| Osasco        | DINIZ ANTONIO AGU, DINIZ PRIMITIVA I, DINIZ PRIMITIVA II, DINIZ STO ANTONIO, DINIZ SUPER SHOPPING, DINIZ UNIÃO |
+| Carapicuíba   | DINIZ CARAPICUIBA                                                                                           |
+| Itapevi       | DINIZ ITAPEVI                                                                                               |
+| Barueri       | DINIZ BARUERI                                                                                               |
 
-### 1. Snapshot de segurança
-Antes de qualquer DELETE, gravar `SELECT count(*), family FROM pricing_table_lentes WHERE brand='Hoya' GROUP BY family` para conferência pós-aplicação.
+Dados (endereço, horário) buscados em `telefones_lojas WHERE nome_loja IN (...) AND tipo='loja' AND ativo=true`. Match por nome (sem precisar de coluna `cidade`). Se faltar endereço/horário no banco, IA mostra só o nome (degradação graciosa).
 
-### 2. Migration 1 — Visão Simples + parte das Progressivas (h1.sql)
-- `DELETE FROM pricing_table_lentes WHERE brand='Hoya' AND family <> 'Hoyalux D+'`
-- INSERT de ~428 SKUs: Nulux iDentity V+ (todos índices/tratamentos), Nulux iDentity, MyStyle V+, e início das progressivas.
+### Regras
 
-### 3. Migration 2 — Restante das Progressivas (h2.sql)
-- INSERT de ~429 SKUs: Hoyalux iD LifeStyle 4, Hoyalux iD MyStyle V+, Hoyalux Daynamic etc. (sem novo DELETE).
+1. Auto-chain `consultar_lentes` só após "sim" da receita.
+2. Correção atualiza valores e re-pergunta; nunca pede foto novamente.
+3. CTA agendamento entra no MESMO turno das opções.
+4. CTA aceito → IA envia **lista de cidades** (não lojas).
+5. Cidade com >1 loja (Osasco) → 2º passo: lista de lojas da cidade.
+6. Cidade com 1 loja (Carapicuíba/Itapevi/Barueri) → pula direto pra dia/hora ("Beleza! Será na DINIZ {nome} — {endereço}. Qual dia e horário ficam bons?").
+7. CTA recusado → despedida + silêncio (`pos-agendamento-silencio`).
+8. Cliente já cita cidade/loja específica antes da pergunta → IA atalha pro passo correspondente (skip lista).
 
-### 4. Validação pós-aplicação
-Rodar 3 queries de smoke test:
-- Total Hoya ativo (esperado ≈ 857 + linhas Hoyalux D+ preservadas).
-- Cobertura da receita Cleber: `WHERE category='progressiva' AND sphere_min<=-5.50 AND sphere_max>=5.50 AND cylinder_min<=-4.25` — esperar ≥1 linha (Nulux iD MyStyle V+ 1.67/1.74 etc.).
-- Conferir que `Hoyalux D+` continua presente.
+### Mensagens canônicas
 
-### 5. Atualizar memory
-Atualizar `mem://ia/auto-receita-e-anti-loop` registrando que a reforma Hoya Abr/2025 foi aplicada e o cilindro -4.25 multifocal passou a ter cobertura nativa (não depende mais do fallback estimativa).
+- **Confirmação receita (1ª):** "Li sua receita assim, confere? 😊\n👁️ OD: ESF {esf} CIL {cil} EIXO {eixo}°{add}\n👁️ OE: …\nEstá certinho?"
+- **Após correção:** "Anotei! Ficou assim:\n👁️ OD: …\n👁️ OE: …\nAgora tá certo? ✅"
+- **CTA agendamento (sufixo de `runConsultarLentes`):** "Posso agendar uma visita pra você ver pessoalmente e fechar o pedido? 😊"
+- **Lista de cidades:** "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n\n🏙️ Osasco\n🏙️ Carapicuíba\n🏙️ Itapevi\n🏙️ Barueri"
+- **Lojas de Osasco:** "Em Osasco temos essas unidades:\n\n🏬 *DINIZ ANTONIO AGU* — {endereco} ({horário})\n🏬 *DINIZ PRIMITIVA I* — …\n…\n\nQual fica melhor pra você?"
+- **Cidade com loja única:** "Beleza! Será na *DINIZ {nome}* — {endereco} ({horário}).\nQual dia e horário ficam bons pra sua visita?"
 
-### 6. Commit do plano de correção do `ai-triage`
-As correções do ai-triage (logar zero-linhas, fallback automático para `consultar_lentes_estimativa`, re-disparo após resposta de região, anti-loop endurecido) descritas em `.lovable/plan.md` **não** entram nesta passada — ficam para uma rodada subsequente. Aqui o foco é só desbloquear o catálogo.
+### Mudanças em `supabase/functions/ai-triage/index.ts`
 
-## Observações
+1. `interpretar_receita`: remove auto-chain; salva `pending_confirmation: true`; resposta = `MSG_CONFIRMAR_RECEITA(rxData, isCorrection:false)`.
+2. `detectRxConfirmation` — regex `/^(sim|confere|isso|perfeito|certinho|correto|exato|tá certo|ok|positivo|👍|👌|✅)/i` com guarda anti-"não/errad".
+3. Hook `detectPrescriptionCorrection`: aplica correção, mantém `pending=true`, incrementa `correction_count`, devolve `MSG_CONFIRMAR_RECEITA(...,isCorrection:true)`. NÃO dispara `consultar_lentes`.
+4. `forcedIntent`: receita pendente + "sim" → marca `confirmed_at`, força `consultar_lentes`.
+5. Bloqueio `consultar_lentes` com `pending_confirmation===true` → devolve confirmação atual.
+6. `runConsultarLentes`: acrescenta sufixo `MSG_CTA_AGENDAMENTO`; marca `metadata.cta_agendamento_enviado_at`.
+7. `detectAgendamentoConfirmacao` — disparado quando `cta_agendamento_enviado_at` existe e ainda não há agendamento → `enviarListaCidades(contato)`.
+8. **Novo `enviarListaCidades`** — texto fixo `MSG_LISTA_CIDADES` (4 cidades hardcoded). Marca `metadata.cidades_enviadas_at`.
+9. **Novo `detectEscolhaCidade`** — regex sobre `lista_cidades_enviadas_at` ativo. Match em "osasco|carapicuíba|carapicuiba|itapevi|barueri":
+   - Osasco → `enviarLojasOsasco()` (busca em `telefones_lojas` as 6 lojas, ordena, formata). Marca `metadata.lojas_enviadas_at`, `metadata.cidade_escolhida='osasco'`.
+   - Demais → `confirmarLojaUnicaECidadeUnica(cidade)` (carrega 1 loja, manda `MSG_CIDADE_LOJA_UNICA` + pergunta dia/hora). Marca `metadata.loja_escolhida=…`, `metadata.aguardando_data_hora_at`.
+10. **Novo `detectEscolhaLoja`** — quando `lojas_enviadas_at` ativo + match em nome de loja → injeta hint forçando próximo passo (perguntar dia/hora). Marca `metadata.loja_escolhida=…`.
+11. CTA recusado ("não/depois/vou pensar") → despedida + silêncio.
+12. Atalho: se cliente, antes de qualquer pergunta, citar cidade/loja → pula etapas correspondentes.
+13. Eventos `eventos_crm`: `receita_confirmacao_solicitada`, `receita_corrigida_pelo_cliente`, `receita_confirmada_cliente`, `cta_agendamento_enviado`, `cta_agendamento_aceito`, `cta_agendamento_recusado`, `cidades_enviadas`, `cidade_escolhida`, `lojas_osasco_enviadas`, `loja_escolhida`.
 
-- As migrations vão pelo tool de migração (DELETE + INSERT em lote dentro de transação) — se algo falhar, rollback automático.
-- Nenhum schema novo, só dados — sem impacto em código TS.
-- Após apply, o orçamento "OD +4.25/-1.25, OE +5.50/-4.25" passa a retornar opções reais via `consultar_lentes` no `ai-triage`, sem precisar do fallback.
+### Pré-requisito de dados
 
-Aprovar para eu aplicar as 2 migrations + validação?
+`telefones_lojas` precisa ter `endereco` e `horario` para as 9 lojas. Verifico antes de codar; se faltar, sugiro migração de seed (sem bloquear — IA mostra só nome se faltar).
+
+### Arquivos afetados
+
+- `supabase/functions/ai-triage/index.ts` — itens 1-13.
+- 1 migração SQL — correção pontual receita Jennifer (`0c02bf09-…`) com OD -21,50/-0,50/180° e OE -13,00/-1,00/145°, `confirmed_at: now()`, `confidence: 1.0`.
+- (Opcional) seed `telefones_lojas` se faltar endereço/horário.
+- `mem://ia/auto-receita-e-anti-loop.md` — nova seção "Confirmação pós-OCR + CTA + escolha cidade→loja (Mai/2026)".
+- `mem://ia/correcao-receita-por-texto.md` — correção dispara re-pergunta, não confirma.
+- `mem://ia/pos-agendamento-silencio.md` — adiciona "CTA recusado = silêncio".
+- `mem://ia/base-conhecimento-lojas.md` — registra mapeamento cidade→loja (Osasco x6, demais x1).
+
+### O que NÃO muda
+
+Modelo único `openai/gpt-5`, threshold `0.80`, sem segunda LLM, custo zero. `agendar_visita`/`agendar_cliente`, Hoyalux D+, anti-loop Fases 1-4, watchdogs, despedida pós-agendamento, lembretes — nada.
+
+---
+
+Aprova essa versão? Aprovado, troco pra build mode e implemento.
