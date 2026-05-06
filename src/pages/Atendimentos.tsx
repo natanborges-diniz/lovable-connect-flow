@@ -500,39 +500,106 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             const mimeType = (m?.metadata?.mime_type as string | undefined) || "";
             const isImage = (m?.tipo_conteudo || "text") === "image" && !!mediaUrl;
             const isDocument = !!mediaUrl && !isImage;
+            const isDeleted = !!m.deletada_at;
+            const isEditing = editingId === m.id;
+            // Autor reconhecido: outbound/internal com remetente_nome == profile.nome do usuário logado
+            const isAuthor =
+              !!profile?.nome &&
+              !!m.remetente_nome &&
+              m.remetente_nome === profile.nome &&
+              m.direcao !== "inbound";
+            const hasOnlyMedia = (isImage || isDocument) && (!m.conteudo || m.conteudo === "[image]");
 
             return (
-              <div key={m.id} className={cn("max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden", direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
-                {m.remetente_nome && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota"}</p>}
-                {isImage ? (
-                  <a href={mediaUrl} target="_blank" rel="noreferrer" className="block mb-2">
-                    <img
-                      src={mediaUrl}
-                      alt={m.conteudo && m.conteudo !== "[image]" ? m.conteudo : "Imagem enviada pelo cliente"}
-                      className="max-h-72 w-full rounded-md object-contain bg-background/40"
-                      loading="lazy"
-                    />
-                  </a>
-                ) : null}
-                {isDocument ? (
-                  <a
-                    href={mediaUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mb-2 flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-3 py-2 text-xs underline-offset-2 hover:underline"
-                  >
-                    {mimeType.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                    <span className="truncate">Ver anexo</span>
-                    <ExternalLink className="ml-auto h-3.5 w-3.5" />
-                  </a>
-                ) : null}
-                {m.conteudo && m.conteudo !== "[image]" && <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>}
-                <div className="flex items-center justify-between gap-2 mt-1">
-                  <p className="text-[10px] opacity-50">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</p>
-                  {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
-                    <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
-                  )}
-                </div>
+              <div key={m.id} className={cn("group max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden relative", isDeleted ? "bg-muted/50 text-muted-foreground italic border border-dashed" : direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
+                {m.remetente_nome && !isDeleted && <p className="text-[11px] font-medium opacity-70 mb-0.5 truncate">{m.remetente_nome} {m.direcao === "internal" && "• nota"}</p>}
+                {isDeleted ? (
+                  <p className="flex items-center gap-1.5">
+                    <Ban className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                    Mensagem apagada
+                  </p>
+                ) : isEditing ? (
+                  <EditableMessageBubble
+                    initialValue={m.conteudo}
+                    onCancel={() => setEditingId(null)}
+                    saving={editMensagem.isPending}
+                    onSave={async (v) => {
+                      try {
+                        await editMensagem.mutateAsync({
+                          id: m.id,
+                          novoConteudo: v,
+                          conteudoAnterior: m.conteudo,
+                          metadata: m.metadata,
+                        });
+                        setEditingId(null);
+                        toast.success("Mensagem editada (apenas no histórico interno)");
+                      } catch (e: any) {
+                        toast.error("Erro ao editar: " + (e?.message || ""));
+                      }
+                    }}
+                  />
+                ) : (
+                  <>
+                    {isImage ? (
+                      <a href={mediaUrl} target="_blank" rel="noreferrer" className="block mb-2">
+                        <img
+                          src={mediaUrl}
+                          alt={m.conteudo && m.conteudo !== "[image]" ? m.conteudo : "Imagem enviada pelo cliente"}
+                          className="max-h-72 w-full rounded-md object-contain bg-background/40"
+                          loading="lazy"
+                        />
+                      </a>
+                    ) : null}
+                    {isDocument ? (
+                      <a
+                        href={mediaUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mb-2 flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-3 py-2 text-xs underline-offset-2 hover:underline"
+                      >
+                        {mimeType.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                        <span className="truncate">Ver anexo</span>
+                        <ExternalLink className="ml-auto h-3.5 w-3.5" />
+                      </a>
+                    ) : null}
+                    {m.conteudo && m.conteudo !== "[image]" && <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>}
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <p className="text-[10px] opacity-50 flex items-center gap-1">
+                        <span>{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</span>
+                        {m.editada_at && (
+                          <span title={`editada em ${format(new Date(m.editada_at), "dd/MM HH:mm", { locale: ptBR })}`}>
+                            • editada
+                          </span>
+                        )}
+                      </p>
+                      <div className="flex items-center gap-1">
+                        {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
+                          <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
+                        )}
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <MessageActionsMenu
+                            autorId={isAuthor ? uid : null}
+                            currentUserId={uid}
+                            createdAt={m.created_at}
+                            deletadaAt={m.deletada_at}
+                            forceHide={hasOnlyMedia}
+                            onEdit={() => setEditingId(m.id)}
+                            onDelete={async () => {
+                              if (!uid) return;
+                              await deleteMensagem.mutateAsync({ id: m.id, userId: uid });
+                            }}
+                            deleteWarning={
+                              m.direcao === "outbound" && atendimento?.canal === "whatsapp"
+                                ? "A mensagem será marcada como apagada apenas no histórico interno. O cliente continua vendo a original no WhatsApp."
+                                : undefined
+                            }
+                            tone={m.direcao === "outbound" ? "dark" : "light"}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             );
           })
