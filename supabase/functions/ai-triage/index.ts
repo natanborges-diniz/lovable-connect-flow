@@ -4469,7 +4469,27 @@ async function runConsultarLentesEstimativa(
   }
 
   if (collected.length === 0) {
-    console.log(`[QUOTE-EST] Sem matches para sphere=${worstSphere} cyl=${worstCyl} type=${rxType}`);
+    const filtrosAplicados = {
+      rx_type: rxType,
+      sphere: worstSphere,
+      cylinder: worstCyl,
+      adds_tested: addsToTry,
+      filtro_blue: !!args?.filtro_blue,
+      filtro_photo: !!args?.filtro_photo,
+    };
+    console.log(`[QUOTE-ZERO] ${JSON.stringify({ tool: "consultar_lentes_estimativa", contato_id: contatoId, atendimento_id: atendimentoId, ...filtrosAplicados })}`);
+    if (contatoId) {
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consultar_lentes_zero_resultados",
+          descricao: `consultar_lentes_estimativa não encontrou faixa para ${rxType} sphere=${worstSphere} cyl=${worstCyl}`,
+          metadata: { tool: "consultar_lentes_estimativa", ...filtrosAplicados },
+          referencia_tipo: atendimentoId ? "atendimento" : null,
+          referencia_id: atendimentoId || null,
+        });
+      } catch (e) { console.warn("[QUOTE-EST] failed to log zero_resultados", e); }
+    }
     return {
       resposta:
         "Pra esse grau específico preciso confirmar a disponibilidade direto na loja. Em qual região/bairro você está? Já te indico a unidade mais próxima 😊",
