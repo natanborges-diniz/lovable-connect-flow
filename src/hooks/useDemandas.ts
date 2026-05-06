@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -124,6 +124,9 @@ export interface DemandaMensagemRow {
   visto_por_loja_user_id: string | null;
   created_at: string;
   metadata: Record<string, any> | null;
+  editada_at?: string | null;
+  deletada_at?: string | null;
+  deletada_por?: string | null;
 }
 
 /** Realtime de mensagens de uma demanda específica. */
@@ -154,6 +157,72 @@ export function useDemandaMensagens(demandaId: string | null) {
         .order("created_at", { ascending: true });
       if (error) throw error;
       return (data || []) as DemandaMensagemRow[];
+    },
+  });
+}
+
+export function useEditDemandaMensagem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      demandaId,
+      novoConteudo,
+      conteudoAnterior,
+      metadata,
+    }: {
+      id: string;
+      demandaId: string;
+      novoConteudo: string;
+      conteudoAnterior: string;
+      metadata?: Record<string, any> | null;
+    }) => {
+      const historico = Array.isArray((metadata as any)?.historico_edicoes)
+        ? [...(metadata as any).historico_edicoes]
+        : [];
+      historico.push({ at: new Date().toISOString(), conteudo_anterior: conteudoAnterior });
+      const newMeta = { ...(metadata || {}), historico_edicoes: historico };
+      const { error } = await supabase
+        .from("demanda_mensagens")
+        .update({
+          conteudo: novoConteudo,
+          editada_at: new Date().toISOString(),
+          metadata: newMeta,
+        } as any)
+        .eq("id", id);
+      if (error) throw error;
+      return { demandaId };
+    },
+    onSuccess: ({ demandaId }) => {
+      qc.invalidateQueries({ queryKey: ["demanda-mensagens", demandaId] });
+    },
+  });
+}
+
+export function useDeleteDemandaMensagem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      demandaId,
+      userId,
+    }: {
+      id: string;
+      demandaId: string;
+      userId: string;
+    }) => {
+      const { error } = await supabase
+        .from("demanda_mensagens")
+        .update({
+          deletada_at: new Date().toISOString(),
+          deletada_por: userId,
+        } as any)
+        .eq("id", id);
+      if (error) throw error;
+      return { demandaId };
+    },
+    onSuccess: ({ demandaId }) => {
+      qc.invalidateQueries({ queryKey: ["demanda-mensagens", demandaId] });
     },
   });
 }

@@ -5,6 +5,8 @@ import {
   useMensagensConversa,
   useEnviarMensagem,
   useMarcarLidas,
+  useEditMensagemInterna,
+  useDeleteMensagemInterna,
   type Conversa,
 } from "@/hooks/useMensagensInternas";
 import { useQuery } from "@tanstack/react-query";
@@ -14,12 +16,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Send, Plus, MessageCircle, Search } from "lucide-react";
+import { Send, Plus, MessageCircle, Search, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
+import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
+import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
+import { toast } from "sonner";
 
 export default function Mensagens() {
   const { user } = useAuth();
@@ -30,6 +35,9 @@ export default function Mensagens() {
   const { data: mensagens } = useMensagensConversa(selectedConversa);
   const enviar = useEnviarMensagem();
   const marcarLidas = useMarcarLidas();
+  const editMsg = useEditMensagemInterna();
+  const deleteMsg = useDeleteMensagemInterna();
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [texto, setTexto] = useState("");
   const [busca, setBusca] = useState("");
   const [novaConversaOpen, setNovaConversaOpen] = useState(false);
@@ -204,8 +212,10 @@ export default function Mensagens() {
                   const isMine = m.remetente_id === uid;
                   const meta = m.metadata || {};
                   const isAutorizacao = meta?.kind === "autorizacao_excecao";
+                  const isDeleted = !!m.deletada_at;
+                  const isEditing = editingId === m.id;
                   return (
-                    <div key={m.id} className={cn("flex", isMine ? "justify-end" : "justify-start")}>
+                    <div key={m.id} className={cn("flex group", isMine ? "justify-end" : "justify-start")}>
                       {isAutorizacao ? (
                         <div className="max-w-[85%]">
                           <AutorizacaoExcecaoCard metadata={meta} isMine={isMine} />
@@ -216,16 +226,72 @@ export default function Mensagens() {
                       ) : (
                         <div
                           className={cn(
-                            "max-w-[70%] px-3 py-2 rounded-lg text-sm",
-                            isMine
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-foreground"
+                            "max-w-[70%] px-3 py-2 rounded-lg text-sm relative",
+                            isDeleted
+                              ? "bg-muted/50 text-muted-foreground italic border border-dashed"
+                              : isMine
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-foreground"
                           )}
                         >
-                          <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
-                          <p className={cn("text-[10px] mt-1", isMine ? "text-primary-foreground/70" : "text-muted-foreground")}>
-                            {format(new Date(m.created_at), "HH:mm", { locale: ptBR })}
-                          </p>
+                          {isEditing ? (
+                            <EditableMessageBubble
+                              initialValue={m.conteudo}
+                              onCancel={() => setEditingId(null)}
+                              saving={editMsg.isPending}
+                              onSave={async (v) => {
+                                try {
+                                  await editMsg.mutateAsync({
+                                    id: m.id,
+                                    novoConteudo: v,
+                                    conteudoAnterior: m.conteudo,
+                                    metadata: m.metadata,
+                                  });
+                                  setEditingId(null);
+                                  toast.success("Mensagem editada");
+                                } catch (e: any) {
+                                  toast.error("Erro ao editar: " + (e?.message || ""));
+                                }
+                              }}
+                            />
+                          ) : isDeleted ? (
+                            <p className="flex items-center gap-1.5 whitespace-pre-wrap break-words">
+                              <Ban className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                              Mensagem apagada
+                            </p>
+                          ) : (
+                            <>
+                              <div className="flex items-start gap-1">
+                                <p className="whitespace-pre-wrap break-words flex-1">{m.conteudo}</p>
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <MessageActionsMenu
+                                    autorId={m.remetente_id}
+                                    currentUserId={uid}
+                                    createdAt={m.created_at}
+                                    deletadaAt={m.deletada_at}
+                                    onEdit={() => setEditingId(m.id)}
+                                    onDelete={async () => {
+                                      try {
+                                        await deleteMsg.mutateAsync({ id: m.id, userId: uid! });
+                                        toast.success("Mensagem excluída");
+                                      } catch (e: any) {
+                                        toast.error("Erro ao excluir: " + (e?.message || ""));
+                                      }
+                                    }}
+                                    tone={isMine ? "dark" : "light"}
+                                  />
+                                </div>
+                              </div>
+                              <p className={cn("text-[10px] mt-1 flex items-center gap-1", isMine ? "text-primary-foreground/70" : "text-muted-foreground")}>
+                                <span>{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</span>
+                                {m.editada_at && (
+                                  <span title={`editada em ${format(new Date(m.editada_at), "dd/MM HH:mm", { locale: ptBR })}`}>
+                                    • editada
+                                  </span>
+                                )}
+                              </p>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

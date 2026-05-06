@@ -3,12 +3,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Pin, Loader2, Check, CheckCheck, ArrowRight, X, Users, ChevronDown, ChevronRight } from "lucide-react";
+import { Pin, Loader2, Check, CheckCheck, ArrowRight, X, Users, ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-import { useDemandaMensagens, type DemandaRow } from "@/hooks/useDemandas";
+import { useDemandaMensagens, useEditDemandaMensagem, useDeleteDemandaMensagem, type DemandaRow } from "@/hooks/useDemandas";
+import { useAuth } from "@/hooks/useAuth";
+import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
+import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 
 const dirColors: Record<string, string> = {
   operador_para_loja: "bg-primary text-primary-foreground ml-auto",
@@ -25,6 +28,11 @@ function lojaTone(nome: string): string {
 
 export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
   const { data: msgs = [] } = useDemandaMensagens(demanda.id);
+  const { user } = useAuth();
+  const uid = user?.id ?? null;
+  const editMsg = useEditDemandaMensagem();
+  const deleteMsg = useDeleteDemandaMensagem();
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [forwardText, setForwardText] = useState("");
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   const [forwarding, setForwarding] = useState(false);

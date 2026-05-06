@@ -716,8 +716,11 @@ export type Database = {
           autor_nome: string | null
           conteudo: string
           created_at: string
+          deletada_at: string | null
+          deletada_por: string | null
           demanda_id: string
           direcao: string
+          editada_at: string | null
           encaminhada_ao_cliente: boolean
           id: string
           metadata: Json | null
@@ -732,8 +735,11 @@ export type Database = {
           autor_nome?: string | null
           conteudo: string
           created_at?: string
+          deletada_at?: string | null
+          deletada_por?: string | null
           demanda_id: string
           direcao: string
+          editada_at?: string | null
           encaminhada_ao_cliente?: boolean
           id?: string
           metadata?: Json | null
@@ -748,8 +754,11 @@ export type Database = {
           autor_nome?: string | null
           conteudo?: string
           created_at?: string
+          deletada_at?: string | null
+          deletada_por?: string | null
           demanda_id?: string
           direcao?: string
+          editada_at?: string | null
           encaminhada_ao_cliente?: boolean
           id?: string
           metadata?: Json | null
@@ -1187,7 +1196,10 @@ export type Database = {
           atendimento_id: string
           conteudo: string
           created_at: string
+          deletada_at: string | null
+          deletada_por: string | null
           direcao: Database["public"]["Enums"]["direcao_mensagem"]
+          editada_at: string | null
           id: string
           metadata: Json | null
           provedor: string | null
@@ -1198,7 +1210,10 @@ export type Database = {
           atendimento_id: string
           conteudo: string
           created_at?: string
+          deletada_at?: string | null
+          deletada_por?: string | null
           direcao?: Database["public"]["Enums"]["direcao_mensagem"]
+          editada_at?: string | null
           id?: string
           metadata?: Json | null
           provedor?: string | null
@@ -1209,7 +1224,10 @@ export type Database = {
           atendimento_id?: string
           conteudo?: string
           created_at?: string
+          deletada_at?: string | null
+          deletada_por?: string | null
           direcao?: Database["public"]["Enums"]["direcao_mensagem"]
+          editada_at?: string | null
           id?: string
           metadata?: Json | null
           provedor?: string | null
@@ -1233,7 +1251,10 @@ export type Database = {
           conteudo: string
           conversa_id: string
           created_at: string
+          deletada_at: string | null
+          deletada_por: string | null
           destinatario_id: string
+          editada_at: string | null
           id: string
           lida: boolean
           metadata: Json
@@ -1245,7 +1266,10 @@ export type Database = {
           conteudo: string
           conversa_id: string
           created_at?: string
+          deletada_at?: string | null
+          deletada_por?: string | null
           destinatario_id: string
+          editada_at?: string | null
           id?: string
           lida?: boolean
           metadata?: Json
@@ -1257,7 +1281,10 @@ export type Database = {
           conteudo?: string
           conversa_id?: string
           created_at?: string
+          deletada_at?: string | null
+          deletada_por?: string | null
           destinatario_id?: string
+          editada_at?: string | null
           id?: string
           lida?: boolean
           metadata?: Json

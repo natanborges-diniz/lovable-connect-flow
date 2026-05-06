@@ -107,6 +107,73 @@ export function useMensagens(atendimentoId: string | undefined) {
   });
 }
 
+export function useEditMensagem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      novoConteudo,
+      conteudoAnterior,
+      metadata,
+    }: {
+      id: string;
+      novoConteudo: string;
+      conteudoAnterior: string;
+      metadata?: Record<string, unknown> | null;
+    }) => {
+      const historico = Array.isArray((metadata as any)?.historico_edicoes)
+        ? [...(metadata as any).historico_edicoes]
+        : [];
+      historico.push({ at: new Date().toISOString(), conteudo_anterior: conteudoAnterior });
+      const newMeta = { ...(metadata || {}), historico_edicoes: historico };
+      const { data, error } = await supabase
+        .from("mensagens")
+        .update({
+          conteudo: novoConteudo,
+          editada_at: new Date().toISOString(),
+          metadata: newMeta as any,
+        })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["mensagens", data.atendimento_id] });
+    },
+    onError: (error) => {
+      toast.error("Erro ao editar mensagem: " + error.message);
+    },
+  });
+}
+
+export function useDeleteMensagem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, userId }: { id: string; userId: string }) => {
+      const { data, error } = await supabase
+        .from("mensagens")
+        .update({
+          deletada_at: new Date().toISOString(),
+          deletada_por: userId,
+        } as any)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["mensagens", data.atendimento_id] });
+      toast.success("Mensagem excluída do histórico interno");
+    },
+    onError: (error) => {
+      toast.error("Erro ao excluir mensagem: " + error.message);
+    },
+  });
+}
+
 export function useCreateMensagem() {
   const queryClient = useQueryClient();
   return useMutation({
