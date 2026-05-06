@@ -2865,7 +2865,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           tools: TOOLS,
           tool_choice: forceResponderTool
             ? { type: "function", function: { name: "responder" } }
-            : "required",
+            : forceConsultarLentesTool
+              ? { type: "function", function: { name: "consultar_lentes" } }
+              : "required",
           max_completion_tokens: 2500,
         }),
       });
