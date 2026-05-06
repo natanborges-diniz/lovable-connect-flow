@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
 import PipelineFinanceiro from "./pages/PipelineFinanceiro";
+import PagamentosLink from "./pages/PagamentosLink";
 import PipelineAgendamentos from "./pages/PipelineAgendamentos";
 import PipelineTI from "./pages/PipelineTI";
 import PipelineInterno from "./pages/PipelineInterno";
