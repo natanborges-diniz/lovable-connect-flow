@@ -1525,6 +1525,16 @@ function pickFallback(recentOutbound: string[]): string | null {
   const recentNorm = recentOutbound.slice(-10).map(norm);
   // ⚠️ Se já mandamos QUALQUER fallback genérico recentemente, escala (retorna null).
   // Caso Paulo Henrique 2026-04-27: 3× "Me explica melhor..." em loop.
+  // Caso Cleber 2026-05-06: 2× "Conta pra mim..." idênticas — threshold 0.6 deveria pegar
+  // mas algum race fez passar. Reforçamos com checagem ESTRITA de identidade exata
+  // contra as últimas 3 outbounds, ANTES da checagem por similaridade.
+  const last3Norm = recentNorm.slice(-3);
+  const exactRepeatInLast3 = VALIDATOR_FAILED_POOL.some((fb) => {
+    const fbNorm = norm(fb);
+    return last3Norm.some((prev) => prev === fbNorm);
+  });
+  if (exactRepeatInLast3) return null;
+
   const sentAnyFallback = VALIDATOR_FAILED_POOL.some((fb) => {
     const fbNorm = norm(fb);
     return recentNorm.some((prev) => computeSimilarity(fbNorm, prev) > 0.6);
