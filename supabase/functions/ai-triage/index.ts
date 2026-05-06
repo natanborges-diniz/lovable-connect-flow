@@ -4314,11 +4314,43 @@ async function runConsultarLentes(
       });
     } catch (e) { console.warn("[QUOTE] failed to log consultar_lentes_zero_resultados", e); }
 
-    // FALLBACK AUTOMÁTICO PRA ESTIMATIVA — caso Cleber 2026-05-06.
+    // FALLBACK AUTOMÁTICO PRA ESTIMATIVA — caso Cleber 2026-05-06 (Fase 2 endurecida).
     // Catálogo não cobre a combinação exata? Em vez de empurrar pra loja sem dar valor,
     // tenta a tool de estimativa (faixas econômica/intermediária/premium) com o tipo + esférico.
-    // Só cai no fallback "confirmar na loja" se a estimativa também não retornar nada.
-    if (rxType === "progressive" || rxType === "single_vision") {
+    //
+    // GUARDRAILS (anti-loop / só re-disparar quando faz sentido):
+    //  G1. Já mandei a estimativa de gap nas últimas 3 outbounds? → não repete (loop).
+    //  G2. Cliente pediu marca específica (preferencia_marca)? → estimativa traria outras marcas e
+    //      confundiria ("pedi DMAX e a IA mandou ZEISS"). Pula fallback, vai pra loja.
+    //  G3. Filtros opcionais ativos (blue/photo)? Estimativa relaxa esses filtros pra achar faixa,
+    //      mas mantemos os mesmos flags pra não enganar o cliente (já passados abaixo).
+    //  G4. rxType desconhecido / não suportado? Estimativa só sabe single_vision e progressive.
+    const prefixGap = `Pra esse grau específico`;
+    const recentNormFb = (recentOutbound || []).slice(-3).map(norm);
+    const fallbackJaEnviado = recentNormFb.some((p) => p && p.includes(norm(prefixGap)));
+    const podeFallback =
+      (rxType === "progressive" || rxType === "single_vision") &&
+      !fallbackJaEnviado &&
+      !args?.preferencia_marca;
+
+    if (!podeFallback) {
+      const motivo = fallbackJaEnviado
+        ? "fallback_ja_enviado_recente"
+        : args?.preferencia_marca
+          ? "preferencia_marca_definida"
+          : `rx_type_nao_suportado:${rxType}`;
+      console.log(`[QUOTE] fallback estimativa SKIP (${motivo})`);
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consultar_lentes_fallback_estimativa_skip",
+          descricao: `Fallback estimativa não disparado: ${motivo}`,
+          metadata: { motivo, ...filtrosAplicados },
+          referencia_tipo: atendimentoId ? "atendimento" : null,
+          referencia_id: atendimentoId || null,
+        });
+      } catch (e) { console.warn("[QUOTE] failed to log fallback_skip", e); }
+    } else {
       try {
         const est = await runConsultarLentesEstimativa(supabase, {
           rx_type: rxType,
@@ -4341,8 +4373,16 @@ async function runConsultarLentes(
             });
           } catch (e) { console.warn("[QUOTE] failed to log fallback_acionado", e); }
           // Marca explicitamente que foi estimativa por gap, mantém pergunta de região no fim.
-          const prefix = `Pra esse grau específico (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
-          return { resposta: prefix + est.resposta };
+          const prefix = `${prefixGap} (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
+          // Anti-duplicação extra: se a resposta da estimativa em si já apareceu literalmente,
+          // NÃO repete — manda só a parte de loja (próxima frase) pra evoluir o turno.
+          const respostaFinal = prefix + est.resposta;
+          const respostaNorm = norm(respostaFinal);
+          if (recentNormFb.some((p) => p && (p === respostaNorm || computeSimilarity(p, respostaNorm) > 0.85))) {
+            console.log(`[QUOTE] fallback estimativa gerou texto duplicado → escala suave pra loja`);
+          } else {
+            return { resposta: respostaFinal };
+          }
         }
       } catch (e) {
         console.warn("[QUOTE] estimativa fallback falhou", e);
