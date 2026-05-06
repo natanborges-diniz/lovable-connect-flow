@@ -35,6 +35,9 @@ export default function Mensagens() {
   const { data: mensagens } = useMensagensConversa(selectedConversa);
   const enviar = useEnviarMensagem();
   const marcarLidas = useMarcarLidas();
+  const editMsg = useEditMensagemInterna();
+  const deleteMsg = useDeleteMensagemInterna();
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [texto, setTexto] = useState("");
   const [busca, setBusca] = useState("");
   const [novaConversaOpen, setNovaConversaOpen] = useState(false);
