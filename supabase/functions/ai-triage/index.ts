@@ -3178,27 +3178,43 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           metadata: rxData, referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
-        // ── AUTO-CHAIN: pós-OCR válido em contexto de óculos, encadeia consultar_lentes
-        // POR PADRÃO. Casos André + Paulo Henrique 2026-04-27: regex anterior exigia
-        // keyword explícita ("orçamento/preço") e a IA gastava 1 turno extra só dizendo
-        // "vou separar opções" → cliente desistia. Agora só pulamos o auto-chain se o
-        // cliente sinalizou explicitamente outra intenção (guardar receita / depois).
+        // ── CONFIRMAÇÃO PÓS-OCR (Mai/2026) ──
+        // Em vez de auto-chain → consultar_lentes, pedimos confirmação explícita
+        // ao cliente com os valores lidos. Só após "sim" é que segue pra orçamento.
+        // Casos de correção mantêm pending=true e re-perguntam com valores novos.
         const rxJustValid = isReceitaValida(rxWithLabel);
         const recentInboundJoined = inboundMsgs.slice(-5).map((m: any) => String(m.conteudo || "")).join(" | ").toLowerCase();
-        const isLCRecent = /\b(lente[s]?\s+de\s+contato|\blc\b|di[aá]ria|quinzenal|mensal|t[oó]rica|gelatinosa)\b/i.test(recentInboundJoined);
         const explicitOptOut = /\b(s[oó]\s+(quero|queria|gostaria)\s+(que\s+)?(voc[eê]\s+)?guarde|guarda?r?\s+(a\s+)?receita|depois\s+(eu\s+)?(te\s+)?falo|n[aã]o\s+quero\s+or[cç]amento|s[oó]\s+(uma|tirando)\s+d[uú]vida)\b/i.test(recentInboundJoined);
-        const shouldAutoChain = rxJustValid && !isLCRecent && !explicitOptOut;
 
-        if (shouldAutoChain) {
-          console.log(`[AUTO-CHAIN] OCR válido + óculos (sem opt-out) → encadeando consultar_lentes (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%)`);
-          const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, {});
-          resposta = quoteResult.resposta;
-          intencao = "orcamento";
-          pipeline_coluna = "Orçamento";
-          validatorFlags.push("auto_chain_pos_ocr");
+        if (rxJustValid && !explicitOptOut) {
+          // Marca pending_confirmation no metadata e devolve mensagem canônica.
+          try {
+            const { data: c2 } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+            const m2 = (c2?.metadata as Record<string, any>) || {};
+            await supabase.from("contatos").update({
+              metadata: {
+                ...m2,
+                receita_confirmacao: {
+                  pending: true,
+                  rx_label: rxLabel,
+                  asked_at: new Date().toISOString(),
+                  correction_count: 0,
+                },
+              },
+            }).eq("id", contatoId);
+          } catch (e) { console.warn("[RX-CONFIRM] failed to mark pending", e); }
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_confirmacao_solicitada",
+            descricao: `Solicitando confirmação cliente. ${rxType} OD esf=${od.sphere} OE esf=${oe.sphere}`,
+            metadata: { rx_label: rxLabel, source: "ocr" },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          resposta = buildMsgConfirmarReceita(rxWithLabel, false);
+          validatorFlags.push("receita_confirmacao_solicitada");
+          console.log(`[RX-CONFIRM] Pedindo confirmação ao cliente (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%)`);
         } else if (needsHumanReview) {
-          // Se ficou totalmente ilegível (rxType unknown OU sem nenhum sphere/cyl), pede valores por texto.
-          // Caso contrário, mantém a resposta cautelosa com a base lida.
           const totalmenteIlegivel = rxType === "unknown" || (sphereValues.length === 0 && cylValues.length === 0);
           if (totalmenteIlegivel) {
             resposta = MSG_PEDIR_RECEITA_TEXTO;
@@ -3211,7 +3227,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         } else {
           resposta = args.resposta;
         }
-        console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${shouldAutoChain ? "auto-chained" : (explicitOptOut ? "client opted-out" : (isLCRecent ? "LC context" : "no chain"))}`);
+        console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${rxJustValid && !explicitOptOut ? "pending_confirmation" : (explicitOptOut ? "client opted-out" : "no chain")}`);
 
       } else if (fn === "consultar_lentes") {
         // ── QUOTE ENGINE: triggered by client interest ──
