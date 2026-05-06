@@ -4418,6 +4418,8 @@ async function runConsultarLentesEstimativa(
     filtro_blue?: boolean;
     filtro_photo?: boolean;
   },
+  contatoId?: string,
+  atendimentoId?: string,
 ): Promise<{ resposta: string }> {
   const rxType = args?.rx_type === "progressive" ? "progressive" : "single_vision";
   const sphereCandidates = [args?.sphere_od, args?.sphere_oe].filter(
