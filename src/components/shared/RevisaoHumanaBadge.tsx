@@ -13,6 +13,37 @@ export function traduzirMotivos(motivos?: string[] | null): string {
   return motivos.map((m) => MOTIVO_LABELS[m] ?? m).join(" • ");
 }
 
+interface RxEye {
+  esf?: number | string | null;
+  cyl?: number | string | null;
+  axis?: number | string | null;
+  add?: number | string | null;
+}
+
+function fmtNum(v: any, withSign = true): string {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n).toFixed(2).replace(".", ",");
+  if (!withSign) return abs;
+  if (n === 0) return "0,00";
+  return (n > 0 ? "+" : "-") + abs;
+}
+
+export function formatRx(eye?: RxEye | null): string {
+  if (!eye) return "—";
+  const parts: string[] = [];
+  parts.push(`ESF ${fmtNum(eye.esf)}`);
+  parts.push(`CIL ${fmtNum(eye.cyl)}`);
+  if (eye.axis !== null && eye.axis !== undefined && eye.axis !== "") {
+    parts.push(`EIXO ${fmtNum(eye.axis, false).replace(",00", "")}°`);
+  }
+  if (eye.add !== null && eye.add !== undefined && eye.add !== "" && Number(eye.add) !== 0) {
+    parts.push(`ADD ${fmtNum(eye.add)}`);
+  }
+  return parts.join(" ");
+}
+
 interface Props {
   motivos?: string[] | null;
   size?: "sm" | "md";
