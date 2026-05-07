@@ -26,7 +26,7 @@ export function useAtendimento(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("atendimentos")
-        .select("*, contato:contatos(*), solicitacao:solicitacoes(*, contato:contatos(id, nome, tipo)), fila:filas(*, setor:setores(*))")
+        .select("*, contato:contatos(*), solicitacao:solicitacoes(*, contato:contatos(id, nome, tipo, metadata)), fila:filas(*, setor:setores(*))")
         .eq("id", id!)
         .single();
       if (error) throw error;
