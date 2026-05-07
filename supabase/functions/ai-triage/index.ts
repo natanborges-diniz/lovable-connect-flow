@@ -2060,6 +2060,7 @@ serve(async (req) => {
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
     const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
+    const precisaConfirmarNome = contatoMeta.precisa_confirmar_nome === true && !nomeConfirmado;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
 
     // ── 3.5b. POST-DATA ROUTER: "modelos / armações" → presencial ──
