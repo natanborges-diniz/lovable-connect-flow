@@ -22,8 +22,6 @@ import { Badge } from "@/components/ui/badge";
 import { RevisaoHumanaBadge, traduzirMotivos } from "@/components/shared/RevisaoHumanaBadge";
 import { ReceitaValidacaoPopover } from "@/components/atendimentos/ReceitaValidacaoPopover";
 import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban, CheckCircle2 } from "lucide-react";
-import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
-import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -171,15 +169,11 @@ export default function Atendimentos() {
 function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange: (s: StatusAtendimento) => void }) {
   const { data: mensagens, refetch } = useMensagens(id);
   const createMensagem = useCreateMensagem();
-  const editMensagem = useEditMensagem();
-  const deleteMensagem = useDeleteMensagem();
   const { data: atendimentos } = useAtendimentos();
   const atendimento = atendimentos?.find((a: any) => a.id === id) as any;
   const { profile, user } = useAuth();
   const uid = user?.id ?? null;
   const consultorNome = profile?.nome?.split(" ")[0] || "consultor das Óticas Diniz";
-
-  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [msgText, setMsgText] = useState("");
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
