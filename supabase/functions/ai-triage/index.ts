@@ -253,16 +253,6 @@ function detectCtaAgendamentoNo(text: string): boolean {
     || /\b(depois eu (te )?falo|outra hora|n[ãa]o quero agendar|n[ãa]o agora)\b/.test(t);
 }
 
-function detectCidadeEscolhida(text: string): string | null {
-  const t = String(text || "").toLowerCase();
-  if (!t) return null;
-  if (/\bosasco\b/.test(t)) return "osasco";
-  if (/\bcarapicu[ií]ba\b|\bcarapic[uú]iba\b/.test(t)) return "carapicuiba";
-  if (/\bitapevi\b/.test(t)) return "itapevi";
-  if (/\bbarueri\b/.test(t)) return "barueri";
-  return null;
-}
-
 function detectLojaEscolhida(text: string, lojaNomes: string[]): string | null {
   const t = String(text || "").toLowerCase();
   if (!t) return null;
