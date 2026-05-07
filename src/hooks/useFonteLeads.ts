@@ -2,10 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 export type FontePeriodo = "7d" | "30d" | "90d" | "all";
+export type FonteLead = "site" | "instagram" | "retorno" | "organico" | "desconhecido";
 
 export interface FonteLeadRow {
   id: string;
-  fonte: "site" | "instagram" | "outro";
+  fonte: FonteLead;
   created_at: string;
 }
 
@@ -33,8 +34,10 @@ export function useFonteLeads(periodo: FontePeriodo = "30d") {
       if (error) throw error;
       return (data ?? []).map((c: any) => {
         const f = c.metadata?.fonte_lead;
-        const fonte: FonteLeadRow["fonte"] =
-          f === "site" || f === "instagram" ? f : "outro";
+        const fonte: FonteLead =
+          f === "site" || f === "instagram" || f === "retorno" || f === "organico"
+            ? f
+            : "desconhecido";
         return { id: c.id, fonte, created_at: c.created_at };
       });
     },

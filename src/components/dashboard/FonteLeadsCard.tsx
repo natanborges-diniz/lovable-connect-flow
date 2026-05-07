@@ -1,24 +1,30 @@
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Globe, Instagram, HelpCircle } from "lucide-react";
+import { Globe, Instagram, RotateCcw, Sparkles, HelpCircle } from "lucide-react";
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend,
   LineChart, Line, XAxis, YAxis, CartesianGrid,
 } from "recharts";
-import { useFonteLeads, type FontePeriodo } from "@/hooks/useFonteLeads";
+import { useFonteLeads, type FontePeriodo, type FonteLead } from "@/hooks/useFonteLeads";
 
-const COLORS = {
+const COLORS: Record<FonteLead, string> = {
   site: "hsl(220, 70%, 50%)",
   instagram: "hsl(320, 65%, 55%)",
-  outro: "hsl(0, 0%, 60%)",
-} as const;
+  retorno: "hsl(265, 70%, 55%)",
+  organico: "hsl(150, 50%, 45%)",
+  desconhecido: "hsl(0, 0%, 60%)",
+};
 
-const LABELS: Record<string, string> = {
+const LABELS: Record<FonteLead, string> = {
   site: "Site",
   instagram: "Instagram",
-  outro: "Outro / não identificado",
+  retorno: "Retorno",
+  organico: "Orgânico",
+  desconhecido: "Desconhecido",
 };
+
+const ORDER: FonteLead[] = ["site", "instagram", "retorno", "organico", "desconhecido"];
 
 export function FonteLeadsCard() {
   const [periodo, setPeriodo] = useState<FontePeriodo>("30d");
@@ -26,25 +32,26 @@ export function FonteLeadsCard() {
 
   const { totals, donut, timeline } = useMemo(() => {
     const rows = data ?? [];
-    const t = { site: 0, instagram: 0, outro: 0 } as Record<string, number>;
-    const byDay = new Map<string, { date: string; site: number; instagram: number }>();
+    const t: Record<FonteLead, number> = { site: 0, instagram: 0, retorno: 0, organico: 0, desconhecido: 0 };
+    const byDay = new Map<string, { date: string } & Record<FonteLead, number>>();
     for (const r of rows) {
       t[r.fonte]++;
       const day = r.created_at.slice(0, 10);
-      if (!byDay.has(day)) byDay.set(day, { date: day, site: 0, instagram: 0 });
-      const b = byDay.get(day)!;
-      if (r.fonte === "site") b.site++;
-      else if (r.fonte === "instagram") b.instagram++;
+      if (!byDay.has(day)) {
+        byDay.set(day, { date: day, site: 0, instagram: 0, retorno: 0, organico: 0, desconhecido: 0 });
+      }
+      byDay.get(day)![r.fonte]++;
     }
-    const donutArr = (["site", "instagram", "outro"] as const)
+    const donutArr = ORDER
       .map((k) => ({ name: LABELS[k], value: t[k], fill: COLORS[k] }))
       .filter((d) => d.value > 0);
     const timelineArr = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
     return { totals: t, donut: donutArr, timeline: timelineArr };
   }, [data]);
 
-  const total = totals.site + totals.instagram + totals.outro;
+  const total = ORDER.reduce((acc, k) => acc + totals[k], 0);
   const pct = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0);
+  const pctRetorno = pct(totals.retorno);
 
   const periodos: { key: FontePeriodo; label: string }[] = [
     { key: "7d", label: "7 dias" },
@@ -77,10 +84,12 @@ export function FonteLeadsCard() {
       </CardHeader>
       <CardContent>
         {/* KPIs */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
           <KpiTile icon={<Globe className="h-4 w-4" />} label="Site" value={totals.site} pct={pct(totals.site)} color={COLORS.site} />
           <KpiTile icon={<Instagram className="h-4 w-4" />} label="Instagram" value={totals.instagram} pct={pct(totals.instagram)} color={COLORS.instagram} />
-          <KpiTile icon={<HelpCircle className="h-4 w-4" />} label="Outro" value={totals.outro} pct={pct(totals.outro)} color={COLORS.outro} />
+          <KpiTile icon={<RotateCcw className="h-4 w-4" />} label="Retorno" value={totals.retorno} pct={pctRetorno} color={COLORS.retorno} />
+          <KpiTile icon={<Sparkles className="h-4 w-4" />} label="Orgânico" value={totals.organico} pct={pct(totals.organico)} color={COLORS.organico} />
+          <KpiTile icon={<HelpCircle className="h-4 w-4" />} label="Desconhecido" value={totals.desconhecido} pct={pct(totals.desconhecido)} color={COLORS.desconhecido} />
         </div>
 
         {isLoading ? (
@@ -90,8 +99,10 @@ export function FonteLeadsCard() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div>
-              <p className="text-xs text-muted-foreground mb-2">Distribuição</p>
-              <ResponsiveContainer width="100%" height={220}>
+              <p className="text-xs text-muted-foreground mb-2">
+                Distribuição · <span className="font-medium" style={{ color: COLORS.retorno }}>{pctRetorno}% retorno</span>
+              </p>
+              <ResponsiveContainer width="100%" height={240}>
                 <PieChart>
                   <Pie data={donut} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} label={(e: any) => `${e.value}`}>
                     {donut.map((d, i) => <Cell key={i} fill={d.fill} />)}
@@ -103,7 +114,7 @@ export function FonteLeadsCard() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-2">Leads por dia</p>
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={240}>
                 <LineChart data={timeline}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
@@ -112,6 +123,8 @@ export function FonteLeadsCard() {
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Line type="monotone" dataKey="site" name="Site" stroke={COLORS.site} strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="instagram" name="Instagram" stroke={COLORS.instagram} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="retorno" name="Retorno" stroke={COLORS.retorno} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="organico" name="Orgânico" stroke={COLORS.organico} strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -129,7 +142,7 @@ function KpiTile({ icon, label, value, pct, color }: { icon: React.ReactNode; la
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="text-xs text-muted-foreground truncate">{label}</div>
         <div className="text-2xl font-bold leading-none">{value}</div>
       </div>
       <div className="text-xs text-muted-foreground tabular-nums">{pct}%</div>
