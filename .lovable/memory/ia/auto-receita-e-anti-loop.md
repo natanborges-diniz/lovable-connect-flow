@@ -154,3 +154,14 @@ Toda receita lida via OCR fica com `contatos.metadata.receita_confirmacao.pendin
 - **Confirmação granular**: `detectRxConfirmation` agora marca `confirmed_by_client_at` da receita pelo `rx_index` (ou última como fallback).
 - **Safety net pós-LLM**: antes da validação geral, se a resposta tem `R$`/preços ou tool de quote rodou, e existe alguma receita sem `confirmed_by_client_at`, sobrescreve com `buildMsgConfirmarReceita(rxAlvo)`. Evento `bloqueado_orcamento_receita_nao_confirmada`.
 - **Prompt**: contexto das receitas marca `✅ confirmada` ou `⚠️ AGUARDA confirmação` por receita; instrui IA a nunca cotar receita não confirmada.
+
+## 🆕 Mai/2026 — Nova receita após receita confirmada (caso Tati)
+
+**Caso Tati (07/05):** cliente já tinha receita confirmada (-13,5 / -20,5), declarou "Tenho nova receita" e mandou foto. LLM viu `hasValidReceitas=true` + bloco "FLUXO PÓS-RECEITA OBRIGATÓRIO" e ficou paralisado — sem chamar tool. Caiu no fallback determinístico que respondeu "Recebi sua receita 👀… analisando" e parou. O `9.4 FORCED RETRY` estava condicionado a `!hasValidReceitas` e foi pulado.
+
+**Correções (`ai-triage/index.ts`):**
+- **Flag `hasPendingNewPrescriptionImage`**: imagem inbound mais recente que `max(receitas[].data_leitura)` OU intent declarado ("nova receita", "outra receita", "receita atualizada", etc.) com imagem nas últimas 5 inbounds. Loga `[RX-NEW-PENDING]`.
+- **`isImageContext`**: passa a incluir esse flag mesmo quando `hasValidReceitas=true`.
+- **Hint de prompt**: novo bloco `[SISTEMA: NOVA RECEITA PENDENTE]` substitui o `[FLUXO PÓS-RECEITA OBRIGATÓRIO]` quando aplicável — força `interpretar_receita` AGORA com a imagem nova e proíbe usar receita antiga em `consultar_lentes`.
+- **Force-retry estendido** (bloco 9.4): dispara quando `hasPendingNewPrescriptionImage=true` mesmo com receita salva. Sucesso do retry faz append em `receitas[]` (FIFO 5) e marca `receita_confirmacao.pending=true` — preserva receita anterior.
+- **Quote-engine bloqueia** `consultar_lentes`/`consultar_lentes_contato` quando `hasPendingNewPrescriptionImage=true`: devolve "Recebi sua nova receita 👀… lendo" e loga `quote_blocked_new_rx_pending`.

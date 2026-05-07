@@ -2145,10 +2145,37 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
     // Receita salva mas vazia/`unknown` (caso Jardel) NÃO conta — força nova OCR.
     const hasValidReceitas = hasReceitasValidas(receitas);
+
+    // ── Nova receita pendente: imagem inbound mais recente que a última receita salva ──
+    // Caso Tati (Mai/2026): cliente já tem receita confirmada, manda foto de receita NOVA;
+    // sem este gate, hasValidReceitas=true bloqueia OCR e o LLM cota com receita antiga
+    // ou trava no fallback "Recebi sua receita…".
+    let lastInboundImageAt = 0;
+    for (const m of last5Inbound) {
+      if ((m.tipo_conteudo || "text") === "image" && m.created_at) {
+        const t = new Date(m.created_at).getTime();
+        if (t > lastInboundImageAt) lastInboundImageAt = t;
+      }
+    }
+    let lastReceitaAt = 0;
+    for (const r of receitas as any[]) {
+      const t = r?.data_leitura ? new Date(r.data_leitura).getTime() : 0;
+      if (t > lastReceitaAt) lastReceitaAt = t;
+    }
+    const last3InboundText = inboundMsgs.slice(-3).map((m: any) => String(m.conteudo || "")).join(" | ").toLowerCase();
+    const declaredNewRx = /nova receita|outra receita|receita nova|receita atualizada|receita recente|tenho (uma )?receita/i.test(last3InboundText);
+    const hasPendingNewPrescriptionImage = !!(lastInboundImageAt && (
+      (lastReceitaAt && lastInboundImageAt > lastReceitaAt) || (declaredNewRx && hasValidReceitas)
+    ));
+
     const isImageContext = lastIsImage
-      || (hasRecentUnparsedPrescriptionImage && !hasValidReceitas);
+      || (hasRecentUnparsedPrescriptionImage && !hasValidReceitas)
+      || hasPendingNewPrescriptionImage;
     if (receitas.length > 0 && !hasValidReceitas) {
       console.log(`[RX-VALID] Receita salva existe mas é INVÁLIDA (rx_type/eyes vazios) — tratando como sem receita`);
+    }
+    if (hasPendingNewPrescriptionImage) {
+      console.log(`[RX-NEW-PENDING] Nova imagem de receita detectada (imageAt=${lastInboundImageAt} > rxAt=${lastReceitaAt}, declaredNew=${declaredNewRx}) — força OCR`);
     }
 
     // ── 4.4. GATE DE CONFIRMAÇÃO DE RECEITA (Mai/2026) ──
@@ -2966,7 +2993,13 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             content: "[SISTEMA: PRIORIDADE MÁXIMA — RECEITA PENDENTE] O cliente enviou uma imagem (provável receita) nas últimas mensagens e ela AINDA NÃO foi interpretada com sucesso (RECEITAS JÁ INTERPRETADAS está vazio ou inválido). REGRAS: 1) Você DEVE chamar a tool interpretar_receita usando a imagem mais recente entregue no histórico, ANTES de qualquer outra ação (não escale, não peça reenvio, não responda genericamente). 2) Se a imagem foi entregue ao modelo, use-a — mesmo que a última mensagem do cliente seja curta ('ok', 'então?', 'cadê'). 3) Só peça reenvio se o sistema avisar explicitamente que a imagem NÃO foi entregue. 4) Só escale para humano se a imagem estiver claramente ilegível APÓS a tentativa de interpretação.]",
           }]
         : []),
-      ...(hasValidReceitas
+      ...(hasPendingNewPrescriptionImage
+        ? [{
+            role: "system",
+            content: "[SISTEMA: NOVA RECEITA PENDENTE] O cliente declarou ter NOVA RECEITA e enviou uma imagem mais recente que a última receita salva. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA com a imagem mais recente do histórico — NÃO use consultar_lentes/consultar_lentes_contato com a receita antiga (ela está desatualizada). Após interpretar, peça confirmação dos novos valores ao cliente antes de cotar. Se a imagem estiver ilegível APÓS a tentativa de OCR, peça reenvio uma única vez.",
+          }]
+        : []),
+      ...(hasValidReceitas && !hasPendingNewPrescriptionImage
         ? [{
             role: "system",
             content: isLCContextGlobal
@@ -3787,6 +3820,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         }
         console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${rxJustValid && !explicitOptOut ? "pending_confirmation" : (explicitOptOut ? "client opted-out" : "no chain")}`);
 
+      } else if ((fn === "consultar_lentes" || fn === "consultar_lentes_contato") && hasPendingNewPrescriptionImage) {
+        // Bloqueia cotação com receita antiga quando há nova receita pendente de OCR
+        console.log(`[QUOTE-BLOCK] ${fn} bloqueada: nova receita pendente de interpretação`);
+        validatorFlags.push("quote_blocked_new_rx_pending");
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = "Orçamento";
+        resposta = "Recebi sua nova receita 👀 Já estou lendo os valores aqui pra te passar o orçamento certinho com base nela, um instante…";
+        continue;
       } else if (fn === "consultar_lentes") {
         // ── QUOTE ENGINE: triggered by client interest ──
         intencao = "orcamento";
@@ -4573,7 +4614,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // Caso Artur Borges 24/04 15:13: modelo retornou texto ("Recebi sua receita 👀 Já estou analisando…")
     // sem chamar interpretar_receita. Sem retry, a conversa morre — cliente fica esperando indefinidamente.
     const interpretouReceitaNesteTurno = (toolCalls || []).some((tc: any) => tc.function?.name === "interpretar_receita");
-    const precisaForcarInterpretacao = isImageContext && !hasValidReceitas && !interpretouReceitaNesteTurno && !precisa_humano;
+    const precisaForcarInterpretacao = !interpretouReceitaNesteTurno && !precisa_humano && (
+      (isImageContext && !hasValidReceitas) || hasPendingNewPrescriptionImage
+    );
 
     if (precisaForcarInterpretacao) {
       console.log("[FORCE-INTERPRETAR] Imagem pendente sem chamada de interpretar_receita — forçando retry");
