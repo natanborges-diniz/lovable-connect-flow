@@ -226,6 +226,24 @@ function isReceitaForaDaFaixa(rx: any): boolean {
   return false;
 }
 
+// Receita "complexa porém cotável": IA cota normal, mas sinaliza revisão humana.
+// NÃO bloqueia o cliente — só liga uma flag interna pra equipe conferir.
+function requerRevisaoHumanaPosOrcamento(rx: any): { precisa: boolean; motivos: string[] } {
+  const motivos: string[] = [];
+  if (!rx?.eyes) return { precisa: false, motivos };
+  const od = rx.eyes.od || {};
+  const oe = rx.eyes.oe || {};
+  const sphereMax = Math.max(Math.abs(Number(od.sphere) || 0), Math.abs(Number(oe.sphere) || 0));
+  const cylMax = Math.max(Math.abs(Number(od.cylinder) || 0), Math.abs(Number(oe.cylinder) || 0));
+  const addMax = Math.max(Number(od.add) || 0, Number(oe.add) || 0);
+  if (cylMax > 4) motivos.push(`cilindrico_alto:${cylMax}`);
+  if (addMax > 3.5) motivos.push(`adicao_alta:${addMax}`);
+  if (sphereMax > 8 && sphereMax <= 10) motivos.push(`esferico_faixa_cinza:${sphereMax}`);
+  return { precisa: motivos.length > 0, motivos };
+}
+
+const MSG_REVISAO_HUMANA_SUFIXO = "\n\n💡 _Como sua receita tem um detalhe específico, vou pedir uma conferência rápida do nosso consultor pra confirmar prazo e disponibilidade. Pode ir escolhendo a opção que mais te agrada que já adianto 🙌_";
+
 const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Por ser uma *lente especial*, vou te conectar com um Consultor pra montar o orçamento certinho e confirmar prazo 🤝";
 
 // ── Bloqueia escalada/oferta de "grau alto / sob encomenda" sem receita interpretada ──
