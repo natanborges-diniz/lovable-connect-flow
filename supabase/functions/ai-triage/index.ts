@@ -651,10 +651,11 @@ function detectPrescriptionCorrection(text: string): {
   if (!text || text.length < 4) return null;
   // Normaliza espaço entre sinal e número: "- 425" → "-425", "+ 200" → "+200"
   let t = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2");
-  // Convenções ópticas: pl/plano/neutro/zerado/sc → 0.00 (substitui por "0" pra entrar no parser numérico)
+  // Remove asteriscos de markdown ("*OD*", "*CIL")
+  t = t.replace(/\*/g, " ");
+  // Convenções ópticas: pl/plano/neutro/zerado/sc → 0.00
   t = t.replace(/-\s*(pl|plano|neutro|zerado|zero)\b/g, "0");
   t = t.replace(/\b(pl|plano|neutro|zerado)\b/g, "0");
-  // "sc" (sem cilindro) → some
   t = t.replace(/\bsc\b/g, "");
 
   // Strong signals: must contain at least 2 of these markers
@@ -662,21 +663,16 @@ function detectPrescriptionCorrection(text: string): {
     /\bod\b/, /\boe\b/, /\bos\b/,
     /\blonge\b/, /\bperto\b/,
     /\besf[eé]rico\b|\besf\b/,
-    /\bcil[ií]ndrico\b|\bcil\b/,
-    /\beixo\b/,
+    /\bcil[ií]ndrico\b|\bcil\b|\bcyl\b/,
+    /\beixo\b|\baxis\b/,
     /\badi[cç][aã]o\b|\badd?\b/,
   ];
   const numericPairs = (t.match(/[+-]?\d+[.,]?\d*/g) || []).length;
   const markerHits = markers.filter((r) => r.test(t)).length;
-  // Aceita 1 marcador + 1 número quando há OD ou OE explícito (caso esf-only "Od -4.50 / Oe 0")
   const hasOdOe = /\bod\b/.test(t) && /\boe\b/.test(t);
   if (!(markerHits >= 2 && numericPairs >= 1) && !(hasOdOe && numericPairs >= 1)) return null;
 
   // Helper: parse a number como dioptria.
-  // - Aceita "-9,25", "+0.50", "0.00".
-  // - Normaliza shorthand óptico SEM separador decimal: "400" → 4.00, "425" → 4.25,
-  //   "175" → 1.75 (3 dígitos sem ponto/vírgula). 4 dígitos viram 2 casas decimais.
-  // - Eixo (0–180) NÃO usa esta normalização — é parseado à parte.
   const parseDiopter = (s: string | undefined): number | null => {
     if (!s) return null;
     const raw = s.replace(/\s/g, "");
@@ -689,7 +685,6 @@ function detectPrescriptionCorrection(text: string): {
     if (!/^\d+$/.test(digits)) return null;
     let value: number;
     if (digits.length >= 3) {
-      // 3+ dígitos sem decimal → últimos 2 viram fração
       value = parseInt(digits.slice(0, -2), 10) + parseInt(digits.slice(-2), 10) / 100;
     } else {
       value = parseInt(digits, 10);
@@ -702,52 +697,74 @@ function detectPrescriptionCorrection(text: string): {
     return Number.isFinite(n) && n >= 0 && n <= 180 ? n : null;
   };
 
-  // Try to extract values per eye. Patterns supported:
-  //   "OD 0.00 com -2,25 eixo 180"
-  //   "OD: esf -9 cil -2,75 eixo 180 add +2,00"
-  //   "LONGE: OD 0.00 com -2,25"  /  "PERTO: -0,25 com -2,00"
-  //   "Od -400 / Oe -425"   (shorthand sem decimal)
-  const num = "([+-]?\\d+[.,]?\\d*)";
   const buildEye = () => ({ sphere: null as number | null, cylinder: null as number | null, axis: null as number | null, add: null as number | null });
   const od = buildEye();
   const oe = buildEye();
 
-  // Pattern A: "OD <esf> com <cil> [eixo <axis>] [add <add>]"
-  const reA = new RegExp(`(od|oe|os)[^\\d+\\-]{0,15}${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?(?:[^\\d]*(?:add?|adi[cç][aã]o)\\s*${num})?`, "gi");
-  let m: RegExpExecArray | null;
-  while ((m = reA.exec(t)) !== null) {
-    const eye = m[1].toLowerCase() === "od" ? od : oe;
-    if (eye.sphere == null) eye.sphere = parseDiopter(m[2]);
-    if (eye.cylinder == null) eye.cylinder = parseDiopter(m[3]);
-    if (eye.axis == null) eye.axis = parseAxis(m[4]);
-    if (eye.add == null) eye.add = parseDiopter(m[5]);
+  // ── Extração por BLOCO de olho ──
+  // Divide o texto em segmentos começando em "od"/"oe"/"os" e indo até o próximo marcador de olho.
+  const eyeBlockRe = /\b(od|oe|os)\b([\s\S]*?)(?=\b(?:od|oe|os)\b|$)/gi;
+  let bm: RegExpExecArray | null;
+  const extractFromBlock = (raw: string, eye: any) => {
+    let block = raw;
+    // Axis: "eixo 180" / "axis 180" — captura primeiro e remove
+    const axisM = block.match(/(?:eixo|axis)\s*([+-]?\d{1,3}(?:[.,]\d+)?)\s*°?/i);
+    if (axisM) {
+      eye.axis = eye.axis ?? parseAxis(axisM[1]);
+      block = block.replace(axisM[0], " ");
+    }
+    // Add: "add +2,00" / "adição 2"
+    const addM = block.match(/(?:add?|adi[cç][aã]o)\s*([+-]?\d+[.,]?\d*)/i);
+    if (addM) {
+      eye.add = eye.add ?? parseDiopter(addM[1]);
+      block = block.replace(addM[0], " ");
+    }
+    // Restante: pega TODOS os números na ordem (esfera, cilindro)
+    const nums = block.match(/[+-]?\d+[.,]?\d*/g) || [];
+    if (nums.length >= 1 && eye.sphere == null) eye.sphere = parseDiopter(nums[0]);
+    if (nums.length >= 2 && eye.cylinder == null) eye.cylinder = parseDiopter(nums[1]);
+  };
+  while ((bm = eyeBlockRe.exec(t)) !== null) {
+    const eye = bm[1].toLowerCase() === "od" ? od : oe;
+    extractFromBlock(bm[2], eye);
   }
 
-  // Pattern B: longe/perto blocks (when client splits longe/perto with single eye line each)
-  // "LONGE: OD <s> com <c>" / "PERTO: <s> com <c> eixo <ax>"
-  const longeMatch = t.match(/longe[^a-z]*([\s\S]*?)(?=perto|$)/i);
-  const pertoMatch = t.match(/perto[^a-z]*([\s\S]*?)$/i);
-  const eyeFromBlock = (block: string, eye: any) => {
-    const r = new RegExp(`(?:od|oe|os)?\\s*${num}\\s*(?:com|x|\\/)?\\s*${num}?\\s*(?:eixo\\s*${num})?`, "i");
-    const mm = block.match(r);
-    if (mm) {
-      if (eye.sphere == null) eye.sphere = parseDiopter(mm[1]);
-      if (eye.cylinder == null) eye.cylinder = parseDiopter(mm[2]);
-      if (eye.axis == null) eye.axis = parseAxis(mm[3]);
+  // Fallback: blocos longe/perto (cliente separa por distância sem od/oe)
+  if (od.sphere == null && oe.sphere == null) {
+    const longeMatch = t.match(/longe[^a-z]*([\s\S]*?)(?=perto|$)/i);
+    const pertoMatch = t.match(/perto[^a-z]*([\s\S]*?)$/i);
+    if (longeMatch) extractFromBlock(longeMatch[1], od);
+    if (pertoMatch) extractFromBlock(pertoMatch[1], oe.sphere == null ? oe : od);
+  }
+
+  // ── Validação anti-hallucination: todo número persistido tem que existir no texto-fonte ──
+  // Constrói "haystack" de números absolutos vistos no texto original normalizado.
+  const sourceNumbers = new Set<string>();
+  const rawNorm = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2").replace(/\*/g, " ");
+  for (const tok of (rawNorm.match(/[+-]?\d+[.,]?\d*/g) || [])) {
+    const parsed = parseDiopter(tok);
+    if (parsed != null) sourceNumbers.add(Math.abs(parsed).toFixed(2));
+    const axisN = parseAxis(tok);
+    if (axisN != null) sourceNumbers.add(axisN.toFixed(0));
+  }
+  const validateField = (eye: any, field: "sphere" | "cylinder" | "axis" | "add") => {
+    const v = eye[field];
+    if (v == null) return;
+    const key = field === "axis" ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(2);
+    if (!sourceNumbers.has(key)) {
+      console.log(`[RX-VALIDATE] descartando ${field}=${v} (não encontrado no texto-fonte)`);
+      eye[field] = null;
     }
   };
-  if (longeMatch && od.sphere == null) eyeFromBlock(longeMatch[1], od);
-  if (pertoMatch) {
-    // "perto" line implies addition exists → progressive
-    const pBlock = pertoMatch[1];
-    // If the client only gives ONE pair under "perto", treat it as the additional set for OE if OE empty, else as add reference for OD
-    eyeFromBlock(pBlock, oe.sphere == null ? oe : od);
+  for (const eye of [od, oe]) {
+    validateField(eye, "sphere");
+    validateField(eye, "cylinder");
+    validateField(eye, "axis");
+    validateField(eye, "add");
   }
 
-  // Need at least one eye with sphere defined to be valid
   if (od.sphere == null && oe.sphere == null) return null;
 
-  // Mirror values when only one eye provided (best-effort: keep nulls — let LLM ask)
   const has_addition = (od.add != null && od.add !== 0) || (oe.add != null && oe.add !== 0) || /\bperto\b|\badi[cç][aã]o\b|\badd?\b/.test(t);
   const rx_type: "single_vision" | "progressive" = has_addition ? "progressive" : "single_vision";
 
