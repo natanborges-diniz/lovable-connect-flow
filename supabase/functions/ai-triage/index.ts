@@ -77,6 +77,84 @@ const CIDADE_TO_LOJAS: Record<string, string[]> = {
   barueri: ["DINIZ BARUERI"],
 };
 
+const CIDADE_LABEL: Record<string, string> = {
+  osasco: "Osasco",
+  carapicuiba: "Carapicuíba",
+  itapevi: "Itapevi",
+  barueri: "Barueri",
+};
+
+function _normTxt(s: string): string {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+function detectAceiteVisita(text: string): boolean {
+  const t = _normTxt(text);
+  if (!t) return false;
+  if (/\b(nao|n[ãa]o)\b/.test(t)) return false;
+  return /^(sim|claro|quero|topo|topa|pode|pode sim|bora|vamos|gostaria|aceito|com certeza|simm|isso|👍|👌|✅)\b/.test(t);
+}
+
+function detectRecusaVisita(text: string): boolean {
+  const t = _normTxt(text);
+  if (!t) return false;
+  return /^(nao|n[ãa]o|agora nao|depois|fica pra depois|so orcamento|so or[çc]amento)\b/.test(t);
+}
+
+function detectCidadeEscolhida(text: string): string | null {
+  const t = _normTxt(text);
+  if (!t) return null;
+  // numérico (1=osasco, 2=carapicuiba, 3=itapevi, 4=barueri)
+  const numMatch = t.match(/^([1-4])\b/);
+  if (numMatch) {
+    const idx = Number(numMatch[1]);
+    return ["osasco", "carapicuiba", "itapevi", "barueri"][idx - 1] || null;
+  }
+  if (/\bosasco\b/.test(t)) return "osasco";
+  if (/\bcarapicuiba\b/.test(t)) return "carapicuiba";
+  if (/\bitapevi\b/.test(t)) return "itapevi";
+  if (/\bbarueri\b|\balphaville\b/.test(t)) return "barueri";
+  return null;
+}
+
+function formatLojasPorCidade(cidade: string, lojas: any[]): string {
+  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+  const filtradas = (lojas || []).filter((l: any) =>
+    nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
+  );
+  if (filtradas.length === 0) {
+    return `Boa! Pra ${CIDADE_LABEL[cidade] || cidade}, posso te indicar a loja mais próxima — me passa o seu bairro? 😊`;
+  }
+  const numEmojis = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"];
+  let out = `Aqui são as lojas em *${CIDADE_LABEL[cidade] || cidade}* — qual fica melhor pra você? 😊\n`;
+  filtradas.forEach((l: any, i: number) => {
+    const end = l.endereco ? ` — ${l.endereco}` : "";
+    out += `\n${numEmojis[i] || `${i+1}.`} *${l.nome_loja}*${end}`;
+  });
+  return out;
+}
+
+function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): any | null {
+  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+  const filtradas = (lojas || []).filter((l: any) =>
+    nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
+  );
+  if (filtradas.length === 0) return null;
+  const t = _normTxt(text);
+  const numMatch = t.match(/^([1-9])\b/);
+  if (numMatch) {
+    const idx = Number(numMatch[1]) - 1;
+    if (filtradas[idx]) return filtradas[idx];
+  }
+  // match por palavra-chave do nome (tira "DINIZ ")
+  for (const l of filtradas) {
+    const nome = _normTxt(l.nome_loja).replace(/^diniz\s+/, "");
+    const tokens = nome.split(/\s+/).filter((w) => w.length >= 3);
+    if (tokens.some((w) => t.includes(w))) return l;
+  }
+  return null;
+}
+
 function fmtRxLine(eye: any, name: string): string {
   const esf = (eye?.sphere ?? null);
   const cil = (eye?.cylinder ?? null);
@@ -2146,6 +2224,94 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
     }
 
+    // ── 4.4b. MÁQUINA DE ESTADOS PÓS-ORÇAMENTO (Mai/2026) ──
+    // Após a IA enviar o orçamento + CTA "quer agendar uma visita?" o fluxo é
+    // determinístico: cidade → loja → encaminha pra agendamento.
+    {
+      const posOrc = (contatoMeta as any).pos_orcamento;
+      const _setPosOrc = async (next: any) => {
+        try {
+          const { data: cur } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+          const m = (cur?.metadata as Record<string, any>) || {};
+          if (next === null) delete m.pos_orcamento; else m.pos_orcamento = next;
+          await supabase.from("contatos").update({ metadata: m }).eq("id", contatoId);
+        } catch (_) { /* noop */ }
+      };
+      if (posOrc?.etapa && !lastIsImage) {
+        if (posOrc.etapa === "aguardando_cta_visita") {
+          if (detectAceiteVisita(lastInboundText)) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await _setPosOrc({ ...posOrc, etapa: "aguardando_cidade", atualizado_at: new Date().toISOString() });
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "cta_visita_aceito",
+              descricao: "Cliente aceitou visita após orçamento — listando cidades",
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          if (detectRecusaVisita(lastInboundText)) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, "Tranquilo! Quando quiser ver pessoalmente, é só me chamar 😊");
+            await _setPosOrc(null);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "cta_visita_recusado",
+              descricao: "Cliente recusou visita após orçamento",
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_recusa"], intencao: "orcamento", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+          }
+          await _setPosOrc(null);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId, tipo: "pos_orcamento_fallback_llm",
+            descricao: `Cliente desviou de aguardando_cta_visita: "${lastInboundText.substring(0,120)}"`,
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          }).catch(() => {});
+        } else if (posOrc.etapa === "aguardando_cidade") {
+          const cidade = detectCidadeEscolhida(lastInboundText);
+          if (cidade) {
+            const lojasMsg = formatLojasPorCidade(cidade, lojas);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
+            await _setPosOrc({ ...posOrc, etapa: "aguardando_loja", cidade, atualizado_at: new Date().toISOString() });
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "cidade_escolhida",
+              descricao: `Cliente escolheu cidade ${CIDADE_LABEL[cidade]}`,
+              metadata: { cidade },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          const tries = Number(posOrc.tries_cidade || 0) + 1;
+          if (tries < 2) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await _setPosOrc({ ...posOrc, tries_cidade: tries });
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          await _setPosOrc(null);
+        } else if (posOrc.etapa === "aguardando_loja") {
+          const loja = matchLojaEscolhida(lastInboundText, posOrc.cidade || "", lojas);
+          if (loja) {
+            await _setPosOrc({ ...posOrc, etapa: "agendando", loja_nome: loja.nome_loja, atualizado_at: new Date().toISOString() });
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "loja_escolhida",
+              descricao: `Cliente escolheu loja ${loja.nome_loja}`,
+              metadata: { loja_nome: loja.nome_loja, cidade: posOrc.cidade },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            const ask = `Boa! Vamos marcar na *${loja.nome_loja}* então 😊 Qual dia e horário ficam melhor pra você? Pode ser hoje, amanhã ou outro dia da semana.`;
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, ask);
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_loja_definida"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          const tries = Number(posOrc.tries_loja || 0) + 1;
+          if (tries < 2) {
+            const lojasMsg = formatLojasPorCidade(posOrc.cidade || "osasco", lojas);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
+            await _setPosOrc({ ...posOrc, tries_loja: tries });
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          await _setPosOrc(null);
+        }
+      }
+    }
+
     // ── 4.5. PRIORIDADE: COMPROVANTE DE PAGAMENTO ──
     // Se a imagem inbound chegou logo após o envio de um link de pagamento,
     // tratar como COMPROVANTE — não como receita ocular. Sem isso, o motor
@@ -3505,6 +3671,15 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         pipeline_coluna = "Orçamento";
         const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args, atendimento_id);
         resposta = quoteResult.resposta;
+        // Arma máquina pós-orçamento se a resposta contém o CTA padrão
+        if (resposta && resposta.includes(MSG_CTA_AGENDAMENTO)) {
+          try {
+            const { data: cur } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+            const m = (cur?.metadata as Record<string, any>) || {};
+            m.pos_orcamento = { etapa: "aguardando_cta_visita", iniciado_at: new Date().toISOString(), origem: "consultar_lentes" };
+            await supabase.from("contatos").update({ metadata: m }).eq("id", contatoId);
+          } catch (_) { /* noop */ }
+        }
       } else if (fn === "consultar_lentes_estimativa") {
         // ── QUOTE ESTIMATE: receita parcial, nunca bloquear orçamento ──
         intencao = "orcamento";
@@ -3905,7 +4080,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 msg += `\n${l.is_dnz ? "🌟 " : "👁️ "}*${l.produto}* (${l.fornecedor}) — ${desc}\n💰 R$ ${preco}/caixa\n${plano}`;
               }
 
-              msg += `\n\nQuer que eu reserve a opção que você preferir? Posso te encaminhar pra loja mais próxima fechar o pedido.`;
+              msg += `\n\n${MSG_CTA_AGENDAMENTO}`;
               resposta = msg;
               console.log(
                 `[QUOTE-LC] ${pick.length} options sph=${worstSphere} cyl=${worstCyl} toric=${needsToric} mesma=${mesmaDioptria}`,
@@ -3924,6 +4099,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             referencia_id: atendimento_id,
           });
         } catch (_) { /* noop */ }
+        if (resposta && resposta.includes(MSG_CTA_AGENDAMENTO)) {
+          try {
+            const { data: cur } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+            const m = (cur?.metadata as Record<string, any>) || {};
+            m.pos_orcamento = { etapa: "aguardando_cta_visita", iniciado_at: new Date().toISOString(), origem: "consultar_lentes_contato" };
+            await supabase.from("contatos").update({ metadata: m }).eq("id", contatoId);
+          } catch (_) { /* noop */ }
+        }
       }
     }
 
@@ -4979,7 +5162,7 @@ async function runConsultarLentes(
       quoteMsg += "\n" + formatLens(premium, "💎 Premium");
     }
   }
-  quoteMsg += "\n\nPosso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊";
+  quoteMsg += "\n\n" + MSG_CTA_AGENDAMENTO;
 
   const quoteNorm = norm(quoteMsg);
   const recentNormQuote = (recentOutbound || []).slice(-3).map(norm);
