@@ -2589,12 +2589,14 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           if (typeof eye.add === "number") parts.push(`add +${eye.add}`);
           return parts.join(" ");
         };
-        receitaCtx += `\n## Receita ${i + 1} (${label}) — lida em ${dataLeitura}\n`;
+        const confirmedTag = rx.confirmed_by_client_at ? " ✅ confirmada pelo cliente" : " ⚠️ AGUARDA confirmação do cliente";
+        receitaCtx += `\n## Receita ${i + 1} (${label})${confirmedTag} — lida em ${dataLeitura}\n`;
         receitaCtx += `Tipo: ${rxTypeLabel} | Confiança: ${conf}\n`;
         receitaCtx += `${formatEye(od, "OD")}\n`;
         receitaCtx += `${formatEye(oe, "OE")}\n`;
       }
       receitaCtx += `\n⚠️ NÃO peça receita novamente. O cliente JÁ enviou. Use consultar_lentes referenciando a receita correta.`;
+      receitaCtx += `\n⚠️ NUNCA cote uma receita marcada como "AGUARDA confirmação". Se o cliente escolher uma assim, peça que confirme os valores antes (o sistema cuida disso automaticamente).`;
       if (receitas.length > 1) {
         receitaCtx += `\nQuando o cliente pedir orçamento, pergunte "Para qual receita?" antes de chamar consultar_lentes.`;
       }
