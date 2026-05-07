@@ -126,6 +126,16 @@ serve(async (req) => {
       const sim = similarity(outbounds[outbounds.length - 1].conteudo, outbounds[outbounds.length - 2].conteudo);
       if (sim <= 0.7) continue;
 
+      // ── EXCEÇÃO: mensagens de confirmação de receita não contam como loop.
+      // Repetir "Li sua receita assim, confere?" / "Anotei! Ficou assim:" é parte
+      // do fluxo de validação com o cliente, não erro do bot.
+      const CONFIRM_RX_RE = /^(Li sua receita assim|Anotei!\s*Ficou assim:)/i;
+      const last2OutboundsConfirm = outbounds.slice(-2).every((o) => CONFIRM_RX_RE.test(String(o.conteudo || "").trim()));
+      if (last2OutboundsConfirm) {
+        console.log(`[WATCHDOG] Atendimento ${at.id}: confirmação de receita repetida — não é loop, ignorando.`);
+        continue;
+      }
+
       // ── RESGATE OCR: se o loop é "estou analisando" / "recebi sua receita" e ainda
       // não há receita válida salva, em vez de escalar pedimos os valores por texto.
       // Caso Renata 2026-04-28 04:50: 2× "Recebi sua receita" → watchdog escalava direto.
