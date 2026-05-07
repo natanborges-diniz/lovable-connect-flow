@@ -2805,6 +2805,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         nomeWhatsapp: nomePerfilWhatsapp,
         nomeAtual: contatoNomeAtual,
         nomeConfirmado,
+        precisaConfirmar: precisaConfirmarNome,
         locationCtx,
       } as any);
 
@@ -2850,6 +2851,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         nomeWhatsapp: nomePerfilWhatsapp,
         nomeAtual: contatoNomeAtual,
         nomeConfirmado,
+        precisaConfirmar: precisaConfirmarNome,
       });
     }
 
