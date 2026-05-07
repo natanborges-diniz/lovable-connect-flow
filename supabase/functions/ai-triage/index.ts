@@ -3222,6 +3222,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     let validatorFlags: string[] = [];
 
     const toolCalls = choice.message?.tool_calls || [];
+    let rxConfirmGateTriggered = false;
+    let rxConfirmGateRx: any = null;
+    const semReceitaSalvaTurno = !hasReceitasValidas(receitas);
 
     if (toolCalls.length === 0) {
       const plainContent = (choice.message?.content || "").trim();
