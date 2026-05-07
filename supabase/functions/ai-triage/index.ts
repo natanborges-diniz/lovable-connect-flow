@@ -3926,6 +3926,30 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     }
 
+    // ── GATE PÓS-LOOP: confirmação de receita VENCE qualquer escalada/cotação no mesmo turno ──
+    // Caso Franciana (Mai/2026): no mesmo turno em que interpretar_receita marcou pending,
+    // o LLM também emitiu escalar_consultor → escalou sem cliente confirmar.
+    if (rxConfirmGateTriggered && rxConfirmGateRx) {
+      const _toolNomes = (toolCalls || []).map((t: any) => t?.function?.name).filter(Boolean);
+      const _outrasTools = _toolNomes.filter((n: string) => n !== "interpretar_receita");
+      if (_outrasTools.length > 0 || precisa_humano) {
+        console.log(`[RX-GATE] Sobrescrevendo turno: outras tools=${_outrasTools.join(",")} precisa_humano=${precisa_humano} — força confirmação`);
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "escalada_bloqueada_pendente_confirmacao",
+          descricao: `Turno teve interpretar_receita + ${_outrasTools.join(",")} — gate de confirmação prevalece`,
+          metadata: { tools: _toolNomes, precisa_humano_descartado: precisa_humano, setor_descartado: setor_sugerido },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+      }
+      resposta = buildMsgConfirmarReceita(rxConfirmGateRx, false);
+      precisa_humano = false;
+      intencao = "receita_oftalmologica";
+      pipeline_coluna = "Orçamento";
+      setor_sugerido = "";
+      validatorFlags.push("rx_confirm_gate_overrode_turn");
+    }
+
     // ── 9. POST-LLM VALIDATION (Phase 3) ──
     if (resposta && !precisa_humano) {
       // ── ANTI-DUPLICAÇÃO DE DESPEDIDA: se o último outbound já é a frase canônica
