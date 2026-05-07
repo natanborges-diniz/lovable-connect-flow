@@ -5400,6 +5400,59 @@ async function runConsultarLentes(
   }
   quoteMsg += "\n\n" + MSG_CTA_AGENDAMENTO;
 
+  // Receita complexa cotável → sufixo + sinalização interna (não escala atendimento)
+  const revisao = requerRevisaoHumanaPosOrcamento(rxMeta);
+  if (revisao.precisa) {
+    quoteMsg += MSG_REVISAO_HUMANA_SUFIXO;
+    try {
+      // Idempotência: evita duplicar evento/notificação nos últimos 30min para o mesmo atendimento
+      const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { data: jaExiste } = atendimentoId
+        ? await supabase.from("eventos_crm")
+            .select("id")
+            .eq("tipo", "orcamento_revisao_humana")
+            .eq("referencia_id", atendimentoId)
+            .gte("created_at", since)
+            .limit(1)
+        : { data: null };
+      if (!jaExiste || jaExiste.length === 0) {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "orcamento_revisao_humana",
+          descricao: `Orçamento gerado com receita complexa (${revisao.motivos.join(", ")}) — revisar prazo/disponibilidade`,
+          metadata: {
+            motivos: revisao.motivos,
+            rx: { od: rxMeta?.eyes?.od, oe: rxMeta?.eyes?.oe, rx_type: rxType },
+            lentes_cotadas: lenses.slice(0, 5).map((l: any) => ({ id: l.id, brand: l.brand, family: l.family, price_brl: l.price_brl })),
+          },
+          referencia_tipo: atendimentoId ? "atendimento" : null,
+          referencia_id: atendimentoId || null,
+        });
+        // Notifica setor do contato (ou nada se sem setor — evento já fica registrado)
+        const { data: contatoSetor } = await supabase.from("contatos").select("setor_destino, nome").eq("id", contatoId).single();
+        if (contatoSetor?.setor_destino) {
+          await supabase.from("notificacoes").insert({
+            tipo: "orcamento_revisao",
+            titulo: "Orçamento com receita complexa — revisar",
+            mensagem: `${contatoSetor.nome || "Cliente"}: ${revisao.motivos.join(", ")}`,
+            setor_id: contatoSetor.setor_destino,
+            referencia_id: atendimentoId || null,
+          });
+        }
+        // Flag no atendimento pra UI exibir badge
+        if (atendimentoId) {
+          const { data: at } = await supabase.from("atendimentos").select("metadata").eq("id", atendimentoId).single();
+          const meta = (at?.metadata as Record<string, any>) || {};
+          await supabase.from("atendimentos").update({
+            metadata: { ...meta, revisao_humana_pendente: true, revisao_motivos: revisao.motivos, revisao_solicitada_at: new Date().toISOString() },
+          }).eq("id", atendimentoId);
+        }
+      }
+    } catch (e) {
+      console.warn("[QUOTE] failed to log orcamento_revisao_humana", e);
+    }
+  }
+
   const quoteNorm = norm(quoteMsg);
   const recentNormQuote = (recentOutbound || []).slice(-3).map(norm);
   const isDuplicate = recentNormQuote.some((prev) => {
@@ -5407,7 +5460,7 @@ async function runConsultarLentes(
     if (prev === quoteNorm) return true;
     return computeSimilarity(prev, quoteNorm) > 0.9;
   });
-  console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}${isDuplicate ? " (DEDUPED)" : ""}`);
+  console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}${isDuplicate ? " (DEDUPED)" : ""}${revisao.precisa ? ` [revisao:${revisao.motivos.join("|")}]` : ""}`);
   if (isDuplicate) {
     return { resposta: "Já te mandei as opções acima 😊 Quer que eu detalhe alguma delas, ou prefere agendar uma visita pra ver as armações pessoalmente?" };
   }
