@@ -225,6 +225,7 @@ serve(async (req) => {
       if (rawTel.length >= 10 && nomeClienteRaw) {
         // Normaliza para padrão internacional BR (55 + DDD + número)
         const telNormalizado = rawTel.startsWith("55") ? rawTel : `55${rawTel}`;
+        const primeiroNome = nomeClienteRaw.split(/\s+/)[0] || nomeClienteRaw;
 
         try {
           // Upsert contato (PK telefone)
