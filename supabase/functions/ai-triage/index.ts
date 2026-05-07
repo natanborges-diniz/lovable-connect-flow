@@ -127,6 +127,16 @@ function isReceitaForaDaFaixa(rx: any): boolean {
 
 const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Seu grau é mais alto e exige uma lente sob encomenda — vou chamar um Consultor especializado pra te passar opções e prazo certinho 🤝";
 
+// ── Bloqueia escalada/oferta de "grau alto / sob encomenda" sem receita interpretada ──
+// Caso Franciana (Mai/2026): IA falou "Encontrei poucas opções automáticas para esse grau alto"
+// e ofereceu Consultor antes mesmo da receita ter sido enviada.
+function escaladaGrauSemReceitaTexto(texto: string): boolean {
+  const t = String(texto || "").toLowerCase();
+  if (!t) return false;
+  return /(grau\s+(alto|elevado|bem\s+alto)|sob\s+encomenda|sob\s+medida\s+espec[ií]fic|op[cç][oõ]es?\s+sob\s+encomenda|fora\s+da\s+faixa)/i.test(t);
+}
+const MSG_PEDIR_RECEITA_PARA_GRAU_ALTO = "Pra te passar opções certinhas, preciso primeiro da sua receita 😊 Me manda uma foto que eu já analiso e te respondo com as opções compatíveis.";
+
 function detectCtaAgendamentoYes(text: string): boolean {
   const t = String(text || "").toLowerCase().trim();
   if (!t) return false;
