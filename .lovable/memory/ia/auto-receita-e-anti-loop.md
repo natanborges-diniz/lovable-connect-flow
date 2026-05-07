@@ -140,3 +140,17 @@ Toda receita lida via OCR fica com `contatos.metadata.receita_confirmacao.pendin
 - **Gate pós-loop em ai-triage**: flags `rxConfirmGateTriggered` + `rxConfirmGateRx` setadas quando `interpretar_receita` marca pending. Após o loop de tools, se outras tools rodaram OU `precisa_humano=true`, FORÇA `resposta = buildMsgConfirmarReceita(...)`, zera escalada e loga `escalada_bloqueada_pendente_confirmacao`. Aplicado nos 2 caminhos (normal e forced retry).
 - **Prompt** (modo restrito): adicionada proibição explícita de mencionar grau/sob encomenda/Consultor por causa do grau antes da receita ter sido interpretada.
 - **`watchdog-loop-ia`**: exceção para outbounds que começam com "Li sua receita assim" / "Anotei! Ficou assim:" — repetir confirmação faz parte do fluxo, não é loop.
+
+## 🆕 Mai/2026 — Confirmação por receita (caso 558488766851)
+
+**Caso 558488766851 (07/05 21:38–21:48):** cliente já tinha receita 1 confirmada, mandou foto da receita 2. IA leu (`interpretar_receita`), perguntou "Uso qual receita...", cliente respondeu **"A segunda"** e IA pulou direto pra `consultar_lentes` com OD -2.5/-0.5 OE -3/-1, sem confirmar valores da segunda receita.
+
+**Causa raiz:** `receita_confirmacao.pending` era flag global do contato. Receita 1 já estava `pending=false`, e nenhum gate re-armava pending pra receita 2 quando o cliente escolhia.
+
+**Correções:**
+- Cada receita em `metadata.receitas[]` agora carrega `confirmed_by_client_at` (null no save).
+- Helper `detectEscolhaReceita`: detecta "primeira/segunda/última/nova/de agora/etc" e retorna o índice.
+- **Gate 4.4a**: quando `!pending && receitas.length>=2` e cliente escolhe uma com `confirmed_by_client_at=null`, re-arma `receita_confirmacao { pending:true, rx_index }` e envia `buildMsgConfirmarReceita`.
+- **Confirmação granular**: `detectRxConfirmation` agora marca `confirmed_by_client_at` da receita pelo `rx_index` (ou última como fallback).
+- **Safety net pós-LLM**: antes da validação geral, se a resposta tem `R$`/preços ou tool de quote rodou, e existe alguma receita sem `confirmed_by_client_at`, sobrescreve com `buildMsgConfirmarReceita(rxAlvo)`. Evento `bloqueado_orcamento_receita_nao_confirmada`.
+- **Prompt**: contexto das receitas marca `✅ confirmada` ou `⚠️ AGUARDA confirmação` por receita; instrui IA a nunca cotar receita não confirmada.
