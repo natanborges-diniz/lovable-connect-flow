@@ -2010,7 +2010,7 @@ serve(async (req) => {
     const setores = setRes.data || [];
     const lojas = lojasRes.data || [];
     const agendamentosAtivos = agendRes.data || [];
-    const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
+    let contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
     const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
