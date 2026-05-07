@@ -5436,9 +5436,14 @@ async function runConsultarLentes(
     const prefixGap = `Pra esse grau específico`;
     const recentNormFb = (recentOutbound || []).slice(-3).map(norm);
     const fallbackJaEnviado = recentNormFb.some((p) => p && p.includes(norm(prefixGap)));
+    // BYPASS G1: quando o cliente acabou de confirmar a receita (`confirmed_by_client_at`),
+    // a re-emissão da estimativa NÃO é loop — é a cotação determinística obrigatória pós-confirmação.
+    // Caso Franciana (Mai/2026): segunda confirmação caía no caminho mudo "região/bairro"
+    // sem preços e sem ligar revisao_humana_pendente.
+    const rxJaConfirmadaG1 = !!rxMeta?.confirmed_by_client_at;
     const podeFallback =
       (rxType === "progressive" || rxType === "single_vision") &&
-      !fallbackJaEnviado &&
+      (!fallbackJaEnviado || rxJaConfirmadaG1) &&
       !args?.preferencia_marca;
 
     if (!podeFallback) {
@@ -5453,19 +5458,31 @@ async function runConsultarLentes(
           contato_id: contatoId,
           tipo: "consultar_lentes_fallback_estimativa_skip",
           descricao: `Fallback estimativa não disparado: ${motivo}`,
-          metadata: { motivo, ...filtrosAplicados },
+          metadata: { motivo, rx_ja_confirmada: rxJaConfirmadaG1, ...filtrosAplicados },
           referencia_tipo: atendimentoId ? "atendimento" : null,
           referencia_id: atendimentoId || null,
         });
       } catch (e) { console.warn("[QUOTE] failed to log fallback_skip", e); }
     } else {
+      if (fallbackJaEnviado && rxJaConfirmadaG1) {
+        console.log("[QUOTE] G1 bypass: estimativa re-emitida porque receita acabou de ser confirmada");
+        try {
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "cotacao_estimativa_pos_confirmacao_bypass_g1",
+            descricao: "Estimativa re-emitida após confirmação de receita (G1 anti-loop bypassado)",
+            metadata: { rx_label: rxMeta?.label, ...filtrosAplicados },
+            referencia_tipo: atendimentoId ? "atendimento" : null,
+            referencia_id: atendimentoId || null,
+          });
+        } catch (e) { console.warn("[QUOTE] failed to log bypass_g1", e); }
+      }
       try {
-        const rxJaConfirmada = !!rxMeta?.confirmed_by_client_at;
+        const rxJaConfirmada = rxJaConfirmadaG1;
         const est = await runConsultarLentesEstimativa(supabase, {
           rx_type: rxType,
           sphere_od: typeof od.sphere === "number" ? od.sphere : undefined,
           sphere_oe: typeof oe.sphere === "number" ? oe.sphere : undefined,
-          // NÃO passa cylinder_hint — a estimativa usa default conservador e procura faixa ampla.
           filtro_blue: args?.filtro_blue === true ? true : undefined,
           filtro_photo: args?.filtro_photo === true ? true : undefined,
           rx_ja_confirmada: rxJaConfirmada,
@@ -5482,10 +5499,11 @@ async function runConsultarLentes(
               referencia_id: atendimentoId || null,
             });
           } catch (e) { console.warn("[QUOTE] failed to log fallback_acionado", e); }
-          // Marca explicitamente que foi estimativa por gap, mantém pergunta de região no fim.
-          const prefix = `${prefixGap} (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
+          // Se já enviamos prefixo padrão antes, troca por variante leve pra não parecer cópia carbono.
+          const prefix = (fallbackJaEnviado && rxJaConfirmada)
+            ? `Conforme te passei, suas opções pra esse grau:\n\n`
+            : `${prefixGap} (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
           let respostaFinal = prefix + est.resposta;
-          // Se receita já confirmada e é caso de revisão humana, anexa sufixo + liga flag no atendimento.
           if (rxJaConfirmada) {
             try {
               const rev = requerRevisaoHumanaPosOrcamento(rxMeta);
@@ -5517,7 +5535,8 @@ async function runConsultarLentes(
             } catch (_) { /* noop */ }
           }
           const respostaNorm = norm(respostaFinal);
-          if (recentNormFb.some((p) => p && (p === respostaNorm || computeSimilarity(p, respostaNorm) > 0.85))) {
+          const isDup = recentNormFb.some((p) => p && (p === respostaNorm || computeSimilarity(p, respostaNorm) > 0.85));
+          if (isDup && !rxJaConfirmada) {
             console.log(`[QUOTE] fallback estimativa gerou texto duplicado → escala suave pra loja`);
           } else {
             return { resposta: respostaFinal };
@@ -5528,8 +5547,41 @@ async function runConsultarLentes(
       }
     }
 
-    // ⚠️ NUNCA escalar para "Consultor" aqui. Encaminha pra loja física, mantém engajamento.
-    return { resposta: args?.resposta_fallback || "Pra esses graus específicos preciso confirmar a disponibilidade direto na loja antes de te passar o valor exato 😊 Em qual região/bairro você está? Já te indico a unidade mais próxima pra você ver as opções pessoalmente." };
+    // Fallback final mudo: se a receita está confirmada e é complexa, ANTES de devolver
+    // "região/bairro" liga revisao_humana_pendente + anexa sufixo pra alertar o consultor.
+    let respFallbackFinal = args?.resposta_fallback || "Pra esses graus específicos preciso confirmar a disponibilidade direto na loja antes de te passar o valor exato 😊 Em qual região/bairro você está? Já te indico a unidade mais próxima pra você ver as opções pessoalmente.";
+    if (rxJaConfirmadaG1 && atendimentoId) {
+      try {
+        const rev = requerRevisaoHumanaPosOrcamento(rxMeta);
+        if (rev.precisa) {
+          const { data: atFlag } = await supabase
+            .from("atendimentos").select("metadata").eq("id", atendimentoId).single();
+          const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
+          if (!metaFlag?.revisao_humana_pendente) {
+            await supabase.from("atendimentos").update({
+              metadata: {
+                ...metaFlag,
+                revisao_humana_pendente: true,
+                revisao_motivos: rev.motivos,
+                revisao_solicitada_at: new Date().toISOString(),
+              },
+            }).eq("id", atendimentoId);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "revisao_humana_pos_cotacao_fallback_mudo",
+              descricao: "Revisão humana ligada no fallback final (caminho região/bairro) — receita confirmada e complexa",
+              metadata: { motivos: rev.motivos },
+              referencia_tipo: "atendimento", referencia_id: atendimentoId,
+            });
+          }
+          if (!respFallbackFinal.includes(MSG_REVISAO_HUMANA_SUFIXO)) {
+            respFallbackFinal = respFallbackFinal + MSG_REVISAO_HUMANA_SUFIXO;
+          }
+        }
+      } catch (e) { console.warn("[QUOTE] fallback final revisao humana falhou", e); }
+    }
+    return { resposta: respFallbackFinal };
+
   }
 
   const economy = lenses[0];
