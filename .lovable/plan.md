@@ -1,64 +1,72 @@
+## Diagnóstico do loop (Franciana)
 
-## Diagnóstico
+Sequência real:
 
-Sequência observada com a Franciana:
+1. Cliente manda foto → OCR lê `OD ESF -1,00 CIL -5,50 EIXO 40 / OE ESF -0,75 CIL -3,00 EIXO 145` → IA pergunta "confere?".
+2. Cliente: "Sim" → gate marca `pending=false` e dispara `runConsultarLentes` (fix anterior).
+3. `runConsultarLentes` consulta `pricing_table_lentes` com `cylinder_max ≥ 5,50`. Catálogo NÃO cobre cilindro tão alto → zero resultados → cai em `runConsultarLentesEstimativa`, que devolve as 3 faixas (Econômica/Intermediária/Premium) **e termina perguntando** `"Consegue me confirmar o cilindro e eixo de cada olho (ou enviar foto da receita)?"` (linha 5739).
+4. Cliente respondeu o cilindro de novo por texto → parser de correção entendeu como "novo ESF" e gravou `OD ESF -5,50 CIL -5,50` (interpretação errada) → IA pediu confirmação outra vez → loop.
 
-1. Cliente manda foto → IA OCR → IA pergunta "Li sua receita assim, confere?" (gate de confirmação ligado, `receita_confirmacao.pending=true`).
-2. Cliente: "Sim".
-3. IA: **"Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções certinhas, um instante…"** ❌
+Ou seja: o pedido de "confirmar cilindro/eixo" no fim do `consultar_lentes_estimativa` é o gatilho da segunda volta. A receita já estava confirmada pela cliente; perguntar de novo é redundante e ainda contamina o parser de texto.
 
-O gate de confirmação em `ai-triage/index.ts` (linhas 2219–2306) detecta o "Sim", marca `pending=false` e `confirmed_by_client_at`, e em seguida **só dá `fall-through` para o LLM**. Aí o modelo, em vez de chamar `consultar_lentes` (apesar do system-prompt FLUXO PÓS-RECEITA OBRIGATÓRIO), retorna o texto "Recebi sua receita 👀 Já estou analisando…" — exatamente a mensagem que já é usada como fallback de imagem nova ainda não lida. Não há nenhum guardrail bloqueando essa string quando a receita já está confirmada.
-
-Resultado: cliente fica esperando, e a próxima passada do watchdog vê outbound recente ("analisando") e silencia.
+A regra que o usuário quer é simples: cilindro alto (>4) = `revisão pendente` + segue fluxo IA mostrando estimativa, **sem** pedir nada de volta ao cliente.
 
 ## O que vou alterar
 
-Arquivo: `supabase/functions/ai-triage/index.ts`
+Arquivo único: `supabase/functions/ai-triage/index.ts`.
 
-### 1. Forçar `consultar_lentes` / `consultar_lentes_contato` imediatamente após confirmação
+### 1. Gate pós-confirmação não pode "perguntar de novo"
 
-No bloco do gate (após linha 2305, ramo `Confirmada DENTRO da faixa`), em vez de só setar `pending=false` e seguir o fluxo normal:
+Logo após `runConsultarLentes` no gate (linha ~2335):
 
-- Disparar uma chamada ao gateway com `tool_choice` forçado para `consultar_lentes` (óculos) ou `consultar_lentes_contato` (LC, baseado em `isLCContextGlobal`/`metadata.contexto_lc`), passando os valores da receita confirmada (`receitas[targetIdx]`).
-- Se a tool retornar opções, montar a resposta com 3 faixas (econômica/intermediária/premium) seguindo o padrão atual.
-- Se retornar zero opções, escalar para humano (já é a regra).
-- Se a chamada falhar/timeout, devolver mensagem determinística curta de transição (ex.: "Perfeito! Já vou te mandar as opções compatíveis 👇") + `validatorFlags.push("post_confirm_tool_failed")` e seguir para o LLM como hoje.
+- Se `requerRevisaoHumanaPosOrcamento(lastRx).precisa === true`, marcar no `atendimentos.metadata`:
+  - `revisao_humana_pendente = true`
+  - `revisao_motivos = [...motivos da função]`
+  - `revisao_solicitada_at = now()`
+  e inserir evento `tipo="revisao_humana_pos_cotacao"` em `eventos_crm`.
+- Continua enviando a resposta da cotação com `MSG_REVISAO_HUMANA_SUFIXO` (já é o que faz hoje), mas agora a flag fica acesa também quando o caminho é via estimativa.
 
-Isso espelha o padrão que já existe em `9.4 FORCED RETRY: interpretar_receita` (linhas 4670–4792), só que aplicado ao próximo passo do funil.
+### 2. `runConsultarLentes` — quando cair em estimativa com receita JÁ confirmada, não repergunta
 
-### 2. Guardrail anti-"analisando" pós-confirmação
+No bloco do fallback estimativa (linha ~5444), depois de obter `est.resposta`:
 
-Logo antes do envio da resposta final (perto de `9.5 GUARDRAIL ANTI-LOOP`), adicionar:
+- Se a receita selecionada (`rxMeta`) tem `confirmed_by_client_at`, sanitizar a resposta da estimativa removendo a frase final "Consegue me confirmar o cilindro e eixo..." / "Consegue me enviar foto da receita ou os números de ADD e CIL/AX..." e substituir por CTA de fechamento: `"Quer que eu já te indique a loja mais próxima pra fechar nessa condição? Me passa sua região/bairro 😊"`.
+- Anexar `MSG_REVISAO_HUMANA_SUFIXO` se `requerRevisaoHumanaPosOrcamento(rxMeta).precisa`.
+- Logar evento `tipo="cotacao_estimativa_pos_confirmacao"` para auditoria.
 
-```text
-se (resposta casa MSG_ANALISANDO_RE) e (última receita tem confirmed_by_client_at):
-  descartar a resposta do LLM
-  forçar consultar_lentes(_contato) (mesma rotina do passo 1)
-  validatorFlags.push("anti_loop_analisando_pos_confirmacao")
-```
+Implementação prática: depois de `est?.resposta`, aplicar `est.resposta = est.resposta.replace(/Consegue me (confirmar o cilindro[^\n]*|enviar foto da receita ou os números de ADD[^\n]*)\?/gi, "")` e concatenar o CTA + sufixo.
 
-Cobre tanto o caminho do gate (passo 1) quanto qualquer outro turno em que o modelo voltar a esse texto depois que a receita já foi confirmada.
+### 3. `runConsultarLentesEstimativa` — fonte da pergunta
 
-### 3. Ajuste em `deterministicIntentFallback` (linhas ~821–861)
+Em vez de mexer só no chamador, adicionar um parâmetro opcional `rx_ja_confirmada: boolean`. Quando `true`, pular as duas últimas linhas que perguntam ADD/CIL/EIXO (linhas 5737–5739) e devolver só as faixas + frase neutra `"Posso seguir com uma dessas opções e já te conectar com a loja mais próxima?"`. Chamada em `runConsultarLentes` passa `rx_ja_confirmada: !!rxMeta.confirmed_by_client_at`.
 
-O pool de "Recebi sua receita 👀 Já estou analisando…" só deve disparar quando `!hasValidReceitas` **e** `!últimaReceitaConfirmada`. Se a receita já foi confirmada, ir direto para a transição "Já vou te mandar as opções compatíveis com sua receita 😊" (sem repetir "Recebi sua receita") e marcar `intencao=orcamento` para o pipeline.
+(Itens 2 e 3 são redundantes de propósito — defesa em profundidade. Se algum outro caminho chamar `runConsultarLentesEstimativa` direto, o parâmetro já blinda.)
 
-### 4. Memória
+### 4. Parser de correção por texto — proteção mínima
 
-Atualizar `mem://ia/memoria-multiplas-receitas` (ou criar `mem://ia/pos-confirmacao-forca-cotacao`) com a regra:
+Caso colateral: a cliente escreveu `"OD: -5,50 CIL/ Eixo 40"` e o parser virou `ESF -5,50 CIL -5,50`. Não vou refatorar o parser nesta tarefa (fora do escopo declarado), mas vou adicionar **uma guarda**: se a receita-alvo já está com `confirmed_by_client_at` e o texto chega no formato "OD: <num> CIL/Eixo <num>", o parser deve interpretar como **correção apenas de cilindro/eixo** (não esférico), preservando o ESF original. Implementação: regex específica `/^OD[:\s]+-?\d+[,.]?\d*\s*CIL\s*\/\s*Eixo\s+\d+/i` antes da regex genérica que mapeia o primeiro número como ESF.
 
-> Após `detectRxConfirmation` + `pending=false` + `!foraDaFaixa`, é OBRIGATÓRIO chamar `consultar_lentes`/`consultar_lentes_contato` no mesmo turno. PROIBIDO devolver "Recebi sua receita / estou analisando" depois da confirmação.
+Se isso ficar grande demais, faço como follow-up; mas é de 5–10 linhas em `aplicarCorrecaoReceitaPorTexto` (já existente em `mem://ia/correcao-receita-por-texto`).
 
-E acrescentar uma linha curta no índice (`mem://index.md` → Core) referenciando essa nova memória.
+### 5. Memória
 
-## Detalhes técnicos
+Atualizar `mem://ia/pos-confirmacao-forca-cotacao.md` com a regra:
 
-- Reaproveitar o helper de chamada do gateway que já existe no FORCED RETRY (mesmas envs `LOVABLE_API_KEY`, modelo `openai/gpt-5`, `tool_choice: { type: "function", function: { name: "consultar_lentes" } }`).
-- Usar `requerRevisaoHumanaPosOrcamento(rx)` (já existe, linha 231) para anexar `MSG_REVISAO_HUMANA_SUFIXO` quando `cylMax>4` ou `addMax>3.5` — preserva o comportamento atual.
-- Eventos CRM novos: `tipo="cotacao_pos_confirmacao_forcada"` para auditoria.
-- Sem alterações de schema/migration. Sem mudanças no front.
+> Após confirmação, NUNCA repergunte cilindro/eixo/ADD. Se o catálogo zerar, apresente estimativa + ligue `revisao_humana_pendente`. Cliente só vê CTA de fechamento, nunca pedido de re-digitação.
+
+E linha curta no `mem://index.md` Core: "Receita confirmada → IA nunca repergunta valores; cyl>4 vira `revisao_humana_pendente`."
 
 ## Fora de escopo
 
-- Não vou mexer no `interpretar_receita` nem no parser de receita por texto (funcionando).
-- Não vou alterar `watchdog-loop-ia` (a regex `MSG_ANALISANDO_RE` continua válida; o fix é antes da mensagem ser emitida).
+- Não vou aumentar `cylinder_max` no `pricing_table_lentes` (decisão de catálogo, não de IA).
+- Não vou tocar no watchdog nem no `interpretar_receita`.
+- Não vou mexer no front da `RevisaoHumanaBadge` (a flag já existe e o badge já lê).
+
+## Resultado esperado
+
+Cliente confirma receita "complexa" (cilindro alto):
+
+1. IA envia 3 faixas de estimativa **sem** pedir confirmação de novo.
+2. Sufixo `💡 Como sua receita tem um detalhe específico, vou pedir uma conferência rápida do nosso consultor...` aparece.
+3. Atendimento ganha `revisao_humana_pendente=true` → consultor vê o badge no card e confirma/corrige.
+4. Próxima inbound do cliente (região, "qual fica perto", etc.) segue fluxo normal de agendamento. Sem loop.
