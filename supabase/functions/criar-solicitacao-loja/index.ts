@@ -236,7 +236,7 @@ serve(async (req) => {
             .eq("telefone", telNormalizado)
             .maybeSingle();
 
-          let contatoClienteId = contatoExist?.id;
+          contatoClienteId = contatoExist?.id ?? null;
           if (!contatoClienteId) {
             const { data: novoCont, error: ncErr } = await supabase
               .from("contatos")
