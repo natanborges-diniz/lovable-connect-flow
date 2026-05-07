@@ -3820,7 +3820,17 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         }
         console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${rxJustValid && !explicitOptOut ? "pending_confirmation" : (explicitOptOut ? "client opted-out" : "no chain")}`);
 
-      } else if (fn === "consultar_lentes") {
+      } else if (fn === "consultar_lentes" || fn === "consultar_lentes_contato") {
+        // Bloqueia cotação com receita antiga quando há nova receita pendente de OCR
+        if (hasPendingNewPrescriptionImage) {
+          console.log(`[QUOTE-BLOCK] ${fn} bloqueada: nova receita pendente de interpretação`);
+          validatorFlags.push("quote_blocked_new_rx_pending");
+          intencao = "receita_oftalmologica";
+          pipeline_coluna = "Orçamento";
+          resposta = "Recebi sua nova receita 👀 Já estou lendo os valores aqui pra te passar o orçamento certinho com base nela, um instante…";
+          continue;
+        }
+      } if (fn === "consultar_lentes") {
         // ── QUOTE ENGINE: triggered by client interest ──
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
