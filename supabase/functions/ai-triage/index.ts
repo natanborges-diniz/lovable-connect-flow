@@ -3619,7 +3619,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         
         // Add label from model args or infer
         const rxLabel = args.label || (existingReceitas.length === 0 ? "cliente" : `pessoa_${existingReceitas.length + 1}`);
-        const rxWithLabel = { ...rxData, label: rxLabel };
+        const rxWithLabel = { ...rxData, label: rxLabel, confirmed_by_client_at: null };
         
         // Append and cap at 5 (FIFO)
         existingReceitas.push(rxWithLabel);
