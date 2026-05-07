@@ -125,3 +125,18 @@ Toda receita lida via OCR fica com `contatos.metadata.receita_confirmacao.pendin
 - **Defesa em depth**: `runConsultarLentes` e `runConsultarLentesEstimativa` checam `isReceitaPending` no início e retornam `buildMsgConfirmarReceita`, logando `consultar_lentes_bloqueado_pendente_confirmacao` — garante que mesmo se LLM ignorar, nenhum preço sai.
 
 **Caso Franciana 2 (06/05 20:27):** OCR leu OD esf -13.50 / OE esf -20.50 (extremo). `consultar_lentes` zerou, fallback estimativa zerou, IA escalou direto com "preciso que um Consultor finalize" — sem nunca pedir confirmação ao cliente. Erros de OCR para mais/para menos passavam batido. Com o gate, agora SEMPRE pergunta "Está certinho?" antes de qualquer cotação ou escalada; só após confirmação positiva escala (e com mensagem específica de grau sob encomenda).
+
+## 🆕 Mai/2026 — Bloqueio de "grau alto" sem receita + gate vence escalada no mesmo turno (caso Franciana 3)
+
+**Caso Franciana 3 (06/05 21:05):** cliente disse "Quero orçamento" SEM ter mandado receita. IA respondeu "Encontrei poucas opções automáticas para esse grau alto. Posso acionar um Consultor?" — alucinação total. Cliente reclamou "Mas não mandei receita ainda", mandou foto, e no turno seguinte IA escalou direto com "Para esse grau bem alto, vou acionar um Consultor para buscar opções sob encomenda" — sem pedir confirmação dos valores OCR.
+
+**Causa raiz:**
+1. Sem guardrail contra IA inventar "grau alto" sem receita interpretada.
+2. Gate `receita_confirmacao.pending` só agia no **próximo** turno; no turno em que `interpretar_receita` setava pending, o LLM podia emitir `escalar_consultor` no mesmo turno e sobrescrever a confirmação.
+
+**Correções:**
+- **Helpers `escaladaGrauSemReceitaTexto` + `MSG_PEDIR_RECEITA_PARA_GRAU_ALTO`**: regex `/grau (alto|elevado|bem alto)|sob encomenda|sob medida específic|fora da faixa/i`.
+- Branches `responder` e `escalar_consultor`: se `!hasReceitasValidas(receitas)` E motivo/resposta casa a regex → descarta tool, responde pedindo a receita, loga `escalada_grau_sem_receita_bloqueada`.
+- **Gate pós-loop em ai-triage**: flags `rxConfirmGateTriggered` + `rxConfirmGateRx` setadas quando `interpretar_receita` marca pending. Após o loop de tools, se outras tools rodaram OU `precisa_humano=true`, FORÇA `resposta = buildMsgConfirmarReceita(...)`, zera escalada e loga `escalada_bloqueada_pendente_confirmacao`. Aplicado nos 2 caminhos (normal e forced retry).
+- **Prompt** (modo restrito): adicionada proibição explícita de mencionar grau/sob encomenda/Consultor por causa do grau antes da receita ter sido interpretada.
+- **`watchdog-loop-ia`**: exceção para outbounds que começam com "Li sua receita assim" / "Anotei! Ficou assim:" — repetir confirmação faz parte do fluxo, não é loop.

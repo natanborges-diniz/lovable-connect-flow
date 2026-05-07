@@ -127,6 +127,16 @@ function isReceitaForaDaFaixa(rx: any): boolean {
 
 const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Seu grau é mais alto e exige uma lente sob encomenda — vou chamar um Consultor especializado pra te passar opções e prazo certinho 🤝";
 
+// ── Bloqueia escalada/oferta de "grau alto / sob encomenda" sem receita interpretada ──
+// Caso Franciana (Mai/2026): IA falou "Encontrei poucas opções automáticas para esse grau alto"
+// e ofereceu Consultor antes mesmo da receita ter sido enviada.
+function escaladaGrauSemReceitaTexto(texto: string): boolean {
+  const t = String(texto || "").toLowerCase();
+  if (!t) return false;
+  return /(grau\s+(alto|elevado|bem\s+alto)|sob\s+encomenda|sob\s+medida\s+espec[ií]fic|op[cç][oõ]es?\s+sob\s+encomenda|fora\s+da\s+faixa)/i.test(t);
+}
+const MSG_PEDIR_RECEITA_PARA_GRAU_ALTO = "Pra te passar opções certinhas, preciso primeiro da sua receita 😊 Me manda uma foto que eu já analiso e te respondo com as opções compatíveis.";
+
 function detectCtaAgendamentoYes(text: string): boolean {
   const t = String(text || "").toLowerCase().trim();
   if (!t) return false;
@@ -1488,7 +1498,8 @@ Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assun
 Sem dados detalhados de produtos. Use APENAS valores das REGRAS DE ATENDIMENTO.
 Sugira envio de foto da receita. NUNCA responda sobre produtos com endereço de loja.
 Se não souber responder com precisão: peça mais detalhes ao cliente OU sugira agendamento na loja mais próxima pra ver pessoalmente.
-PROIBIDO usar frases como "vou encaminhar para um Consultor", "para esse grau específico vou passar pra alguém da equipe" — escalada só via tool escalar_consultor em cenários graves (reclamação, pedido humano explícito, ZERO opções no catálogo).`);
+PROIBIDO usar frases como "vou encaminhar para um Consultor", "para esse grau específico vou passar pra alguém da equipe" — escalada só via tool escalar_consultor em cenários graves (reclamação, pedido humano explícito, ZERO opções no catálogo).
+PROIBIDO mencionar "grau alto", "grau elevado", "sob encomenda", "sob medida específica" ou oferecer Consultor por causa do grau ANTES de ter recebido E interpretado a receita do cliente. Sem receita interpretada = pedir foto da receita primeiro.`);
   }
 
   if (opts.examples) s.push(`# EXEMPLOS CORRETOS\n${opts.examples}`);
@@ -3212,6 +3223,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     let validatorFlags: string[] = [];
 
     const toolCalls = choice.message?.tool_calls || [];
+    let rxConfirmGateTriggered = false;
+    let rxConfirmGateRx: any = null;
+    const semReceitaSalvaTurno = !hasReceitasValidas(receitas);
 
     if (toolCalls.length === 0) {
       const plainContent = (choice.message?.content || "").trim();
@@ -3241,6 +3255,24 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.log(`[TOOL] ${fn}:`, JSON.stringify(args).substring(0, 300));
 
       if (fn === "responder") {
+        // ── GUARDA: "grau alto / sob encomenda" SEM receita interpretada ──
+        // Caso Franciana (Mai/2026): IA falou em grau alto antes da foto chegar.
+        if (semReceitaSalvaTurno && escaladaGrauSemReceitaTexto(args.resposta || "")) {
+          console.log(`[GUARDA-GRAU-SEM-RECEITA] responder bloqueado — IA mencionou grau/sob encomenda sem receita salva`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "escalada_grau_sem_receita_bloqueada",
+            descricao: `IA mencionou grau alto/sob encomenda sem receita salva (responder)`,
+            metadata: { resposta_original: String(args.resposta || "").substring(0, 300) },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          resposta = MSG_PEDIR_RECEITA_PARA_GRAU_ALTO;
+          intencao = "receita_oftalmologica";
+          pipeline_coluna = "Orçamento";
+          precisa_humano = false;
+          validatorFlags.push("escalada_grau_sem_receita_bloqueada");
+          continue;
+        }
         // Merge proximo_passo into resposta if not already included.
         // Evita duplicar pergunta: se a `resposta` já termina com '?' E o
         // `proximo_passo` também é pergunta, descarta o proximo_passo (o
@@ -3309,6 +3341,26 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             precisa_humano = false;
             validatorFlags.push("blocked_inherited_escalation");
           }
+          continue;
+        }
+
+        // ── GUARDA: escalada por "grau alto / sob encomenda" SEM receita interpretada ──
+        const _motivoTxt = `${args.motivo || ""} ${args.resposta || ""}`;
+        if (semReceitaSalvaTurno && escaladaGrauSemReceitaTexto(_motivoTxt)) {
+          console.log(`[GUARDA-GRAU-SEM-RECEITA] escalar_consultor bloqueado — sem receita salva`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "escalada_grau_sem_receita_bloqueada",
+            descricao: `IA tentou escalar com motivo "grau alto/sob encomenda" sem receita salva`,
+            metadata: { motivo: args.motivo, resposta: String(args.resposta || "").substring(0, 200) },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          resposta = MSG_PEDIR_RECEITA_PARA_GRAU_ALTO;
+          intencao = "receita_oftalmologica";
+          pipeline_coluna = "Orçamento";
+          precisa_humano = false;
+          setor_sugerido = "";
+          validatorFlags.push("escalada_grau_sem_receita_bloqueada");
           continue;
         }
 
@@ -3428,6 +3480,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             referencia_tipo: "atendimento", referencia_id: atendimento_id,
           });
           resposta = buildMsgConfirmarReceita(rxWithLabel, false);
+          rxConfirmGateTriggered = true;
+          rxConfirmGateRx = rxWithLabel;
           validatorFlags.push("receita_confirmacao_solicitada");
           console.log(`[RX-CONFIRM] Pedindo confirmação ao cliente (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%)`);
         } else if (needsHumanReview) {
@@ -3873,6 +3927,30 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     }
 
+    // ── GATE PÓS-LOOP: confirmação de receita VENCE qualquer escalada/cotação no mesmo turno ──
+    // Caso Franciana (Mai/2026): no mesmo turno em que interpretar_receita marcou pending,
+    // o LLM também emitiu escalar_consultor → escalou sem cliente confirmar.
+    if (rxConfirmGateTriggered && rxConfirmGateRx) {
+      const _toolNomes = (toolCalls || []).map((t: any) => t?.function?.name).filter(Boolean);
+      const _outrasTools = _toolNomes.filter((n: string) => n !== "interpretar_receita");
+      if (_outrasTools.length > 0 || precisa_humano) {
+        console.log(`[RX-GATE] Sobrescrevendo turno: outras tools=${_outrasTools.join(",")} precisa_humano=${precisa_humano} — força confirmação`);
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "escalada_bloqueada_pendente_confirmacao",
+          descricao: `Turno teve interpretar_receita + ${_outrasTools.join(",")} — gate de confirmação prevalece`,
+          metadata: { tools: _toolNomes, precisa_humano_descartado: precisa_humano, setor_descartado: setor_sugerido },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        });
+      }
+      resposta = buildMsgConfirmarReceita(rxConfirmGateRx, false);
+      precisa_humano = false;
+      intencao = "receita_oftalmologica";
+      pipeline_coluna = "Orçamento";
+      setor_sugerido = "";
+      validatorFlags.push("rx_confirm_gate_overrode_turn");
+    }
+
     // ── 9. POST-LLM VALIDATION (Phase 3) ──
     if (resposta && !precisa_humano) {
       // ── ANTI-DUPLICAÇÃO DE DESPEDIDA: se o último outbound já é a frase canônica
@@ -4239,6 +4317,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 });
 
                 resposta = buildMsgConfirmarReceita({ ...rxData, label: rxLabel }, false);
+                rxConfirmGateTriggered = true;
+                rxConfirmGateRx = { ...rxData, label: rxLabel };
                 intencao = isLCContextGlobal ? "orcamento_lc" : "orcamento";
                 pipeline_coluna = "Orçamento";
                 precisa_humano = false;
