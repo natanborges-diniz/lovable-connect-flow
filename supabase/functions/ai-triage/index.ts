@@ -4876,6 +4876,49 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     }
 
+    // ── 9.6. GUARDRAIL ANTI-"ANALISANDO" PÓS-CONFIRMAÇÃO ──
+    // Caso Franciana (Mai/2026): cliente confirmou a receita ("Sim"), o LLM ainda devolveu
+    // "Recebi sua receita 👀 Já estou analisando…". Se a última receita já está confirmada
+    // pelo cliente, esse texto é uma volta atrás — substituímos por cotação determinística.
+    try {
+      const _ultimaRx = Array.isArray(receitas) && receitas.length > 0
+        ? receitas[receitas.length - 1]
+        : null;
+      const _rxJaConfirmada = !!_ultimaRx?.confirmed_by_client_at && !isReceitaPending(contatoMeta);
+      if (_rxJaConfirmada && typeof resposta === "string" && MSG_ANALISANDO_RE.test(resposta)) {
+        console.log("[GUARDRAIL-ANALISANDO-POS-CONF] Substituindo 'analisando' por cotação determinística");
+        validatorFlags.push("anti_loop_analisando_pos_confirmacao");
+        if (!isLCContextGlobal) {
+          try {
+            const qr = await runConsultarLentes(
+              supabase,
+              contatoId,
+              recentOutbound,
+              { receita_label: _ultimaRx?.label || undefined },
+              atendimento_id,
+            );
+            resposta = qr.resposta;
+            const rev = requerRevisaoHumanaPosOrcamento(_ultimaRx);
+            if (rev.precisa && resposta && !resposta.includes(MSG_REVISAO_HUMANA_SUFIXO)) {
+              resposta = resposta + MSG_REVISAO_HUMANA_SUFIXO;
+            }
+            intencao = "orcamento";
+            pipeline_coluna = "Orçamento";
+          } catch (e) {
+            console.warn("[GUARDRAIL-ANALISANDO-POS-CONF] runConsultarLentes falhou:", e);
+            resposta = "Perfeito! Já vou te mandar as opções compatíveis com a sua receita 😊";
+          }
+        } else {
+          // LC: deixa o caminho determinístico curto (a próxima rodada do LLM apresenta opções LC).
+          resposta = "Beleza! Já tô montando aqui as opções de lentes de contato com base na sua receita 😊";
+          intencao = "orcamento_lc";
+          pipeline_coluna = "Orçamento";
+        }
+      }
+    } catch (e) {
+      console.warn("[GUARDRAIL-ANALISANDO-POS-CONF] erro:", e);
+    }
+
     // ── 10. SEND RESPONSE ──
     // Guardrail intra-mensagem: na 1ª interação, garantir UMA única pergunta sobre o nome.
     // Se o LLM duplicou ("Posso saber seu nome? Pode me dizer seu nome completo?"),
