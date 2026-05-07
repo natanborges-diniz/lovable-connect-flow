@@ -1,66 +1,40 @@
+# Editar/apagar mensagem: só no InFoco Messenger
 
-## Diagnóstico real
+## Contexto
 
-A Thaynara (atendimento `46d5579a-8a56-44a7-a888-b815ca923e11`) confirmou a receita e o `ai-triage` caiu no ramo `fora_da_faixa === true` (linha 2257), enviou `MSG_ESCALADA_GRAU_FORA_FAIXA` ("lente especial, vou te conectar com Consultor") e fez `modo='humano'`. **Esse caminho NÃO seta `revisao_humana_pendente`** — só o caminho de cotação automática (`consultar_lentes`, linha 5404→5447) seta.
+Hoje os controles de editar/apagar mensagem aparecem em três lugares:
 
-Resultado: atendimentos escalados por receita fora-da-faixa ficam em modo humano sem o popover de validação aparecer. O operador não tem onde validar a leitura antes de cotar manualmente.
+| Local | Tipo de canal | Comportamento atual |
+|---|---|---|
+| `/mensagens` (chat 1:1 interno) | Interno (App Atrium) | Edita/apaga em tempo real para os dois lados ✅ |
+| `/atendimentos` → painel de demanda loja (`DemandaThreadView`) | Interno operador↔loja | Edita/apaga em tempo real para os dois lados ✅ |
+| `/atendimentos` → chat com cliente WhatsApp | Externo (Meta) | Soft-delete só interno; **não some no WhatsApp do cliente** ⚠️ |
+
+A última situação é a problemática: o operador acha que apagou, mas o cliente continua vendo no WhatsApp. A Meta Cloud API não expõe endpoint de delete para mensagens já entregues, então não tem como sincronizar. Melhor remover a opção e evitar a falsa sensação de exclusão.
+
+A proposta anterior de adicionar editar/apagar nas bolhas do CRM (`src/pages/Pipeline.tsx`) fica **descartada** — pelos mesmos motivos.
 
 ## Mudanças
 
-### 1. Forçar a flag no atendimento da Thaynara (one-shot)
+### 1. Remover editar/apagar do chat WhatsApp em `src/pages/Atendimentos.tsx`
 
-Migração `UPDATE atendimentos` setando em `metadata`:
-- `revisao_humana_pendente = true`
-- `revisao_motivos = ['cilindrico_alto:5.5', 'escalada_grau_fora_faixa']`
-- `revisao_solicitada_at = now()`
+- Tirar render do `MessageActionsMenu` e do ramo `EditableMessageBubble` para mensagens do atendimento (linhas ~547 e ~605).
+- Remover imports não usados: `useEditMensagem`, `useDeleteMensagem`, `MessageActionsMenu`, `EditableMessageBubble`, e o estado `editingId` + handlers correspondentes.
+- Manter o marcador "• editada" e a bolha "Mensagem apagada" para mensagens que já existirem com `editada_at`/`deletada_at` no histórico (não some retroativamente; só não dá mais para criar novas).
 
-Filtro: `id = '46d5579a-8a56-44a7-a888-b815ca923e11'`. Assim o botão **📄 Receita lida** aparece imediatamente para você testar o fluxo de validação.
+### 2. Não mexer em
 
-### 2. Corrigir gap em `ai-triage` (escalada fora-da-faixa)
+- `src/pages/Mensagens.tsx` — chat 1:1 interno, mantém edit/delete.
+- `src/components/atendimentos/DemandaThreadView.tsx` — thread operador↔loja, mantém edit/delete.
+- Hooks `useEditMensagem` / `useDeleteMensagem` em `useAtendimentos` — ficam no código (ainda podem ser úteis para admin no futuro), só deixam de ser chamados na UI.
+- `src/pages/Pipeline.tsx` — não recebe mais a feature, conforme decisão.
 
-Em `supabase/functions/ai-triage/index.ts`, no bloco da escalada `foraDaFaixa` (linhas 2257-2278), antes do `return jsonResponse(...)`, gravar também a flag de revisão humana no atendimento:
+## Resultado esperado
 
-```ts
-// Marca flag para o popover "Receita lida" aparecer no detalhe
-const motivos: string[] = ["escalada_grau_fora_faixa"];
-const cyl = Math.max(
-  Math.abs(Number(lastRx?.eyes?.od?.cylinder) || 0),
-  Math.abs(Number(lastRx?.eyes?.oe?.cylinder) || 0)
-);
-const sph = Math.max(
-  Math.abs(Number(lastRx?.eyes?.od?.sphere) || 0),
-  Math.abs(Number(lastRx?.eyes?.oe?.sphere) || 0)
-);
-if (cyl > 4) motivos.push(`cilindrico_alto:${cyl}`);
-if (sph > 10) motivos.push(`esferico_fora_catalogo:${sph}`);
+- No WhatsApp (Atendimentos e CRM) o operador **não** vê mais o menu "⋮ Editar / Excluir" nas próprias bolhas.
+- No InFoco Messenger (`/mensagens` e thread de demanda loja) tudo continua igual: edita até 15 min, apaga com confirmação, sincroniza via Realtime para o outro lado.
+- Mensagens antigas que já foram editadas/apagadas continuam exibindo o estado correto.
 
-const { data: atFlag } = await supabase
-  .from("atendimentos").select("metadata").eq("id", atendimento_id).single();
-const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
-await supabase.from("atendimentos").update({
-  modo: "humano",
-  metadata: {
-    ...metaFlag,
-    revisao_humana_pendente: true,
-    revisao_motivos: motivos,
-    revisao_solicitada_at: new Date().toISOString(),
-  },
-}).eq("id", atendimento_id);
-```
+## Memória a atualizar
 
-Substitui o `update({ modo: "humano" })` puro da linha 2261. A partir daí, **todo lead escalado por fora-da-faixa** já entra com a flag ligada e o popover aparece para o consultor validar a leitura antes de cotar manualmente.
-
-### 3. Memória
-
-Atualizar `mem://ia/regras-negocio-e-proibicoes-criticas`: gate do popover **📄 Receita lida** cobre dois caminhos — (a) cotação automática com `cilindrico_alto`/`adicao_alta`/`esferico_faixa_cinza`; (b) escalada por `fora_da_faixa` (cyl/sph fora do catálogo cotável).
-
-## Arquivos
-
-- Migração SQL — UPDATE pontual no atendimento da Thaynara.
-- `supabase/functions/ai-triage/index.ts` (linhas ~2261) — flag no ramo `foraDaFaixa`.
-- `mem://ia/regras-negocio-e-proibicoes-criticas` — escopo do popover.
-
-## Sem mudanças
-
-- UI / popover (`ReceitaValidacaoPopover.tsx`) já funciona corretamente — só não estava recebendo o flag nesse caminho.
-- `interpretar_receita`, schema, frontend.
+Adicionar regra clara: edit/delete de mensagem é exclusivo do canal interno (App Atrium / InFoco Messenger). Nunca habilitar em canais que sincronizam com WhatsApp Meta, porque a Meta não permite apagar do lado do cliente.

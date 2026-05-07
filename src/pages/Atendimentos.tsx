@@ -6,7 +6,7 @@ import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
 import { JanelaFechadaDialog } from "@/components/atendimentos/JanelaFechadaDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem, useEditMensagem, useDeleteMensagem } from "@/hooks/useAtendimentos";
+import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
 import { AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
@@ -22,8 +22,6 @@ import { Badge } from "@/components/ui/badge";
 import { RevisaoHumanaBadge, traduzirMotivos } from "@/components/shared/RevisaoHumanaBadge";
 import { ReceitaValidacaoPopover } from "@/components/atendimentos/ReceitaValidacaoPopover";
 import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban, CheckCircle2 } from "lucide-react";
-import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
-import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -171,15 +169,11 @@ export default function Atendimentos() {
 function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange: (s: StatusAtendimento) => void }) {
   const { data: mensagens, refetch } = useMensagens(id);
   const createMensagem = useCreateMensagem();
-  const editMensagem = useEditMensagem();
-  const deleteMensagem = useDeleteMensagem();
   const { data: atendimentos } = useAtendimentos();
   const atendimento = atendimentos?.find((a: any) => a.id === id) as any;
   const { profile, user } = useAuth();
   const uid = user?.id ?? null;
   const consultorNome = profile?.nome?.split(" ")[0] || "consultor das Óticas Diniz";
-
-  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [msgText, setMsgText] = useState("");
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
@@ -526,14 +520,6 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             const isImage = (m?.tipo_conteudo || "text") === "image" && !!mediaUrl;
             const isDocument = !!mediaUrl && !isImage;
             const isDeleted = !!m.deletada_at;
-            const isEditing = editingId === m.id;
-            // Autor reconhecido: outbound/internal com remetente_nome == profile.nome do usuário logado
-            const isAuthor =
-              !!profile?.nome &&
-              !!m.remetente_nome &&
-              m.remetente_nome === profile.nome &&
-              m.direcao !== "inbound";
-            const hasOnlyMedia = (isImage || isDocument) && (!m.conteudo || m.conteudo === "[image]");
 
             return (
               <div key={m.id} className={cn("group max-w-[78%] rounded-lg px-3 py-2 text-sm break-words overflow-hidden relative", isDeleted ? "bg-muted/50 text-muted-foreground italic border border-dashed" : direcaoColors[m.direcao], m.direcao === "inbound" ? "mr-auto" : "ml-auto")}>
@@ -543,26 +529,6 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                     <Ban className="h-3.5 w-3.5 shrink-0 opacity-70" />
                     Mensagem apagada
                   </p>
-                ) : isEditing ? (
-                  <EditableMessageBubble
-                    initialValue={m.conteudo}
-                    onCancel={() => setEditingId(null)}
-                    saving={editMensagem.isPending}
-                    onSave={async (v) => {
-                      try {
-                        await editMensagem.mutateAsync({
-                          id: m.id,
-                          novoConteudo: v,
-                          conteudoAnterior: m.conteudo,
-                          metadata: m.metadata,
-                        });
-                        setEditingId(null);
-                        toast.success("Mensagem editada (apenas no histórico interno)");
-                      } catch (e: any) {
-                        toast.error("Erro ao editar: " + (e?.message || ""));
-                      }
-                    }}
-                  />
                 ) : (
                   <>
                     {isImage ? (
@@ -601,26 +567,6 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                         {m.direcao === "outbound" && ["Assistente IA", "Bot Lojas", "Sistema"].includes(m.remetente_nome ?? "") && (
                           <MessageFeedback mensagemId={m.id} atendimentoId={id} conteudo={m.conteudo} />
                         )}
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                          <MessageActionsMenu
-                            autorId={isAuthor ? uid : null}
-                            currentUserId={uid}
-                            createdAt={m.created_at}
-                            deletadaAt={m.deletada_at}
-                            forceHide={hasOnlyMedia}
-                            onEdit={() => setEditingId(m.id)}
-                            onDelete={async () => {
-                              if (!uid) return;
-                              await deleteMensagem.mutateAsync({ id: m.id, userId: uid });
-                            }}
-                            deleteWarning={
-                              m.direcao === "outbound" && atendimento?.canal === "whatsapp"
-                                ? "A mensagem será marcada como apagada apenas no histórico interno. O cliente continua vendo a original no WhatsApp."
-                                : undefined
-                            }
-                            tone={m.direcao === "outbound" ? "dark" : "light"}
-                          />
-                        </div>
                       </div>
                     </div>
                   </>
