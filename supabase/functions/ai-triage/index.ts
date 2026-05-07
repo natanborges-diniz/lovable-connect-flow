@@ -215,15 +215,14 @@ function detectEscolhaReceita(text: string, receitas: any[]): { idx: number; how
 }
 
 function isReceitaForaDaFaixa(rx: any): boolean {
+  // Regra de negócio (Mai/2026): "lente especial" = SOMENTE esférico muito alto (>10D em qualquer
+  // olho). Cilindro alto e adição alta NÃO marcam como especial — essas receitas seguem o fluxo
+  // normal de cotação (consultar_lentes apresenta 3 opções a partir da tabela existente).
   if (!rx?.eyes) return false;
   const od = rx.eyes.od || {};
   const oe = rx.eyes.oe || {};
   const sphereMax = Math.max(Math.abs(Number(od.sphere) || 0), Math.abs(Number(oe.sphere) || 0));
-  const cylMax = Math.max(Math.abs(Number(od.cylinder) || 0), Math.abs(Number(oe.cylinder) || 0));
-  const addMax = Math.max(Math.abs(Number(od.add) || 0), Math.abs(Number(oe.add) || 0));
-  if (sphereMax > 12) return true;
-  if (cylMax > 4) return true;
-  if (rx.rx_type === "progressive" && addMax > 3.5) return true;
+  if (sphereMax > 10) return true;
   return false;
 }
 
