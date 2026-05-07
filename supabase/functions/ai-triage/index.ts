@@ -215,15 +215,14 @@ function detectEscolhaReceita(text: string, receitas: any[]): { idx: number; how
 }
 
 function isReceitaForaDaFaixa(rx: any): boolean {
+  // Regra de negócio (Mai/2026): "lente especial" = SOMENTE esférico muito alto (>10D em qualquer
+  // olho). Cilindro alto e adição alta NÃO marcam como especial — essas receitas seguem o fluxo
+  // normal de cotação (consultar_lentes apresenta 3 opções a partir da tabela existente).
   if (!rx?.eyes) return false;
   const od = rx.eyes.od || {};
   const oe = rx.eyes.oe || {};
   const sphereMax = Math.max(Math.abs(Number(od.sphere) || 0), Math.abs(Number(oe.sphere) || 0));
-  const cylMax = Math.max(Math.abs(Number(od.cylinder) || 0), Math.abs(Number(oe.cylinder) || 0));
-  const addMax = Math.max(Math.abs(Number(od.add) || 0), Math.abs(Number(oe.add) || 0));
-  if (sphereMax > 12) return true;
-  if (cylMax > 4) return true;
-  if (rx.rx_type === "progressive" && addMax > 3.5) return true;
+  if (sphereMax > 10) return true;
   return false;
 }
 
@@ -3217,7 +3216,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           label: old.label || (isFirst ? "digitada pelo cliente" : undefined),
         };
         // ── Detecta correção de ALTO IMPACTO ──
-        // Se a esfera mudou ≥0,75D em qualquer olho OU a esfera nova é ≥|8|D (lente especial),
+        // Se a esfera mudou ≥0,75D em qualquer olho OU a esfera nova é >|10|D (lente especial),
         // OBRIGA confirmação explícita do cliente antes de cotar/escalar.
         const oldOdSph = typeof old?.eyes?.od?.sphere === "number" ? old.eyes.od.sphere : null;
         const oldOeSph = typeof old?.eyes?.oe?.sphere === "number" ? old.eyes.oe.sphere : null;
@@ -3226,7 +3225,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         const deltaOd = (oldOdSph != null && newOdSph != null) ? Math.abs(newOdSph - oldOdSph) : 0;
         const deltaOe = (oldOeSph != null && newOeSph != null) ? Math.abs(newOeSph - oldOeSph) : 0;
         const maxNewAbs = Math.max(Math.abs(newOdSph ?? 0), Math.abs(newOeSph ?? 0));
-        const isHighImpact = (!isFirst && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs >= 8;
+        const isHighImpact = (!isFirst && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs > 10;
 
         // Marca a receita recém-gravada como NÃO confirmada pelo cliente
         merged.confirmed_by_client_at = null;
@@ -3241,7 +3240,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             asked_at: new Date().toISOString(),
             correction_count: Number(contatoMeta?.receita_confirmacao?.correction_count || 0) + 1,
             reason: "high_impact_correction",
-            fora_da_faixa: maxNewAbs >= 8,
+            fora_da_faixa: maxNewAbs > 10,
           };
         }
 
