@@ -194,25 +194,56 @@ serve(async (req) => {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const obRes = await fetch(`${OB_URL}/functions/v1/payment-links`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-service-key": OB_SECRET },
-        body: JSON.stringify({
-          action: "criar",
-          cod_empresa: codEmpresa,
-          valor: dados.valor,
-          descricao: dados.descricao,
-          parcelas_max: dados.parcelas || 1,
-          cliente_nome: dados.cliente || null,
-          origem: "ATRIUM_INFOCO",
-          origem_ref: user.id,
-        }),
-      });
-      const obData = await obRes.json();
-      if (obData?.error) {
-        return new Response(JSON.stringify({ error: `OB: ${obData.error}` }), {
-          status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      let obRes: Response;
+      try {
+        obRes = await fetch(`${OB_URL}/functions/v1/payment-links`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-service-key": OB_SECRET },
+          body: JSON.stringify({
+            action: "criar",
+            cod_empresa: codEmpresa,
+            valor: dados.valor,
+            descricao: dados.descricao,
+            parcelas_max: dados.parcelas || 1,
+            cliente_nome: dados.cliente || null,
+            origem: "ATRIUM_INFOCO",
+            origem_ref: user.id,
+          }),
         });
+      } catch (netErr) {
+        console.error("[criar-solicitacao-loja] OB fetch network error:", netErr);
+        return new Response(JSON.stringify({
+          ok: false,
+          error: `Falha de rede ao contatar OB: ${netErr instanceof Error ? netErr.message : String(netErr)}`,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const obContentType = obRes.headers.get("content-type") || "";
+      const obRawText = await obRes.text();
+      console.log(`[criar-solicitacao-loja] OB response status=${obRes.status} ct=${obContentType} body=${obRawText.slice(0, 300)}`);
+
+      let obData: any = null;
+      if (obContentType.includes("application/json")) {
+        try { obData = JSON.parse(obRawText); } catch (e) {
+          return new Response(JSON.stringify({
+            ok: false,
+            error: `OB retornou JSON inválido (status ${obRes.status}): ${obRawText.slice(0, 200)}`,
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      } else {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: `OB retornou ${obRes.status} (${obContentType || "sem content-type"}): ${obRawText.slice(0, 200)}`,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      if (!obRes.ok || obData?.error) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: `OB (${obRes.status}): ${obData?.error || obData?.message || "erro desconhecido"}`,
+          ob_status: obRes.status,
+          ob_payload: obData,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       respostaCliente = { url: obData.url_pagamento, payment_link_id: obData.id };
       extraMetadata = { payment_link_id: obData.id, url: obData.url_pagamento };
