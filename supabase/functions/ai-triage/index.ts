@@ -2258,7 +2258,32 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
           const respFinal = isHorarioHumano() ? MSG_ESCALADA_GRAU_FORA_FAIXA : mensagemEscaladaForaHorario(_np);
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respFinal);
-          await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+          // Marca flag de revisão humana para o popover "Receita lida" aparecer no detalhe
+          {
+            const motivosRev: string[] = ["escalada_grau_fora_faixa"];
+            const cylRev = Math.max(
+              Math.abs(Number(lastRx?.eyes?.od?.cylinder) || 0),
+              Math.abs(Number(lastRx?.eyes?.oe?.cylinder) || 0),
+            );
+            const sphRev = Math.max(
+              Math.abs(Number(lastRx?.eyes?.od?.sphere) || 0),
+              Math.abs(Number(lastRx?.eyes?.oe?.sphere) || 0),
+            );
+            if (cylRev > 4) motivosRev.push(`cilindrico_alto:${cylRev}`);
+            if (sphRev > 10) motivosRev.push(`esferico_fora_catalogo:${sphRev}`);
+            const { data: atFlag } = await supabase
+              .from("atendimentos").select("metadata").eq("id", atendimento_id).single();
+            const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
+            await supabase.from("atendimentos").update({
+              modo: "humano",
+              metadata: {
+                ...metaFlag,
+                revisao_humana_pendente: true,
+                revisao_motivos: motivosRev,
+                revisao_solicitada_at: new Date().toISOString(),
+              },
+            }).eq("id", atendimento_id);
+          }
           await supabase.from("eventos_crm").insert({
             contato_id: contatoId,
             tipo: "escalada_grau_fora_faixa",
