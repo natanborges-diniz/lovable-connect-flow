@@ -4099,10 +4099,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             referencia_id: atendimento_id,
           });
         } catch (_) { /* noop */ }
-      }
-    }
-
-    // ── GATE PÓS-LOOP: confirmação de receita VENCE qualquer escalada/cotação no mesmo turno ──
+        if (resposta && resposta.includes(MSG_CTA_AGENDAMENTO)) {
+          try {
+            const { data: cur } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+            const m = (cur?.metadata as Record<string, any>) || {};
+            m.pos_orcamento = { etapa: "aguardando_cta_visita", iniciado_at: new Date().toISOString(), origem: "consultar_lentes_contato" };
+            await supabase.from("contatos").update({ metadata: m }).eq("id", contatoId);
+          } catch (_) { /* noop */ }
+        }
     // Caso Franciana (Mai/2026): no mesmo turno em que interpretar_receita marcou pending,
     // o LLM também emitiu escalar_consultor → escalou sem cliente confirmar.
     if (rxConfirmGateTriggered && rxConfirmGateRx) {
