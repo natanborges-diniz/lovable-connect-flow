@@ -2304,6 +2304,56 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
         console.log(`[RX-CONFIRMACAO] Confirmada DENTRO da faixa — liberando fluxo normal`);
         contatoMeta.receita_confirmacao = { ...contatoMeta.receita_confirmacao, pending: false, confirmed_at: new Date().toISOString() };
+
+        // ── DISPARO DETERMINÍSTICO: cotação óculos imediatamente após confirmação ──
+        // Caso Franciana (Mai/2026): após cliente responder "Sim", o LLM voltava a mandar
+        // "Recebi sua receita 👀 Já estou analisando…" sem chamar consultar_lentes.
+        // Para óculos chamamos runConsultarLentes direto; LC mantém o fluxo via LLM.
+        const _recentInboundForLC = inboundMsgs
+          .slice(-10)
+          .map((m: any) => String(m.conteudo || ""))
+          .join(" | ")
+          .toLowerCase();
+        const _isLCCtx = /\b(lente[s]?\s+de\s+contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?)\b/i.test(_recentInboundForLC);
+
+        if (!_isLCCtx && lastRx) {
+          try {
+            const quoteResult = await runConsultarLentes(
+              supabase,
+              contatoId,
+              recentOutbound,
+              { receita_label: rxLabel || lastRx?.label || undefined },
+              atendimento_id,
+            );
+            let respCotacao = quoteResult.resposta;
+            try {
+              const rev = requerRevisaoHumanaPosOrcamento(lastRx);
+              if (rev.precisa && respCotacao && !respCotacao.includes(MSG_REVISAO_HUMANA_SUFIXO)) {
+                respCotacao = respCotacao + MSG_REVISAO_HUMANA_SUFIXO;
+              }
+            } catch (_) { /* noop */ }
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respCotacao);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "cotacao_pos_confirmacao_forcada",
+              descricao: "Cotação óculos disparada deterministicamente após cliente confirmar a receita",
+              metadata: { rx_label: rxLabel, source: "post_rx_confirmation_gate" },
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+            });
+            console.log("[RX-CONFIRMACAO] Cotação determinística enviada após confirmação");
+            return jsonResponse({
+              status: "ok",
+              tools_used: ["consultar_lentes_pos_confirmacao"],
+              intencao: "orcamento",
+              precisa_humano: false,
+              pipeline_coluna_sugerida: "Orçamento",
+              modo: atendimento.modo,
+            });
+          } catch (e) {
+            console.warn("[RX-CONFIRMACAO] runConsultarLentes pós-confirmação falhou — caindo para LLM:", e);
+          }
+        }
       } else if (detectRxRejeicao(lastInboundText)) {
         const newCount = correctionCount + 1;
         try {
@@ -4824,6 +4874,49 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         intencao = "orcamento";
         pipeline_coluna = "Orçamento";
       }
+    }
+
+    // ── 9.6. GUARDRAIL ANTI-"ANALISANDO" PÓS-CONFIRMAÇÃO ──
+    // Caso Franciana (Mai/2026): cliente confirmou a receita ("Sim"), o LLM ainda devolveu
+    // "Recebi sua receita 👀 Já estou analisando…". Se a última receita já está confirmada
+    // pelo cliente, esse texto é uma volta atrás — substituímos por cotação determinística.
+    try {
+      const _ultimaRx = Array.isArray(receitas) && receitas.length > 0
+        ? receitas[receitas.length - 1]
+        : null;
+      const _rxJaConfirmada = !!_ultimaRx?.confirmed_by_client_at && !isReceitaPending(contatoMeta);
+      if (_rxJaConfirmada && typeof resposta === "string" && MSG_ANALISANDO_RE.test(resposta)) {
+        console.log("[GUARDRAIL-ANALISANDO-POS-CONF] Substituindo 'analisando' por cotação determinística");
+        validatorFlags.push("anti_loop_analisando_pos_confirmacao");
+        if (!isLCContextGlobal) {
+          try {
+            const qr = await runConsultarLentes(
+              supabase,
+              contatoId,
+              recentOutbound,
+              { receita_label: _ultimaRx?.label || undefined },
+              atendimento_id,
+            );
+            resposta = qr.resposta;
+            const rev = requerRevisaoHumanaPosOrcamento(_ultimaRx);
+            if (rev.precisa && resposta && !resposta.includes(MSG_REVISAO_HUMANA_SUFIXO)) {
+              resposta = resposta + MSG_REVISAO_HUMANA_SUFIXO;
+            }
+            intencao = "orcamento";
+            pipeline_coluna = "Orçamento";
+          } catch (e) {
+            console.warn("[GUARDRAIL-ANALISANDO-POS-CONF] runConsultarLentes falhou:", e);
+            resposta = "Perfeito! Já vou te mandar as opções compatíveis com a sua receita 😊";
+          }
+        } else {
+          // LC: deixa o caminho determinístico curto (a próxima rodada do LLM apresenta opções LC).
+          resposta = "Beleza! Já tô montando aqui as opções de lentes de contato com base na sua receita 😊";
+          intencao = "orcamento_lc";
+          pipeline_coluna = "Orçamento";
+        }
+      }
+    } catch (e) {
+      console.warn("[GUARDRAIL-ANALISANDO-POS-CONF] erro:", e);
     }
 
     // ── 10. SEND RESPONSE ──
