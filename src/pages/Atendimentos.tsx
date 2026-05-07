@@ -337,6 +337,36 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         {atendimento && (
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             <AtendimentoStatusBadge status={atendimento.status} />
+            {(atendimento.metadata as any)?.revisao_humana_pendente === true && (
+              <>
+                <RevisaoHumanaBadge motivos={(atendimento.metadata as any)?.revisao_motivos} size="md" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-[10px] gap-1 border-amber-500/60 text-amber-700 hover:bg-amber-50"
+                  onClick={async () => {
+                    const meta = { ...(atendimento.metadata as any) };
+                    const motivos = meta.revisao_motivos;
+                    delete meta.revisao_humana_pendente;
+                    delete meta.revisao_motivos;
+                    const { error } = await supabase.from("atendimentos").update({ metadata: meta }).eq("id", id);
+                    if (error) { toast.error("Erro: " + error.message); return; }
+                    await supabase.from("eventos_crm").insert({
+                      contato_id: atendimento.contato_id,
+                      tipo: "orcamento_revisao_resolvida",
+                      descricao: "Revisão humana do orçamento marcada como concluída",
+                      referencia_tipo: "atendimento",
+                      referencia_id: id,
+                      metadata: { motivos, resolvido_por: (await supabase.auth.getUser()).data.user?.id },
+                    });
+                    toast.success("Revisão concluída");
+                  }}
+                  title={traduzirMotivos((atendimento.metadata as any)?.revisao_motivos)}
+                >
+                  <CheckCircle2 className="h-3 w-3" /> Resolver
+                </Button>
+              </>
+            )}
             <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>
             {atendimento.canal_provedor && (
               <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-muted-foreground/40 text-muted-foreground")}>
