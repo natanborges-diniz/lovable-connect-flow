@@ -1477,6 +1477,7 @@ function buildSystemPromptFromCompiled(opts: {
   nomeWhatsapp?: string;
   nomeAtual?: string;
   nomeConfirmado?: boolean;
+  precisaConfirmar?: boolean;
 }): string {
   const s: string[] = [];
 
@@ -1486,6 +1487,7 @@ function buildSystemPromptFromCompiled(opts: {
     nomeWhatsapp: opts.nomeWhatsapp,
     nomeAtual: opts.nomeAtual,
     nomeConfirmado: opts.nomeConfirmado,
+    precisaConfirmar: opts.precisaConfirmar,
   });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
@@ -1565,6 +1567,7 @@ function buildSystemPrompt(opts: {
   nomeWhatsapp?: string;
   nomeAtual?: string;
   nomeConfirmado?: boolean;
+  precisaConfirmar?: boolean;
 }): string {
   const s: string[] = [];
 
@@ -1575,6 +1578,7 @@ function buildSystemPrompt(opts: {
     nomeWhatsapp: opts.nomeWhatsapp,
     nomeAtual: opts.nomeAtual,
     nomeConfirmado: opts.nomeConfirmado,
+    precisaConfirmar: opts.precisaConfirmar,
   });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
