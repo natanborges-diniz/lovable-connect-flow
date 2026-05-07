@@ -2259,6 +2259,44 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
     }
 
+    // ── 4.4a. GATE DE ESCOLHA DE RECEITA NÃO CONFIRMADA (Mai/2026) ──
+    // Cenário: cliente já tinha receita 1 confirmada, mandou foto da receita 2,
+    // IA pergunta "qual receita usamos?" e cliente responde "a segunda".
+    // Antes de cotar, precisa confirmar com o cliente os valores DA segunda receita.
+    if (!isReceitaPending(contatoMeta) && Array.isArray(receitas) && receitas.length >= 2 && !lastIsImage) {
+      const escolha = detectEscolhaReceita(lastInboundText, receitas);
+      if (escolha) {
+        const rxEscolhida = receitas[escolha.idx];
+        if (rxEscolhida && !rxEscolhida.confirmed_by_client_at) {
+          const rxLabelEsc = rxEscolhida.label || `receita_${escolha.idx + 1}`;
+          try {
+            const novaReceitaConf = {
+              pending: true,
+              rx_label: rxLabelEsc,
+              rx_index: escolha.idx,
+              asked_at: new Date().toISOString(),
+              correction_count: 0,
+              fora_da_faixa: isReceitaForaDaFaixa(rxEscolhida),
+            };
+            await supabase.from("contatos").update({
+              metadata: { ...contatoMeta, receita_confirmacao: novaReceitaConf },
+            }).eq("id", contatoId);
+            contatoMeta.receita_confirmacao = novaReceitaConf;
+          } catch (_) { /* noop */ }
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_escolhida_aguardando_confirmacao",
+            descricao: `Cliente escolheu ${escolha.how} (idx=${escolha.idx}) — pedindo confirmação dos valores`,
+            metadata: { rx_label: rxLabelEsc, rx_index: escolha.idx, how: escolha.how },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          }).catch(() => {});
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(rxEscolhida, false));
+          console.log(`[RX-ESCOLHA] Cliente escolheu receita idx=${escolha.idx} ainda não confirmada — pedindo confirmação`);
+          return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+        }
+      }
+    }
+
     // ── 4.4b. MÁQUINA DE ESTADOS PÓS-ORÇAMENTO (Mai/2026) ──
     // Após a IA enviar o orçamento + CTA "quer agendar uma visita?" o fluxo é
     // determinístico: cidade → loja → encaminha pra agendamento.
