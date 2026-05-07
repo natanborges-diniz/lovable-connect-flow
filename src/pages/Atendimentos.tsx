@@ -96,6 +96,7 @@ export default function Atendimentos() {
                 <SelectItem value="aguardando">Aguardando</SelectItem>
                 <SelectItem value="em_atendimento">Em Atendimento</SelectItem>
                 <SelectItem value="encerrado">Encerrado</SelectItem>
+                <SelectItem value="revisao_pendente">⚠ Revisão pendente</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -122,7 +123,14 @@ export default function Atendimentos() {
                   <TableRow key={a.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(a.id)}>
                     <TableCell className="font-medium">{a.solicitacao?.assunto ?? "—"}</TableCell>
                     <TableCell>{a.contato?.nome ?? "—"}</TableCell>
-                    <TableCell><AtendimentoStatusBadge status={a.status} /></TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <AtendimentoStatusBadge status={a.status} />
+                        {a.metadata?.revisao_humana_pendente === true && (
+                          <RevisaoHumanaBadge motivos={a.metadata?.revisao_motivos as string[] | undefined} />
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
                         <span className="text-muted-foreground capitalize">{a.canal}</span>
