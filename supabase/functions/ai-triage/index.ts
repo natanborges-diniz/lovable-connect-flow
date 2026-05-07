@@ -190,6 +190,30 @@ function isReceitaPending(metadata: any): boolean {
   return metadata?.receita_confirmacao?.pending === true;
 }
 
+// Detecta escolha do cliente entre múltiplas receitas ("a primeira", "a segunda", "a nova", etc.)
+function detectEscolhaReceita(text: string, receitas: any[]): { idx: number; how: string } | null {
+  if (!Array.isArray(receitas) || receitas.length < 2) return null;
+  const t = String(text || "").toLowerCase().trim();
+  if (!t || t.length > 120) return null;
+  // Última / nova / mais recente / a de agora / a segunda foto
+  if (/\b(a\s+)?(ultima|última|mais\s+recente|nova|recente|de\s+agora|que\s+(eu\s+)?mandei\s+(agora|por\s+ultimo|por\s+último)|essa\s+(de\s+)?(agora|nova|ultima|última)|segunda\s+foto|nova\s+foto)\b/.test(t)) {
+    return { idx: receitas.length - 1, how: "ultima" };
+  }
+  // Primeira / antiga / anterior
+  if (/\b(a\s+)?(primeira|1[ªa°]?|antiga|anterior|antiga\s+receita|de\s+antes|que\s+(eu\s+)?mandei\s+(antes|primeiro))\b/.test(t)) {
+    return { idx: 0, how: "primeira" };
+  }
+  // "a segunda", "a 2", "receita 2"
+  const mNum = t.match(/\b(?:a\s+|receita\s+)?(\d{1,2})[ªa°]?\b/);
+  if (mNum) {
+    const n = parseInt(mNum[1], 10);
+    if (n >= 1 && n <= receitas.length) return { idx: n - 1, how: `numero_${n}` };
+  }
+  if (/\bsegunda\b/.test(t) && receitas.length >= 2) return { idx: 1, how: "segunda" };
+  if (/\bterceira\b/.test(t) && receitas.length >= 3) return { idx: 2, how: "terceira" };
+  return null;
+}
+
 function isReceitaForaDaFaixa(rx: any): boolean {
   if (!rx?.eyes) return false;
   const od = rx.eyes.od || {};
@@ -2134,9 +2158,18 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
       if (detectRxConfirmation(lastInboundText)) {
         try {
+          // Marca a receita-alvo (rx_index se houver, senão a última) como confirmada
+          const targetIdx = typeof contatoMeta.receita_confirmacao?.rx_index === "number"
+            ? contatoMeta.receita_confirmacao.rx_index
+            : (Array.isArray(contatoMeta.receitas) ? contatoMeta.receitas.length - 1 : -1);
+          const updatedReceitas = Array.isArray(contatoMeta.receitas) ? [...contatoMeta.receitas] : [];
+          if (targetIdx >= 0 && updatedReceitas[targetIdx]) {
+            updatedReceitas[targetIdx] = { ...updatedReceitas[targetIdx], confirmed_by_client_at: new Date().toISOString() };
+          }
           await supabase.from("contatos").update({
             metadata: {
               ...contatoMeta,
+              receitas: updatedReceitas.length ? updatedReceitas : contatoMeta.receitas,
               receita_confirmacao: {
                 ...contatoMeta.receita_confirmacao,
                 pending: false,
@@ -2144,6 +2177,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               },
             },
           }).eq("id", contatoId);
+          if (updatedReceitas.length) contatoMeta.receitas = updatedReceitas;
+          if (updatedReceitas.length) receitas = updatedReceitas;
         } catch (_) { /* noop */ }
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId,
@@ -2219,6 +2254,44 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             : "Antes de te passar as opções, preciso que você confirme os valores que li da sua receita. Pode dar uma olhada e me dizer se está certinho? 😊";
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respRep);
           console.log(`[RX-CONFIRMACAO] Cliente desviou — repedindo confirmação`);
+          return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+        }
+      }
+    }
+
+    // ── 4.4a. GATE DE ESCOLHA DE RECEITA NÃO CONFIRMADA (Mai/2026) ──
+    // Cenário: cliente já tinha receita 1 confirmada, mandou foto da receita 2,
+    // IA pergunta "qual receita usamos?" e cliente responde "a segunda".
+    // Antes de cotar, precisa confirmar com o cliente os valores DA segunda receita.
+    if (!isReceitaPending(contatoMeta) && Array.isArray(receitas) && receitas.length >= 2 && !lastIsImage) {
+      const escolha = detectEscolhaReceita(lastInboundText, receitas);
+      if (escolha) {
+        const rxEscolhida = receitas[escolha.idx];
+        if (rxEscolhida && !rxEscolhida.confirmed_by_client_at) {
+          const rxLabelEsc = rxEscolhida.label || `receita_${escolha.idx + 1}`;
+          try {
+            const novaReceitaConf = {
+              pending: true,
+              rx_label: rxLabelEsc,
+              rx_index: escolha.idx,
+              asked_at: new Date().toISOString(),
+              correction_count: 0,
+              fora_da_faixa: isReceitaForaDaFaixa(rxEscolhida),
+            };
+            await supabase.from("contatos").update({
+              metadata: { ...contatoMeta, receita_confirmacao: novaReceitaConf },
+            }).eq("id", contatoId);
+            contatoMeta.receita_confirmacao = novaReceitaConf;
+          } catch (_) { /* noop */ }
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_escolhida_aguardando_confirmacao",
+            descricao: `Cliente escolheu ${escolha.how} (idx=${escolha.idx}) — pedindo confirmação dos valores`,
+            metadata: { rx_label: rxLabelEsc, rx_index: escolha.idx, how: escolha.how },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          }).catch(() => {});
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(rxEscolhida, false));
+          console.log(`[RX-ESCOLHA] Cliente escolheu receita idx=${escolha.idx} ainda não confirmada — pedindo confirmação`);
           return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
         }
       }
@@ -2516,12 +2589,14 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           if (typeof eye.add === "number") parts.push(`add +${eye.add}`);
           return parts.join(" ");
         };
-        receitaCtx += `\n## Receita ${i + 1} (${label}) — lida em ${dataLeitura}\n`;
+        const confirmedTag = rx.confirmed_by_client_at ? " ✅ confirmada pelo cliente" : " ⚠️ AGUARDA confirmação do cliente";
+        receitaCtx += `\n## Receita ${i + 1} (${label})${confirmedTag} — lida em ${dataLeitura}\n`;
         receitaCtx += `Tipo: ${rxTypeLabel} | Confiança: ${conf}\n`;
         receitaCtx += `${formatEye(od, "OD")}\n`;
         receitaCtx += `${formatEye(oe, "OE")}\n`;
       }
       receitaCtx += `\n⚠️ NÃO peça receita novamente. O cliente JÁ enviou. Use consultar_lentes referenciando a receita correta.`;
+      receitaCtx += `\n⚠️ NUNCA cote uma receita marcada como "AGUARDA confirmação". Se o cliente escolher uma assim, peça que confirme os valores antes (o sistema cuida disso automaticamente).`;
       if (receitas.length > 1) {
         receitaCtx += `\nQuando o cliente pedir orçamento, pergunte "Para qual receita?" antes de chamar consultar_lentes.`;
       }
@@ -3595,7 +3670,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         
         // Add label from model args or infer
         const rxLabel = args.label || (existingReceitas.length === 0 ? "cliente" : `pessoa_${existingReceitas.length + 1}`);
-        const rxWithLabel = { ...rxData, label: rxLabel };
+        const rxWithLabel = { ...rxData, label: rxLabel, confirmed_by_client_at: null };
         
         // Append and cap at 5 (FIFO)
         existingReceitas.push(rxWithLabel);
@@ -4134,7 +4209,46 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       validatorFlags.push("rx_confirm_gate_overrode_turn");
     }
 
-    // ── 9. POST-LLM VALIDATION (Phase 3) ──
+    // ── GATE PÓS-LLM: bloquear orçamento quando há receita não confirmada ──
+    // Caso 558488766851 (Mai/2026): cliente escolheu "a segunda" receita; LLM cotou direto.
+    // Se houver alguma receita sem confirmed_by_client_at e o turno produziu cotação/preços,
+    // sobrescreve com mensagem de confirmação dos valores.
+    if (resposta && !rxConfirmGateTriggered && Array.isArray(receitas) && receitas.length >= 1) {
+      const idxNaoConfirmada = receitas.findIndex((r: any) => r && !r.confirmed_by_client_at);
+      const respondeuComPrecos = /R\$\s*\d|Op[cç][oõ]es?\s+de\s+lentes|Mais\s+em\s+conta|Um\s+passo\s+acima|Premium/i.test(resposta || "");
+      const usouQuoteTool = (toolCalls || []).some((t: any) => ["consultar_lentes", "consultar_lentes_contato", "consultar_lentes_estimativa"].includes(t?.function?.name));
+      if (idxNaoConfirmada >= 0 && (respondeuComPrecos || usouQuoteTool)) {
+        const rxAlvo = receitas[idxNaoConfirmada];
+        const rxLabelAlvo = rxAlvo.label || `receita_${idxNaoConfirmada + 1}`;
+        try {
+          const novaReceitaConf = {
+            pending: true,
+            rx_label: rxLabelAlvo,
+            rx_index: idxNaoConfirmada,
+            asked_at: new Date().toISOString(),
+            correction_count: 0,
+            fora_da_faixa: isReceitaForaDaFaixa(rxAlvo),
+          };
+          await supabase.from("contatos").update({
+            metadata: { ...contatoMeta, receita_confirmacao: novaReceitaConf },
+          }).eq("id", contatoId);
+        } catch (_) { /* noop */ }
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "bloqueado_orcamento_receita_nao_confirmada",
+          descricao: `LLM ia cotar com receita idx=${idxNaoConfirmada} sem confirmação — sobrescrevendo com pedido de confirmação`,
+          metadata: { rx_label: rxLabelAlvo, rx_index: idxNaoConfirmada },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).catch(() => {});
+        resposta = buildMsgConfirmarReceita(rxAlvo, false);
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = "Orçamento";
+        precisa_humano = false;
+        validatorFlags.push("bloqueado_orcamento_receita_nao_confirmada");
+        console.log(`[RX-GATE-POSTLLM] Sobrescrevendo cotação — receita idx=${idxNaoConfirmada} ainda não confirmada`);
+      }
+    }
+
     if (resposta && !precisa_humano) {
       // ── ANTI-DUPLICAÇÃO DE DESPEDIDA: se o último outbound já é a frase canônica
       // de encerramento ("Te espero ... 👋 Qualquer dúvida é só me chamar." ou
@@ -4463,7 +4577,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 const eMeta = (cData?.metadata as Record<string, any>) || {};
                 let eRec: any[] = Array.isArray(eMeta.receitas) ? eMeta.receitas : [];
                 const rxLabel = args.label || (eRec.length === 0 ? "cliente" : `pessoa_${eRec.length + 1}`);
-                eRec.push({ ...rxData, label: rxLabel });
+                eRec.push({ ...rxData, label: rxLabel, confirmed_by_client_at: null });
                 if (eRec.length > 5) eRec = eRec.slice(-5);
                 await supabase.from("contatos").update({ metadata: { ...eMeta, receitas: eRec, ultima_receita: rxData } }).eq("id", contatoId);
                 await supabase.from("eventos_crm").insert({

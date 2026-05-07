@@ -1,102 +1,83 @@
-## Problema (caso Emanuel)
+## Problema (caso 558488766851 — 21:38–21:48)
 
-Depois de confirmar a receita ("Sim"), a IA mandou 3 opções de lentes E **na mesma mensagem** já pediu região/bairro abertamente. O fluxo desejado é em **passos**:
+Cliente já tinha **receita 1** confirmada e mandou uma **receita 2** (foto). A IA leu a segunda (`interpretar_receita`), perguntou "Uso qual receita...", o cliente respondeu **"A segunda"** e a IA pulou direto para `consultar_lentes`, **sem confirmar com o cliente os valores lidos da nova receita**.
 
-1. Mostrar 3 opções de lentes.
-2. Perguntar se quer **visitar a loja** pra ver pessoalmente.
-3. Se sim, enviar **lista das 4 cidades** (Osasco / Carapicuíba / Itapevi / Barueri).
-4. Quando cliente escolhe a cidade, listar as lojas daquela cidade e pedir pra escolher uma.
-5. Aí sim, encaminhar pro fluxo de agendamento existente.
-
-Já existem no `ai-triage` os blocos `MSG_CTA_AGENDAMENTO`, `MSG_LISTA_CIDADES` e o mapa `CIDADE_TO_LOJAS` (linhas 67–78), mas nunca são usados. O fluxo atual cai no LLM, que improvisa "Em qual região/bairro você está?" no fim do orçamento.
+Hoje o gate `receita_confirmacao` (`ai-triage/index.ts` ~L2129, L3622, L4116) trata `pending` como flag **global do contato**, não por receita. Quando a primeira foi confirmada (`pending=false`) e depois a IA fez uma pergunta de desambiguação sem re-armar o pending na receita 2, o "A segunda" caiu no LLM normal e virou orçamento.
 
 ## Regra final
 
-Depois que o gate `receita_confirmacao` marca `pending=false` (cliente disse "Sim"), o `ai-triage` entra em **máquina de estados determinística** controlada por `contatos.metadata.pos_orcamento`:
-
-```
-{ etapa: "orcamento_enviado" | "aguardando_cta_visita" | "aguardando_cidade" | "aguardando_loja",
-  cidade?: "osasco" | "carapicuiba" | "itapevi" | "barueri",
-  loja_nome?: string,
-  iniciado_at: ISO }
-```
-
-Transições:
-
-| Estado entrada | Trigger | Saída IA | Próximo estado |
-|---|---|---|---|
-| sem estado, `confirmed_at` recém-setado | (mesmo turno da confirmação) | dispara `consultar_lentes` (ou `consultar_lentes_contato` p/ LC), formatador remove o sufixo "Em qual região/bairro?" e troca por `MSG_CTA_AGENDAMENTO` | `aguardando_cta_visita` |
-| `aguardando_cta_visita` | inbound = "sim/quero/pode/bora/vamos/pode sim/topa" | `MSG_LISTA_CIDADES` | `aguardando_cidade` |
-| `aguardando_cta_visita` | inbound = "não/agora não/depois" | resposta curta de despedida amigável + libera LLM normal | limpa estado |
-| `aguardando_cidade` | inbound contém match de cidade (Osasco/Carapicuíba/Itapevi/Barueri, com fuzzy) | lista as lojas daquela cidade (de `telefones_lojas` filtrando pelos nomes em `CIDADE_TO_LOJAS[cidade]`), formatadas com endereço e horário do dia | `aguardando_loja` |
-| `aguardando_cidade` | qualquer outra coisa | re-envia `MSG_LISTA_CIDADES` (1×); na 2ª devolve pro LLM | mantém / limpa |
-| `aguardando_loja` | inbound casa nome/número de uma das lojas listadas | grava `metadata.pos_orcamento.loja_nome` + dispara fluxo de agendamento existente (LLM com hint forçando `agendar_visita` naquela loja, dia/hora a perguntar) | limpa estado |
+Toda receita lida via OCR (1ª, 2ª, 3ª…) precisa ser **explicitamente confirmada pelo cliente antes de virar base de orçamento**. Quando há múltiplas receitas e o cliente escolhe uma ainda não confirmada, a IA precisa mostrar `Li sua receita assim, confere? 😊` com os valores DAQUELA receita antes de chamar `consultar_lentes`.
 
 ## Mudanças
 
-### `supabase/functions/ai-triage/index.ts`
+### 1. `supabase/functions/ai-triage/index.ts` — marcar confirmação por receita
 
-**a) Helpers novos (próximo às linhas 67–78):**
+**a) No salvamento da receita (~L3598–3606 e L4470–4491, force-interpretar):**
+- Adicionar `confirmed_by_client_at: null` em `rxWithLabel` antes do append em `existingReceitas`.
+- Manter o `receita_confirmacao` global como hoje (controla o gate "estamos esperando confirmação").
 
-- `detectAceiteVisita(text)` regex `/^(sim|claro|quero|topo|topa|pode|pode sim|bora|vamos|gostaria|aceito|👍|👌|✅)\b/i` (com filtro de "não").
-- `detectRecusaVisita(text)` regex `/^(n[ãa]o|agora\s*n[ãa]o|depois|fica\s*pra\s*depois|s[oó]\s*orcamento)\b/i`.
-- `detectCidadeEscolhida(text)` → casa contra chaves de `CIDADE_TO_LOJAS` (normalizando acentos/maiúsculas; aceita "1/2/3/4" se a lista foi numerada).
-- `formatLojasPorCidade(cidade, lojas)` → monta string numerada `1️⃣ DINIZ ANTONIO AGU — Rua X, 100 (hoje 09–18)\n2️⃣ ...`.
+**b) Quando o cliente confirma (~L2135–2180, bloco `detectRxConfirmation`):**
+- Além de setar `receita_confirmacao.pending=false`, marcar a última receita de `receitas[]` com `confirmed_by_client_at = now` e regravar `metadata.receitas`.
 
-**b) Bloco pós-confirmação (~linha 2101–2102):**
+### 2. Novo helper `detectEscolhaReceita(text, receitas)`
 
-Quando o gate libera (`pending=false` recém-setado, dentro da faixa, contexto óculos/LC), antes de seguir pro LLM, gravar:
+Regex/heurística leve em ~L180 (junto dos outros `detect*`):
+- "primeira / 1ª / a 1 / receita 1 / a antiga / a anterior" → idx 0
+- "segunda / 2ª / a 2 / receita 2 / a nova / a última / essa última / a recente / a de agora / a que mandei agora" → último idx
+- Numeração explícita ("a 3") quando `receitas.length >= n`.
+- Retorna `{ idx, label } | null`.
 
-```ts
-contatoMeta.pos_orcamento = { etapa: "orcamento_enviado", iniciado_at: new Date().toISOString() };
-await supabase.from("contatos").update({ metadata: contatoMeta }).eq("id", contatoId);
+### 3. Novo gate "escolha de receita não confirmada" (logo após o bloco do gate atual, ~L2225)
+
+```
+if (!isReceitaPending(...) && receitas.length >= 2 && !lastIsImage) {
+  const escolha = detectEscolhaReceita(lastInboundText, receitas);
+  if (escolha) {
+    const rxEscolhida = receitas[escolha.idx];
+    if (!rxEscolhida.confirmed_by_client_at) {
+      // Re-arma pending para ESSA receita
+      contatoMeta.receita_confirmacao = {
+        pending: true,
+        rx_label: rxEscolhida.label || `receita_${escolha.idx + 1}`,
+        rx_index: escolha.idx,
+        asked_at: now,
+        correction_count: 0,
+        fora_da_faixa: isReceitaForaDaFaixa(rxEscolhida),
+      };
+      await supabase.from("contatos").update({ metadata: contatoMeta }).eq("id", contatoId);
+      await sendWhatsApp(..., buildMsgConfirmarReceita(rxEscolhida, false));
+      eventos_crm: "receita_escolhida_aguardando_confirmacao";
+      return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], ... });
+    }
+    // Se já confirmada, deixa fluxo normal seguir, mas injeta hint pro LLM usar essa receita
+  }
+}
 ```
 
-E injetar um system-hint forte no prompt do turno: "Cliente acabou de confirmar a receita. AÇÃO: chame `consultar_lentes` (ou `consultar_lentes_contato`) AGORA. NÃO pergunte região/bairro/cidade. Termine SOMENTE com a frase exata: '{MSG_CTA_AGENDAMENTO}'." (já há infraestrutura de hint nas linhas ~2725–2752.)
+E quando `rx_index` está presente em `receita_confirmacao`, o `detectRxConfirmation` aplica `confirmed_by_client_at` na receita correta (não só na última).
 
-**c) Pós-processamento da resposta da tool `consultar_lentes`/`consultar_lentes_contato` (no formatador, linhas ~4982 e equivalente em LC):**
+### 4. Pós-LLM safety net (~L4116, onde já existe `rxConfirmGateTriggered`)
 
-Substituir o sufixo atual `"Posso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊"` por `"\n\n" + MSG_CTA_AGENDAMENTO`. E, no caller que envia, depois de mandar a quote, atualizar `metadata.pos_orcamento.etapa = "aguardando_cta_visita"`.
+Antes de aceitar a `resposta` final, se `receitas.length >= 2`, alguma receita está com `confirmed_by_client_at = null`, e o turno atual gerou intent de orçamento (`consultar_lentes`/`consultar_lentes_contato`/resposta com preços), substituir a resposta por `buildMsgConfirmarReceita(receitaPendente, false)` + setar `receita_confirmacao.pending=true` para essa receita. Loga `flag: "bloqueado_orcamento_receita_nao_confirmada"`.
 
-**d) Curto-circuito determinístico no início do `serve` (logo após o bloco de confirmação ~linha 2147):**
+### 5. `watchdog-loop-ia/index.ts`
 
-```ts
-const posOrc = contatoMeta.pos_orcamento;
-if (posOrc?.etapa === "aguardando_cta_visita" && !lastIsImage) {
-  if (detectAceiteVisita(lastInboundText)) { send(MSG_LISTA_CIDADES); set etapa="aguardando_cidade"; return; }
-  if (detectRecusaVisita(lastInboundText))  { send("Tranquilo! Quando quiser ver pessoalmente, é só me chamar 😊"); clear; return; }
-  // qualquer outra coisa → libera LLM (mantém estado por 1 turno só)
-}
-if (posOrc?.etapa === "aguardando_cidade" && !lastIsImage) {
-  const c = detectCidadeEscolhida(lastInboundText);
-  if (c) { send(formatLojasPorCidade(c, lojas)); set etapa="aguardando_loja", cidade=c; return; }
-  // 1ª vez não reconhecida → re-envia MSG_LISTA_CIDADES; 2ª vez → libera LLM
-}
-if (posOrc?.etapa === "aguardando_loja" && !lastIsImage) {
-  const loja = matchLoja(lastInboundText, CIDADE_TO_LOJAS[posOrc.cidade], lojas);
-  if (loja) { grava loja_nome; injeta hint pra LLM rodar agendar_visita com loja_nome=loja; clear pos_orcamento.etapa="agendando"; }
-  // não reconhecida → re-envia lista; na 2ª libera LLM
-}
-```
+Adicionar `buildMsgConfirmarReceita` (regex `^Li sua receita assim, confere|^Anotei! Ficou assim`) à allowlist de não-loop quando o último inbound for escolha de receita ("a segunda" etc.) — já existe `CONFIRM_RX_RE` parcial; ampliar.
 
-**e) Eventos:** `pos_orcamento_iniciado`, `cta_visita_aceito`, `cta_visita_recusado`, `cidade_escolhida`, `loja_escolhida`, `pos_orcamento_fallback_llm`.
+### 6. Memória
 
-**f) Watchdog (`watchdog-loop-ia/index.ts`):** mensagens iguais a `MSG_LISTA_CIDADES` e `formatLojasPorCidade` não contam como loop (regex `^Boa! Atendemos nessas cidades` e `^Beleza! Aqui são as lojas`).
-
-### Memória
-
-- Atualizar `mem://ia/auto-receita-e-anti-loop.md` com o caso Emanuel e a máquina de estados.
-- Adicionar entrada nova `mem://ia/fluxo-pos-confirmacao-receita.md` (curta) descrevendo a transição.
+- Atualizar `mem://ia/auto-receita-e-anti-loop.md` com o caso (cliente escolhe nova receita após múltiplas leituras → confirmar antes de cotar).
+- Adicionar `confirmed_by_client_at` por receita ao schema descrito em `mem://ia/memoria-multiplas-receitas`.
 
 ## Out of scope
 
-- Mudar o fluxo de agendamento em si (continua usando `agendar_visita`).
-- Outros cenários onde o cliente pula direto pra cidade sem confirmar receita (continua via LLM).
-- Dashboard/UX de auditoria desse funil.
+- Mudar a forma como o LLM faz a pergunta "Uso qual receita...?" (continua via prompt).
+- Confirmação de receita digitada por texto (já tratada por `correcao-receita-por-texto`).
+- Backfill de `confirmed_by_client_at` em receitas antigas (só novas receitas a partir desta mudança).
 
 ## Arquivos tocados
 
 - `supabase/functions/ai-triage/index.ts`
 - `supabase/functions/watchdog-loop-ia/index.ts`
 - `.lovable/memory/ia/auto-receita-e-anti-loop.md`
-- `.lovable/memory/ia/fluxo-pos-confirmacao-receita.md` (novo)
+- `.lovable/memory/ia/memoria-multiplas-receitas.md`
