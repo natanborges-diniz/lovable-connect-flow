@@ -77,6 +77,84 @@ const CIDADE_TO_LOJAS: Record<string, string[]> = {
   barueri: ["DINIZ BARUERI"],
 };
 
+const CIDADE_LABEL: Record<string, string> = {
+  osasco: "Osasco",
+  carapicuiba: "Carapicuíba",
+  itapevi: "Itapevi",
+  barueri: "Barueri",
+};
+
+function _normTxt(s: string): string {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+function detectAceiteVisita(text: string): boolean {
+  const t = _normTxt(text);
+  if (!t) return false;
+  if (/\b(nao|n[ãa]o)\b/.test(t)) return false;
+  return /^(sim|claro|quero|topo|topa|pode|pode sim|bora|vamos|gostaria|aceito|com certeza|simm|isso|👍|👌|✅)\b/.test(t);
+}
+
+function detectRecusaVisita(text: string): boolean {
+  const t = _normTxt(text);
+  if (!t) return false;
+  return /^(nao|n[ãa]o|agora nao|depois|fica pra depois|so orcamento|so or[çc]amento)\b/.test(t);
+}
+
+function detectCidadeEscolhida(text: string): string | null {
+  const t = _normTxt(text);
+  if (!t) return null;
+  // numérico (1=osasco, 2=carapicuiba, 3=itapevi, 4=barueri)
+  const numMatch = t.match(/^([1-4])\b/);
+  if (numMatch) {
+    const idx = Number(numMatch[1]);
+    return ["osasco", "carapicuiba", "itapevi", "barueri"][idx - 1] || null;
+  }
+  if (/\bosasco\b/.test(t)) return "osasco";
+  if (/\bcarapicuiba\b/.test(t)) return "carapicuiba";
+  if (/\bitapevi\b/.test(t)) return "itapevi";
+  if (/\bbarueri\b|\balphaville\b/.test(t)) return "barueri";
+  return null;
+}
+
+function formatLojasPorCidade(cidade: string, lojas: any[]): string {
+  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+  const filtradas = (lojas || []).filter((l: any) =>
+    nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
+  );
+  if (filtradas.length === 0) {
+    return `Boa! Pra ${CIDADE_LABEL[cidade] || cidade}, posso te indicar a loja mais próxima — me passa o seu bairro? 😊`;
+  }
+  const numEmojis = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"];
+  let out = `Aqui são as lojas em *${CIDADE_LABEL[cidade] || cidade}* — qual fica melhor pra você? 😊\n`;
+  filtradas.forEach((l: any, i: number) => {
+    const end = l.endereco ? ` — ${l.endereco}` : "";
+    out += `\n${numEmojis[i] || `${i+1}.`} *${l.nome_loja}*${end}`;
+  });
+  return out;
+}
+
+function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): any | null {
+  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+  const filtradas = (lojas || []).filter((l: any) =>
+    nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
+  );
+  if (filtradas.length === 0) return null;
+  const t = _normTxt(text);
+  const numMatch = t.match(/^([1-9])\b/);
+  if (numMatch) {
+    const idx = Number(numMatch[1]) - 1;
+    if (filtradas[idx]) return filtradas[idx];
+  }
+  // match por palavra-chave do nome (tira "DINIZ ")
+  for (const l of filtradas) {
+    const nome = _normTxt(l.nome_loja).replace(/^diniz\s+/, "");
+    const tokens = nome.split(/\s+/).filter((w) => w.length >= 3);
+    if (tokens.some((w) => t.includes(w))) return l;
+  }
+  return null;
+}
+
 function fmtRxLine(eye: any, name: string): string {
   const esf = (eye?.sphere ?? null);
   const cil = (eye?.cylinder ?? null);
