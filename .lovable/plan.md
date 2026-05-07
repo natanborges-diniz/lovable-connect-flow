@@ -1,44 +1,41 @@
-## Receitas complexas (cyl>4 / add>3,5 / sphere 8-10): cotar normal + revisão humana pós-orçamento
+## Badge "Revisão humana pendente" em /crm/conversas
 
-### Mudanças em `supabase/functions/ai-triage/index.ts`
+A flag já é gravada pelo `ai-triage` em `atendimentos.metadata.revisao_humana_pendente` (com `revisao_motivos[]`). Falta expor isso na UI de conversas.
 
-**1. Novo helper `requerRevisaoHumanaPosOrcamento(rx)` (perto da linha 217)**
-Retorna `{ precisa, motivos[] }` para:
-- `cylMax > 4` → `cilindrico_alto`
-- `addMax > 3.5` → `adicao_alta`
-- `sphereMax` em (8, 10] → `esferico_faixa_cinza`
+### Mudanças em `src/pages/Atendimentos.tsx`
 
-(esférico > 10 continua escalando direto via `isReceitaForaDaFaixa`).
+**1. Lista (tabela em ~linha 118)** — adicionar badge âmbar ao lado do `AtendimentoStatusBadge` quando `a.metadata?.revisao_humana_pendente === true`:
+- Texto: `⚠ Revisar orçamento`
+- Estilo: `border-amber-500/60 text-amber-600 bg-amber-50/40`
+- `title` (tooltip) lista os motivos traduzidos (cilindrico_alto → "Cilíndrico alto (>4)", adicao_alta → "Adição alta (>3,5)", esferico_faixa_cinza → "Esférico 8–10").
 
-**2. Sufixo discreto na mensagem da cotação (`executeConsultarLentes`, antes do `return { resposta: quoteMsg }` na linha ~5396)**
-Quando há resultados E `requerRevisaoHumanaPosOrcamento(rxMeta).precisa === true`, anexar ao `quoteMsg`:
+**2. Header do detalhe (~linha 324)** — mesmo badge, mais visível, ao lado do `AtendimentoStatusBadge` no diálogo de conversa.
 
-> _💡 Como sua receita tem um detalhe específico, vou pedir uma conferência rápida do nosso consultor pra confirmar prazo e disponibilidade. Pode ir escolhendo a opção que mais te agrada que já adianto 🙌_
+**3. Filtro novo no `<Select>` de status (~linha 83)** — opção extra **fora** do enum status:
+- `revisao_pendente` → "⚠ Revisão pendente"
+- Quando selecionado: filtra client-side por `metadata.revisao_humana_pendente === true` (não envia ao hook). Mantém os outros filtros como hoje.
 
-**3. Sinalização interna (mesmo bloco, sem escalar o atendimento)**
-Se `precisa === true`:
-- `eventos_crm.insert({ tipo: 'orcamento_revisao_humana', descricao, metadata: { motivos, rx, lenses: [ids/preços] }, referencia_tipo: 'atendimento', referencia_id: atendimentoId })`
-- `notificacoes.insert({ tipo: 'orcamento_revisao', titulo: 'Orçamento com receita complexa — revisar', mensagem, setor_id: setor do contato (ou Vendas como fallback), referencia_id: atendimentoId })`
-- `atendimentos.update({ metadata: { ...current, revisao_humana_pendente: true, revisao_motivos: motivos } })`
+**4. Botão "Resolver revisão"** no header do detalhe (só aparece se a flag for true): faz `update` em `atendimentos.metadata` removendo `revisao_humana_pendente` e `revisao_motivos`, e insere `eventos_crm` `tipo: 'orcamento_revisao_resolvida'` com o `user_id` que resolveu. Toast de confirmação. Realtime já refaz a query.
 
-Idempotência: antes de inserir evento/notificação, checa se já existe `eventos_crm` com `tipo='orcamento_revisao_humana'` e mesmo `referencia_id` nos últimos 30min — evita disparo duplo se o cliente pedir reorçamento.
+### Helper compartilhado
 
-**4. Mantido**
-- Esférico > 10 → escala direto (sem cotar) — sem mudança.
-- Zero resultados → fallback de estimativa atual.
-- Lentes de contato tóricas (cyl≥0.75) → regra existente de "sob encomenda".
-- Modo do atendimento permanece `ia` — operador decide se assume.
+Criar `src/components/shared/RevisaoHumanaBadge.tsx`:
+- Props: `motivos?: string[]`, `size?: "sm" | "md"`.
+- Renderiza badge âmbar com tooltip dos motivos traduzidos.
+- Reutilizável em outras telas (Pipeline cards, etc.) no futuro.
 
-### UI (opcional, só se trivial)
-Se houver render do card de atendimento que já lê `metadata`, basta uma badge "Revisar orçamento" quando `revisao_humana_pendente === true`. Vou checar se existe componente óbvio (`AtendimentoCard` / `KanbanCard`); se exigir refatoração maior, deixo para um próximo passo e por enquanto a notificação no sino + evento no CRM já dão visibilidade.
+### Sem mudanças necessárias
+
+- Schema (já gravado pelo backend).
+- Hooks (`useAtendimentos` já traz `metadata`).
+- `ai-triage` (lógica de gravação intacta).
 
 ### Memória
-Atualizar `mem://ia/regras-negocio-e-proibicoes-criticas` adicionando:
-> Receita complexa (cyl>4, add>3,5, sphere 8-10) NÃO escala — IA cota normal e dispara `eventos_crm.orcamento_revisao_humana` + notificação ao setor + flag `metadata.revisao_humana_pendente`. Esférico >10 segue escalando direto.
 
-### Arquivos
-- `supabase/functions/ai-triage/index.ts` (helper + sufixo + sinalizações)
-- `mem://ia/regras-negocio-e-proibicoes-criticas` (atualização)
-- (talvez) 1 badge em card de atendimento existente
+Adicionar nota curta em `mem://ia/regras-negocio-e-proibicoes-criticas` registrando que a flag é exibida em `/crm/conversas` (lista + detalhe) e pode ser resolvida manualmente pelo operador.
 
-Sem migrações de schema.
+### Arquivos tocados
+
+- `src/pages/Atendimentos.tsx` (badge na lista, no header, filtro, botão resolver)
+- `src/components/shared/RevisaoHumanaBadge.tsx` (novo)
+- `mem://ia/regras-negocio-e-proibicoes-criticas` (nota da UI)

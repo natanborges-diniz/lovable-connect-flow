@@ -19,7 +19,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban } from "lucide-react";
+import { RevisaoHumanaBadge, traduzirMotivos } from "@/components/shared/RevisaoHumanaBadge";
+import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban, CheckCircle2 } from "lucide-react";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { format } from "date-fns";
@@ -36,24 +37,30 @@ export default function Atendimentos() {
   const [statusFilter, setStatusFilter] = useState<string>("todos");
   const [detailId, setDetailId] = useState<string | null>(searchParams.get("open") || null);
 
+  const isRealStatus = statusFilter !== "todos" && statusFilter !== "revisao_pendente";
   const filters = {
-    status: statusFilter !== "todos" ? (statusFilter as StatusAtendimento) : undefined,
+    status: isRealStatus ? (statusFilter as StatusAtendimento) : undefined,
   };
 
   const { data: atendimentos, isLoading } = useAtendimentos(filters);
   const updateStatus = useUpdateAtendimentoStatus();
   const queryClient = useQueryClient();
 
-  // Client-side search across contato, assunto, atendente
+  // Client-side search + revisão filter
   const filteredAtendimentos = useMemo(() => {
-    if (!atendimentos || !search.trim()) return atendimentos;
+    let list = atendimentos;
+    if (!list) return list;
+    if (statusFilter === "revisao_pendente") {
+      list = list.filter((a: any) => a.metadata?.revisao_humana_pendente === true);
+    }
+    if (!search.trim()) return list;
     const s = search.toLowerCase();
-    return atendimentos.filter((a: any) =>
+    return list.filter((a: any) =>
       (a.contato?.nome ?? "").toLowerCase().includes(s) ||
       (a.solicitacao?.assunto ?? "").toLowerCase().includes(s) ||
       (a.atendente_nome ?? "").toLowerCase().includes(s)
     );
-  }, [atendimentos, search]);
+  }, [atendimentos, search, statusFilter]);
 
   // Realtime: auto-refresh list when atendimentos or mensagens change
   useEffect(() => {
@@ -89,6 +96,7 @@ export default function Atendimentos() {
                 <SelectItem value="aguardando">Aguardando</SelectItem>
                 <SelectItem value="em_atendimento">Em Atendimento</SelectItem>
                 <SelectItem value="encerrado">Encerrado</SelectItem>
+                <SelectItem value="revisao_pendente">⚠ Revisão pendente</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -115,7 +123,14 @@ export default function Atendimentos() {
                   <TableRow key={a.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetailId(a.id)}>
                     <TableCell className="font-medium">{a.solicitacao?.assunto ?? "—"}</TableCell>
                     <TableCell>{a.contato?.nome ?? "—"}</TableCell>
-                    <TableCell><AtendimentoStatusBadge status={a.status} /></TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <AtendimentoStatusBadge status={a.status} />
+                        {a.metadata?.revisao_humana_pendente === true && (
+                          <RevisaoHumanaBadge motivos={a.metadata?.revisao_motivos as string[] | undefined} />
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
                         <span className="text-muted-foreground capitalize">{a.canal}</span>
@@ -322,6 +337,36 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         {atendimento && (
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             <AtendimentoStatusBadge status={atendimento.status} />
+            {(atendimento.metadata as any)?.revisao_humana_pendente === true && (
+              <>
+                <RevisaoHumanaBadge motivos={(atendimento.metadata as any)?.revisao_motivos} size="md" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-[10px] gap-1 border-amber-500/60 text-amber-700 hover:bg-amber-50"
+                  onClick={async () => {
+                    const meta = { ...(atendimento.metadata as any) };
+                    const motivos = meta.revisao_motivos;
+                    delete meta.revisao_humana_pendente;
+                    delete meta.revisao_motivos;
+                    const { error } = await supabase.from("atendimentos").update({ metadata: meta }).eq("id", id);
+                    if (error) { toast.error("Erro: " + error.message); return; }
+                    await supabase.from("eventos_crm").insert({
+                      contato_id: atendimento.contato_id,
+                      tipo: "orcamento_revisao_resolvida",
+                      descricao: "Revisão humana do orçamento marcada como concluída",
+                      referencia_tipo: "atendimento",
+                      referencia_id: id,
+                      metadata: { motivos, resolvido_por: (await supabase.auth.getUser()).data.user?.id },
+                    });
+                    toast.success("Revisão concluída");
+                  }}
+                  title={traduzirMotivos((atendimento.metadata as any)?.revisao_motivos)}
+                >
+                  <CheckCircle2 className="h-3 w-3" /> Resolver
+                </Button>
+              </>
+            )}
             <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>
             {atendimento.canal_provedor && (
               <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-muted-foreground/40 text-muted-foreground")}>
