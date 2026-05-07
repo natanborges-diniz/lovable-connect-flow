@@ -1,96 +1,102 @@
-## Problema (caso Franciana)
+## Problema (caso Emanuel)
 
-Sequência real:
+Depois de confirmar a receita ("Sim"), a IA mandou 3 opções de lentes E **na mesma mensagem** já pediu região/bairro abertamente. O fluxo desejado é em **passos**:
 
-1. Cliente: "Quero orçamento" (sem receita ainda).
-2. IA (21:08): **"Encontrei poucas opções automáticas para esse grau alto. Posso acionar um Consultor…"** — alucinação: não existe receita, mas IA já fala em "grau alto" e oferece escalada.
-3. Cliente: "Mas não mandei receita ainda" → manda foto.
-4. IA: "Recebi sua receita 👀 já estou analisando…"
-5. IA (turno seguinte): **"Para esse grau bem alto, vou acionar um Consultor para buscar opções sob encomenda específicas."** — escala direto, sem pedir confirmação dos valores lidos.
+1. Mostrar 3 opções de lentes.
+2. Perguntar se quer **visitar a loja** pra ver pessoalmente.
+3. Se sim, enviar **lista das 4 cidades** (Osasco / Carapicuíba / Itapevi / Barueri).
+4. Quando cliente escolhe a cidade, listar as lojas daquela cidade e pedir pra escolher uma.
+5. Aí sim, encaminhar pro fluxo de agendamento existente.
 
-Hoje já existe gate `receita_confirmacao.pending` + `MSG_ESCALADA_GRAU_FORA_FAIXA`, mas:
-
-- O gate só bloqueia no **próximo turno** (lê `pending` no início). No turno em que a OCR é feita, `interpretar_receita` marca `pending=true` e seta `resposta = buildMsgConfirmarReceita(...)`, mas o LLM pode emitir, na mesma resposta, outros tool calls (`escalar_consultor`, `consultar_lentes`) que sobrescrevem `resposta` / disparam `precisa_humano=true`. Foi o que aconteceu com Franciana.
-- Não há guardrail contra a IA inventar "grau alto" sem receita lida.
+Já existem no `ai-triage` os blocos `MSG_CTA_AGENDAMENTO`, `MSG_LISTA_CIDADES` e o mapa `CIDADE_TO_LOJAS` (linhas 67–78), mas nunca são usados. O fluxo atual cai no LLM, que improvisa "Em qual região/bairro você está?" no fim do orçamento.
 
 ## Regra final
 
-1. **Sem receita interpretada no histórico**, é PROIBIDO escalar com motivo de "grau alto / sob encomenda / fora de faixa". Se o LLM tentar (`escalar_consultor` com motivo casando essa regex, ou `responder` com texto contendo "grau alto/sob encomenda/sob medida" + oferta de consultor), o turno é interceptado: IA pede a receita ("Pra te passar opções certinhas, me manda uma foto da receita 📸").
-2. **No turno em que `interpretar_receita` marca `pending=true`**, qualquer outro tool call do mesmo turno (`escalar_consultor`, `consultar_lentes*`, `agendar_visita`) é descartado. Resposta enviada é exclusivamente `buildMsgConfirmarReceita(...)`. `precisa_humano` permanece `false`. Aplica-se ao caminho normal (linhas ~3404-3432) e ao retry forçado (linhas ~4216-4247).
-3. Mensagens enviadas durante `pending=true` que apenas repetem a confirmação **não disparam** watchdog de loop (já parcialmente coberto, garantir cobertura do texto do `buildMsgConfirmarReceita`).
+Depois que o gate `receita_confirmacao` marca `pending=false` (cliente disse "Sim"), o `ai-triage` entra em **máquina de estados determinística** controlada por `contatos.metadata.pos_orcamento`:
+
+```
+{ etapa: "orcamento_enviado" | "aguardando_cta_visita" | "aguardando_cidade" | "aguardando_loja",
+  cidade?: "osasco" | "carapicuiba" | "itapevi" | "barueri",
+  loja_nome?: string,
+  iniciado_at: ISO }
+```
+
+Transições:
+
+| Estado entrada | Trigger | Saída IA | Próximo estado |
+|---|---|---|---|
+| sem estado, `confirmed_at` recém-setado | (mesmo turno da confirmação) | dispara `consultar_lentes` (ou `consultar_lentes_contato` p/ LC), formatador remove o sufixo "Em qual região/bairro?" e troca por `MSG_CTA_AGENDAMENTO` | `aguardando_cta_visita` |
+| `aguardando_cta_visita` | inbound = "sim/quero/pode/bora/vamos/pode sim/topa" | `MSG_LISTA_CIDADES` | `aguardando_cidade` |
+| `aguardando_cta_visita` | inbound = "não/agora não/depois" | resposta curta de despedida amigável + libera LLM normal | limpa estado |
+| `aguardando_cidade` | inbound contém match de cidade (Osasco/Carapicuíba/Itapevi/Barueri, com fuzzy) | lista as lojas daquela cidade (de `telefones_lojas` filtrando pelos nomes em `CIDADE_TO_LOJAS[cidade]`), formatadas com endereço e horário do dia | `aguardando_loja` |
+| `aguardando_cidade` | qualquer outra coisa | re-envia `MSG_LISTA_CIDADES` (1×); na 2ª devolve pro LLM | mantém / limpa |
+| `aguardando_loja` | inbound casa nome/número de uma das lojas listadas | grava `metadata.pos_orcamento.loja_nome` + dispara fluxo de agendamento existente (LLM com hint forçando `agendar_visita` naquela loja, dia/hora a perguntar) | limpa estado |
 
 ## Mudanças
 
 ### `supabase/functions/ai-triage/index.ts`
 
-**a) Helpers novos (perto dos detectores de receita ~linha 110):**
+**a) Helpers novos (próximo às linhas 67–78):**
 
-- `escaladaGrauSemReceita(motivoOuTexto: string): boolean` → regex `/\b(grau\s+(alto|elevado|bem\s+alto)|sob\s+encomenda|sob\s+medida\s+espec[ií]fic|opções?\s+sob\s+encomenda)\b/i`.
-- `MSG_PEDIR_RECEITA_PARA_GRAU_ALTO = "Pra te passar opções certinhas, preciso primeiro da sua receita 😊 Me manda uma foto que eu já analiso e te respondo com as opções compatíveis."`
+- `detectAceiteVisita(text)` regex `/^(sim|claro|quero|topo|topa|pode|pode sim|bora|vamos|gostaria|aceito|👍|👌|✅)\b/i` (com filtro de "não").
+- `detectRecusaVisita(text)` regex `/^(n[ãa]o|agora\s*n[ãa]o|depois|fica\s*pra\s*depois|s[oó]\s*orcamento)\b/i`.
+- `detectCidadeEscolhida(text)` → casa contra chaves de `CIDADE_TO_LOJAS` (normalizando acentos/maiúsculas; aceita "1/2/3/4" se a lista foi numerada).
+- `formatLojasPorCidade(cidade, lojas)` → monta string numerada `1️⃣ DINIZ ANTONIO AGU — Rua X, 100 (hoje 09–18)\n2️⃣ ...`.
 
-**b) Loop de tool calls (`for (const toolCall of toolCalls)` ~linha 3243):**
+**b) Bloco pós-confirmação (~linha 2101–2102):**
 
-Após processar cada tool, manter um flag `rxConfirmGateTriggeredThisTurn`. Quando `interpretar_receita` (linhas ~3404 e ~4216) seta `receita_confirmacao.pending=true`, marcar o flag.
+Quando o gate libera (`pending=false` recém-setado, dentro da faixa, contexto óculos/LC), antes de seguir pro LLM, gravar:
 
-No final do loop, se `rxConfirmGateTriggeredThisTurn === true`:
-- Forçar `resposta = buildMsgConfirmarReceita(rxRecemLido, false)`.
-- Forçar `precisa_humano = false`, `intencao = "receita_oftalmologica"`, `pipeline_coluna = "Orçamento"`.
-- Limpar qualquer `setor_sugerido` herdado de `escalar_consultor`.
-- Logar `eventos_crm` tipo `escalada_bloqueada_pendente_confirmacao` com snapshot dos tool calls descartados.
-
-**c) Antes de aceitar `escalar_consultor` (~linha 3280, dentro do branch `else if (fn === "escalar_consultor")`):**
-
-Adicionar checagem:
 ```ts
-const motivoTxt = `${args.motivo || ""} ${args.resposta || ""}`;
-const semReceita = !hasReceitasValidas(receitas);
-if (semReceita && escaladaGrauSemReceita(motivoTxt)) {
-  // descartar tool call
-  resposta = MSG_PEDIR_RECEITA_PARA_GRAU_ALTO;
-  intencao = "receita_oftalmologica";
-  pipeline_coluna = "Orçamento";
-  precisa_humano = false;
-  await supabase.from("eventos_crm").insert({
-    contato_id: contatoId,
-    tipo: "escalada_grau_sem_receita_bloqueada",
-    descricao: `IA tentou escalar "grau alto" sem receita salva`,
-    metadata: { motivo: args.motivo, resposta: args.resposta?.substring(0,200) },
-    referencia_tipo: "atendimento", referencia_id: atendimento_id,
-  });
-  validatorFlags.push("escalada_grau_sem_receita_bloqueada");
-  continue;
+contatoMeta.pos_orcamento = { etapa: "orcamento_enviado", iniciado_at: new Date().toISOString() };
+await supabase.from("contatos").update({ metadata: contatoMeta }).eq("id", contatoId);
+```
+
+E injetar um system-hint forte no prompt do turno: "Cliente acabou de confirmar a receita. AÇÃO: chame `consultar_lentes` (ou `consultar_lentes_contato`) AGORA. NÃO pergunte região/bairro/cidade. Termine SOMENTE com a frase exata: '{MSG_CTA_AGENDAMENTO}'." (já há infraestrutura de hint nas linhas ~2725–2752.)
+
+**c) Pós-processamento da resposta da tool `consultar_lentes`/`consultar_lentes_contato` (no formatador, linhas ~4982 e equivalente em LC):**
+
+Substituir o sufixo atual `"Posso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊"` por `"\n\n" + MSG_CTA_AGENDAMENTO`. E, no caller que envia, depois de mandar a quote, atualizar `metadata.pos_orcamento.etapa = "aguardando_cta_visita"`.
+
+**d) Curto-circuito determinístico no início do `serve` (logo após o bloco de confirmação ~linha 2147):**
+
+```ts
+const posOrc = contatoMeta.pos_orcamento;
+if (posOrc?.etapa === "aguardando_cta_visita" && !lastIsImage) {
+  if (detectAceiteVisita(lastInboundText)) { send(MSG_LISTA_CIDADES); set etapa="aguardando_cidade"; return; }
+  if (detectRecusaVisita(lastInboundText))  { send("Tranquilo! Quando quiser ver pessoalmente, é só me chamar 😊"); clear; return; }
+  // qualquer outra coisa → libera LLM (mantém estado por 1 turno só)
+}
+if (posOrc?.etapa === "aguardando_cidade" && !lastIsImage) {
+  const c = detectCidadeEscolhida(lastInboundText);
+  if (c) { send(formatLojasPorCidade(c, lojas)); set etapa="aguardando_loja", cidade=c; return; }
+  // 1ª vez não reconhecida → re-envia MSG_LISTA_CIDADES; 2ª vez → libera LLM
+}
+if (posOrc?.etapa === "aguardando_loja" && !lastIsImage) {
+  const loja = matchLoja(lastInboundText, CIDADE_TO_LOJAS[posOrc.cidade], lojas);
+  if (loja) { grava loja_nome; injeta hint pra LLM rodar agendar_visita com loja_nome=loja; clear pos_orcamento.etapa="agendando"; }
+  // não reconhecida → re-envia lista; na 2ª libera LLM
 }
 ```
 
-**d) `responder` (branch ~3243):** mesma checagem aplicada ao texto de `args.resposta` quando `semReceita`. Substitui a resposta por `MSG_PEDIR_RECEITA_PARA_GRAU_ALTO`.
+**e) Eventos:** `pos_orcamento_iniciado`, `cta_visita_aceito`, `cta_visita_recusado`, `cidade_escolhida`, `loja_escolhida`, `pos_orcamento_fallback_llm`.
 
-**e) Prompt do sistema (~linhas 1389-1511, blocos com lista de proibições):** adicionar regra explícita:
+**f) Watchdog (`watchdog-loop-ia/index.ts`):** mensagens iguais a `MSG_LISTA_CIDADES` e `formatLojasPorCidade` não contam como loop (regex `^Boa! Atendemos nessas cidades` e `^Beleza! Aqui são as lojas`).
 
-> "PROIBIDO mencionar 'grau alto', 'grau elevado', 'sob encomenda' ou oferecer Consultor por causa do grau ANTES de ter recebido e interpretado a receita do cliente. Sem receita = pedir receita por foto."
+### Memória
 
-### `supabase/functions/watchdog-loop-ia/index.ts`
-
-Garantir que mensagens iguais a `buildMsgConfirmarReceita` (regex `^(Li sua receita assim|Anotei! Ficou assim:)`) NÃO contam como loop e NÃO disparam escalada. Se já existe exceção parcial, ampliar para esses dois prefixes.
-
-### Memórias
-
-- Atualizar `mem://ia/auto-receita-e-anti-loop.md` com:
-  - Caso Franciana 2 (escalada por "grau alto" sem receita).
-  - Regra: gate de confirmação vence escalada/cotação no mesmo turno.
-  - Proibição de falar em grau sem receita.
-
-## Eventos novos
-
-- `escalada_grau_sem_receita_bloqueada`
-- `escalada_bloqueada_pendente_confirmacao`
+- Atualizar `mem://ia/auto-receita-e-anti-loop.md` com o caso Emanuel e a máquina de estados.
+- Adicionar entrada nova `mem://ia/fluxo-pos-confirmacao-receita.md` (curta) descrevendo a transição.
 
 ## Out of scope
 
-- Ajustes em `consultar_lentes` para casos pós-confirmação (já cobertos).
-- UI/Dashboard de escaladas bloqueadas.
+- Mudar o fluxo de agendamento em si (continua usando `agendar_visita`).
+- Outros cenários onde o cliente pula direto pra cidade sem confirmar receita (continua via LLM).
+- Dashboard/UX de auditoria desse funil.
 
 ## Arquivos tocados
 
 - `supabase/functions/ai-triage/index.ts`
 - `supabase/functions/watchdog-loop-ia/index.ts`
 - `.lovable/memory/ia/auto-receita-e-anti-loop.md`
+- `.lovable/memory/ia/fluxo-pos-confirmacao-receita.md` (novo)
