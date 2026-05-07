@@ -227,7 +227,7 @@ function isReceitaForaDaFaixa(rx: any): boolean {
   return false;
 }
 
-const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Seu grau é mais alto e exige uma lente sob encomenda — vou chamar um Consultor especializado pra te passar opções e prazo certinho 🤝";
+const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Por ser uma *lente especial*, vou te conectar com um Consultor pra montar o orçamento certinho e confirmar prazo 🤝";
 
 // ── Bloqueia escalada/oferta de "grau alto / sob encomenda" sem receita interpretada ──
 // Caso Franciana (Mai/2026): IA falou "Encontrei poucas opções automáticas para esse grau alto"
@@ -2010,7 +2010,7 @@ serve(async (req) => {
     const setores = setRes.data || [];
     const lojas = lojasRes.data || [];
     const agendamentosAtivos = agendRes.data || [];
-    const contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
+    let contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
     const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
@@ -3151,19 +3151,59 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           needs_human_review: false,
           label: old.label || (isFirst ? "digitada pelo cliente" : undefined),
         };
+        // ── Detecta correção de ALTO IMPACTO ──
+        // Se a esfera mudou ≥0,75D em qualquer olho OU a esfera nova é ≥|8|D (lente especial),
+        // OBRIGA confirmação explícita do cliente antes de cotar/escalar.
+        const oldOdSph = typeof old?.eyes?.od?.sphere === "number" ? old.eyes.od.sphere : null;
+        const oldOeSph = typeof old?.eyes?.oe?.sphere === "number" ? old.eyes.oe.sphere : null;
+        const newOdSph = typeof correction.od?.sphere === "number" ? correction.od.sphere : null;
+        const newOeSph = typeof correction.oe?.sphere === "number" ? correction.oe.sphere : null;
+        const deltaOd = (oldOdSph != null && newOdSph != null) ? Math.abs(newOdSph - oldOdSph) : 0;
+        const deltaOe = (oldOeSph != null && newOeSph != null) ? Math.abs(newOeSph - oldOeSph) : 0;
+        const maxNewAbs = Math.max(Math.abs(newOdSph ?? 0), Math.abs(newOeSph ?? 0));
+        const isHighImpact = (!isFirst && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs >= 8;
+
+        // Marca a receita recém-gravada como NÃO confirmada pelo cliente
+        merged.confirmed_by_client_at = null;
         if (isFirst) receitas.push(merged); else receitas[idx] = merged;
 
-        await supabase.from("contatos").update({
-          metadata: { ...contatoMeta, receitas },
-        }).eq("id", contatoId);
+        const newMeta: any = { ...contatoMeta, receitas };
+        if (isHighImpact) {
+          newMeta.receita_confirmacao = {
+            pending: true,
+            rx_index: idx,
+            rx_label: merged.label || `receita_${idx + 1}`,
+            asked_at: new Date().toISOString(),
+            correction_count: Number(contatoMeta?.receita_confirmacao?.correction_count || 0) + 1,
+            reason: "high_impact_correction",
+            fora_da_faixa: maxNewAbs >= 8,
+          };
+        }
+
+        await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contatoId);
+        contatoMeta = newMeta;
 
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId,
-          tipo: isFirst ? "receita_digitada_pelo_cliente" : "receita_corrigida_pelo_cliente",
-          descricao: `Cliente ${isFirst ? "digitou" : "corrigiu"} receita por texto. Tipo: ${correction.rx_type}`,
-          metadata: { od: correction.od, oe: correction.oe, rx_type: correction.rx_type, raw: correction.raw, mode: isFirst ? "first" : "correction" },
+          tipo: isHighImpact
+            ? "receita_corrigida_alto_impacto"
+            : (isFirst ? "receita_digitada_pelo_cliente" : "receita_corrigida_pelo_cliente"),
+          descricao: `Cliente ${isFirst ? "digitou" : "corrigiu"} receita por texto. Tipo: ${correction.rx_type}${isHighImpact ? ` [ALTO IMPACTO Δ=${Math.max(deltaOd,deltaOe).toFixed(2)} max=${maxNewAbs}]` : ""}`,
+          metadata: { od: correction.od, oe: correction.oe, rx_type: correction.rx_type, raw: correction.raw, mode: isFirst ? "first" : "correction", high_impact: isHighImpact, delta_od: deltaOd, delta_oe: deltaOe, max_abs: maxNewAbs },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
+
+        // ── Em alto impacto: ENVIA pedido de confirmação determinístico e RETORNA antes do LLM ──
+        if (isHighImpact) {
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(merged, true));
+          try {
+            const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+            delete m.ia_lock;
+            await supabase.from("atendimentos").update({ metadata: m }).eq("id", atendimento_id);
+          } catch (_) { /* noop */ }
+          console.log(`[RX-HIGH-IMPACT] Pedindo confirmação antes de cotar (Δod=${deltaOd}, Δoe=${deltaOe}, maxAbs=${maxNewAbs})`);
+          return jsonResponse({ status: "ok", tools_used: ["receita_alto_impacto_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+        }
 
         receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
         for (let i = 0; i < receitas.length; i++) {
@@ -5094,7 +5134,7 @@ async function runConsultarLentes(
   const sphereLooksAbsurd = sphereValues.some((v: number) => Math.abs(v) > 25);
   if (rxType === "unknown" || sphereValues.length === 0 || sphereLooksAbsurd) {
     console.log(`[QUOTE] Prescription incomplete (rxType=${rxType}, sphereCount=${sphereValues.length}, absurd=${sphereLooksAbsurd}) — asking structured values`);
-    return { resposta: "Pra montar o orçamento certinho, me confirma os valores da receita por texto, por favor?\n• OD: esférico / cilíndrico / eixo\n• OE: esférico / cilíndrico / eixo\n(Se tiver adição pra perto, manda também 😊)" };
+    return { resposta: "Pra montar o orçamento certinho dessa *lente personalizada*, me confirma os valores da receita por texto, por favor?\n• OD: esférico / cilíndrico / eixo\n• OE: esférico / cilíndrico / eixo\n(Se tiver adição pra perto, manda também 😊)" };
   }
 
   const worstSphere = sphereValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0);
