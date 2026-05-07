@@ -1,36 +1,50 @@
 ---
 name: Pós-Confirmação de Receita Força Cotação
-description: Após cliente confirmar receita lida via OCR, IA cota deterministicamente; se catálogo zerar, devolve estimativa SEM perguntar valores de novo e liga revisao_humana_pendente para cyl>4 / add>3.5
+description: Após cliente confirmar receita via OCR, IA cota deterministicamente; G1 anti-loop é bypassado quando rxJaConfirmada=true; fallback final mudo SEMPRE liga revisao_humana_pendente para receita complexa
 type: feature
 ---
 
 # Pós-Confirmação de Receita — Cotação Determinística
 
-## Caso Franciana (Mai/2026)
+## Casos Franciana (Mai/2026)
 
-1. OCR leu OD ESF -1,00 CIL -5,50 EIXO 40 / OE -0,75 CIL -3,00 EIXO 145.
-2. Cliente: "Sim" → gate marcou `pending=false` e disparou `runConsultarLentes`.
-3. Catálogo `pricing_table_lentes` não cobre cyl=-5,50 → zero linhas → fallback `runConsultarLentesEstimativa` devolveu 3 faixas + frase final "Consegue me confirmar o cilindro e eixo de cada olho (ou enviar foto da receita)?"
-4. Cliente respondeu o cilindro de novo → parser de correção interpretou como ESF → loop infinito de "confere?".
+**1ª iteração:** OCR -5,50 cyl → catálogo zera → estimativa + sufixo de revisão. OK.
+
+**2ª iteração (gap original):** cliente reenviou foto + "Sim" de novo. `runConsultarLentes` rodou, mas G1 anti-loop (`fallbackJaEnviado` detecta prefixo "Pra esse grau específico" nas últimas 3 outbounds) bloqueou estimativa → caiu no fallback final mudo "Em qual região/bairro você está?" SEM preços e SEM ligar `revisao_humana_pendente`.
 
 ## Regra
 
 Após `detectRxConfirmation` + `pending=false` + `!foraDaFaixa`:
 
-1. `runConsultarLentes` é chamado direto (gate, ~linha 2305).
-2. Se catálogo zera, fallback `runConsultarLentesEstimativa` é chamado com `rx_ja_confirmada: true`.
-3. Com `rx_ja_confirmada=true`, a estimativa NUNCA pergunta cilindro/eixo/ADD de volta — termina com CTA de fechamento ("Posso seguir com uma dessas opções e já te indicar a loja mais próxima…").
-4. Se `requerRevisaoHumanaPosOrcamento(rx).precisa` (cyl>4, add>3.5, sph 8-10), o `ai-triage` anexa `MSG_REVISAO_HUMANA_SUFIXO` à resposta E liga `atendimentos.metadata.revisao_humana_pendente=true` (com motivos), gravando evento `revisao_humana_pos_cotacao`. Consultor vê o badge e confirma/corrige sem incomodar o cliente.
+1. `runConsultarLentes` chamado direto (gate ~2305).
+2. Se catálogo zera, fallback `runConsultarLentesEstimativa` com `rx_ja_confirmada: true`.
+3. Estimativa com `rx_ja_confirmada=true` NUNCA pergunta cilindro/eixo/ADD de volta — termina com CTA de fechamento.
+4. Se `requerRevisaoHumanaPosOrcamento(rx).precisa` (cyl>4, add>3.5, sph 8-10): anexa `MSG_REVISAO_HUMANA_SUFIXO` + liga `atendimentos.metadata.revisao_humana_pendente=true` + evento `revisao_humana_pos_cotacao`.
+
+## Bypass G1 anti-loop (Mai/2026)
+
+`rxJaConfirmada = !!rxMeta?.confirmed_by_client_at` é calculado ANTES do gate `podeFallback`. Quando `true`, `fallbackJaEnviado` é IGNORADO — a estimativa é tratada como cotação determinística obrigatória, não como repetição. Evento: `cotacao_estimativa_pos_confirmacao_bypass_g1`.
+
+Quando o prefixo já saiu na conversa anterior, troca para variante leve: "Conforme te passei, suas opções pra esse grau:" — evita parecer cópia carbono.
+
+## Fallback final endurecido (Mai/2026)
+
+Antes de retornar "Em qual região/bairro você está?", se `rxJaConfirmada=true` E `requerRevisaoHumanaPosOrcamento(rxMeta).precisa`:
+- Liga `revisao_humana_pendente` (idempotente — só se ainda não estiver true).
+- Anexa `MSG_REVISAO_HUMANA_SUFIXO`.
+- Grava evento `revisao_humana_pos_cotacao_fallback_mudo`.
+
+Garantia: cliente com receita complexa confirmada NUNCA fica órfão sem alertar consultor.
 
 ## Proibições
 
-- PROIBIDO devolver "Recebi sua receita / estou analisando" depois da confirmação (guardrail anti-loop em ~linha 4830).
-- PROIBIDO repetir "Consegue me confirmar o cilindro e eixo…" / "Consegue me enviar foto da receita ou os números de ADD…" quando a receita-alvo tem `confirmed_by_client_at`.
+- PROIBIDO "Recebi sua receita / estou analisando" depois da confirmação (~linha 4830).
+- PROIBIDO repetir "Consegue me confirmar o cilindro e eixo…" / "Consegue me enviar foto da receita…" quando receita-alvo tem `confirmed_by_client_at`.
 
 ## Arquivos
 
 - `supabase/functions/ai-triage/index.ts`
-  - Gate ~2305 (disparo determinístico)
+  - Gate ~2305 (disparo determinístico pós-confirmação)
   - Guardrail anti-analisando ~4830
-  - Fallback estimativa em `runConsultarLentes` ~5444 (passa `rx_ja_confirmada` + liga revisão humana)
-  - `runConsultarLentesEstimativa` ~5593 (parâmetro `rx_ja_confirmada` suprime perguntas finais)
+  - `runConsultarLentes` ~5436 (bypass G1 + fallback final endurecido)
+  - `runConsultarLentesEstimativa` ~5643 (parâmetro `rx_ja_confirmada` suprime perguntas finais)
