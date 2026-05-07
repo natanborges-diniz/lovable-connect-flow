@@ -3254,6 +3254,24 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.log(`[TOOL] ${fn}:`, JSON.stringify(args).substring(0, 300));
 
       if (fn === "responder") {
+        // ── GUARDA: "grau alto / sob encomenda" SEM receita interpretada ──
+        // Caso Franciana (Mai/2026): IA falou em grau alto antes da foto chegar.
+        if (semReceitaSalvaTurno && escaladaGrauSemReceitaTexto(args.resposta || "")) {
+          console.log(`[GUARDA-GRAU-SEM-RECEITA] responder bloqueado — IA mencionou grau/sob encomenda sem receita salva`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "escalada_grau_sem_receita_bloqueada",
+            descricao: `IA mencionou grau alto/sob encomenda sem receita salva (responder)`,
+            metadata: { resposta_original: String(args.resposta || "").substring(0, 300) },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          resposta = MSG_PEDIR_RECEITA_PARA_GRAU_ALTO;
+          intencao = "receita_oftalmologica";
+          pipeline_coluna = "Orçamento";
+          precisa_humano = false;
+          validatorFlags.push("escalada_grau_sem_receita_bloqueada");
+          continue;
+        }
         // Merge proximo_passo into resposta if not already included.
         // Evita duplicar pergunta: se a `resposta` já termina com '?' E o
         // `proximo_passo` também é pergunta, descarta o proximo_passo (o
