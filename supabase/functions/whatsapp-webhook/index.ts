@@ -141,6 +141,27 @@ serve(async (req) => {
       }).eq("id", contato.id);
     }
 
+    // ─── 1b. FONTE DO LEAD (site / instagram / outro) ───
+    // Detecta apenas se ainda não foi classificado e o contato é cliente final.
+    if (text && contato && contato.tipo === "cliente" && !(contato.metadata as any)?.fonte_lead) {
+      let fonte: "site" | "instagram" | "outro" | null = null;
+      if (/Acessei o site/i.test(text)) fonte = "site";
+      else if (/(no|pelo)\s+Instagram|vi\s+voc[êe]s?\s+no\s+Insta/i.test(text)) fonte = "instagram";
+      // só persiste se reconheceu padrão (não polui com "outro" todas as conversas)
+      if (fonte) {
+        const meta = (contato.metadata as Record<string, unknown>) || {};
+        const newMeta = {
+          ...meta,
+          fonte_lead: fonte,
+          fonte_lead_at: new Date().toISOString(),
+          fonte_lead_mensagem: text.substring(0, 280),
+        };
+        await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contato.id);
+        contato = { ...contato, metadata: newMeta };
+        console.log(`[fonte_lead] ${contato.id} classificado como "${fonte}"`);
+      }
+    }
+
     // 2. Find or create canal (sempre meta_official)
     let { data: canal } = await supabase
       .from("canais")
