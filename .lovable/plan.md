@@ -1,66 +1,66 @@
-## Painel "Receita lida pelo Gael" — só aparece em faixa alta de grau
 
-Hoje o operador vê o badge âmbar "⚠ Revisar orçamento" no header do atendimento, mas não consegue conferir os valores da receita que o Gael leu via OCR e o cliente confirmou. Vamos trazer essa visibilidade direto no painel — **mas só nos casos em que a IA marcou revisão humana pendente** (faixa alta: `cilindrico_alto`, `adicao_alta`, `esferico_faixa_cinza`). Receitas em faixa normal continuam fluindo sem nenhum overhead na UI.
+## Diagnóstico real
 
-### Gate de exibição
+A Thaynara (atendimento `46d5579a-8a56-44a7-a888-b815ca923e11`) confirmou a receita e o `ai-triage` caiu no ramo `fora_da_faixa === true` (linha 2257), enviou `MSG_ESCALADA_GRAU_FORA_FAIXA` ("lente especial, vou te conectar com Consultor") e fez `modo='humano'`. **Esse caminho NÃO seta `revisao_humana_pendente`** — só o caminho de cotação automática (`consultar_lentes`, linha 5404→5447) seta.
 
-O botão e o popover **só renderizam** quando:
+Resultado: atendimentos escalados por receita fora-da-faixa ficam em modo humano sem o popover de validação aparecer. O operador não tem onde validar a leitura antes de cotar manualmente.
+
+## Mudanças
+
+### 1. Forçar a flag no atendimento da Thaynara (one-shot)
+
+Migração `UPDATE atendimentos` setando em `metadata`:
+- `revisao_humana_pendente = true`
+- `revisao_motivos = ['cilindrico_alto:5.5', 'escalada_grau_fora_faixa']`
+- `revisao_solicitada_at = now()`
+
+Filtro: `id = '46d5579a-8a56-44a7-a888-b815ca923e11'`. Assim o botão **📄 Receita lida** aparece imediatamente para você testar o fluxo de validação.
+
+### 2. Corrigir gap em `ai-triage` (escalada fora-da-faixa)
+
+Em `supabase/functions/ai-triage/index.ts`, no bloco da escalada `foraDaFaixa` (linhas 2257-2278), antes do `return jsonResponse(...)`, gravar também a flag de revisão humana no atendimento:
+
+```ts
+// Marca flag para o popover "Receita lida" aparecer no detalhe
+const motivos: string[] = ["escalada_grau_fora_faixa"];
+const cyl = Math.max(
+  Math.abs(Number(lastRx?.eyes?.od?.cylinder) || 0),
+  Math.abs(Number(lastRx?.eyes?.oe?.cylinder) || 0)
+);
+const sph = Math.max(
+  Math.abs(Number(lastRx?.eyes?.od?.sphere) || 0),
+  Math.abs(Number(lastRx?.eyes?.oe?.sphere) || 0)
+);
+if (cyl > 4) motivos.push(`cilindrico_alto:${cyl}`);
+if (sph > 10) motivos.push(`esferico_fora_catalogo:${sph}`);
+
+const { data: atFlag } = await supabase
+  .from("atendimentos").select("metadata").eq("id", atendimento_id).single();
+const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
+await supabase.from("atendimentos").update({
+  modo: "humano",
+  metadata: {
+    ...metaFlag,
+    revisao_humana_pendente: true,
+    revisao_motivos: motivos,
+    revisao_solicitada_at: new Date().toISOString(),
+  },
+}).eq("id", atendimento_id);
 ```
-atendimento.metadata.revisao_humana_pendente === true
-```
 
-Para receitas em faixa normal (a grande maioria) nada muda — sem botão, sem popover, sem ruído visual. O operador só vê o painel quando o Gael sinalizou que aquele grau exige validação humana.
+Substitui o `update({ modo: "humano" })` puro da linha 2261. A partir daí, **todo lead escalado por fora-da-faixa** já entra com a flag ligada e o popover aparece para o consultor validar a leitura antes de cotar manualmente.
 
-### Onde os dados já estão
+### 3. Memória
 
-`contatos.metadata.receitas[]` (até 5 leituras). Cada item tem:
-- `eyes.od` / `eyes.oe` — `{ esf, cyl, axis, add }`
-- `rx_type`, `confidence`, `data_leitura`, `confirmed_by_client_at`, `label`
-- `summary.suggested_category`
+Atualizar `mem://ia/regras-negocio-e-proibicoes-criticas`: gate do popover **📄 Receita lida** cobre dois caminhos — (a) cotação automática com `cilindrico_alto`/`adicao_alta`/`esferico_faixa_cinza`; (b) escalada por `fora_da_faixa` (cyl/sph fora do catálogo cotável).
 
-E `metadata.receita_confirmacao` traz `rx_index`, `pending`, `confirmed_at`.
+## Arquivos
 
-A IA já grava `revisao_motivos[]` em `atendimentos.metadata` quando bate uma das três faixas críticas.
+- Migração SQL — UPDATE pontual no atendimento da Thaynara.
+- `supabase/functions/ai-triage/index.ts` (linhas ~2261) — flag no ramo `foraDaFaixa`.
+- `mem://ia/regras-negocio-e-proibicoes-criticas` — escopo do popover.
 
-### Mudanças
+## Sem mudanças
 
-**1. Novo `src/components/atendimentos/ReceitaValidacaoPopover.tsx`**
-
-- Renderiza `null` se `!revisao_humana_pendente` (gate de segurança extra).
-- Cabeçalho: label da receita + timestamp + tag de tipo (Visão simples / Multifocal).
-- Cartões OD / OE com ESF, CIL, EIXO, ADD formatados em pt-BR (sinais e graus).
-- Linha de motivos da revisão (reusa `traduzirMotivos`): "Cilíndrico alto (>4) • Adição alta (>3,5)".
-- Status de confirmação do cliente: ✅ "Confirmada em DD/MM HH:mm" ou ⏳ "Aguardando confirmação".
-- Confiança da extração (`confidence × 100%`) em barrinha discreta.
-- Se houver mais de uma receita em `receitas[]`, Tabs simples para alternar.
-- Rodapé com dois botões:
-  - **"Validar e liberar orçamento"** → limpa `revisao_humana_pendente` + `revisao_motivos`, registra `eventos_crm` `tipo: 'orcamento_revisao_validada'` com `user_id`, motivos originais e snapshot da receita validada. Toast "Receita validada".
-  - **"Pedir nova leitura"** → marca `receita_confirmacao.pending=true`, incrementa `correction_count`, registra `eventos_crm` `tipo: 'orcamento_revisao_rejeitada'`. Não envia mensagem ao cliente.
-
-**2. `src/pages/Atendimentos.tsx`**
-
-- No header do detalhe, **substituir** o botão "Resolver" atual por um botão **"📄 Receita lida"** (com ping âmbar discreto) que abre o popover. O badge "⚠ Revisar orçamento" continua visível ao lado, sinalizando o estado.
-- Renderização condicionada a `revisao_humana_pendente === true` — receitas em faixa normal não mostram o controle.
-- Estender `useAtendimento` em `src/hooks/useAtendimentos.ts` para trazer `contato:contatos(*)` (precisa de `metadata.receitas` e `receita_confirmacao`).
-
-**3. `src/components/shared/RevisaoHumanaBadge.tsx`**
-
-- Exportar helper `formatRx(eye)` → `"ESF -1,00 CIL -5,50 EIXO 40°"` para reúso.
-
-### Sem mudanças
-
-- Schema (tudo já em `contatos.metadata` / `atendimentos.metadata`).
-- `ai-triage` (lógica de leitura/classificação intacta).
-- Lista (tabela) — mantém só o badge âmbar pequeno.
-
-### Memória
-
-Atualizar `mem://ia/regras-negocio-e-proibicoes-criticas`: validação humana da receita acontece **apenas em faixa alta de grau** (motivos `cilindrico_alto`, `adicao_alta`, `esferico_faixa_cinza`) via popover "📄 Receita lida" no detalhe do atendimento. `orcamento_revisao_validada` é a fonte de verdade da validação.
-
-### Arquivos tocados
-
-- `src/components/atendimentos/ReceitaValidacaoPopover.tsx` (novo)
-- `src/pages/Atendimentos.tsx` (botão condicional + integração)
-- `src/hooks/useAtendimentos.ts` (select estendido em `useAtendimento`)
-- `src/components/shared/RevisaoHumanaBadge.tsx` (export `formatRx`)
-- `mem://ia/regras-negocio-e-proibicoes-criticas` (escopo da validação)
+- UI / popover (`ReceitaValidacaoPopover.tsx`) já funciona corretamente — só não estava recebendo o flag nesse caminho.
+- `interpretar_receita`, schema, frontend.
