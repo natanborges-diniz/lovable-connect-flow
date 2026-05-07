@@ -4292,6 +4292,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 });
 
                 resposta = buildMsgConfirmarReceita({ ...rxData, label: rxLabel }, false);
+                rxConfirmGateTriggered = true;
+                rxConfirmGateRx = { ...rxData, label: rxLabel };
                 intencao = isLCContextGlobal ? "orcamento_lc" : "orcamento";
                 pipeline_coluna = "Orçamento";
                 precisa_humano = false;
