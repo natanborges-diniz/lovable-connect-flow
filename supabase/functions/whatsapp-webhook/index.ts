@@ -141,25 +141,112 @@ serve(async (req) => {
       }).eq("id", contato.id);
     }
 
-    // ─── 1b. FONTE DO LEAD (site / instagram / outro) ───
-    // Detecta apenas se ainda não foi classificado e o contato é cliente final.
-    if (text && contato && contato.tipo === "cliente" && !(contato.metadata as any)?.fonte_lead) {
-      let fonte: "site" | "instagram" | "outro" | null = null;
-      if (/Acessei o site/i.test(text)) fonte = "site";
-      else if (/(no|pelo)\s+Instagram|vi\s+voc[êe]s?\s+no\s+Insta/i.test(text)) fonte = "instagram";
-      // só persiste se reconheceu padrão (não polui com "outro" todas as conversas)
-      if (fonte) {
-        const meta = (contato.metadata as Record<string, unknown>) || {};
-        const newMeta = {
-          ...meta,
-          fonte_lead: fonte,
-          fonte_lead_at: new Date().toISOString(),
-          fonte_lead_mensagem: text.substring(0, 280),
-        };
-        await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contato.id);
-        contato = { ...contato, metadata: newMeta };
-        console.log(`[fonte_lead] ${contato.id} classificado como "${fonte}"`);
+    // ─── 1b. FONTE DO LEAD (cascata: site / instagram / retorno / organico) ───
+    // Roda na 1ª inbound que classifica o contato (cliente final). Persiste sempre — nunca null.
+    if (contato && contato.tipo === "cliente" && !(contato.metadata as any)?.fonte_lead) {
+      const ctMeta = (contato.metadata as Record<string, unknown>) || {};
+      let fonte: "site" | "instagram" | "retorno" | "organico" = "organico";
+      let detalhe: Record<string, unknown> = {};
+
+      if (text && /Acessei o site/i.test(text)) {
+        fonte = "site";
+      } else if (text && /(no|pelo)\s+Instagram|vi\s+voc[êe]s?\s+no\s+Insta/i.test(text)) {
+        fonte = "instagram";
+      } else {
+        // Heurísticas de retorno (cliente já existia ou já comprou/contratou antes)
+        const tags: string[] = Array.isArray((contato as any).tags) ? (contato as any).tags : [];
+        const ciclo = (contato as any).ciclo_funil || 1;
+        const ultimoContato = (contato as any).ultimo_contato_at as string | null;
+        const createdAt = (contato as any).created_at as string | null;
+        const idadeContatoMs = createdAt ? (Date.now() - new Date(createdAt).getTime()) : 0;
+        const idadeDias = idadeContatoMs / 86400000;
+
+        // Conta atendimentos anteriores encerrados
+        const { count: atendAnteriores } = await supabase
+          .from("atendimentos")
+          .select("id", { count: "exact", head: true })
+          .eq("contato_id", contato.id)
+          .eq("status", "encerrado");
+
+        if (
+          ciclo >= 2 ||
+          (atendAnteriores ?? 0) >= 1 ||
+          tags.includes("comprador") ||
+          tags.includes("lead-recuperado") ||
+          idadeDias >= 7 // contato existia há mais de 7d antes desta primeira "fonte_lead"
+        ) {
+          fonte = "retorno";
+          detalhe = {
+            ciclo_funil: ciclo,
+            atendimentos_anteriores: atendAnteriores ?? 0,
+            tags_relevantes: tags.filter(t => ["comprador", "lead-recuperado"].includes(t)),
+            idade_contato_dias: Math.round(idadeDias),
+            ultimo_contato_at: ultimoContato,
+          };
+        }
       }
+
+      const newMeta = {
+        ...ctMeta,
+        fonte_lead: fonte,
+        fonte_lead_at: new Date().toISOString(),
+        fonte_lead_mensagem: (text || "").substring(0, 280),
+        ...(Object.keys(detalhe).length ? { fonte_lead_detalhe: detalhe } : {}),
+      };
+      await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contato.id);
+      contato = { ...contato, metadata: newMeta };
+      console.log(`[fonte_lead] ${contato.id} classificado como "${fonte}"`);
+    }
+
+    // ─── 1c. RETOMADA ESPONTÂNEA (>14 dias sem contato) ───
+    // Independente da fonte_lead, se o contato existia há tempo e voltou sozinho, registra evento e incrementa ciclo.
+    try {
+      if (contato && contato.tipo === "cliente") {
+        const ultimoContato = (contato as any).ultimo_contato_at as string | null;
+        if (ultimoContato) {
+          const diasSilencio = (Date.now() - new Date(ultimoContato).getTime()) / 86400000;
+          const ctMeta = (contato.metadata as Record<string, unknown>) || {};
+          const ultimaRetomada = (ctMeta.retomada_espontanea_at as string) || null;
+          const jaMarcadoRecente = ultimaRetomada
+            && (Date.now() - new Date(ultimaRetomada).getTime()) < 24 * 60 * 60 * 1000;
+          if (diasSilencio >= 14 && !jaMarcadoRecente) {
+            const novoCiclo = ((contato as any).ciclo_funil || 1) + 1;
+            await supabase.from("contatos").update({
+              ciclo_funil: novoCiclo,
+              metadata: { ...ctMeta, retomada_espontanea_at: new Date().toISOString() },
+            }).eq("id", contato.id);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contato.id,
+              tipo: "retomada_espontanea",
+              descricao: `Cliente retomou conversa após ${Math.round(diasSilencio)} dias de silêncio. Ciclo: ${novoCiclo}.`,
+              metadata: { dias_silencio: Math.round(diasSilencio), ciclo_funil: novoCiclo },
+            });
+            console.log(`[retomada_espontanea] ${contato.id} após ${Math.round(diasSilencio)}d`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[retomada_espontanea] erro:", e);
+    }
+
+    // ─── 1d. VALIDAÇÃO TELEFONE+NOME ───
+    // Marca para a IA pedir confirmação de nome quando o nome é genérico/placeholder.
+    try {
+      if (contato && contato.tipo === "cliente") {
+        const ctMeta = (contato.metadata as Record<string, unknown>) || {};
+        const nomeAtual = (contato.nome || "").trim();
+        const isPhonePlaceholder = !nomeAtual || nomeAtual === phone || /^\+?\d[\d\s()+-]*$/.test(nomeAtual);
+        const isGeneric = /^(cliente|whatsapp\s*user|usu[áa]rio)$/i.test(nomeAtual);
+        const jaConfirmado = ctMeta.nome_confirmado === true;
+        if (!jaConfirmado && (isPhonePlaceholder || isGeneric) && ctMeta.precisa_confirmar_nome !== true) {
+          await supabase.from("contatos").update({
+            metadata: { ...ctMeta, precisa_confirmar_nome: true },
+          }).eq("id", contato.id);
+          contato = { ...contato, metadata: { ...ctMeta, precisa_confirmar_nome: true } };
+        }
+      }
+    } catch (e) {
+      console.error("[precisa_confirmar_nome] erro:", e);
     }
 
     // 2. Find or create canal (sempre meta_official)
