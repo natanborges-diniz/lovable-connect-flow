@@ -6,7 +6,7 @@ import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
 import { JanelaFechadaDialog } from "@/components/atendimentos/JanelaFechadaDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem, useEditMensagem, useDeleteMensagem } from "@/hooks/useAtendimentos";
+import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
 import { AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
