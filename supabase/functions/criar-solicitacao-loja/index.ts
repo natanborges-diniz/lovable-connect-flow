@@ -182,6 +182,7 @@ serve(async (req) => {
     // ── Caso especial: link_pagamento via Optical Business ──
     let extraMetadata: Record<string, unknown> = {};
     let respostaCliente: { url?: string; payment_link_id?: string; cliente_envio_status?: string; cliente_envio_erro?: string | null } = {};
+    let contatoClienteId: string | null = null;
     if (acao.endpoint === "payment-links") {
       if (!OB_URL || !OB_SECRET) {
         return new Response(JSON.stringify({ error: "Integração de pagamento não configurada" }), {
