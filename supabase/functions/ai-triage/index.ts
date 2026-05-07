@@ -5145,7 +5145,7 @@ async function runConsultarLentes(
       quoteMsg += "\n" + formatLens(premium, "💎 Premium");
     }
   }
-  quoteMsg += "\n\nPosso te indicar a loja mais próxima pra você ver pessoalmente e fechar a melhor opção? Em qual região/bairro você está? 😊";
+  quoteMsg += "\n\n" + MSG_CTA_AGENDAMENTO;
 
   const quoteNorm = norm(quoteMsg);
   const recentNormQuote = (recentOutbound || []).slice(-3).map(norm);
