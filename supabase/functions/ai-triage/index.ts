@@ -190,6 +190,30 @@ function isReceitaPending(metadata: any): boolean {
   return metadata?.receita_confirmacao?.pending === true;
 }
 
+// Detecta escolha do cliente entre múltiplas receitas ("a primeira", "a segunda", "a nova", etc.)
+function detectEscolhaReceita(text: string, receitas: any[]): { idx: number; how: string } | null {
+  if (!Array.isArray(receitas) || receitas.length < 2) return null;
+  const t = String(text || "").toLowerCase().trim();
+  if (!t || t.length > 120) return null;
+  // Última / nova / mais recente / a de agora / a segunda foto
+  if (/\b(a\s+)?(ultima|última|mais\s+recente|nova|recente|de\s+agora|que\s+(eu\s+)?mandei\s+(agora|por\s+ultimo|por\s+último)|essa\s+(de\s+)?(agora|nova|ultima|última)|segunda\s+foto|nova\s+foto)\b/.test(t)) {
+    return { idx: receitas.length - 1, how: "ultima" };
+  }
+  // Primeira / antiga / anterior
+  if (/\b(a\s+)?(primeira|1[ªa°]?|antiga|anterior|antiga\s+receita|de\s+antes|que\s+(eu\s+)?mandei\s+(antes|primeiro))\b/.test(t)) {
+    return { idx: 0, how: "primeira" };
+  }
+  // "a segunda", "a 2", "receita 2"
+  const mNum = t.match(/\b(?:a\s+|receita\s+)?(\d{1,2})[ªa°]?\b/);
+  if (mNum) {
+    const n = parseInt(mNum[1], 10);
+    if (n >= 1 && n <= receitas.length) return { idx: n - 1, how: `numero_${n}` };
+  }
+  if (/\bsegunda\b/.test(t) && receitas.length >= 2) return { idx: 1, how: "segunda" };
+  if (/\bterceira\b/.test(t) && receitas.length >= 3) return { idx: 2, how: "terceira" };
+  return null;
+}
+
 function isReceitaForaDaFaixa(rx: any): boolean {
   if (!rx?.eyes) return false;
   const od = rx.eyes.od || {};
