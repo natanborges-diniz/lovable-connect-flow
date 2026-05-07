@@ -1,29 +1,25 @@
 ---
-name: Regras de negócio e proibições críticas
-description: Regras-mestre de produto da IA (exames, foto, receita) + UI de validação humana de receita em /crm/conversas
+name: Regras de negócio críticas + popover "Receita lida"
+description: Quando o popover de validação aparece e proibições de orçamento sem foto/escalada
 type: feature
 ---
 
-# Regras de negócio críticas
+## Popover "📄 Receita lida pelo Gael"
 
-- Não realizamos exames médicos na loja — sempre direcionar para parceiros.
-- Sempre priorizar visita à loja para fechamento.
-- Foto da receita é necessária para orçamentos de óculos.
+Renderiza apenas quando `atendimentos.metadata.revisao_humana_pendente === true`.
 
-## Validação humana de receita (faixa alta apenas)
+A flag é setada em DOIS caminhos do `ai-triage`:
 
-A IA só sinaliza `revisao_humana_pendente=true` em `atendimentos.metadata` quando a receita cai numa das três faixas críticas (`cilindrico_alto` >4, `adicao_alta` >3,5, `esferico_faixa_cinza` 8–10). Receitas em faixa normal seguem cotação automática sem nenhum overhead.
+1. **Cotação automática com receita complexa** (`requerRevisaoHumanaPosOrcamento`, ~linha 5404): cyl > 4 (`cilindrico_alto`), add > 3.5 (`adicao_alta`), sphere 8–10 (`esferico_faixa_cinza`). IA cota normal e liga a flag pra equipe conferir prazo/disponibilidade.
 
-### UI em /crm/conversas (detalhe do atendimento)
+2. **Escalada por receita fora-da-faixa** (~linha 2257, `foraDaFaixa === true`): sphere > 10 ou outro motivo de catálogo. IA escala para humano (`MSG_ESCALADA_GRAU_FORA_FAIXA`) e liga a flag para o consultor validar a leitura antes de cotar manualmente. Motivos enriquecidos com `cilindrico_alto:X` / `esferico_fora_catalogo:X` quando aplicável.
 
-Quando `revisao_humana_pendente === true`, o header mostra:
-1. Badge âmbar `⚠ Revisar orçamento` (com motivos no tooltip).
-2. Botão `📄 Receita lida` (com ping âmbar) que abre o popover `ReceitaValidacaoPopover`.
+Eventos `eventos_crm`:
+- `orcamento_revisao_validada` — consultor aprovou a leitura.
+- `orcamento_revisao_rejeitada` — consultor pediu nova leitura ao Gael.
 
-O popover exibe OD/OE formatados (`formatRx`), tipo da lente, motivos da revisão, status de confirmação do cliente, confiança da extração, e suporte a múltiplas receitas via Tabs.
-
-Duas ações:
-- **Validar e liberar orçamento** → remove `revisao_humana_pendente`/`revisao_motivos` de `atendimentos.metadata`, registra `eventos_crm` `tipo: 'orcamento_revisao_validada'` com snapshot da receita. Fonte de verdade da validação humana.
-- **Pedir nova leitura** → marca `contatos.metadata.receita_confirmacao.pending=true`, incrementa `correction_count`, registra `eventos_crm` `tipo: 'orcamento_revisao_rejeitada'`. Não envia mensagem ao cliente.
-
-Receitas em faixa normal não exibem botão nem popover.
+## Outras regras críticas
+- Sem exames médicos na loja.
+- Priorizar visita à loja.
+- Foto de receita é OBRIGATÓRIA antes de cotar óculos.
+- Lentes de contato cotam com receita salva via `consultar_lentes_contato`.
