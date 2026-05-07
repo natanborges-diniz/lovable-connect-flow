@@ -1498,7 +1498,8 @@ Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assun
 Sem dados detalhados de produtos. Use APENAS valores das REGRAS DE ATENDIMENTO.
 Sugira envio de foto da receita. NUNCA responda sobre produtos com endereço de loja.
 Se não souber responder com precisão: peça mais detalhes ao cliente OU sugira agendamento na loja mais próxima pra ver pessoalmente.
-PROIBIDO usar frases como "vou encaminhar para um Consultor", "para esse grau específico vou passar pra alguém da equipe" — escalada só via tool escalar_consultor em cenários graves (reclamação, pedido humano explícito, ZERO opções no catálogo).`);
+PROIBIDO usar frases como "vou encaminhar para um Consultor", "para esse grau específico vou passar pra alguém da equipe" — escalada só via tool escalar_consultor em cenários graves (reclamação, pedido humano explícito, ZERO opções no catálogo).
+PROIBIDO mencionar "grau alto", "grau elevado", "sob encomenda", "sob medida específica" ou oferecer Consultor por causa do grau ANTES de ter recebido E interpretado a receita do cliente. Sem receita interpretada = pedir foto da receita primeiro.`);
   }
 
   if (opts.examples) s.push(`# EXEMPLOS CORRETOS\n${opts.examples}`);
