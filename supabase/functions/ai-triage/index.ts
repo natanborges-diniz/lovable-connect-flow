@@ -2145,10 +2145,37 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
     // Receita salva mas vazia/`unknown` (caso Jardel) NÃO conta — força nova OCR.
     const hasValidReceitas = hasReceitasValidas(receitas);
+
+    // ── Nova receita pendente: imagem inbound mais recente que a última receita salva ──
+    // Caso Tati (Mai/2026): cliente já tem receita confirmada, manda foto de receita NOVA;
+    // sem este gate, hasValidReceitas=true bloqueia OCR e o LLM cota com receita antiga
+    // ou trava no fallback "Recebi sua receita…".
+    let lastInboundImageAt = 0;
+    for (const m of last5Inbound) {
+      if ((m.tipo_conteudo || "text") === "image" && m.created_at) {
+        const t = new Date(m.created_at).getTime();
+        if (t > lastInboundImageAt) lastInboundImageAt = t;
+      }
+    }
+    let lastReceitaAt = 0;
+    for (const r of receitas as any[]) {
+      const t = r?.data_leitura ? new Date(r.data_leitura).getTime() : 0;
+      if (t > lastReceitaAt) lastReceitaAt = t;
+    }
+    const last3InboundText = inboundMsgs.slice(-3).map((m: any) => String(m.conteudo || "")).join(" | ").toLowerCase();
+    const declaredNewRx = /nova receita|outra receita|receita nova|receita atualizada|receita recente|tenho (uma )?receita/i.test(last3InboundText);
+    const hasPendingNewPrescriptionImage = !!(lastInboundImageAt && (
+      (lastReceitaAt && lastInboundImageAt > lastReceitaAt) || (declaredNewRx && hasValidReceitas)
+    ));
+
     const isImageContext = lastIsImage
-      || (hasRecentUnparsedPrescriptionImage && !hasValidReceitas);
+      || (hasRecentUnparsedPrescriptionImage && !hasValidReceitas)
+      || hasPendingNewPrescriptionImage;
     if (receitas.length > 0 && !hasValidReceitas) {
       console.log(`[RX-VALID] Receita salva existe mas é INVÁLIDA (rx_type/eyes vazios) — tratando como sem receita`);
+    }
+    if (hasPendingNewPrescriptionImage) {
+      console.log(`[RX-NEW-PENDING] Nova imagem de receita detectada (imageAt=${lastInboundImageAt} > rxAt=${lastReceitaAt}, declaredNew=${declaredNewRx}) — força OCR`);
     }
 
     // ── 4.4. GATE DE CONFIRMAÇÃO DE RECEITA (Mai/2026) ──
