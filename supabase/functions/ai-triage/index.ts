@@ -4071,7 +4071,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 msg += `\n${l.is_dnz ? "🌟 " : "👁️ "}*${l.produto}* (${l.fornecedor}) — ${desc}\n💰 R$ ${preco}/caixa\n${plano}`;
               }
 
-              msg += `\n\nQuer que eu reserve a opção que você preferir? Posso te encaminhar pra loja mais próxima fechar o pedido.`;
+              msg += `\n\n${MSG_CTA_AGENDAMENTO}`;
               resposta = msg;
               console.log(
                 `[QUOTE-LC] ${pick.length} options sph=${worstSphere} cyl=${worstCyl} toric=${needsToric} mesma=${mesmaDioptria}`,
