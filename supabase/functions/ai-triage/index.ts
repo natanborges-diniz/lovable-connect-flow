@@ -1319,30 +1319,42 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
   return block;
 }
 
-function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: string; nomeAtual?: string; nomeConfirmado?: boolean }): string {
-  if (inboundCount > 1) return "";
+function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: string; nomeAtual?: string; nomeConfirmado?: boolean; precisaConfirmar?: boolean }): string {
+  const precisaConfirmar = opts?.precisaConfirmar === true && opts?.nomeConfirmado !== true;
+  // Dispara na 1ª interação OU sempre que houver flag precisa_confirmar_nome (nome genérico/placeholder).
+  if (inboundCount > 1 && !precisaConfirmar) return "";
   const nomeWa = (opts?.nomeWhatsapp || "").trim();
   const nomeAtual = (opts?.nomeAtual || "").trim();
   const candidato = nomeWa || nomeAtual;
-  const looksReal = !!candidato && /[A-Za-zÀ-ÿ]{2,}/.test(candidato) && !/^\d+$/.test(candidato);
+  const looksReal = !!candidato
+    && /[A-Za-zÀ-ÿ]{2,}/.test(candidato)
+    && !/^\+?\d[\d\s()+-]*$/.test(candidato);
 
   if (looksReal && !opts?.nomeConfirmado) {
     const primeiroNome = candidato.split(/\s+/)[0];
-    return `# PRIMEIRA INTERAÇÃO — CONFIRMAR NOME
+    const cabecalho = inboundCount > 1 ? `# CONFIRMAR NOME (cadastro pendente)` : `# PRIMEIRA INTERAÇÃO — CONFIRMAR NOME`;
+    const msg = inboundCount > 1
+      ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
+      : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
+    return `${cabecalho}
 ## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
-"Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+"${msg}"
 
 ## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
 - Apenas UMA pergunta. Nada depois do ponto final.
 - PROIBIDO escrever no texto enviado: "aguardar confirmação", "confirme o nome", "sem reformular", "primeira interação", "tool registrar", "aguarde", instruções de sistema, comentários, parênteses explicativos, listas com "-".
 - Se cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
 - Se cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto.
-- Só DEPOIS da confirmação, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.`;
+- Só DEPOIS da confirmação, prossiga. NÃO mencione receita/lentes/agendamento antes de confirmar o nome.`;
   }
 
-  return `# PRIMEIRA INTERAÇÃO — PEDIR NOME
+  const cabecalho = inboundCount > 1 ? `# CADASTRO INCOMPLETO — PEDIR NOME` : `# PRIMEIRA INTERAÇÃO — PEDIR NOME`;
+  const msg = inboundCount > 1
+    ? `Antes de seguir, posso saber seu nome, por favor? 😊`
+    : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+  return `${cabecalho}
 ## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
-"Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+"${msg}"
 
 ## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
 - Mensagem termina no "?" da pergunta sobre o nome. Apenas UMA pergunta.
