@@ -20,6 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { RevisaoHumanaBadge, traduzirMotivos } from "@/components/shared/RevisaoHumanaBadge";
+import { ReceitaValidacaoPopover } from "@/components/atendimentos/ReceitaValidacaoPopover";
 import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban, CheckCircle2 } from "lucide-react";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
@@ -340,31 +341,12 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             {(atendimento.metadata as any)?.revisao_humana_pendente === true && (
               <>
                 <RevisaoHumanaBadge motivos={(atendimento.metadata as any)?.revisao_motivos} size="md" />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 px-2 text-[10px] gap-1 border-amber-500/60 text-amber-700 hover:bg-amber-50"
-                  onClick={async () => {
-                    const meta = { ...(atendimento.metadata as any) };
-                    const motivos = meta.revisao_motivos;
-                    delete meta.revisao_humana_pendente;
-                    delete meta.revisao_motivos;
-                    const { error } = await supabase.from("atendimentos").update({ metadata: meta }).eq("id", id);
-                    if (error) { toast.error("Erro: " + error.message); return; }
-                    await supabase.from("eventos_crm").insert({
-                      contato_id: atendimento.contato_id,
-                      tipo: "orcamento_revisao_resolvida",
-                      descricao: "Revisão humana do orçamento marcada como concluída",
-                      referencia_tipo: "atendimento",
-                      referencia_id: id,
-                      metadata: { motivos, resolvido_por: (await supabase.auth.getUser()).data.user?.id },
-                    });
-                    toast.success("Revisão concluída");
-                  }}
-                  title={traduzirMotivos((atendimento.metadata as any)?.revisao_motivos)}
-                >
-                  <CheckCircle2 className="h-3 w-3" /> Resolver
-                </Button>
+                <ReceitaValidacaoPopover
+                  atendimentoId={id}
+                  contatoId={atendimento.contato_id}
+                  atendimentoMetadata={atendimento.metadata}
+                  contatoMetadata={(atendimento.contato as any)?.metadata}
+                />
               </>
             )}
             <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>

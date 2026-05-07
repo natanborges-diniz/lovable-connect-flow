@@ -1,41 +1,66 @@
-## Badge "Revisão humana pendente" em /crm/conversas
+## Painel "Receita lida pelo Gael" — só aparece em faixa alta de grau
 
-A flag já é gravada pelo `ai-triage` em `atendimentos.metadata.revisao_humana_pendente` (com `revisao_motivos[]`). Falta expor isso na UI de conversas.
+Hoje o operador vê o badge âmbar "⚠ Revisar orçamento" no header do atendimento, mas não consegue conferir os valores da receita que o Gael leu via OCR e o cliente confirmou. Vamos trazer essa visibilidade direto no painel — **mas só nos casos em que a IA marcou revisão humana pendente** (faixa alta: `cilindrico_alto`, `adicao_alta`, `esferico_faixa_cinza`). Receitas em faixa normal continuam fluindo sem nenhum overhead na UI.
 
-### Mudanças em `src/pages/Atendimentos.tsx`
+### Gate de exibição
 
-**1. Lista (tabela em ~linha 118)** — adicionar badge âmbar ao lado do `AtendimentoStatusBadge` quando `a.metadata?.revisao_humana_pendente === true`:
-- Texto: `⚠ Revisar orçamento`
-- Estilo: `border-amber-500/60 text-amber-600 bg-amber-50/40`
-- `title` (tooltip) lista os motivos traduzidos (cilindrico_alto → "Cilíndrico alto (>4)", adicao_alta → "Adição alta (>3,5)", esferico_faixa_cinza → "Esférico 8–10").
+O botão e o popover **só renderizam** quando:
+```
+atendimento.metadata.revisao_humana_pendente === true
+```
 
-**2. Header do detalhe (~linha 324)** — mesmo badge, mais visível, ao lado do `AtendimentoStatusBadge` no diálogo de conversa.
+Para receitas em faixa normal (a grande maioria) nada muda — sem botão, sem popover, sem ruído visual. O operador só vê o painel quando o Gael sinalizou que aquele grau exige validação humana.
 
-**3. Filtro novo no `<Select>` de status (~linha 83)** — opção extra **fora** do enum status:
-- `revisao_pendente` → "⚠ Revisão pendente"
-- Quando selecionado: filtra client-side por `metadata.revisao_humana_pendente === true` (não envia ao hook). Mantém os outros filtros como hoje.
+### Onde os dados já estão
 
-**4. Botão "Resolver revisão"** no header do detalhe (só aparece se a flag for true): faz `update` em `atendimentos.metadata` removendo `revisao_humana_pendente` e `revisao_motivos`, e insere `eventos_crm` `tipo: 'orcamento_revisao_resolvida'` com o `user_id` que resolveu. Toast de confirmação. Realtime já refaz a query.
+`contatos.metadata.receitas[]` (até 5 leituras). Cada item tem:
+- `eyes.od` / `eyes.oe` — `{ esf, cyl, axis, add }`
+- `rx_type`, `confidence`, `data_leitura`, `confirmed_by_client_at`, `label`
+- `summary.suggested_category`
 
-### Helper compartilhado
+E `metadata.receita_confirmacao` traz `rx_index`, `pending`, `confirmed_at`.
 
-Criar `src/components/shared/RevisaoHumanaBadge.tsx`:
-- Props: `motivos?: string[]`, `size?: "sm" | "md"`.
-- Renderiza badge âmbar com tooltip dos motivos traduzidos.
-- Reutilizável em outras telas (Pipeline cards, etc.) no futuro.
+A IA já grava `revisao_motivos[]` em `atendimentos.metadata` quando bate uma das três faixas críticas.
 
-### Sem mudanças necessárias
+### Mudanças
 
-- Schema (já gravado pelo backend).
-- Hooks (`useAtendimentos` já traz `metadata`).
-- `ai-triage` (lógica de gravação intacta).
+**1. Novo `src/components/atendimentos/ReceitaValidacaoPopover.tsx`**
+
+- Renderiza `null` se `!revisao_humana_pendente` (gate de segurança extra).
+- Cabeçalho: label da receita + timestamp + tag de tipo (Visão simples / Multifocal).
+- Cartões OD / OE com ESF, CIL, EIXO, ADD formatados em pt-BR (sinais e graus).
+- Linha de motivos da revisão (reusa `traduzirMotivos`): "Cilíndrico alto (>4) • Adição alta (>3,5)".
+- Status de confirmação do cliente: ✅ "Confirmada em DD/MM HH:mm" ou ⏳ "Aguardando confirmação".
+- Confiança da extração (`confidence × 100%`) em barrinha discreta.
+- Se houver mais de uma receita em `receitas[]`, Tabs simples para alternar.
+- Rodapé com dois botões:
+  - **"Validar e liberar orçamento"** → limpa `revisao_humana_pendente` + `revisao_motivos`, registra `eventos_crm` `tipo: 'orcamento_revisao_validada'` com `user_id`, motivos originais e snapshot da receita validada. Toast "Receita validada".
+  - **"Pedir nova leitura"** → marca `receita_confirmacao.pending=true`, incrementa `correction_count`, registra `eventos_crm` `tipo: 'orcamento_revisao_rejeitada'`. Não envia mensagem ao cliente.
+
+**2. `src/pages/Atendimentos.tsx`**
+
+- No header do detalhe, **substituir** o botão "Resolver" atual por um botão **"📄 Receita lida"** (com ping âmbar discreto) que abre o popover. O badge "⚠ Revisar orçamento" continua visível ao lado, sinalizando o estado.
+- Renderização condicionada a `revisao_humana_pendente === true` — receitas em faixa normal não mostram o controle.
+- Estender `useAtendimento` em `src/hooks/useAtendimentos.ts` para trazer `contato:contatos(*)` (precisa de `metadata.receitas` e `receita_confirmacao`).
+
+**3. `src/components/shared/RevisaoHumanaBadge.tsx`**
+
+- Exportar helper `formatRx(eye)` → `"ESF -1,00 CIL -5,50 EIXO 40°"` para reúso.
+
+### Sem mudanças
+
+- Schema (tudo já em `contatos.metadata` / `atendimentos.metadata`).
+- `ai-triage` (lógica de leitura/classificação intacta).
+- Lista (tabela) — mantém só o badge âmbar pequeno.
 
 ### Memória
 
-Adicionar nota curta em `mem://ia/regras-negocio-e-proibicoes-criticas` registrando que a flag é exibida em `/crm/conversas` (lista + detalhe) e pode ser resolvida manualmente pelo operador.
+Atualizar `mem://ia/regras-negocio-e-proibicoes-criticas`: validação humana da receita acontece **apenas em faixa alta de grau** (motivos `cilindrico_alto`, `adicao_alta`, `esferico_faixa_cinza`) via popover "📄 Receita lida" no detalhe do atendimento. `orcamento_revisao_validada` é a fonte de verdade da validação.
 
 ### Arquivos tocados
 
-- `src/pages/Atendimentos.tsx` (badge na lista, no header, filtro, botão resolver)
-- `src/components/shared/RevisaoHumanaBadge.tsx` (novo)
-- `mem://ia/regras-negocio-e-proibicoes-criticas` (nota da UI)
+- `src/components/atendimentos/ReceitaValidacaoPopover.tsx` (novo)
+- `src/pages/Atendimentos.tsx` (botão condicional + integração)
+- `src/hooks/useAtendimentos.ts` (select estendido em `useAtendimento`)
+- `src/components/shared/RevisaoHumanaBadge.tsx` (export `formatRx`)
+- `mem://ia/regras-negocio-e-proibicoes-criticas` (escopo da validação)
