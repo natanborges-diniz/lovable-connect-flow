@@ -4198,7 +4198,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               .from("contatos")
               .update({
                 nome: novoNome,
-                metadata: { ...ctMeta, nome_confirmado: true, nome_origem: "ia_confirmado", nome_atualizado_at: new Date().toISOString() },
+                metadata: { ...ctMeta, nome_confirmado: true, precisa_confirmar_nome: false, nome_origem: "ia_confirmado", nome_atualizado_at: new Date().toISOString() },
               })
               .eq("id", contatoId);
             await supabase.from("eventos_crm").insert({
