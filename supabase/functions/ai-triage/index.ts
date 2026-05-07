@@ -3240,7 +3240,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             asked_at: new Date().toISOString(),
             correction_count: Number(contatoMeta?.receita_confirmacao?.correction_count || 0) + 1,
             reason: "high_impact_correction",
-            fora_da_faixa: maxNewAbs >= 8,
+            fora_da_faixa: maxNewAbs > 10,
           };
         }
 
