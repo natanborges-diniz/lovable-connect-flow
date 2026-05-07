@@ -3343,6 +3343,26 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           continue;
         }
 
+        // ── GUARDA: escalada por "grau alto / sob encomenda" SEM receita interpretada ──
+        const _motivoTxt = `${args.motivo || ""} ${args.resposta || ""}`;
+        if (semReceitaSalvaTurno && escaladaGrauSemReceitaTexto(_motivoTxt)) {
+          console.log(`[GUARDA-GRAU-SEM-RECEITA] escalar_consultor bloqueado — sem receita salva`);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "escalada_grau_sem_receita_bloqueada",
+            descricao: `IA tentou escalar com motivo "grau alto/sob encomenda" sem receita salva`,
+            metadata: { motivo: args.motivo, resposta: String(args.resposta || "").substring(0, 200) },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          resposta = MSG_PEDIR_RECEITA_PARA_GRAU_ALTO;
+          intencao = "receita_oftalmologica";
+          pipeline_coluna = "Orçamento";
+          precisa_humano = false;
+          setor_sugerido = "";
+          validatorFlags.push("escalada_grau_sem_receita_bloqueada");
+          continue;
+        }
+
         resposta = args.resposta;
         precisa_humano = true;
         // Keep contact in current column — human intervention is managed via modo='humano' flag
