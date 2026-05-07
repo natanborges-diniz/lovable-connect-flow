@@ -5134,7 +5134,7 @@ async function runConsultarLentes(
   const sphereLooksAbsurd = sphereValues.some((v: number) => Math.abs(v) > 25);
   if (rxType === "unknown" || sphereValues.length === 0 || sphereLooksAbsurd) {
     console.log(`[QUOTE] Prescription incomplete (rxType=${rxType}, sphereCount=${sphereValues.length}, absurd=${sphereLooksAbsurd}) — asking structured values`);
-    return { resposta: "Pra montar o orçamento certinho, me confirma os valores da receita por texto, por favor?\n• OD: esférico / cilíndrico / eixo\n• OE: esférico / cilíndrico / eixo\n(Se tiver adição pra perto, manda também 😊)" };
+    return { resposta: "Pra montar o orçamento certinho dessa *lente personalizada*, me confirma os valores da receita por texto, por favor?\n• OD: esférico / cilíndrico / eixo\n• OE: esférico / cilíndrico / eixo\n(Se tiver adição pra perto, manda também 😊)" };
   }
 
   const worstSphere = sphereValues.reduce((a, b) => Math.abs(a) > Math.abs(b) ? a : b, 0);
