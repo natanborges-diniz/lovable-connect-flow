@@ -3479,6 +3479,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             referencia_tipo: "atendimento", referencia_id: atendimento_id,
           });
           resposta = buildMsgConfirmarReceita(rxWithLabel, false);
+          rxConfirmGateTriggered = true;
+          rxConfirmGateRx = rxWithLabel;
           validatorFlags.push("receita_confirmacao_solicitada");
           console.log(`[RX-CONFIRM] Pedindo confirmação ao cliente (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%)`);
         } else if (needsHumanReview) {
