@@ -2224,6 +2224,94 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
     }
 
+    // ── 4.4b. MÁQUINA DE ESTADOS PÓS-ORÇAMENTO (Mai/2026) ──
+    // Após a IA enviar o orçamento + CTA "quer agendar uma visita?" o fluxo é
+    // determinístico: cidade → loja → encaminha pra agendamento.
+    {
+      const posOrc = (contatoMeta as any).pos_orcamento;
+      const _setPosOrc = async (next: any) => {
+        try {
+          const { data: cur } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+          const m = (cur?.metadata as Record<string, any>) || {};
+          if (next === null) delete m.pos_orcamento; else m.pos_orcamento = next;
+          await supabase.from("contatos").update({ metadata: m }).eq("id", contatoId);
+        } catch (_) { /* noop */ }
+      };
+      if (posOrc?.etapa && !lastIsImage) {
+        if (posOrc.etapa === "aguardando_cta_visita") {
+          if (detectAceiteVisita(lastInboundText)) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await _setPosOrc({ ...posOrc, etapa: "aguardando_cidade", atualizado_at: new Date().toISOString() });
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "cta_visita_aceito",
+              descricao: "Cliente aceitou visita após orçamento — listando cidades",
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          if (detectRecusaVisita(lastInboundText)) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, "Tranquilo! Quando quiser ver pessoalmente, é só me chamar 😊");
+            await _setPosOrc(null);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "cta_visita_recusado",
+              descricao: "Cliente recusou visita após orçamento",
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_recusa"], intencao: "orcamento", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+          }
+          await _setPosOrc(null);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId, tipo: "pos_orcamento_fallback_llm",
+            descricao: `Cliente desviou de aguardando_cta_visita: "${lastInboundText.substring(0,120)}"`,
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          }).catch(() => {});
+        } else if (posOrc.etapa === "aguardando_cidade") {
+          const cidade = detectCidadeEscolhida(lastInboundText);
+          if (cidade) {
+            const lojasMsg = formatLojasPorCidade(cidade, lojas);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
+            await _setPosOrc({ ...posOrc, etapa: "aguardando_loja", cidade, atualizado_at: new Date().toISOString() });
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "cidade_escolhida",
+              descricao: `Cliente escolheu cidade ${CIDADE_LABEL[cidade]}`,
+              metadata: { cidade },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          const tries = Number(posOrc.tries_cidade || 0) + 1;
+          if (tries < 2) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await _setPosOrc({ ...posOrc, tries_cidade: tries });
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          await _setPosOrc(null);
+        } else if (posOrc.etapa === "aguardando_loja") {
+          const loja = matchLojaEscolhida(lastInboundText, posOrc.cidade || "", lojas);
+          if (loja) {
+            await _setPosOrc({ ...posOrc, etapa: "agendando", loja_nome: loja.nome_loja, atualizado_at: new Date().toISOString() });
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "loja_escolhida",
+              descricao: `Cliente escolheu loja ${loja.nome_loja}`,
+              metadata: { loja_nome: loja.nome_loja, cidade: posOrc.cidade },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            }).catch(() => {});
+            const ask = `Boa! Vamos marcar na *${loja.nome_loja}* então 😊 Qual dia e horário ficam melhor pra você? Pode ser hoje, amanhã ou outro dia da semana.`;
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, ask);
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_loja_definida"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          const tries = Number(posOrc.tries_loja || 0) + 1;
+          if (tries < 2) {
+            const lojasMsg = formatLojasPorCidade(posOrc.cidade || "osasco", lojas);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
+            await _setPosOrc({ ...posOrc, tries_loja: tries });
+            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          }
+          await _setPosOrc(null);
+        }
+      }
+    }
+
     // ── 4.5. PRIORIDADE: COMPROVANTE DE PAGAMENTO ──
     // Se a imagem inbound chegou logo após o envio de um link de pagamento,
     // tratar como COMPROVANTE — não como receita ocular. Sem isso, o motor
