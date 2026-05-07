@@ -1,38 +1,33 @@
-## Causa raiz
+## Diagnóstico
 
-Tati já tinha receita confirmada (`-13,50 / -20,50`). Ao enviar nova foto, o LLM viu `hasValidReceitas=true` + bloco `[FLUXO PÓS-RECEITA OBRIGATÓRIO]` e ficou sem chamar tool. Caiu no fallback determinístico que respondeu "Recebi sua receita 👀… analisando" e parou — o `9.4 FORCED RETRY` não dispara porque está condicionado a `!hasValidReceitas`.
+Os 502 em `criar-solicitacao-loja` são causados por um **ReferenceError**: a variável `primeiroNome` é usada na linha 310 mas **nunca foi declarada** na função.
 
-## Mudanças em `supabase/functions/ai-triage/index.ts`
+```ts
+// Linha 310 (dentro do bloco de envio do template ao cliente)
+descricao:
+  envioClienteStatus === "enviado"
+    ? `Link de pagamento enviado para ${primeiroNome} (${nomeLoja})`  // 💥 não definida
+    : `Falha ao enviar link de pagamento: ${envioClienteErro}`,
+```
 
-1. **Detectar nova receita pendente** (perto da linha 2138):
-   - Computar `lastInboundImageAt` (max `created_at` de inbound image em `last5Inbound`).
-   - Computar `lastReceitaAt` (max `data_leitura` em `receitas[]`).
-   - `hasPendingNewPrescriptionImage = lastInboundImageAt && (!lastReceitaAt || lastInboundImageAt > lastReceitaAt)`.
-   - Reforço por intent: regex `/nova receita|outra receita|receita nova|receita atualizada|tenho (uma )?receita/i` em últimos 3 inbounds próximos da imagem.
+A única variável de nome do cliente que existe no escopo é `nomeClienteRaw` (vinda de `dados.cliente`). Quando o template é enviado com sucesso, o código tenta acessar `primeiroNome`, dispara `ReferenceError`, e o catch externo devolve 502 — exatamente o status que aparece nos logs do navegador. Por isso também não há logs úteis em `edge_function_logs` (a stack do erro é jogada no catch genérico do `serve`).
 
-2. **`isImageContext`**: incluir `hasPendingNewPrescriptionImage` independentemente de `hasValidReceitas`.
+O aviso de `apple-mobile-web-app-capable` é só um warning de PWA do Chrome, não tem relação com o 502 — `index.html` já tem `<meta name="mobile-web-app-capable" content="yes">`.
 
-3. **Hint de prompt** (~linha 2963/2974): se `hasPendingNewPrescriptionImage`, substituir o bloco "FLUXO PÓS-RECEITA OBRIGATÓRIO" por um `[SISTEMA: NOVA RECEITA PENDENTE]` que ordena `interpretar_receita` AGORA com a imagem nova e proíbe `consultar_lentes` com a receita antiga.
+## Correção
 
-4. **Force-retry** (linha 4576): estender condição
+**Arquivo:** `supabase/functions/criar-solicitacao-loja/index.ts`
+
+1. Declarar `primeiroNome` logo após `nomeClienteRaw` (~linha 221):
+   ```ts
+   const primeiroNome = nomeClienteRaw.split(/\s+/)[0] || nomeClienteRaw;
    ```
-   precisaForcarInterpretacao =
-     (isImageContext && !hasValidReceitas && !interpretouReceitaNesteTurno && !precisa_humano)
-     || (hasPendingNewPrescriptionImage && !interpretouReceitaNesteTurno && !precisa_humano);
-   ```
-   O sucesso do retry já faz append em `metadata.receitas[]` (FIFO 5) e marca `receita_confirmacao.pending=true` — preserva receita anterior.
+2. Manter o uso atual em `eventos_crm.descricao`.
 
-5. **Quote-engine** (linha 3382 e adjacentes): bloquear `consultar_lentes` quando `hasPendingNewPrescriptionImage=true`, devolvendo confirmação da nova OCR antes.
+Sem outras mudanças — o restante do fluxo (OB payment-links, template, anexos, protocolo) já está correto.
 
-## Memória
+## Validação
 
-Atualizar `mem://ia/auto-receita-e-anti-loop` com seção "Nova receita após confirmada": gatilho por timestamp + intent, force-retry estendido, proibição de cotar com receita antiga até OCR rodar.
-
-## Validação pós-deploy
-
-Reenviar foto de receita em conversa com receita já confirmada → log `[FORCE-INTERPRETAR] Receita salva via retry` ou tool_call `interpretar_receita` + mensagem de confirmação com novos valores. Não pode mais parar em "estou analisando".
-
-## Fora de escopo
-
-- Parser de correção por texto (já corrigido — caso Franciana).
-- Mudanças de copy além dos hints citados.
+Após o deploy automático:
+- Gerar um novo link de pagamento pela loja → deve voltar 200 com `url` e `payment_link_id`.
+- Conferir `eventos_crm` com tipo `link_pagamento_enviado_cliente` referenciando o primeiro nome do cliente.
