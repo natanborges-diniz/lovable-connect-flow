@@ -1,68 +1,38 @@
 ## Causa raiz
 
-Na conversa, a Franciana digitou:
+Tati já tinha receita confirmada (`-13,50 / -20,50`). Ao enviar nova foto, o LLM viu `hasValidReceitas=true` + bloco `[FLUXO PÓS-RECEITA OBRIGATÓRIO]` e ficou sem chamar tool. Caiu no fallback determinístico que respondeu "Recebi sua receita 👀… analisando" e parou — o `9.4 FORCED RETRY` não dispara porque está condicionado a `!hasValidReceitas`.
 
-```
-*OD*: ESF -13,50 *CIL -0,50 *EIXO 180°
-*OE*: ESF -20,50 CIL -1,50 EIXO 145°
-```
+## Mudanças em `supabase/functions/ai-triage/index.ts`
 
-A IA persistiu OD como `ESF -13,50 / CIL -0,80 / EIXO 180°`. O `-0,80` é resíduo do OCR anterior — o parser **não capturou o cilindro novo (-0,50)**, então o merge manteve o valor antigo.
+1. **Detectar nova receita pendente** (perto da linha 2138):
+   - Computar `lastInboundImageAt` (max `created_at` de inbound image em `last5Inbound`).
+   - Computar `lastReceitaAt` (max `data_leitura` em `receitas[]`).
+   - `hasPendingNewPrescriptionImage = lastInboundImageAt && (!lastReceitaAt || lastInboundImageAt > lastReceitaAt)`.
+   - Reforço por intent: regex `/nova receita|outra receita|receita nova|receita atualizada|tenho (uma )?receita/i` em últimos 3 inbounds próximos da imagem.
 
-### Por quê (em `supabase/functions/ai-triage/index.ts`, função `detectPrescriptionCorrection`, linhas 644–740)
+2. **`isImageContext`**: incluir `hasPendingNewPrescriptionImage` independentemente de `hasValidReceitas`.
 
-O Pattern A usa o regex:
+3. **Hint de prompt** (~linha 2963/2974): se `hasPendingNewPrescriptionImage`, substituir o bloco "FLUXO PÓS-RECEITA OBRIGATÓRIO" por um `[SISTEMA: NOVA RECEITA PENDENTE]` que ordena `interpretar_receita` AGORA com a imagem nova e proíbe `consultar_lentes` com a receita antiga.
 
-```js
-(od|oe|os)[^\d+\-]{0,15}${num}\s*(?:com|x|\/)?\s*${num}?\s*(?:eixo\s*${num})?
-```
+4. **Force-retry** (linha 4576): estender condição
+   ```
+   precisaForcarInterpretacao =
+     (isImageContext && !hasValidReceitas && !interpretouReceitaNesteTurno && !precisa_humano)
+     || (hasPendingNewPrescriptionImage && !interpretouReceitaNesteTurno && !precisa_humano);
+   ```
+   O sucesso do retry já faz append em `metadata.receitas[]` (FIFO 5) e marca `receita_confirmacao.pending=true` — preserva receita anterior.
 
-Entre a esfera (`-13,50`) e o cilindro (`-0,50`) o texto contém `" *cil "`. O regex só permite `\s*(?:com|x|\/)?\s*` antes do segundo `${num}`. Como há a palavra `cil` (e o `*`), o segundo grupo numérico **não casa** → `cylinder = null` → merge mantém o valor antigo (-0,80) do OCR.
+5. **Quote-engine** (linha 3382 e adjacentes): bloquear `consultar_lentes` quando `hasPendingNewPrescriptionImage=true`, devolvendo confirmação da nova OCR antes.
 
-OE funciona porque o cilindro vem direto após a esfera ou talvez já estava correto antes. Mas qualquer formato com a palavra "cil" entre os números reproduz o bug.
+## Memória
 
-## Mudanças
+Atualizar `mem://ia/auto-receita-e-anti-loop` com seção "Nova receita após confirmada": gatilho por timestamp + intent, force-retry estendido, proibição de cotar com receita antiga até OCR rodar.
 
-### 1. `supabase/functions/ai-triage/index.ts` — Robustecer parser
+## Validação pós-deploy
 
-a. **Pre-normalizar o texto** dentro de `detectPrescriptionCorrection` (após o tratamento de pl/plano/sc):
-   - Remover asteriscos: `t = t.replace(/\*/g, " ")`.
-   - Normalizar separadores explícitos: trocar palavras-rótulo por espaço, mas só entre números do mesmo olho — substituir ocorrências de `\b(esf[eé]rico|esf|cil[ií]ndrico|cil|cyl|eixo|axis|grau|graus)\b` por espaço **dentro do bloco de cada olho** (ver passo b). A palavra `eixo` precisa virar marcador especial para o axis, então fazemos isso só depois de extrair eixo (ou usamos um regex de eixo separado).
-
-b. **Trocar Pattern A por extração por bloco de olho** (mais robusta):
-   - Dividir `t` em blocos por olho usando lookahead em `od|oe|os`: regex `/\b(od|oe|os)\b([\s\S]*?)(?=\b(od|oe|os)\b|$)/gi`.
-   - Em cada bloco:
-     - Extrair `axis` primeiro: `/(?:eixo|axis)\s*([+-]?\d{1,3})/i`.
-     - Extrair `add`: `/(?:add?|adi[cç][aã]o)\s*([+-]?\d+[.,]?\d*)/i`.
-     - Remover esses trechos do bloco.
-     - No restante, capturar **todos** os números (`/[+-]?\d+[.,]?\d*/g`) — primeiro = `sphere`, segundo = `cylinder`.
-   - Isso elimina dependência de `com/x//` e ignora rótulos textuais como `esf`, `cil`, `*`, `:`, etc.
-
-c. **Manter `parseDiopter` / `parseAxis` atuais** (shorthand óptico continua valendo).
-
-d. **Validação anti-hallucination pós-merge** (linha ~3122 e ~2240): após aplicar o merge, comparar cada campo do `merged` com o texto-fonte normalizado:
-   - Para cada valor não-null em `od.cylinder`, `oe.cylinder`, `od.sphere`, `oe.sphere`, `od.axis`, `oe.axis`: se o módulo do valor não aparece como substring numérica no texto original do cliente E o valor é diferente do snapshot da receita anterior, **reverter** ao valor anterior e logar `[RX-VALIDATE] revertendo {campo}: extracted={x} not found in source`.
-   - Isso garante que mesmo se o parser falhar, nenhum número fantasma chega ao cliente.
-
-### 2. Confirmação visível ao cliente
-
-A mensagem `buildMsgConfirmarReceita` já mostra os 4 valores. Após este fix, o cilindro vai bater com o que o cliente digitou. Cliente responde "Não" → fluxo `[RX-CONFIRMACAO] Rejeição` continua repedindo (já existe).
-
-### 3. Testes manuais (após deploy)
-
-Re-disparar `ai-triage` para a conversa da Franciana via watchdog ou novo inbound. Esperar:
-- `[RX-VALIDATE]` sem reversões.
-- Mensagem de confirmação com `OD CIL -0,50` (não `-0,80`).
-- Logs `[RX-HIGH-IMPACT]` mantêm-se (esfera ≥8 ainda dispara confirmação).
-
-### 4. Memória
-
-Atualizar `mem://ia/correcao-receita-por-texto` adicionando seção **"Parser por bloco de olho + validação anti-fantasma"** com a regra: todo número persistido tem que existir no texto-fonte.
+Reenviar foto de receita em conversa com receita já confirmada → log `[FORCE-INTERPRETAR] Receita salva via retry` ou tool_call `interpretar_receita` + mensagem de confirmação com novos valores. Não pode mais parar em "estou analisando".
 
 ## Fora de escopo
-- OCR (Gemini Vision) — bug é só no parser de texto.
-- Mudar copy ou fluxo de escalada.
 
-## Validação
-- Deploy `ai-triage`.
-- Conferir nos logs: `[RX-VALIDATE]` ausente OU revertendo corretamente, e cilindro OD = -0,50 na próxima confirmação.
+- Parser de correção por texto (já corrigido — caso Franciana).
+- Mudanças de copy além dos hints citados.
