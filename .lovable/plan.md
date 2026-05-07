@@ -1,72 +1,85 @@
-## Diagnóstico do loop (Franciana)
+# Plano — Fonte de Lead, Retorno e Validação de Contato
 
-Sequência real:
+## Diagnóstico
 
-1. Cliente manda foto → OCR lê `OD ESF -1,00 CIL -5,50 EIXO 40 / OE ESF -0,75 CIL -3,00 EIXO 145` → IA pergunta "confere?".
-2. Cliente: "Sim" → gate marca `pending=false` e dispara `runConsultarLentes` (fix anterior).
-3. `runConsultarLentes` consulta `pricing_table_lentes` com `cylinder_max ≥ 5,50`. Catálogo NÃO cobre cilindro tão alto → zero resultados → cai em `runConsultarLentesEstimativa`, que devolve as 3 faixas (Econômica/Intermediária/Premium) **e termina perguntando** `"Consegue me confirmar o cilindro e eixo de cada olho (ou enviar foto da receita)?"` (linha 5739).
-4. Cliente respondeu o cilindro de novo por texto → parser de correção entendeu como "novo ESF" e gravou `OD ESF -5,50 CIL -5,50` (interpretação errada) → IA pediu confirmação outra vez → loop.
+Auditei `contatos` (tipo=cliente, 258 totais):
 
-Ou seja: o pedido de "confirmar cilindro/eixo" no fim do `consultar_lentes_estimativa` é o gatilho da segunda volta. A receita já estava confirmada pela cliente; perguntar de novo é redundante e ainda contamina o parser de texto.
+| categoria | qtde |
+|---|---|
+| site (regex "Acessei o site") | 99 |
+| instagram (regex "no Instagram") | 12 |
+| sem `fonte_lead` (cai em "Outro" no card) | **147** |
 
-A regra que o usuário quer é simples: cilindro alto (>4) = `revisão pendente` + segue fluxo IA mostrando estimativa, **sem** pedir nada de volta ao cliente.
+A 1ª inbound dos 147 sem fonte é dominantemente **orgânica** (cumprimentos: "Bom dia", "Olá", "Gostaria de informações", foto de receita) — **não é bug de captura**, é o WhatsApp orgânico (cartão, indicação, busca local, retomadas espontâneas). Hoje não há diferenciação entre **Retorno** (cliente já existia) e **Orgânico novo** — ambos viram "Outro".
 
-## O que vou alterar
+Também não há validação ativa do par **telefone+nome**: hoje a IA só chama `registrar_nome_cliente` na 1ª interação quando `nome_confirmado=false`. Em retorno (cliclo ≥ 2) ou contato pré-existente sem confirmação, o nome do banco fica preso ao senderName antigo.
 
-Arquivo único: `supabase/functions/ai-triage/index.ts`.
+## Objetivo
 
-### 1. Gate pós-confirmação não pode "perguntar de novo"
+1. Acabar com a categoria genérica "Outro": separar em **Retorno**, **Orgânico** (novo, sem origem identificada) e **Desconhecido** (corner cases).
+2. Sempre que abrir uma nova conversa, validar o par `telefone + nome` com o cliente — confirmar, criar ou atualizar.
+3. Auditoria one-shot dos 147 contatos atuais para preencher retroativamente.
 
-Logo após `runConsultarLentes` no gate (linha ~2335):
+## Mudanças
 
-- Se `requerRevisaoHumanaPosOrcamento(lastRx).precisa === true`, marcar no `atendimentos.metadata`:
-  - `revisao_humana_pendente = true`
-  - `revisao_motivos = [...motivos da função]`
-  - `revisao_solicitada_at = now()`
-  e inserir evento `tipo="revisao_humana_pos_cotacao"` em `eventos_crm`.
-- Continua enviando a resposta da cotação com `MSG_REVISAO_HUMANA_SUFIXO` (já é o que faz hoje), mas agora a flag fica acesa também quando o caminho é via estimativa.
+### 1. Webhook — classificação ampliada da fonte (`whatsapp-webhook/index.ts`)
 
-### 2. `runConsultarLentes` — quando cair em estimativa com receita JÁ confirmada, não repergunta
+Substituir o bloco `1b. FONTE DO LEAD` por uma cascata determinística aplicada **na 1ª inbound** (rastreada por `metadata.primeira_inbound_at`):
 
-No bloco do fallback estimativa (linha ~5444), depois de obter `est.resposta`:
+```text
+1. "Acessei o site" / link dinizosasco         → site
+2. "no Instagram" / "vi vocês no Insta" / bio   → instagram
+3. contato pré-existente com atendimento
+   anterior encerrado (>0)                       → retorno
+4. ciclo_funil ≥ 2                                → retorno
+5. tags inclui 'comprador' ou 'lead-recuperado'  → retorno
+6. caso contrário                                  → organico
+```
 
-- Se a receita selecionada (`rxMeta`) tem `confirmed_by_client_at`, sanitizar a resposta da estimativa removendo a frase final "Consegue me confirmar o cilindro e eixo..." / "Consegue me enviar foto da receita ou os números de ADD e CIL/AX..." e substituir por CTA de fechamento: `"Quer que eu já te indique a loja mais próxima pra fechar nessa condição? Me passa sua região/bairro 😊"`.
-- Anexar `MSG_REVISAO_HUMANA_SUFIXO` se `requerRevisaoHumanaPosOrcamento(rxMeta).precisa`.
-- Logar evento `tipo="cotacao_estimativa_pos_confirmacao"` para auditoria.
+Sempre persistir `fonte_lead` (nunca null para clientes finais), `fonte_lead_at`, `fonte_lead_mensagem`. Para `retorno`, gravar também `fonte_lead_origem_anterior` (a `fonte_lead` que tinha antes, se houver) e `retorno_apos_dias`.
 
-Implementação prática: depois de `est?.resposta`, aplicar `est.resposta = est.resposta.replace(/Consegue me (confirmar o cilindro[^\n]*|enviar foto da receita ou os números de ADD[^\n]*)\?/gi, "")` e concatenar o CTA + sufixo.
+### 2. Validação obrigatória do par telefone+nome
 
-### 3. `runConsultarLentesEstimativa` — fonte da pergunta
+Reforçar `whatsapp-webhook` + `ai-triage`:
 
-Em vez de mexer só no chamador, adicionar um parâmetro opcional `rx_ja_confirmada: boolean`. Quando `true`, pular as duas últimas linhas que perguntam ADD/CIL/EIXO (linhas 5737–5739) e devolver só as faixas + frase neutra `"Posso seguir com uma dessas opções e já te conectar com a loja mais próxima?"`. Chamada em `runConsultarLentes` passa `rx_ja_confirmada: !!rxMeta.confirmed_by_client_at`.
+- **No webhook (já existe parcialmente)**: ao localizar/criar `contatos` por `telefone`, se `nome` estiver vazio, igual ao telefone, ou for genérico ("Cliente", "WhatsApp User", começa com "+55"), marcar `metadata.nome_confirmado=false` e `metadata.precisa_confirmar_nome=true`.
+- **No `ai-triage`**: se `precisa_confirmar_nome=true` (independe de ser 1ª interação), o Gael pergunta **uma vez** "Falo com {senderName}?" (ou "Posso saber seu nome?"). A resposta dispara a tool `registrar_nome_cliente` (já existente), que faz `UPDATE contatos SET nome` e zera os flags.
+- Para contatos já confirmados onde o `senderName` mudou (cliente trocou de aparelho/perfil), gravar discrepância em `metadata.nomes_alternativos[]` mas **não** sobrescrever automaticamente.
 
-(Itens 2 e 3 são redundantes de propósito — defesa em profundidade. Se algum outro caminho chamar `runConsultarLentesEstimativa` direto, o parâmetro já blinda.)
+### 3. Regra: Retorno reabre, não duplica
 
-### 4. Parser de correção por texto — proteção mínima
+`whatsapp-webhook` já faz upsert por telefone (PK lógica). Acrescentar: quando contato pré-existente recebe nova inbound após `>14 dias` da última mensagem, registrar evento `retomada_espontanea` em `eventos_crm` e incrementar `contatos.ciclo_funil`. Isso alimenta a regra 4 acima já no próximo lead que vier.
 
-Caso colateral: a cliente escreveu `"OD: -5,50 CIL/ Eixo 40"` e o parser virou `ESF -5,50 CIL -5,50`. Não vou refatorar o parser nesta tarefa (fora do escopo declarado), mas vou adicionar **uma guarda**: se a receita-alvo já está com `confirmed_by_client_at` e o texto chega no formato "OD: <num> CIL/Eixo <num>", o parser deve interpretar como **correção apenas de cilindro/eixo** (não esférico), preservando o ESF original. Implementação: regex específica `/^OD[:\s]+-?\d+[,.]?\d*\s*CIL\s*\/\s*Eixo\s+\d+/i` antes da regex genérica que mapeia o primeiro número como ESF.
+### 4. Dashboard — card "Origem dos Leads"
 
-Se isso ficar grande demais, faço como follow-up; mas é de 5–10 linhas em `aplicarCorrecaoReceitaPorTexto` (já existente em `mem://ia/correcao-receita-por-texto`).
+`useFonteLeads.ts` + `FonteLeadsCard.tsx`:
 
-### 5. Memória
+- 4 categorias: **Site**, **Instagram**, **Retorno**, **Orgânico** (+ "Desconhecido" se houver legado sem fonte).
+- KPI extra: `% retorno` (saúde da base) e `dias médios até retorno`.
+- Donut com 4 fatias e cor distinta para Retorno (azul/violeta).
 
-Atualizar `mem://ia/pos-confirmacao-forca-cotacao.md` com a regra:
+### 5. Backfill one-shot
 
-> Após confirmação, NUNCA repergunte cilindro/eixo/ADD. Se o catálogo zerar, apresente estimativa + ligue `revisao_humana_pendente`. Cliente só vê CTA de fechamento, nunca pedido de re-digitação.
+Migration de dados (INSERT em `contatos.metadata`) varrendo os 147 atuais:
+- Se contato tem ≥ 2 atendimentos OU `ciclo_funil ≥ 2` OU tag `comprador` → `fonte_lead='retorno'`
+- Senão → `fonte_lead='organico'`
+- Marcar `metadata.fonte_lead_backfill_v2=true` para distinguir do backfill anterior.
 
-E linha curta no `mem://index.md` Core: "Receita confirmada → IA nunca repergunta valores; cyl>4 vira `revisao_humana_pendente`."
+### 6. Memória
+
+Atualizar `mem://crm/fonte-lead-tracking.md` com as novas categorias, cascata e a regra de validação de nome. Atualizar `mem://index.md` apontando o item.
 
 ## Fora de escopo
 
-- Não vou aumentar `cylinder_max` no `pricing_table_lentes` (decisão de catálogo, não de IA).
-- Não vou tocar no watchdog nem no `interpretar_receita`.
-- Não vou mexer no front da `RevisaoHumanaBadge` (a flag já existe e o badge já lê).
+- Detecção avançada por UTM/short-link (exigiria integração Meta Click-to-WhatsApp Ads).
+- Reescrita do componente UI além das 4 fatias e KPI.
 
-## Resultado esperado
+## Arquivos tocados
 
-Cliente confirma receita "complexa" (cilindro alto):
-
-1. IA envia 3 faixas de estimativa **sem** pedir confirmação de novo.
-2. Sufixo `💡 Como sua receita tem um detalhe específico, vou pedir uma conferência rápida do nosso consultor...` aparece.
-3. Atendimento ganha `revisao_humana_pendente=true` → consultor vê o badge no card e confirma/corrige.
-4. Próxima inbound do cliente (região, "qual fica perto", etc.) segue fluxo normal de agendamento. Sem loop.
+- `supabase/functions/whatsapp-webhook/index.ts` (cascata + validação nome + retomada)
+- `supabase/functions/ai-triage/index.ts` (gate `precisa_confirmar_nome`)
+- `src/hooks/useFonteLeads.ts` (4 categorias)
+- `src/components/dashboard/FonteLeadsCard.tsx` (donut + KPI retorno)
+- `.lovable/memory/crm/fonte-lead-tracking.md` (rewrite)
+- `.lovable/memory/index.md` (entry refresh)
+- 1 INSERT-migration de backfill

@@ -1319,30 +1319,42 @@ nem como serviço próprio, nem como parceria, nem como indicação.\n`;
   return block;
 }
 
-function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: string; nomeAtual?: string; nomeConfirmado?: boolean }): string {
-  if (inboundCount > 1) return "";
+function buildFirstContactBlock(inboundCount: number, opts?: { nomeWhatsapp?: string; nomeAtual?: string; nomeConfirmado?: boolean; precisaConfirmar?: boolean }): string {
+  const precisaConfirmar = opts?.precisaConfirmar === true && opts?.nomeConfirmado !== true;
+  // Dispara na 1ª interação OU sempre que houver flag precisa_confirmar_nome (nome genérico/placeholder).
+  if (inboundCount > 1 && !precisaConfirmar) return "";
   const nomeWa = (opts?.nomeWhatsapp || "").trim();
   const nomeAtual = (opts?.nomeAtual || "").trim();
   const candidato = nomeWa || nomeAtual;
-  const looksReal = !!candidato && /[A-Za-zÀ-ÿ]{2,}/.test(candidato) && !/^\d+$/.test(candidato);
+  const looksReal = !!candidato
+    && /[A-Za-zÀ-ÿ]{2,}/.test(candidato)
+    && !/^\+?\d[\d\s()+-]*$/.test(candidato);
 
   if (looksReal && !opts?.nomeConfirmado) {
     const primeiroNome = candidato.split(/\s+/)[0];
-    return `# PRIMEIRA INTERAÇÃO — CONFIRMAR NOME
+    const cabecalho = inboundCount > 1 ? `# CONFIRMAR NOME (cadastro pendente)` : `# PRIMEIRA INTERAÇÃO — CONFIRMAR NOME`;
+    const msg = inboundCount > 1
+      ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
+      : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
+    return `${cabecalho}
 ## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
-"Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."
+"${msg}"
 
 ## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
 - Apenas UMA pergunta. Nada depois do ponto final.
 - PROIBIDO escrever no texto enviado: "aguardar confirmação", "confirme o nome", "sem reformular", "primeira interação", "tool registrar", "aguarde", instruções de sistema, comentários, parênteses explicativos, listas com "-".
 - Se cliente CONFIRMAR ('sim', 'isso', 'sou eu') → chame a tool registrar_nome_cliente com nome="${candidato}".
 - Se cliente CORRIGIR ('na verdade é Maria') → chame registrar_nome_cliente com o nome correto.
-- Só DEPOIS da confirmação, pergunte como pode ajudar. NÃO mencione receita/lentes/agendamento na 1ª mensagem.`;
+- Só DEPOIS da confirmação, prossiga. NÃO mencione receita/lentes/agendamento antes de confirmar o nome.`;
   }
 
-  return `# PRIMEIRA INTERAÇÃO — PEDIR NOME
+  const cabecalho = inboundCount > 1 ? `# CADASTRO INCOMPLETO — PEDIR NOME` : `# PRIMEIRA INTERAÇÃO — PEDIR NOME`;
+  const msg = inboundCount > 1
+    ? `Antes de seguir, posso saber seu nome, por favor? 😊`
+    : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+  return `${cabecalho}
 ## MENSAGEM A ENVIAR (copie literalmente o trecho entre aspas, NADA além disso):
-"Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"
+"${msg}"
 
 ## REGRAS INTERNAS — NÃO COPIE NADA DESTE BLOCO PARA A MENSAGEM:
 - Mensagem termina no "?" da pergunta sobre o nome. Apenas UMA pergunta.
@@ -1465,6 +1477,7 @@ function buildSystemPromptFromCompiled(opts: {
   nomeWhatsapp?: string;
   nomeAtual?: string;
   nomeConfirmado?: boolean;
+  precisaConfirmar?: boolean;
 }): string {
   const s: string[] = [];
 
@@ -1474,6 +1487,7 @@ function buildSystemPromptFromCompiled(opts: {
     nomeWhatsapp: opts.nomeWhatsapp,
     nomeAtual: opts.nomeAtual,
     nomeConfirmado: opts.nomeConfirmado,
+    precisaConfirmar: opts.precisaConfirmar,
   });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
@@ -1553,6 +1567,7 @@ function buildSystemPrompt(opts: {
   nomeWhatsapp?: string;
   nomeAtual?: string;
   nomeConfirmado?: boolean;
+  precisaConfirmar?: boolean;
 }): string {
   const s: string[] = [];
 
@@ -1563,6 +1578,7 @@ function buildSystemPrompt(opts: {
     nomeWhatsapp: opts.nomeWhatsapp,
     nomeAtual: opts.nomeAtual,
     nomeConfirmado: opts.nomeConfirmado,
+    precisaConfirmar: opts.precisaConfirmar,
   });
   if (firstContactBlock) s.push(firstContactBlock);
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
@@ -2048,6 +2064,7 @@ serve(async (req) => {
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
     const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
+    const precisaConfirmarNome = contatoMeta.precisa_confirmar_nome === true && !nomeConfirmado;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
 
     // ── 3.5b. POST-DATA ROUTER: "modelos / armações" → presencial ──
@@ -2792,6 +2809,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         nomeWhatsapp: nomePerfilWhatsapp,
         nomeAtual: contatoNomeAtual,
         nomeConfirmado,
+        precisaConfirmar: precisaConfirmarNome,
         locationCtx,
       } as any);
 
@@ -2837,6 +2855,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         nomeWhatsapp: nomePerfilWhatsapp,
         nomeAtual: contatoNomeAtual,
         nomeConfirmado,
+        precisaConfirmar: precisaConfirmarNome,
       });
     }
 
@@ -4179,7 +4198,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               .from("contatos")
               .update({
                 nome: novoNome,
-                metadata: { ...ctMeta, nome_confirmado: true, nome_origem: "ia_confirmado", nome_atualizado_at: new Date().toISOString() },
+                metadata: { ...ctMeta, nome_confirmado: true, precisa_confirmar_nome: false, nome_origem: "ia_confirmado", nome_atualizado_at: new Date().toISOString() },
               })
               .eq("id", contatoId);
             await supabase.from("eventos_crm").insert({
