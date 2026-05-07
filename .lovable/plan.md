@@ -1,55 +1,44 @@
-## Diagnóstico
+## Receitas complexas (cyl>4 / add>3,5 / sphere 8-10): cotar normal + revisão humana pós-orçamento
 
-Na conversa da Thaynara, o Gael nunca pediu a receita porque a mensagem **"Eu tenho a receita … já tenho a armação"** caiu num router que existe ANTES do fluxo normal de receita: o **POST-DATA ROUTER de "modelos / armações"** em `supabase/functions/ai-triage/index.ts` linhas 2036–2080.
+### Mudanças em `supabase/functions/ai-triage/index.ts`
 
-Esse router é acionado pela regex:
+**1. Novo helper `requerRevisaoHumanaPosOrcamento(rx)` (perto da linha 217)**
+Retorna `{ precisa, motivos[] }` para:
+- `cylMax > 4` → `cilindrico_alto`
+- `addMax > 3.5` → `adicao_alta`
+- `sphereMax` em (8, 10] → `esferico_faixa_cinza`
 
-```
-/\b(modelo|modelos|armac|armaç|armacao|armação|armações|armacoes)\b/
-```
+(esférico > 10 continua escalando direto via `isReceitaForaDaFaixa`).
 
-E só é bloqueado quando a mesma mensagem contém `lente|lentes|grau|orcamento de lente`. Como a frase da cliente **mencionou "armação" mas não "lente/grau"**, o router disparou e respondeu com o convite presencial padrão.
+**2. Sufixo discreto na mensagem da cotação (`executeConsultarLentes`, antes do `return { resposta: quoteMsg }` na linha ~5396)**
+Quando há resultados E `requerRevisaoHumanaPosOrcamento(rxMeta).precisa === true`, anexar ao `quoteMsg`:
 
-Pior: nas mensagens seguintes ("não preciso de armação" / "não preciso de armação" / "não") a palavra "armação" continuou batendo na regex e o router repetiu a mesma resposta 3 vezes — clássico loop, até o `loop-escalation` chutar e jogar pro humano.
+> _💡 Como sua receita tem um detalhe específico, vou pedir uma conferência rápida do nosso consultor pra confirmar prazo e disponibilidade. Pode ir escolhendo a opção que mais te agrada que já adianto 🙌_
 
-Causa-raiz: a regex trata QUALQUER menção a "armação" como **pedido** de armação, incluindo:
-- Resposta a uma pergunta da IA ("já tenho armação")
-- Negação explícita ("não preciso de armação")
-- Recusa curta sem contexto ("não")
+**3. Sinalização interna (mesmo bloco, sem escalar o atendimento)**
+Se `precisa === true`:
+- `eventos_crm.insert({ tipo: 'orcamento_revisao_humana', descricao, metadata: { motivos, rx, lenses: [ids/preços] }, referencia_tipo: 'atendimento', referencia_id: atendimentoId })`
+- `notificacoes.insert({ tipo: 'orcamento_revisao', titulo: 'Orçamento com receita complexa — revisar', mensagem, setor_id: setor do contato (ou Vendas como fallback), referencia_id: atendimentoId })`
+- `atendimentos.update({ metadata: { ...current, revisao_humana_pendente: true, revisao_motivos: motivos } })`
 
-E ignora completamente o fato de a cliente ter dito **"tenho receita atualizada"** — sinal de que o próximo passo natural era pedir a foto da receita para gerar orçamento de lentes.
+Idempotência: antes de inserir evento/notificação, checa se já existe `eventos_crm` com `tipo='orcamento_revisao_humana'` e mesmo `referencia_id` nos últimos 30min — evita disparo duplo se o cliente pedir reorçamento.
 
-## Correção
+**4. Mantido**
+- Esférico > 10 → escala direto (sem cotar) — sem mudança.
+- Zero resultados → fallback de estimativa atual.
+- Lentes de contato tóricas (cyl≥0.75) → regra existente de "sob encomenda".
+- Modo do atendimento permanece `ia` — operador decide se assume.
 
-Editar **um único bloco** em `supabase/functions/ai-triage/index.ts` (linhas 2036–2080):
+### UI (opcional, só se trivial)
+Se houver render do card de atendimento que já lê `metadata`, basta uma badge "Revisar orçamento" quando `revisao_humana_pendente === true`. Vou checar se existe componente óbvio (`AtendimentoCard` / `KanbanCard`); se exigir refatoração maior, deixo para um próximo passo e por enquanto a notificação no sino + evento no CRM já dão visibilidade.
 
-1. **Estreitar o gatilho `isArmacaoIntent`** para exigir VERBO de pedido/curiosidade junto da palavra armação. Aceitar apenas frases como "quero ver armações", "que armações vocês têm", "mostra modelos", "tem Ray-Ban?". Rejeitar quando a frase contém:
-   - Negação: `\b(n[ãa]o|sem)\b` próxima de "armação/modelo"
-   - Posse: `\b(j[áa]\s+tenho|tenho\s+(a|minha))\b` próxima de "armação"
-   - Resposta curta de confirmação a pergunta anterior da IA sobre armação
+### Memória
+Atualizar `mem://ia/regras-negocio-e-proibicoes-criticas` adicionando:
+> Receita complexa (cyl>4, add>3,5, sphere 8-10) NÃO escala — IA cota normal e dispara `eventos_crm.orcamento_revisao_humana` + notificação ao setor + flag `metadata.revisao_humana_pendente`. Esférico >10 segue escalando direto.
 
-2. **Bypass do router quando a IA acabou de perguntar sobre receita+armação**: se a última mensagem outbound da IA contém algo como "tem receita … armação" e o inbound do cliente confirma posse de receita, o router NÃO deve disparar — em vez disso, o fluxo segue para a lógica normal que pede a foto da receita (`responder_pedindo_receita`).
+### Arquivos
+- `supabase/functions/ai-triage/index.ts` (helper + sufixo + sinalizações)
+- `mem://ia/regras-negocio-e-proibicoes-criticas` (atualização)
+- (talvez) 1 badge em card de atendimento existente
 
-3. **Bypass se cliente afirma ter receita**: detectar `\b(tenho|tenho a|j[áa] tenho|sim,? tenho)\b.*\breceita\b` no inbound atual ou nos últimos 2 inbounds e, nesse caso, pular o router de armações e seguir para o pedido de foto da receita.
-
-4. **Anti-loop duro**: se `contatoMeta.armacoes_orientado === true` (já mandamos o convite uma vez nesta conversa), o router não dispara de novo — devolve `null` e deixa o LLM decidir.
-
-## Resultado esperado
-
-Para a próxima Thaynara:
-
-```
-Cliente: oculos de grau
-Gael:    [pergunta receita + armação]
-Cliente: tenho a receita e já tenho a armação
-Gael:    Perfeito! Me manda uma foto da receita que eu já te passo as opções de lente
-         compatíveis 😊  (em vez do convite presencial repetido)
-```
-
-Caso a cliente realmente queira ver armações, basta dizer "quero ver armações / mostra modelos" → router dispara normalmente.
-
-## Arquivos alterados
-
-- `supabase/functions/ai-triage/index.ts` (apenas o bloco 2036–2080)
-
-Sem migrações, sem mudança de schema, sem mexer em outros fluxos.
+Sem migrações de schema.
