@@ -132,6 +132,8 @@ export default function Dashboard() {
       </div>
 
       {/* Funnel Chart */}
+      <FonteLeadsCard />
+
       <Card className="shadow-card mb-6">
         <CardHeader>
           <div className="flex items-center justify-between">
