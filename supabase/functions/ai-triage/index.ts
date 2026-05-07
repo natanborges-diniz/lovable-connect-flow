@@ -3671,6 +3671,15 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         pipeline_coluna = "Orçamento";
         const quoteResult = await runConsultarLentes(supabase, contatoId, recentOutbound, args, atendimento_id);
         resposta = quoteResult.resposta;
+        // Arma máquina pós-orçamento se a resposta contém o CTA padrão
+        if (resposta && resposta.includes(MSG_CTA_AGENDAMENTO)) {
+          try {
+            const { data: cur } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+            const m = (cur?.metadata as Record<string, any>) || {};
+            m.pos_orcamento = { etapa: "aguardando_cta_visita", iniciado_at: new Date().toISOString(), origem: "consultar_lentes" };
+            await supabase.from("contatos").update({ metadata: m }).eq("id", contatoId);
+          } catch (_) { /* noop */ }
+        }
       } else if (fn === "consultar_lentes_estimativa") {
         // ── QUOTE ESTIMATE: receita parcial, nunca bloquear orçamento ──
         intencao = "orcamento";
