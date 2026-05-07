@@ -3216,7 +3216,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           label: old.label || (isFirst ? "digitada pelo cliente" : undefined),
         };
         // ── Detecta correção de ALTO IMPACTO ──
-        // Se a esfera mudou ≥0,75D em qualquer olho OU a esfera nova é ≥|8|D (lente especial),
+        // Se a esfera mudou ≥0,75D em qualquer olho OU a esfera nova é >|10|D (lente especial),
         // OBRIGA confirmação explícita do cliente antes de cotar/escalar.
         const oldOdSph = typeof old?.eyes?.od?.sphere === "number" ? old.eyes.od.sphere : null;
         const oldOeSph = typeof old?.eyes?.oe?.sphere === "number" ? old.eyes.oe.sphere : null;
@@ -3225,7 +3225,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         const deltaOd = (oldOdSph != null && newOdSph != null) ? Math.abs(newOdSph - oldOdSph) : 0;
         const deltaOe = (oldOeSph != null && newOeSph != null) ? Math.abs(newOeSph - oldOeSph) : 0;
         const maxNewAbs = Math.max(Math.abs(newOdSph ?? 0), Math.abs(newOeSph ?? 0));
-        const isHighImpact = (!isFirst && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs >= 8;
+        const isHighImpact = (!isFirst && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs > 10;
 
         // Marca a receita recém-gravada como NÃO confirmada pelo cliente
         merged.confirmed_by_client_at = null;
