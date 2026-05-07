@@ -2037,12 +2037,27 @@ serve(async (req) => {
     // Movido pra cá (depois das queries) pra que possa consultar agendamento ativo.
     {
       const tArm = norm(currentMsg);
+      // Verbo de pedido/curiosidade obrigatório próximo da palavra armação/modelo.
+      const ARM_WORD = /(armac|armaç|armacao|armação|armações|armacoes|modelo|modelos)/;
+      const VERBO_PEDIDO = /\b(quero|queria|gostaria|posso|pode(m)?|me\s+(mostr|envi|mand)|mostr(a|ar|em)|envi(a|ar|em)|mand(a|ar|em)|ver|tem|t[eê]m|tens|tens?\s+a[íi]|qual|quais|que\s+(modelo|armac)|catalogo|catálogo|foto|fotos|disponiv|dispon[ií]v|trabalha(m)?\s+com|vende(m)?)\b/;
+      const NEGACAO = /\b(n[ãa]o|sem|nem)\b[^.!?]{0,20}(armac|armaç|armacao|armação|armações|armacoes|modelo|modelos|preciso|quero)/;
+      const POSSE = /\b(j[áa]\s+tenho|tenho\s+(a|minha|um|o|uma)|levo\s+a\s+minha|uso\s+a\s+minha)\b[^.!?]{0,20}(armac|armaç|armacao|armação|armações|armacoes)/;
+      const TEM_RECEITA = /\b(tenho|tenho\s+a|j[áa]\s+tenho|sim,?\s*tenho|com\s+a)\b[^.!?]{0,15}\breceita\b/;
+
+      const inboundsRecentes = allMsgs
+        .filter((m: any) => m.direcao === "inbound")
+        .slice(-3)
+        .map((m: any) => norm(String(m.conteudo || "")));
+      const clienteAfirmouReceita = TEM_RECEITA.test(tArm) || inboundsRecentes.some((s: string) => TEM_RECEITA.test(s));
+      const jaMandouArmacoes = (contatoMeta?.armacoes_orientado === true);
+
       const isArmacaoIntent =
-        /\b(modelo|modelos|armac|armaç|armacao|armação|armações|armacoes)\b/.test(tArm) ||
-        /\b(oculos|óculos)\b.*\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b/.test(tArm) ||
-        /\b(mostrar|enviar|ver|foto|fotos|catalogo|catálogo|modelo|modelos)\b.*\b(oculos|óculos)\b/.test(tArm);
+        ARM_WORD.test(tArm) && VERBO_PEDIDO.test(tArm) &&
+        !NEGACAO.test(tArm) && !POSSE.test(tArm);
       const isLentePedido = /\b(lente|lentes|grau|orcamento de lente|orçamento de lente)\b/.test(tArm);
-      if (isArmacaoIntent && !isLentePedido) {
+
+      // Bypass se cliente afirmou ter receita ou se já mandamos o convite uma vez.
+      if (isArmacaoIntent && !isLentePedido && !clienteAfirmouReceita && !jaMandouArmacoes) {
         // Detecta agendamento ativo já registrado (futuro ≤6h tolerância)
         const _NOW_RT = Date.now();
         const _ROUTER_TOL = 6 * 3600 * 1000;
