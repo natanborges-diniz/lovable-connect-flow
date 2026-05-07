@@ -4606,7 +4606,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // Caso Artur Borges 24/04 15:13: modelo retornou texto ("Recebi sua receita 👀 Já estou analisando…")
     // sem chamar interpretar_receita. Sem retry, a conversa morre — cliente fica esperando indefinidamente.
     const interpretouReceitaNesteTurno = (toolCalls || []).some((tc: any) => tc.function?.name === "interpretar_receita");
-    const precisaForcarInterpretacao = isImageContext && !hasValidReceitas && !interpretouReceitaNesteTurno && !precisa_humano;
+    const precisaForcarInterpretacao = !interpretouReceitaNesteTurno && !precisa_humano && (
+      (isImageContext && !hasValidReceitas) || hasPendingNewPrescriptionImage
+    );
 
     if (precisaForcarInterpretacao) {
       console.log("[FORCE-INTERPRETAR] Imagem pendente sem chamada de interpretar_receita — forçando retry");
