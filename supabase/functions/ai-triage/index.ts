@@ -5599,6 +5599,7 @@ async function runConsultarLentesEstimativa(
     cylinder_hint?: number | null; // se cliente disse "tem astigmatismo" sem valor, passamos 0.75
     filtro_blue?: boolean;
     filtro_photo?: boolean;
+    rx_ja_confirmada?: boolean; // quando true, suprime perguntas finais de "confirmar cilindro/ADD"
   },
   contatoId?: string,
   atendimentoId?: string,
