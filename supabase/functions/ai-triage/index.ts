@@ -2158,9 +2158,18 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
       if (detectRxConfirmation(lastInboundText)) {
         try {
+          // Marca a receita-alvo (rx_index se houver, senão a última) como confirmada
+          const targetIdx = typeof contatoMeta.receita_confirmacao?.rx_index === "number"
+            ? contatoMeta.receita_confirmacao.rx_index
+            : (Array.isArray(contatoMeta.receitas) ? contatoMeta.receitas.length - 1 : -1);
+          const updatedReceitas = Array.isArray(contatoMeta.receitas) ? [...contatoMeta.receitas] : [];
+          if (targetIdx >= 0 && updatedReceitas[targetIdx]) {
+            updatedReceitas[targetIdx] = { ...updatedReceitas[targetIdx], confirmed_by_client_at: new Date().toISOString() };
+          }
           await supabase.from("contatos").update({
             metadata: {
               ...contatoMeta,
+              receitas: updatedReceitas.length ? updatedReceitas : contatoMeta.receitas,
               receita_confirmacao: {
                 ...contatoMeta.receita_confirmacao,
                 pending: false,
@@ -2168,6 +2177,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               },
             },
           }).eq("id", contatoId);
+          if (updatedReceitas.length) contatoMeta.receitas = updatedReceitas;
+          if (updatedReceitas.length) receitas = updatedReceitas;
         } catch (_) { /* noop */ }
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId,
