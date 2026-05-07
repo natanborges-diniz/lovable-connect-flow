@@ -5441,6 +5441,7 @@ async function runConsultarLentes(
       } catch (e) { console.warn("[QUOTE] failed to log fallback_skip", e); }
     } else {
       try {
+        const rxJaConfirmada = !!rxMeta?.confirmed_by_client_at;
         const est = await runConsultarLentesEstimativa(supabase, {
           rx_type: rxType,
           sphere_od: typeof od.sphere === "number" ? od.sphere : undefined,
@@ -5448,24 +5449,54 @@ async function runConsultarLentes(
           // NÃO passa cylinder_hint — a estimativa usa default conservador e procura faixa ampla.
           filtro_blue: args?.filtro_blue === true ? true : undefined,
           filtro_photo: args?.filtro_photo === true ? true : undefined,
+          rx_ja_confirmada: rxJaConfirmada,
         }, contatoId, atendimentoId);
         if (est?.resposta && !/preciso confirmar a disponibilidade/i.test(est.resposta)) {
-          console.log(`[QUOTE] zero-linhas → fallback estimativa OK`);
+          console.log(`[QUOTE] zero-linhas → fallback estimativa OK (rx_confirmada=${rxJaConfirmada})`);
           try {
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId,
-              tipo: "consultar_lentes_fallback_estimativa_acionado",
+              tipo: rxJaConfirmada ? "cotacao_estimativa_pos_confirmacao" : "consultar_lentes_fallback_estimativa_acionado",
               descricao: `Fallback acionado: catálogo zerou para ${rxType} sphere=${worstSphere} cyl=${worstCylinder}, estimativa cobriu`,
-              metadata: { origem: "consultar_lentes_zero", ...filtrosAplicados },
+              metadata: { origem: "consultar_lentes_zero", rx_ja_confirmada: rxJaConfirmada, ...filtrosAplicados },
               referencia_tipo: atendimentoId ? "atendimento" : null,
               referencia_id: atendimentoId || null,
             });
           } catch (e) { console.warn("[QUOTE] failed to log fallback_acionado", e); }
           // Marca explicitamente que foi estimativa por gap, mantém pergunta de região no fim.
           const prefix = `${prefixGap} (com cilíndrico mais alto) confirmamos a opção exata na loja, mas já te dou uma referência de preço:\n\n`;
-          // Anti-duplicação extra: se a resposta da estimativa em si já apareceu literalmente,
-          // NÃO repete — manda só a parte de loja (próxima frase) pra evoluir o turno.
-          const respostaFinal = prefix + est.resposta;
+          let respostaFinal = prefix + est.resposta;
+          // Se receita já confirmada e é caso de revisão humana, anexa sufixo + liga flag no atendimento.
+          if (rxJaConfirmada) {
+            try {
+              const rev = requerRevisaoHumanaPosOrcamento(rxMeta);
+              if (rev.precisa && !respostaFinal.includes(MSG_REVISAO_HUMANA_SUFIXO)) {
+                respostaFinal = respostaFinal + MSG_REVISAO_HUMANA_SUFIXO;
+                if (atendimentoId) {
+                  try {
+                    const { data: atFlag } = await supabase
+                      .from("atendimentos").select("metadata").eq("id", atendimentoId).single();
+                    const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
+                    await supabase.from("atendimentos").update({
+                      metadata: {
+                        ...metaFlag,
+                        revisao_humana_pendente: true,
+                        revisao_motivos: rev.motivos,
+                        revisao_solicitada_at: new Date().toISOString(),
+                      },
+                    }).eq("id", atendimentoId);
+                    await supabase.from("eventos_crm").insert({
+                      contato_id: contatoId,
+                      tipo: "revisao_humana_pos_cotacao",
+                      descricao: "Revisão humana sinalizada após cotação por estimativa (cyl/add fora da faixa principal)",
+                      metadata: { motivos: rev.motivos },
+                      referencia_tipo: "atendimento", referencia_id: atendimentoId,
+                    });
+                  } catch (_) { /* noop */ }
+                }
+              }
+            } catch (_) { /* noop */ }
+          }
           const respostaNorm = norm(respostaFinal);
           if (recentNormFb.some((p) => p && (p === respostaNorm || computeSimilarity(p, respostaNorm) > 0.85))) {
             console.log(`[QUOTE] fallback estimativa gerou texto duplicado → escala suave pra loja`);
