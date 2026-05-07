@@ -227,7 +227,7 @@ function isReceitaForaDaFaixa(rx: any): boolean {
   return false;
 }
 
-const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Seu grau é mais alto e exige uma lente sob encomenda — vou chamar um Consultor especializado pra te passar opções e prazo certinho 🤝";
+const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Por ser uma *lente especial*, vou te conectar com um Consultor pra montar o orçamento certinho e confirmar prazo 🤝";
 
 // ── Bloqueia escalada/oferta de "grau alto / sob encomenda" sem receita interpretada ──
 // Caso Franciana (Mai/2026): IA falou "Encontrei poucas opções automáticas para esse grau alto"
