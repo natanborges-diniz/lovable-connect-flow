@@ -37,8 +37,9 @@ export default function Atendimentos() {
   const [statusFilter, setStatusFilter] = useState<string>("todos");
   const [detailId, setDetailId] = useState<string | null>(searchParams.get("open") || null);
 
+  const isRealStatus = statusFilter !== "todos" && statusFilter !== "revisao_pendente";
   const filters = {
-    status: statusFilter !== "todos" ? (statusFilter as StatusAtendimento) : undefined,
+    status: isRealStatus ? (statusFilter as StatusAtendimento) : undefined,
   };
 
   const { data: atendimentos, isLoading } = useAtendimentos(filters);
