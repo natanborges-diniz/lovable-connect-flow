@@ -4107,6 +4107,10 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             await supabase.from("contatos").update({ metadata: m }).eq("id", contatoId);
           } catch (_) { /* noop */ }
         }
+      }
+    }
+
+    // ── GATE PÓS-LOOP: confirmação de receita VENCE qualquer escalada/cotação no mesmo turno ──
     // Caso Franciana (Mai/2026): no mesmo turno em que interpretar_receita marcou pending,
     // o LLM também emitiu escalar_consultor → escalou sem cliente confirmar.
     if (rxConfirmGateTriggered && rxConfirmGateRx) {
