@@ -4207,7 +4207,46 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       validatorFlags.push("rx_confirm_gate_overrode_turn");
     }
 
-    // ── 9. POST-LLM VALIDATION (Phase 3) ──
+    // ── GATE PÓS-LLM: bloquear orçamento quando há receita não confirmada ──
+    // Caso 558488766851 (Mai/2026): cliente escolheu "a segunda" receita; LLM cotou direto.
+    // Se houver alguma receita sem confirmed_by_client_at e o turno produziu cotação/preços,
+    // sobrescreve com mensagem de confirmação dos valores.
+    if (resposta && !rxConfirmGateTriggered && Array.isArray(receitas) && receitas.length >= 1) {
+      const idxNaoConfirmada = receitas.findIndex((r: any) => r && !r.confirmed_by_client_at);
+      const respondeuComPrecos = /R\$\s*\d|Op[cç][oõ]es?\s+de\s+lentes|Mais\s+em\s+conta|Um\s+passo\s+acima|Premium/i.test(resposta || "");
+      const usouQuoteTool = (toolCalls || []).some((t: any) => ["consultar_lentes", "consultar_lentes_contato", "consultar_lentes_estimativa"].includes(t?.function?.name));
+      if (idxNaoConfirmada >= 0 && (respondeuComPrecos || usouQuoteTool)) {
+        const rxAlvo = receitas[idxNaoConfirmada];
+        const rxLabelAlvo = rxAlvo.label || `receita_${idxNaoConfirmada + 1}`;
+        try {
+          const novaReceitaConf = {
+            pending: true,
+            rx_label: rxLabelAlvo,
+            rx_index: idxNaoConfirmada,
+            asked_at: new Date().toISOString(),
+            correction_count: 0,
+            fora_da_faixa: isReceitaForaDaFaixa(rxAlvo),
+          };
+          await supabase.from("contatos").update({
+            metadata: { ...contatoMeta, receita_confirmacao: novaReceitaConf },
+          }).eq("id", contatoId);
+        } catch (_) { /* noop */ }
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "bloqueado_orcamento_receita_nao_confirmada",
+          descricao: `LLM ia cotar com receita idx=${idxNaoConfirmada} sem confirmação — sobrescrevendo com pedido de confirmação`,
+          metadata: { rx_label: rxLabelAlvo, rx_index: idxNaoConfirmada },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).catch(() => {});
+        resposta = buildMsgConfirmarReceita(rxAlvo, false);
+        intencao = "receita_oftalmologica";
+        pipeline_coluna = "Orçamento";
+        precisa_humano = false;
+        validatorFlags.push("bloqueado_orcamento_receita_nao_confirmada");
+        console.log(`[RX-GATE-POSTLLM] Sobrescrevendo cotação — receita idx=${idxNaoConfirmada} ainda não confirmada`);
+      }
+    }
+
     if (resposta && !precisa_humano) {
       // ── ANTI-DUPLICAÇÃO DE DESPEDIDA: se o último outbound já é a frase canônica
       // de encerramento ("Te espero ... 👋 Qualquer dúvida é só me chamar." ou
