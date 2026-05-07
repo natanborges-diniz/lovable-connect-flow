@@ -9,6 +9,7 @@ import { Users, FileText, AlertCircle, CheckCircle2, MessageSquare, ListTodo, Tr
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { FonteLeadsCard } from "@/components/dashboard/FonteLeadsCard";
 
 const GRUPO_LABELS: Record<string, string> = {
   triagem: "Triagem",
@@ -131,6 +132,8 @@ export default function Dashboard() {
       </div>
 
       {/* Funnel Chart */}
+      <FonteLeadsCard />
+
       <Card className="shadow-card mb-6">
         <CardHeader>
           <div className="flex items-center justify-between">
