@@ -19,7 +19,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban } from "lucide-react";
+import { RevisaoHumanaBadge, traduzirMotivos } from "@/components/shared/RevisaoHumanaBadge";
+import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban, CheckCircle2 } from "lucide-react";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { format } from "date-fns";
@@ -44,16 +45,21 @@ export default function Atendimentos() {
   const updateStatus = useUpdateAtendimentoStatus();
   const queryClient = useQueryClient();
 
-  // Client-side search across contato, assunto, atendente
+  // Client-side search + revisão filter
   const filteredAtendimentos = useMemo(() => {
-    if (!atendimentos || !search.trim()) return atendimentos;
+    let list = atendimentos;
+    if (!list) return list;
+    if (statusFilter === "revisao_pendente") {
+      list = list.filter((a: any) => a.metadata?.revisao_humana_pendente === true);
+    }
+    if (!search.trim()) return list;
     const s = search.toLowerCase();
-    return atendimentos.filter((a: any) =>
+    return list.filter((a: any) =>
       (a.contato?.nome ?? "").toLowerCase().includes(s) ||
       (a.solicitacao?.assunto ?? "").toLowerCase().includes(s) ||
       (a.atendente_nome ?? "").toLowerCase().includes(s)
     );
-  }, [atendimentos, search]);
+  }, [atendimentos, search, statusFilter]);
 
   // Realtime: auto-refresh list when atendimentos or mensagens change
   useEffect(() => {
