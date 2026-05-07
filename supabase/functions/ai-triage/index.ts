@@ -5735,9 +5735,13 @@ async function runConsultarLentesEstimativa(
     msg += `💎 *Premium* — ${premium.brand} ${premium.family}: a partir de ${fmt(Number(premium.price_brl))}\n`;
   }
   msg += `\n_Valores estimativos — com a ${rxType === "progressive" ? "ADIÇÃO e o cilindro/eixo" : "receita"} exatos eu fecho o orçamento certinho._\n\n`;
-  msg += rxType === "progressive"
-    ? "Consegue me enviar foto da receita ou os números de ADD e CIL/AX de cada olho?"
-    : "Consegue me confirmar o cilindro e eixo de cada olho (ou enviar foto da receita)?";
+  if (args?.rx_ja_confirmada) {
+    msg += "Posso seguir com uma dessas opções e já te indicar a loja mais próxima pra fechar? Me passa sua região/bairro 😊";
+  } else {
+    msg += rxType === "progressive"
+      ? "Consegue me enviar foto da receita ou os números de ADD e CIL/AX de cada olho?"
+      : "Consegue me confirmar o cilindro e eixo de cada olho (ou enviar foto da receita)?";
+  }
 
   console.log(`[QUOTE-EST] ${tipoLabel} sphere=${worstSphere} cyl=${worstCyl} → ${sorted.length} produtos únicos`);
   return { resposta: msg };
