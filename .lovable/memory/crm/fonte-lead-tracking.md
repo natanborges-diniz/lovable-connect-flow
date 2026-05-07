@@ -1,22 +1,25 @@
 ---
-name: Fonte do Lead (Site/Instagram)
-description: Webhook classifica origem do lead (site/instagram) na 1ª inbound; gravado em contatos.metadata.fonte_lead; dashboard mostra KPIs + donut + timeline
+name: Fonte do Lead — cascata + retorno + validação de nome
+description: Webhook classifica origem em site/instagram/retorno/organico (nunca null); marca precisa_confirmar_nome para nomes genéricos; registra retomada_espontanea após 14d
 type: feature
 ---
 
-## Detecção
-`whatsapp-webhook` aplica regex na 1ª inbound de contatos `tipo='cliente'` sem `metadata.fonte_lead`:
+## Cascata de classificação (whatsapp-webhook, 1ª inbound do contato cliente)
+1. Texto contém "Acessei o site" → `site`
+2. Texto contém "no Instagram" / "vi vocês no Insta" → `instagram`
+3. ciclo_funil≥2 OU ≥1 atendimento encerrado anterior OU tag `comprador`/`lead-recuperado` OU contato existia há ≥7d → `retorno`
+4. fallback → `organico`
 
-- `/Acessei o site/i` → `fonte_lead = "site"` (ex.: "Acessei o site www.dinizosasco.com.br...")
-- `/(no|pelo)\s+Instagram|vi\s+voc[êe]s?\s+no\s+Insta/i` → `fonte_lead = "instagram"`
-- caso contrário → não grava (mantém `null`, considerado "outro" na UI).
+Persiste sempre em `contatos.metadata.fonte_lead` (nunca null para clientes). Detalhes em `fonte_lead_detalhe`.
 
-Persiste `metadata.fonte_lead`, `fonte_lead_at`, `fonte_lead_mensagem` (snippet 280 chars). Idempotente.
+## Retomada espontânea
+Se `ultimo_contato_at` ≥14d, incrementa `ciclo_funil`, grava `metadata.retomada_espontanea_at` e evento `retomada_espontanea`. Idempotente em janela 24h.
 
-## Visualização
-Card "Origem dos Leads" no Dashboard (`src/components/dashboard/FonteLeadsCard.tsx`), hook `useFonteLeads(periodo)`. Filtro 7d/30d/90d/Tudo. KPIs Site/Instagram/Outro + donut + LineChart leads/dia.
+## Validação telefone+nome
+Webhook seta `metadata.precisa_confirmar_nome=true` quando `contatos.nome` é placeholder (telefone, "Cliente", "WhatsApp User"). `ai-triage.buildFirstContactBlock` dispara confirmação independente de `inboundCount` quando flag true. Tool `registrar_nome_cliente` zera ambos os flags (`nome_confirmado=true`, `precisa_confirmar_nome=false`).
 
-Sem quebra por loja — central de captação é única para toda a rede.
+## UI
+`useFonteLeads` + `FonteLeadsCard`: 5 categorias (site, instagram, retorno, organico, desconhecido) + KPI %retorno + linhas no timeline.
 
 ## Backfill
-Migration de dados (insert) varreu `mensagens(direcao='inbound')` pegando 1ª por `atendimentos.contato_id` e classificando. Marcado com `metadata.fonte_lead_backfill=true`.
+v2 aplicado em ~147 contatos legados (`metadata.fonte_lead_backfill_v2=true`).
