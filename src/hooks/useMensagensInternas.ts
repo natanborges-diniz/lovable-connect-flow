@@ -146,6 +146,22 @@ export function useMensagensInternas() {
           });
         }
       }
+      // Inclui grupos onde o usuário é membro mas ainda não há mensagens
+      for (const [gid, g] of grupoMap) {
+        const cid = `grupo_${gid}`;
+        if (map.has(cid)) continue;
+        result.push({
+          conversa_id: cid,
+          outro_id: gid,
+          outro_nome: g.nome,
+          ultima_mensagem: "Grupo criado — envie a primeira mensagem",
+          ultima_data: g.created_at,
+          nao_lidas: 0,
+          is_grupo: true,
+          participantes: g.participantes,
+          grupo_id: gid,
+        });
+      }
       result.sort((a, b) => new Date(b.ultima_data).getTime() - new Date(a.ultima_data).getTime());
       return result;
     },
