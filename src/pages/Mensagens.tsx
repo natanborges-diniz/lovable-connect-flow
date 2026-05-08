@@ -365,14 +365,15 @@ export default function Mensagens() {
                             </p>
                           ) : (
                             <>
-                              <div className="flex items-start gap-1">
+                              <div className="flex items-start gap-1.5">
                                 <p className="whitespace-pre-wrap break-words flex-1">{m.conteudo}</p>
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
                                   <MessageActionsMenu
                                     autorId={m.remetente_id}
                                     currentUserId={uid}
                                     createdAt={m.created_at}
                                     deletadaAt={m.deletada_at}
+                                    enforceEditWindow={false}
                                     onEdit={() => setEditingId(m.id)}
                                     onDelete={async () => {
                                       try {
@@ -400,13 +401,13 @@ export default function Mensagens() {
                                         <button
                                           type="button"
                                           className={cn(
-                                            "ml-0.5 inline-flex items-center gap-1 hover:underline",
+                                            "ml-0.5 inline-flex items-center gap-1 rounded-sm hover:underline",
                                             isMine ? "text-primary-foreground/80" : "text-muted-foreground"
                                           )}
                                           aria-label="Ver quem leu"
                                         >
                                           <MessageTicks status={m.lida_por_todos ? "read" : "sent"} />
-                                          <span className="text-[10px]">{m.lidas_count ?? 0}/{m.total_copias ?? (selectedOutro.participantes?.length ?? 1) - 1}</span>
+                                          <span className="text-[10px]">{m.lidas_count ?? 0}/{m.total_copias ?? Math.max((selectedOutro.participantes?.length ?? 1) - 1, 0)}</span>
                                         </button>
                                       </PopoverTrigger>
                                       <PopoverContent align="end" className="w-56 p-2">
