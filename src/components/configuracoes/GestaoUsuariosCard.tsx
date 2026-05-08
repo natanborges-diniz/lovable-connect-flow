@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Loader2, HelpCircle, KeyRound, Wand2, Link2 } from "lucide-react";
+import { Users, Plus, Loader2, HelpCircle, KeyRound, Wand2, Link2, Pencil } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
