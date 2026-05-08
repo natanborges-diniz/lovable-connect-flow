@@ -597,32 +597,6 @@ export default function PipelineFinanceiro() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Confirm delete card dialog */}
-      <AlertDialog open={!!deleteCardConfirm} onOpenChange={() => setDeleteCardConfirm(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir card?</AlertDialogTitle>
-            <AlertDialogDescription>
-              O card será removido do pipeline e marcado como cancelado.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (deleteCardConfirm) {
-                  deleteSolicitacao.mutate(deleteCardConfirm);
-                  setDeleteCardConfirm(null);
-                }
-              }}
-            >
-              Excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <CreateCardDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
