@@ -23,6 +23,14 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     return <Navigate to="/auth" replace />;
   }
 
+  // tipo=loja só usa o InFoco Messenger; bloqueia Atrium web inteiro.
+  if (
+    profile?.tipo_usuario === "loja" &&
+    !location.pathname.startsWith("/somente-messenger")
+  ) {
+    return <Navigate to="/somente-messenger" replace />;
+  }
+
   // If roles are specified, check access (admins always pass)
   if (allowedRoles && !isAdmin && roles.length > 0) {
     const hasAccess = roles.some((r) => allowedRoles.includes(r.role));
