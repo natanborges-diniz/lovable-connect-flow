@@ -226,7 +226,16 @@ export function useMensagensConversa(conversaId: string | null) {
         for (const copias of groups.values()) {
           const base = copias[0];
           const lidaPorTodos = copias.length > 0 && copias.every((c) => c.lida);
-          out.push({ ...base, lida_por_todos: lidaPorTodos, total_copias: copias.length, lidas_count: copias.filter((c) => c.lida).length });
+          const leitoresIds = copias.filter((c) => c.lida).map((c) => c.destinatario_id);
+          const destinatariosIds = copias.map((c) => c.destinatario_id);
+          out.push({
+            ...base,
+            lida_por_todos: lidaPorTodos,
+            total_copias: copias.length,
+            lidas_count: copias.filter((c) => c.lida).length,
+            leitores_ids: leitoresIds,
+            destinatarios_ids: destinatariosIds,
+          });
         }
         out.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
         return out;
