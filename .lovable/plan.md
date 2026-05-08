@@ -1,32 +1,53 @@
 ## Problema
 
-O grupo "Setor — Loja" foi criado corretamente (existe no banco, com 11 membros), mas não aparece na lista de conversas do Atrium nem do InFoco Messenger.
+Em grupo (Atrium `/mensagens`):
 
-**Causa:** a lista de conversas é montada lendo apenas a tabela `mensagens_internas`. Como ninguém ainda enviou mensagem nesse grupo, ele fica invisível — só aparece depois da primeira mensagem.
-
-E como o registro já existe em `conversas_grupo`, o índice único impede recriar (correto).
+1. **Read receipts genéricos** — hoje só mostramos `✓` ou `✓✓ azul` (lido por **todos**). Não dá pra saber **quem** já leu quando ainda nem todos leram.
+2. **Editar / Excluir aparentemente sumiram** — cada mensagem em grupo é inserida N vezes (uma linha por destinatário) com mesmo `remetente_id|conteudo|timestamp`. O dedup do `useMensagensConversa` escolhe `copias[0]` como base. Os mutations atuais (`useEditMensagemInterna` e `useDeleteMensagemInterna`) usam `.eq("id", id)` → afetam só **uma** das N linhas. Visualmente vira inconsistente (a UI re-deduca e às vezes o menu/efeito não se reflete) — daí a sensação de "sumiu".
 
 ## Solução
 
-Listar grupos diretamente da tabela `conversas_grupo` (onde o usuário é participante), unindo com as conversas que já têm mensagens. Assim, todo grupo do qual o usuário faz parte aparece imediatamente após a criação, mesmo sem nenhuma mensagem.
+### 1. Read receipts detalhados em grupo (`src/pages/Mensagens.tsx` + `useMensagensInternas.ts`)
 
-### Mudanças
+**a)** No dedup de grupo em `useMensagensConversa` (já agrupa as N cópias), além de `lida_por_todos`/`total_copias`/`lidas_count`, **expor também `leitores_ids: string[]`** = lista de `destinatario_id` das cópias com `lida = true`.
 
-1. **`src/hooks/useMensagensInternas.ts` — query `conversas-internas`**
-   - Após buscar mensagens, buscar também `conversas_grupo` onde `auth.uid()` está em `participantes`.
-   - Para cada grupo retornado que ainda não está no mapa de conversas (sem mensagens), adicionar uma entrada "vazia" com:
-     - `ultima_mensagem`: placeholder ("Grupo criado — envie a primeira mensagem")
-     - `ultima_data`: `created_at` do grupo
-     - `nao_lidas`: 0
-   - Ordenação final continua por `ultima_data` desc.
+**b)** Em `Mensagens.tsx`, no rodapé do balão de mensagem minha em grupo (linhas ~389–406), trocar o `MessageTicks` simples por:
 
-2. **Realtime**
-   - Adicionar listener de `INSERT` em `conversas_grupo` para invalidar `conversas-internas` quando um novo grupo for criado (caso o admin crie em outra aba/sessão).
+- Tick ✓ ou ✓✓ azul (mantém comportamento atual baseado em `lida_por_todos`).
+- Ao lado, contador clicável: `{m.lidas_count}/{m.total_copias}`.
+- Ao clicar, `Popover` lista cada participante (exceto eu) com indicador "lida" (✓ azul) ou "pendente" (○), usando o `participantesNomes` map já carregado.
 
-3. **Projeto InFoco Messenger** (`@project:2d68a67b...`)
-   - Aplicar a mesma mudança no hook equivalente lá. Vou inspecionar o projeto e replicar.
+Não mexer no comportamento de 1:1 (continua só ✓/✓✓).
 
-### Fora do escopo
+### 2. Edit / Delete propagam para todas as cópias (`useMensagensInternas.ts`)
 
-- Não mexer no `NovoGrupoDialog` nem nas RLS — já estão corretos.
-- Não enviar "mensagem de boas-vindas" automática (evitamos poluir o histórico).
+Tornar os mutations *grupo-aware*:
+
+- **`useEditMensagemInterna`**: hoje recebe `id`. Adicionar lookup: buscar a linha por `id` para obter `remetente_id`, `conversa_id`, `created_at`, `conteudo` (atual). Se `conversa_id` começa com `grupo_`, fazer:
+
+  ```ts
+  await supabase
+    .from("mensagens_internas")
+    .update({ conteudo: novoConteudo, editada_at, metadata: newMeta })
+    .eq("conversa_id", conversaId)
+    .eq("remetente_id", remetenteId)
+    .eq("conteudo", conteudoAnterior)
+    .gte("created_at", isoMinus(created_at, 2_000))
+    .lte("created_at", isoPlus(created_at, 2_000));
+  ```
+
+  (janela de ±2s para casar todas as cópias do mesmo broadcast). 1:1 continua igual ao atual (`.eq("id", id)`).
+
+- **`useDeleteMensagemInterna`**: mesma estratégia. Em grupo, soft-delete (`deletada_at`, `deletada_por`) em todas as cópias do broadcast com mesma chave `(conversa_id, remetente_id, conteudo, created_at±2s)`.
+
+- O `MessageActionsMenu` já está condicionado a `autorId === currentUserId` + janela de 15min — nenhuma mudança de UI.
+
+### 3. Realtime já cobre
+
+`useMensagensInternas` ouve `event: "*"` em `mensagens_internas` → ao editar/deletar todas as cópias, a query é invalidada e o feed re-renderiza coerente.
+
+## Fora do escopo
+
+- Não muda schema, RLS ou edge functions.
+- Não muda o InFoco Messenger (separado — esse update fica no plano anterior).
+- Sem "X visualizaram em tal hora" detalhado por horário (V2).
