@@ -244,7 +244,7 @@ export default function Mensagens() {
                 </div>
                 <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
                   {c.ultima_remetente_id === uid && (
-                    <MessageTicks status={c.is_grupo ? "sent" : (c.ultima_lida ? "read" : "sent")} />
+                    <MessageTicks status={c.ultima_lida ? "read" : "sent"} />
                   )}
                   <span className="truncate">{c.ultima_mensagem}</span>
                 </p>
