@@ -41,6 +41,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { CpfApprovalDialog, EntryPercentageBadge } from "@/components/financeiro/CpfApprovalDialog";
 import { useAutomacoes } from "@/hooks/useAutomacoes";
+import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
+import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
+import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
