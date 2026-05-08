@@ -262,8 +262,16 @@ export default function Mensagens() {
           ) : (
             <>
               {/* Header */}
-              <div className="px-4 py-3 border-b bg-muted/30">
-                <h3 className="text-sm font-semibold">{selectedOutro?.nome}</h3>
+              <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
+                {selectedOutro?.isGrupo && <Users className="h-4 w-4 text-muted-foreground" />}
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold truncate">{selectedOutro?.nome}</h3>
+                  {selectedOutro?.isGrupo && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {selectedOutro.participantes?.length ?? 0} participantes
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Messages */}
@@ -274,6 +282,8 @@ export default function Mensagens() {
                   const isAutorizacao = meta?.kind === "autorizacao_excecao";
                   const isDeleted = !!m.deletada_at;
                   const isEditing = editingId === m.id;
+                  const showSenderName = !!selectedOutro?.isGrupo && !isMine && !isAutorizacao;
+                  const senderName = participantesNomes?.[m.remetente_id] || "Usuário";
                   return (
                     <div key={m.id} className={cn("flex group", isMine ? "justify-end" : "justify-start")}>
                       {isAutorizacao ? (
