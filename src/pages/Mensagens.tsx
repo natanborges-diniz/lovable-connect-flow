@@ -16,22 +16,24 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Send, Plus, MessageCircle, Search, Ban } from "lucide-react";
+import { Send, Plus, MessageCircle, Search, Ban, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
+import { NovoGrupoDialog } from "@/components/mensagens/NovoGrupoDialog";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { toast } from "sonner";
 
 export default function Mensagens() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const uid = user?.id;
-  const { conversas, makeConversaId } = useMensagensInternas();
+  const { conversas, makeConversaId, makeGroupConversaId } = useMensagensInternas();
   const [selectedConversa, setSelectedConversa] = useState<string | null>(null);
-  const [selectedOutro, setSelectedOutro] = useState<{ id: string; nome: string } | null>(null);
+  const [selectedOutro, setSelectedOutro] = useState<{ id: string; nome: string; isGrupo?: boolean; participantes?: string[]; grupoId?: string } | null>(null);
+  const [novoGrupoOpen, setNovoGrupoOpen] = useState(false);
   const { data: mensagens } = useMensagensConversa(selectedConversa);
   const enviar = useEnviarMensagem();
   const marcarLidas = useMarcarLidas();
@@ -59,6 +61,21 @@ export default function Mensagens() {
     refetchOnWindowFocus: true,
   });
 
+  // Nomes dos participantes do grupo selecionado (para rótulo de remetente nos balões)
+  const { data: participantesNomes } = useQuery({
+    queryKey: ["grupo-participantes-nomes", selectedOutro?.grupoId],
+    enabled: !!selectedOutro?.isGrupo && !!selectedOutro?.participantes?.length,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, nome")
+        .in("id", selectedOutro!.participantes!);
+      const map: Record<string, string> = {};
+      (data || []).forEach((p) => { map[p.id] = p.nome; });
+      return map;
+    },
+  });
+
   // Mark as read when opening a conversation
   useEffect(() => {
     if (selectedConversa && uid) {
@@ -76,7 +93,13 @@ export default function Mensagens() {
 
   const handleSelectConversa = (c: Conversa) => {
     setSelectedConversa(c.conversa_id);
-    setSelectedOutro({ id: c.outro_id, nome: c.outro_nome });
+    setSelectedOutro({
+      id: c.outro_id,
+      nome: c.outro_nome,
+      isGrupo: c.is_grupo,
+      participantes: c.participantes,
+      grupoId: c.grupo_id,
+    });
   };
 
   const handleNovaConversa = (profile: { id: string; nome: string }) => {
@@ -87,13 +110,36 @@ export default function Mensagens() {
     setBuscaUsuario("");
   };
 
+  const handleGrupoCreated = async (grupoId: string) => {
+    // recarrega lista e abre o grupo recém-criado
+    await conversas.refetch();
+    const { data: g } = await supabase
+      .from("conversas_grupo")
+      .select("id, nome, participantes")
+      .eq("id", grupoId)
+      .maybeSingle();
+    if (g) {
+      setSelectedConversa(makeGroupConversaId(g.id));
+      setSelectedOutro({ id: g.id, nome: g.nome, isGrupo: true, participantes: g.participantes, grupoId: g.id });
+    }
+  };
+
   const handleEnviar = () => {
     if (!texto.trim() || !uid || !selectedOutro) return;
-    enviar.mutate({
-      remetenteId: uid,
-      destinatarioId: selectedOutro.id,
-      conteudo: texto.trim(),
-    });
+    if (selectedOutro.isGrupo && selectedOutro.grupoId && selectedOutro.participantes) {
+      enviar.mutate({
+        remetenteId: uid,
+        grupoId: selectedOutro.grupoId,
+        participantes: selectedOutro.participantes,
+        conteudo: texto.trim(),
+      });
+    } else {
+      enviar.mutate({
+        remetenteId: uid,
+        destinatarioId: selectedOutro.id,
+        conteudo: texto.trim(),
+      });
+    }
     setTexto("");
   };
 
@@ -155,6 +201,17 @@ export default function Mensagens() {
                 </div>
               </PopoverContent>
             </Popover>
+            {isAdmin && (
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-9 w-9"
+                title="Novo grupo"
+                onClick={() => setNovoGrupoOpen(true)}
+              >
+                <Users className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           <ScrollArea className="flex-1">
             {conversas.isLoading && (
@@ -175,8 +232,11 @@ export default function Mensagens() {
                   selectedConversa === c.conversa_id && "bg-muted"
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium truncate">{c.outro_nome}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {c.is_grupo && <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    {c.outro_nome}
+                  </span>
                   {c.nao_lidas > 0 && (
                     <Badge className="h-5 min-w-[20px] px-1.5 text-[10px]">{c.nao_lidas}</Badge>
                   )}
@@ -202,8 +262,16 @@ export default function Mensagens() {
           ) : (
             <>
               {/* Header */}
-              <div className="px-4 py-3 border-b bg-muted/30">
-                <h3 className="text-sm font-semibold">{selectedOutro?.nome}</h3>
+              <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
+                {selectedOutro?.isGrupo && <Users className="h-4 w-4 text-muted-foreground" />}
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold truncate">{selectedOutro?.nome}</h3>
+                  {selectedOutro?.isGrupo && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {selectedOutro.participantes?.length ?? 0} participantes
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Messages */}
@@ -214,6 +282,8 @@ export default function Mensagens() {
                   const isAutorizacao = meta?.kind === "autorizacao_excecao";
                   const isDeleted = !!m.deletada_at;
                   const isEditing = editingId === m.id;
+                  const showSenderName = !!selectedOutro?.isGrupo && !isMine && !isAutorizacao;
+                  const senderName = participantesNomes?.[m.remetente_id] || "Usuário";
                   return (
                     <div key={m.id} className={cn("flex group", isMine ? "justify-end" : "justify-start")}>
                       {isAutorizacao ? (
@@ -224,16 +294,20 @@ export default function Mensagens() {
                           </p>
                         </div>
                       ) : (
-                        <div
-                          className={cn(
-                            "max-w-[70%] px-3 py-2 rounded-lg text-sm relative",
-                            isDeleted
-                              ? "bg-muted/50 text-muted-foreground italic border border-dashed"
-                              : isMine
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted text-foreground"
+                        <div className="max-w-[70%]">
+                          {showSenderName && (
+                            <p className="text-[11px] font-medium text-primary mb-0.5 ml-1">{senderName}</p>
                           )}
-                        >
+                          <div
+                            className={cn(
+                              "px-3 py-2 rounded-lg text-sm relative",
+                              isDeleted
+                                ? "bg-muted/50 text-muted-foreground italic border border-dashed"
+                                : isMine
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-foreground"
+                            )}
+                          >
                           {isEditing ? (
                             <EditableMessageBubble
                               initialValue={m.conteudo}
@@ -292,6 +366,7 @@ export default function Mensagens() {
                               </p>
                             </>
                           )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -316,6 +391,11 @@ export default function Mensagens() {
           )}
         </div>
       </div>
+      <NovoGrupoDialog
+        open={novoGrupoOpen}
+        onOpenChange={setNovoGrupoOpen}
+        onCreated={handleGrupoCreated}
+      />
     </div>
   );
 }

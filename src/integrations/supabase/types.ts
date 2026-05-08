@@ -666,6 +666,36 @@ export type Database = {
         }
         Relationships: []
       }
+      conversas_grupo: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          criado_por: string
+          id: string
+          nome: string
+          participantes: string[]
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          criado_por: string
+          id?: string
+          nome: string
+          participantes?: string[]
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          criado_por?: string
+          id?: string
+          nome?: string
+          participantes?: string[]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       cron_jobs: {
         Row: {
           ativo: boolean
@@ -2341,6 +2371,10 @@ export type Database = {
       }
       get_template_by_alias: { Args: { _alias: string }; Returns: string }
       get_user_setor_ids: { Args: { _user_id: string }; Returns: string[] }
+      grupo_id_from_conversa: {
+        Args: { _conversa_id: string }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -2349,6 +2383,10 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_group_member: {
+        Args: { _grupo_id: string; _user_id: string }
+        Returns: boolean
+      }
       loja_status_no_dia: {
         Args: { _data: string; _loja_id: string }
         Returns: Json

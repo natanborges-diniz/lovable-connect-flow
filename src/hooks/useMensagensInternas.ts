@@ -7,6 +7,10 @@ function makeConversaId(a: string, b: string) {
   return [a, b].sort().join("_");
 }
 
+export function makeGroupConversaId(grupoId: string) {
+  return `grupo_${grupoId}`;
+}
+
 export interface Conversa {
   conversa_id: string;
   outro_id: string;
@@ -14,6 +18,9 @@ export interface Conversa {
   ultima_mensagem: string;
   ultima_data: string;
   nao_lidas: number;
+  is_grupo?: boolean;
+  participantes?: string[];
+  grupo_id?: string;
 }
 
 export function useMensagensInternas() {
@@ -51,7 +58,7 @@ export function useMensagensInternas() {
     return () => { supabase.removeChannel(channel); };
   }, [uid, qc, isAuthReady]);
 
-  // List conversations
+  // List conversations (1:1 + grupos)
   const conversas = useQuery({
     queryKey: ["conversas-internas", uid],
     enabled: !!uid && isAuthReady,
@@ -65,41 +72,64 @@ export function useMensagensInternas() {
         .order("created_at", { ascending: false });
       if (error) throw error;
 
-      // Group by conversa_id (já filtrado de demandas/pontes)
-      const map = new Map<string, { msgs: typeof msgs; outro_id: string }>();
+      const map = new Map<string, { msgs: typeof msgs; outro_id: string | null; isGrupo: boolean }>();
       for (const m of msgs || []) {
+        const isGrupo = m.conversa_id.startsWith("grupo_");
         if (!map.has(m.conversa_id)) {
-          const outroId = m.remetente_id === uid ? m.destinatario_id : m.remetente_id;
-          map.set(m.conversa_id, { msgs: [], outro_id: outroId });
+          const outroId = isGrupo ? null : (m.remetente_id === uid ? m.destinatario_id : m.remetente_id);
+          map.set(m.conversa_id, { msgs: [], outro_id: outroId, isGrupo });
         }
         map.get(m.conversa_id)!.msgs.push(m);
       }
 
-      // Get profile names
-      const outroIds = [...new Set([...map.values()].map((v) => v.outro_id))];
+      // Profiles 1:1
+      const outroIds = [...new Set([...map.values()].filter(v => !v.isGrupo).map(v => v.outro_id!).filter(Boolean))];
       const { data: profiles } = outroIds.length > 0
         ? await supabase.from("profiles").select("id, nome").in("id", outroIds)
         : { data: [] };
       const nameMap = new Map((profiles || []).map((p) => [p.id, p.nome]));
 
+      // Grupos
+      const grupoIds = [...map.keys()].filter(k => k.startsWith("grupo_")).map(k => k.slice(6));
+      const { data: grupos } = grupoIds.length > 0
+        ? await supabase.from("conversas_grupo").select("id, nome, participantes").in("id", grupoIds)
+        : { data: [] };
+      const grupoMap = new Map((grupos || []).map((g: any) => [g.id, g]));
+
       const result: Conversa[] = [];
-      for (const [cid, { msgs: cmsgs, outro_id }] of map) {
+      for (const [cid, { msgs: cmsgs, outro_id, isGrupo }] of map) {
         const naoLidas = cmsgs.filter((m) => m.destinatario_id === uid && !m.lida).length;
-        result.push({
-          conversa_id: cid,
-          outro_id,
-          outro_nome: nameMap.get(outro_id) || "Usuário",
-          ultima_mensagem: cmsgs[0].conteudo,
-          ultima_data: cmsgs[0].created_at,
-          nao_lidas: naoLidas,
-        });
+        if (isGrupo) {
+          const gid = cid.slice(6);
+          const g: any = grupoMap.get(gid);
+          if (!g) continue; // grupo deletado / sem acesso
+          result.push({
+            conversa_id: cid,
+            outro_id: gid,
+            outro_nome: g.nome,
+            ultima_mensagem: cmsgs[0].conteudo,
+            ultima_data: cmsgs[0].created_at,
+            nao_lidas: naoLidas,
+            is_grupo: true,
+            participantes: g.participantes,
+            grupo_id: gid,
+          });
+        } else {
+          result.push({
+            conversa_id: cid,
+            outro_id: outro_id!,
+            outro_nome: nameMap.get(outro_id!) || "Usuário",
+            ultima_mensagem: cmsgs[0].conteudo,
+            ultima_data: cmsgs[0].created_at,
+            nao_lidas: naoLidas,
+          });
+        }
       }
       result.sort((a, b) => new Date(b.ultima_data).getTime() - new Date(a.ultima_data).getTime());
       return result;
     },
   });
 
-  // Total unread count (apenas chat 1:1 — exclui demanda_* e ponte_*)
   const totalNaoLidas = useQuery({
     queryKey: ["total-nao-lidas", uid],
     enabled: !!uid && isAuthReady,
@@ -116,7 +146,7 @@ export function useMensagensInternas() {
     },
   });
 
-  return { conversas, totalNaoLidas, makeConversaId };
+  return { conversas, totalNaoLidas, makeConversaId, makeGroupConversaId };
 }
 
 export function useMensagensConversa(conversaId: string | null) {
@@ -130,6 +160,21 @@ export function useMensagensConversa(conversaId: string | null) {
         .eq("conversa_id", conversaId!)
         .order("created_at", { ascending: true });
       if (error) throw error;
+
+      // Em grupo, deduplicar pela linha "minha cópia" (cada msg foi inserida N-1 vezes, uma por destinatário)
+      if (conversaId?.startsWith("grupo_")) {
+        const seen = new Set<string>();
+        const out: any[] = [];
+        for (const m of data || []) {
+          // chave: remetente + conteudo + created_at(segundo) — mesma mensagem duplicada
+          const key = `${m.remetente_id}|${m.conteudo}|${(m as any).anexo_url || ""}|${new Date(m.created_at).toISOString().slice(0, 19)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            out.push(m);
+          }
+        }
+        return out;
+      }
       return data || [];
     },
   });
@@ -138,15 +183,42 @@ export function useMensagensConversa(conversaId: string | null) {
 export function useEnviarMensagem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ remetenteId, destinatarioId, conteudo }: { remetenteId: string; destinatarioId: string; conteudo: string }) => {
-      const conversa_id = makeConversaId(remetenteId, destinatarioId);
-      const { error } = await supabase.from("mensagens_internas").insert({
-        remetente_id: remetenteId,
-        destinatario_id: destinatarioId,
-        conversa_id,
-        conteudo,
-      });
-      if (error) throw error;
+    mutationFn: async ({
+      remetenteId,
+      destinatarioId,
+      conteudo,
+      grupoId,
+      participantes,
+    }: {
+      remetenteId: string;
+      destinatarioId?: string;
+      conteudo: string;
+      grupoId?: string;
+      participantes?: string[];
+    }) => {
+      if (grupoId && participantes) {
+        const conversa_id = makeGroupConversaId(grupoId);
+        const outros = participantes.filter((p) => p !== remetenteId);
+        if (outros.length === 0) throw new Error("Grupo sem outros participantes");
+        const rows = outros.map((d) => ({
+          remetente_id: remetenteId,
+          destinatario_id: d,
+          conversa_id,
+          conteudo,
+        }));
+        const { error } = await supabase.from("mensagens_internas").insert(rows);
+        if (error) throw error;
+      } else {
+        if (!destinatarioId) throw new Error("Destinatário obrigatório");
+        const conversa_id = makeConversaId(remetenteId, destinatarioId);
+        const { error } = await supabase.from("mensagens_internas").insert({
+          remetente_id: remetenteId,
+          destinatario_id: destinatarioId,
+          conversa_id,
+          conteudo,
+        });
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["conversas-internas"] });
@@ -226,6 +298,26 @@ export function useDeleteMensagemInterna() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["mensagens-conversa"] });
+      qc.invalidateQueries({ queryKey: ["conversas-internas"] });
+    },
+  });
+}
+
+// Criar grupo (apenas admin via RLS)
+export function useCriarGrupo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ nome, participantes, criadoPor }: { nome: string; participantes: string[]; criadoPor: string }) => {
+      const todos = [...new Set([criadoPor, ...participantes])];
+      const { data, error } = await supabase
+        .from("conversas_grupo")
+        .insert({ nome, participantes: todos, criado_por: criadoPor })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["conversas-internas"] });
     },
   });
