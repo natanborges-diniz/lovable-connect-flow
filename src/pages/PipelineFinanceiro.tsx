@@ -611,6 +611,21 @@ export default function PipelineFinanceiro() {
         firstColumnId={firstColumnId}
         setorId={setorId}
       />
+
+      <CancelarSolicitacaoDialog
+        solicitacaoId={cancelDialogId}
+        open={!!cancelDialogId}
+        onOpenChange={(o) => !o && setCancelDialogId(null)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] })}
+      />
+
+      <DevolverLojaDialog
+        solicitacaoId={devolverDialog?.id ?? null}
+        colunaDestinoId={devolverDialog?.colunaId ?? null}
+        open={!!devolverDialog}
+        onOpenChange={(o) => !o && setDevolverDialog(null)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] })}
+      />
     </>
   );
 }
