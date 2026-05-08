@@ -865,16 +865,7 @@ function EditarUsuarioForm(props: EditarUsuarioFormProps) {
   const { target, setores, lojas, tipo, setTipo, cargoLoja, setCargoLoja,
     lojasSelected, setLojasSelected, setorId, setSetorId, saving, onCancel, onSave } = props;
 
-  // Hidrata uma vez na montagem (key={target.id} garante remontar por usuário)
-  // Usa lazy initial state via flag
-  const [hydrated, setHydrated] = useState(false);
-  if (!hydrated) {
-    setTipo((target.tipo_usuario as TipoUsuario) || "setor_operador");
-    setCargoLoja((target.cargo_loja as any) || "operador");
-    setLojasSelected(Array.isArray(target.lojas) ? target.lojas : []);
-    setSetorId(target.setor_id || "");
-    setHydrated(true);
-  }
+  // (Hidratação acontece no Dialog pai via useEffect)
 
   const toggleLoja = (loja: string) => {
     if (lojasSelected.includes(loja)) {
