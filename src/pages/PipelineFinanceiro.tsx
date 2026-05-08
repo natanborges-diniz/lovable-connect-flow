@@ -167,19 +167,26 @@ export default function PipelineFinanceiro() {
     const solicitacaoId = result.draggableId;
     const destColunaId = result.destination.droppableId;
     const sourceColunaId = result.source.droppableId;
+
+    if (destColunaId === sourceColunaId) return;
+
+    // Se a coluna destino é "devolver_para_loja", abre dialog (não move ainda)
+    const destCol: any = (colunas ?? []).find((c: any) => c.id === destColunaId);
+    if (destCol?.tipo_acao === "devolver_para_loja") {
+      setDevolverDialog({ id: solicitacaoId, colunaId: destColunaId });
+      return;
+    }
+
     updateSolicitacaoColuna.mutate({ id: solicitacaoId, pipeline_coluna_id: destColunaId });
 
-    // Trigger pipeline automations
-    if (destColunaId !== sourceColunaId) {
-      supabase.functions.invoke("pipeline-automations", {
-        body: {
-          entity_type: "solicitacao",
-          entity_id: solicitacaoId,
-          coluna_id: destColunaId,
-          coluna_anterior_id: sourceColunaId,
-        },
-      }).catch(e => console.warn("Automation call failed:", e));
-    }
+    supabase.functions.invoke("pipeline-automations", {
+      body: {
+        entity_type: "solicitacao",
+        entity_id: solicitacaoId,
+        coluna_id: destColunaId,
+        coluna_anterior_id: sourceColunaId,
+      },
+    }).catch(e => console.warn("Automation call failed:", e));
   };
 
   const startEditColuna = (id: string, nome: string) => {
