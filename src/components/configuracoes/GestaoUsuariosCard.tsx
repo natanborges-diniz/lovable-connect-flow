@@ -756,3 +756,254 @@ export function GestaoUsuariosCard() {
     </TooltipProvider>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Diálogo unificado: tipo + cargo + lojas + setor numa única tela
+// ─────────────────────────────────────────────────────────────────────────
+interface EditarUsuarioDialogProps {
+  target: any | null;
+  setores: Array<{ id: string; nome: string }>;
+  lojas: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function EditarUsuarioDialog({ target, setores, lojas, onClose, onSaved }: EditarUsuarioDialogProps) {
+  const open = !!target;
+  const [tipo, setTipo] = useState<TipoUsuario>("setor_operador");
+  const [cargoLoja, setCargoLoja] = useState<"supervisor" | "gerente" | "operador">("operador");
+  const [lojasSelected, setLojasSelected] = useState<string[]>([]);
+  const [setorId, setSetorId] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  // Hidrata ao abrir
+  useState(() => {});
+  if (target && tipo !== ((target.tipo_usuario as TipoUsuario) || "setor_operador") && !saving) {
+    // primeira renderização para esse target
+  }
+  // Reset state quando target muda
+  // (usa useEffect via inline tecnica: keyed by id)
+  // Para simplicidade usamos uma key no Dialog para forçar remount.
+
+  const onOpenChange = (o: boolean) => { if (!o) onClose(); };
+
+  const handleSave = async () => {
+    if (!target) return;
+    setSaving(true);
+    try {
+      const update: any = { tipo_usuario: tipo };
+      if (tipo === "loja") {
+        update.cargo_loja = cargoLoja;
+        update.lojas = lojasSelected;
+        update.setor_id = null;
+      } else if (tipo === "setor_operador") {
+        update.cargo_loja = null;
+        update.lojas = [];
+        update.setor_id = setorId || null;
+      } else {
+        update.cargo_loja = null;
+        update.lojas = [];
+        update.setor_id = null;
+      }
+      const { error } = await supabase.from("profiles").update(update).eq("id", target.id);
+      if (error) throw error;
+      toast.success("Usuário atualizado");
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message ?? "Falha ao salvar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        {target && (
+          <EditarUsuarioForm
+            key={target.id}
+            target={target}
+            setores={setores}
+            lojas={lojas}
+            tipo={tipo}
+            setTipo={setTipo}
+            cargoLoja={cargoLoja}
+            setCargoLoja={setCargoLoja}
+            lojasSelected={lojasSelected}
+            setLojasSelected={setLojasSelected}
+            setorId={setorId}
+            setSetorId={setSetorId}
+            saving={saving}
+            onCancel={onClose}
+            onSave={handleSave}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface EditarUsuarioFormProps {
+  target: any;
+  setores: Array<{ id: string; nome: string }>;
+  lojas: string[];
+  tipo: TipoUsuario;
+  setTipo: (t: TipoUsuario) => void;
+  cargoLoja: "supervisor" | "gerente" | "operador";
+  setCargoLoja: (c: "supervisor" | "gerente" | "operador") => void;
+  lojasSelected: string[];
+  setLojasSelected: (l: string[]) => void;
+  setorId: string;
+  setSetorId: (id: string) => void;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}
+
+function EditarUsuarioForm(props: EditarUsuarioFormProps) {
+  const { target, setores, lojas, tipo, setTipo, cargoLoja, setCargoLoja,
+    lojasSelected, setLojasSelected, setorId, setSetorId, saving, onCancel, onSave } = props;
+
+  // Hidrata uma vez na montagem (key={target.id} garante remontar por usuário)
+  // Usa lazy initial state via flag
+  const [hydrated, setHydrated] = useState(false);
+  if (!hydrated) {
+    setTipo((target.tipo_usuario as TipoUsuario) || "setor_operador");
+    setCargoLoja((target.cargo_loja as any) || "operador");
+    setLojasSelected(Array.isArray(target.lojas) ? target.lojas : []);
+    setSetorId(target.setor_id || "");
+    setHydrated(true);
+  }
+
+  const toggleLoja = (loja: string) => {
+    if (lojasSelected.includes(loja)) {
+      setLojasSelected(lojasSelected.filter((l) => l !== loja));
+    } else {
+      setLojasSelected([...lojasSelected, loja]);
+    }
+  };
+
+  const canSave =
+    (tipo === "admin" || tipo === "colaborador") ||
+    (tipo === "loja" && lojasSelected.length > 0) ||
+    (tipo === "setor_operador" && !!setorId);
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Editar usuário — {target.nome}</DialogTitle>
+        <DialogDescription>
+          Defina o tipo, cargo e lojas/setor. As áreas de acesso são sincronizadas automaticamente.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-5 py-2">
+        {/* Tipo */}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Tipo de usuário</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["loja", "setor_operador", "colaborador", "admin"] as TipoUsuario[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTipo(t)}
+                className={`text-left rounded-md border px-3 py-2 text-sm transition-colors ${
+                  tipo === t ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
+                }`}
+              >
+                <div className="font-medium">{TIPO_USUARIO_LABELS[t]}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {t === "loja" && "Equipe de loja — só InFoco Messenger"}
+                  {t === "setor_operador" && "Operador de setor — Atrium web"}
+                  {t === "colaborador" && "Colaborador interno geral"}
+                  {t === "admin" && "Acesso total ao sistema"}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Quando tipo = loja */}
+        {tipo === "loja" && (
+          <>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Cargo na loja</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {(["supervisor", "gerente", "operador"] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setCargoLoja(c)}
+                    className={`rounded-md border px-3 py-2 text-sm capitalize transition-colors ${
+                      cargoLoja === c ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Cargo controla quais opções aparecem no menu de demandas do Messenger.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                Lojas que atende ({lojasSelected.length} selecionada{lojasSelected.length === 1 ? "" : "s"})
+              </Label>
+              <div className="max-h-56 overflow-auto rounded-md border p-2 grid grid-cols-2 gap-1">
+                {lojas.length === 0 ? (
+                  <p className="text-xs text-muted-foreground p-2">Nenhuma loja cadastrada.</p>
+                ) : (
+                  lojas.map((l) => (
+                    <label key={l} className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/40 cursor-pointer">
+                      <Checkbox
+                        checked={lojasSelected.includes(l)}
+                        onCheckedChange={() => toggleLoja(l)}
+                      />
+                      <span className="text-sm">{l}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+              🔒 Acesso ao Atrium web: <strong>bloqueado</strong>. Usuário só usa o InFoco Messenger.
+            </div>
+          </>
+        )}
+
+        {/* Quando tipo = setor_operador */}
+        {tipo === "setor_operador" && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Setor</Label>
+            <Select value={setorId} onValueChange={setSetorId}>
+              <SelectTrigger><SelectValue placeholder="Selecione o setor" /></SelectTrigger>
+              <SelectContent>
+                {setores.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {tipo === "admin" && (
+          <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-xs text-amber-900 dark:text-amber-200">
+            Acesso administrativo total ao Atrium e todos os setores.
+          </div>
+        )}
+      </div>
+
+      <DialogFooter>
+        <Button variant="ghost" onClick={onCancel}>Cancelar</Button>
+        <Button disabled={saving || !canSave} onClick={onSave}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
