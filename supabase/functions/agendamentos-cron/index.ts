@@ -366,14 +366,17 @@ async function processFirstStoreCharge(
   supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[],
   horasDelay: number
 ) {
-  // 1ª cobrança só dispara se já passou (horário do agendamento + horasDelay)
+  // 1ª cobrança só dispara se já passou (horário do agendamento + horasDelay).
+  // Filtro por tentativas_cobranca_loja=0 (e não mais confirmacao_enviada) para
+  // não pular cards que tiveram confirmacao_enviada=true setado por engano
+  // (ex.: automação confundindo "cliente confirmou" com "loja foi cobrada").
   const cutoff = new Date(now.getTime() - horasDelay * 60 * 60 * 1000).toISOString();
   const { data: paraCobranca } = await supabase
     .from("agendamentos")
     .select("id, contato_id, loja_nome, loja_telefone, data_horario")
     .in("status", ["agendado", "lembrete_enviado", "confirmado"])
-    .eq("confirmacao_enviada", false)
     .eq("tentativas_cobranca_loja", 0)
+    .is("loja_confirmou_presenca", null)
     .lt("data_horario", cutoff);
 
   for (const ag of paraCobranca || []) {
