@@ -395,7 +395,11 @@ export default function Mensagens() {
                                 )}
                                 {isMine && !isDeleted && (
                                   <MessageTicks
-                                    status={selectedOutro?.isGrupo ? "sent" : (m.lida ? "read" : "sent")}
+                                    status={
+                                      selectedOutro?.isGrupo
+                                        ? (m.lida_por_todos ? "read" : "sent")
+                                        : (m.lida ? "read" : "sent")
+                                    }
                                     className="ml-0.5"
                                   />
                                 )}
