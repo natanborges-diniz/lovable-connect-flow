@@ -18,6 +18,8 @@ export interface Conversa {
   ultima_mensagem: string;
   ultima_data: string;
   nao_lidas: number;
+  ultima_remetente_id?: string;
+  ultima_lida?: boolean;
   is_grupo?: boolean;
   participantes?: string[];
   grupo_id?: string;
