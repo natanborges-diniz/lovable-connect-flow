@@ -37,6 +37,21 @@ Sem isso (apenas correção pequena): segue o fluxo, hint pós-correção força
 
 O safety-net pós-LLM continua bloqueando qualquer R$ enquanto `pending=true` (ver `memoria-multiplas-receitas`).
 
+## Escalada após 2 falhas de confirmação (Mai/2026)
+
+Quando `metadata.receita_confirmacao.correction_count >= 2` no ramo de **rejeição** (`detectRxRejeicao`) — i.e. cliente disse "Não" 2x seguidas — IA admite dificuldade de leitura e escala:
+
+- `MSG_ESCALADA_RECEITA_LEITURA` ("Desculpa, tô com dificuldade…") dentro do expediente; `mensagemEscaladaForaHorario` fora.
+- `atendimentos.modo = "humano"`, `metadata.revisao_humana_pendente=true` com motivo `receita_confirmacao_falhou_2x`.
+- `receita_confirmacao.pending=false` (consultor assume) + `escalado_humano_at`.
+- Evento `receita_escalada_apos_2_rejeicoes`.
+- Retorna `precisa_humano: true`, `pipeline_coluna_sugerida: "Aguardando Humano"`.
+
+No ramo de **correção textual de alto impacto** (~3424), threshold é `correction_count >= 3` (1ª correção é estado normal; só a partir da 3ª textual em sequência sem confirmação intermediária é loop). Mesma mensagem e mesma flag, evento com `via: "correcao_textual"`.
+
+Contador zera em `detectRxConfirmation` (gate ~2256) — confirmação bem-sucedida limpa também o histórico de falhas.
+
+
 ## Tom para grau elevado
 Substituído "grau alto / sob encomenda" por "lente especial / lente personalizada" nas mensagens visíveis ao cliente:
 - `MSG_ESCALADA_GRAU_FORA_FAIXA`: "Por ser uma *lente especial*, vou te conectar com um Consultor…".
