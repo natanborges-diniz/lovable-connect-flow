@@ -394,14 +394,46 @@ export default function Mensagens() {
                                   </span>
                                 )}
                                 {isMine && !isDeleted && (
-                                  <MessageTicks
-                                    status={
-                                      selectedOutro?.isGrupo
-                                        ? (m.lida_por_todos ? "read" : "sent")
-                                        : (m.lida ? "read" : "sent")
-                                    }
-                                    className="ml-0.5"
-                                  />
+                                  selectedOutro?.isGrupo ? (
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <button
+                                          type="button"
+                                          className={cn(
+                                            "ml-0.5 inline-flex items-center gap-1 hover:underline",
+                                            isMine ? "text-primary-foreground/80" : "text-muted-foreground"
+                                          )}
+                                          aria-label="Ver quem leu"
+                                        >
+                                          <MessageTicks status={m.lida_por_todos ? "read" : "sent"} />
+                                          <span className="text-[10px]">{m.lidas_count ?? 0}/{m.total_copias ?? (selectedOutro.participantes?.length ?? 1) - 1}</span>
+                                        </button>
+                                      </PopoverTrigger>
+                                      <PopoverContent align="end" className="w-56 p-2">
+                                        <p className="text-xs font-medium mb-2 px-1">Visualizações</p>
+                                        <div className="space-y-1 max-h-64 overflow-y-auto">
+                                          {(m.destinatarios_ids || []).map((pid: string) => {
+                                            const leu = (m.leitores_ids || []).includes(pid);
+                                            return (
+                                              <div key={pid} className="flex items-center justify-between text-xs px-1 py-0.5">
+                                                <span className="truncate">{participantesNomes?.[pid] || "Usuário"}</span>
+                                                {leu ? (
+                                                  <span className="text-sky-500" aria-label="Lida">✓✓</span>
+                                                ) : (
+                                                  <span className="text-muted-foreground" aria-label="Pendente">○</span>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  ) : (
+                                    <MessageTicks
+                                      status={m.lida ? "read" : "sent"}
+                                      className="ml-0.5"
+                                    />
+                                  )
                                 )}
                               </p>
                             </>
