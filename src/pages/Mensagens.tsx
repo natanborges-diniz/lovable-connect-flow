@@ -364,6 +364,12 @@ export default function Mensagens() {
                                     • editada
                                   </span>
                                 )}
+                                {isMine && !isDeleted && (
+                                  <MessageTicks
+                                    status={selectedOutro?.isGrupo ? "sent" : (m.lida ? "read" : "sent")}
+                                    className="ml-0.5"
+                                  />
+                                )}
                               </p>
                             </>
                           )}
