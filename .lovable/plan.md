@@ -1,33 +1,72 @@
-## Diagnóstico
+# Dois problemas, duas correções
 
-Verifiquei o código do projeto **InFoco Messenger** e o `src/pages/GrupoChat.tsx` **já contém** a implementação do popover "Visualizações" (linhas 714–762). Provavelmente o que falta no seu lado é:
+## Problema 1 — cards "Confirmado" com data passada
 
-1. O deploy/preview não está atualizado, OU
-2. A coluna `lida` em `mensagens_internas` não está sendo atualizada (o popover existe mas mostra todos como "○ pendente"), OU
-3. O botão dos ticks `✓✓ N/M` não está visível por estilo CSS muito sutil.
+### Diagnóstico
+Inspecionei os 5 cards travados em **Confirmado** (datas 30/04 → 05/05, hoje 08/05). Todos têm:
+- `confirmacao_enviada = true`
+- `tentativas_cobranca_loja = 0`
+- `loja_confirmou_presenca = null`
 
-## O que pedir lá no InFoco Messenger
+Isto é um **estado impossível** pelas regras do cron `agendamentos-cron`:
 
-Abra o projeto **InFoco Messenger** e cole **exatamente** o prompt abaixo no chat de lá (o agente daquele projeto tem acesso de escrita ao código):
+1. `processFirstStoreCharge` filtra por `confirmacao_enviada=false AND tentativas_cobranca_loja=0`. Como o flag já está `true`, **nunca dispara a 1ª cobrança**.
+2. `processSecondStoreChargeNextMorning` exige `tentativas_cobranca_loja=1`. Como ficou em 0, **nunca dispara a 2ª**.
+3. `processStoreTimeout` (que viraria `no_show` / cria tarefa) exige `tentativas_cobranca_loja >= 2`. **Nunca dispara**.
 
----
+Resultado: o card nasce já com `confirmacao_enviada=true` (provavelmente setado por automação quando o **cliente** confirmou — campo com semântica ambígua entre "cliente confirmou" e "loja foi cobrada") e o cron passa direto. Fica órfão indefinidamente em "Confirmado" mesmo dias após a data.
 
-> Em `src/pages/GrupoChat.tsx`, confirme que o bloco `mine && !apagada` (~linhas 714–763) renderiza o `<Popover>` com `PopoverTrigger` (botão `✓✓ N/M`) e `PopoverContent` listando `m.destinatarios_ids` com ✓✓ se `m.leitores_ids.includes(pid)` ou ○ caso contrário. Se sim:
->
-> 1. Aumente a visibilidade do trigger: troque `text-[10px]` por `text-[11px] font-medium underline decoration-dotted underline-offset-2` no `<span>{m.lidas_count}/{m.total_copias}</span>` para o usuário perceber que é clicável.
-> 2. Garanta que o realtime UPDATE em `mensagens_internas` está atualizando o estado local — confirme o handler `event: "UPDATE"` (~linha 242) faz `setMessages(prev => prev.map(x => x.id === m.id ? {...x, ...m} : x))`. Sem isso, `lida` nunca vira `true` no cliente do remetente.
-> 3. Verifique a RLS de `mensagens_internas`: o remetente precisa ter SELECT em todas as N cópias do broadcast (não só nas dele) para o `lidas_count` refletir leitura dos outros. Se a policy estiver restrita a `auth.uid() in (remetente_id, destinatario_id)`, o remetente vê todas as cópias dele (porque é remetente em todas) — mas confirme rodando: `select destinatario_id, lida from mensagens_internas where conversa_id = 'grupo_<id>' and remetente_id = auth.uid()`.
-> 4. Para chat 1:1 (`src/pages/ConversaDetail.tsx`), adicione um `<MessageTicks status={m.lida ? "read" : "sent"} />` no rodapé das mensagens próprias se ainda não houver.
->
-> Após aplicar, abra um grupo, envie uma mensagem, peça para outro membro abrir o grupo e confirme que o contador `0/N` vira `1/N` em tempo real e o popover lista quem leu.
+### Correção
+1. **Backfill imediato dos 5 órfãos**: para cada card em `confirmado`/`agendado`/`lembrete_enviado` com `data_horario < now() - 2h` e `loja_confirmou_presenca IS NULL`, resetar `confirmacao_enviada=false, tentativas_cobranca_loja=0` para o cron retomar a cadência. Caso já tenha passado da janela de 48h, mover direto para `no_show`.
+2. **Guardrail no cron** (`agendamentos-cron/index.ts`):
+   - Em `processFirstStoreCharge`, trocar o filtro de `confirmacao_enviada=false` por **OR**: aceitar tanto `confirmacao_enviada=false` quanto `tentativas_cobranca_loja=0` (o que pega o estado inconsistente).
+   - Adicionar bloco final **G2** ("recuperação_orfao_confirmado"): qualquer card em `agendado`/`lembrete_enviado`/`confirmado` com `data_horario < now() - 24h` e `loja_confirmou_presenca IS NULL` é movido para `no_show` automaticamente, com evento `agendamento_orfao_resgatado` no `eventos_crm`.
+3. **Separar semântica** do campo: introduzir uso explícito de `metadata.cliente_confirmou_at` (já existe) e parar de usar `confirmacao_enviada` para representar "cliente confirmou". `confirmacao_enviada` passa a significar **apenas** "1ª cobrança à loja enviada".
 
----
+## Problema 2 — Card sair do CRM e virar card no Pipeline Lojas com histórico de conversas
 
-## Se mesmo assim não funcionar
+### Estado atual
+`TransferPipelineDialog` (acionado em `Pipeline.tsx`) hoje só:
+- Cria o `agendamento` via edge `agendar-cliente`.
+- Faz `UPDATE contatos SET pipeline_coluna_id = NULL` → some do CRM.
+- O usuário acessa o histórico só via "Esteira Completa" (sub-tab no CRM), e o **card no Pipeline Lojas** é o agendamento — sem link visual rico para o atendimento de origem.
 
-Me avise qual destes ocorre:
-- (a) O botão `✓✓ N/M` não aparece de jeito nenhum → problema de deploy.
-- (b) Aparece `✓ 0/N` e nunca atualiza → realtime/RLS.
-- (c) Clico e o popover abre mas todos aparecem como ○ → coluna `lida` não está sendo escrita pelo cliente do destinatário.
+O usuário quer que, ao sair do CRM, o card **apareça no Pipeline de Lojas com o histórico da conversa anexado e clicável**.
 
-Com essa info eu te dou o ajuste cirúrgico para colar lá.
+### Correção
+1. **Edge function nova `migrar-card-pipeline`** que executa atomicamente:
+   - Busca atendimento ativo do contato (`atendimentos` aberto mais recente).
+   - Cria `agendamento` (reusa lógica de `agendar-cliente` ou chama internamente).
+   - Persiste `metadata.origem_crm = { atendimento_id, coluna_origem_id, coluna_origem_nome, transferido_at, transferido_por }` no agendamento.
+   - Cria evento `pipeline_card_eventos` tipo `transferencia_crm_lojas` com referência cruzada (`entidade=agendamento`, `metadata.atendimento_id`, `metadata.coluna_anterior`).
+   - Limpa `contatos.pipeline_coluna_id`.
+2. **`AgendamentoDialog`** (card do Pipeline Lojas) ganha aba **"Conversa"** que:
+   - Lê `metadata.origem_crm.atendimento_id` do agendamento.
+   - Renderiza as `mensagens` daquele atendimento em modo leitura (timeline com bolhas), reutilizando o mesmo componente de bolha usado em `Atendimentos.tsx`.
+   - Botão "Abrir conversa completa" leva para `/atendimentos?id={atendimento_id}`.
+3. **`TransferPipelineDialog`** chama a nova edge em vez de fazer as duas operações soltas.
+4. **Pipeline Lojas (`PipelineAgendamentos.tsx`)**: badge no card indicando "Veio do CRM" quando existe `metadata.origem_crm`, com tooltip do nome do atendente/coluna anterior.
+
+## Detalhes técnicos
+
+### Arquivos
+- `supabase/migrations/<nova>.sql` — backfill dos 5 órfãos.
+- `supabase/functions/agendamentos-cron/index.ts` — guardrail G2 + ajuste no filtro de processFirstStoreCharge.
+- `supabase/functions/migrar-card-pipeline/index.ts` — **novo**.
+- `supabase/config.toml` — registrar nova função (verify_jwt = false).
+- `src/components/pipeline/TransferPipelineDialog.tsx` — trocar chamada para a nova edge.
+- `src/components/agendamentos/AgendamentoDialog.tsx` — nova aba "Conversa" + carregamento de mensagens.
+- `src/pages/PipelineAgendamentos.tsx` — badge "Veio do CRM".
+
+### SQL backfill
+```sql
+-- Resgata os 5 órfãos com data passada
+UPDATE agendamentos
+SET status = 'no_show',
+    metadata = metadata || jsonb_build_object('orfao_resgatado_at', now()::text)
+WHERE status IN ('agendado','lembrete_enviado','confirmado')
+  AND loja_confirmou_presenca IS NULL
+  AND data_horario < now() - interval '24 hours';
+```
+
+Após aprovação, aplico backfill + edge nova + componentes em sequência.
