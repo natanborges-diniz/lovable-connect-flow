@@ -242,7 +242,12 @@ export default function Mensagens() {
                     <Badge className="h-5 min-w-[20px] px-1.5 text-[10px]">{c.nao_lidas}</Badge>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{c.ultima_mensagem}</p>
+                <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+                  {c.ultima_remetente_id === uid && (
+                    <MessageTicks status={c.is_grupo ? "sent" : (c.ultima_lida ? "read" : "sent")} />
+                  )}
+                  <span className="truncate">{c.ultima_mensagem}</span>
+                </p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   {format(new Date(c.ultima_data), "dd/MM HH:mm", { locale: ptBR })}
                 </p>
