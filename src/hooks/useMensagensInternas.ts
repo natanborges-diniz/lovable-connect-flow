@@ -126,17 +126,24 @@ export function useMensagensInternas() {
       const result: Conversa[] = [];
       for (const [cid, { msgs: cmsgs, outro_id, isGrupo }] of map) {
         const naoLidas = cmsgs.filter((m) => m.destinatario_id === uid && !m.lida).length;
+        const ultima = cmsgs[0];
         if (isGrupo) {
           const gid = cid.slice(6);
           const g: any = grupoMap.get(gid);
           if (!g) continue; // grupo deletado / sem acesso
+          // Em grupo, "lida" só é true se TODAS as cópias da última msg estiverem lidas
+          const ultimaKey = `${ultima.remetente_id}|${ultima.conteudo}|${new Date(ultima.created_at).toISOString().slice(0, 19)}`;
+          const copias = cmsgs.filter((m) => `${m.remetente_id}|${m.conteudo}|${new Date(m.created_at).toISOString().slice(0, 19)}` === ultimaKey);
+          const todasLidas = copias.length > 0 && copias.every((m) => m.lida);
           result.push({
             conversa_id: cid,
             outro_id: gid,
             outro_nome: g.nome,
-            ultima_mensagem: cmsgs[0].conteudo,
-            ultima_data: cmsgs[0].created_at,
+            ultima_mensagem: ultima.conteudo,
+            ultima_data: ultima.created_at,
             nao_lidas: naoLidas,
+            ultima_remetente_id: ultima.remetente_id,
+            ultima_lida: todasLidas,
             is_grupo: true,
             participantes: g.participantes,
             grupo_id: gid,
@@ -146,9 +153,11 @@ export function useMensagensInternas() {
             conversa_id: cid,
             outro_id: outro_id!,
             outro_nome: nameMap.get(outro_id!) || "Usuário",
-            ultima_mensagem: cmsgs[0].conteudo,
-            ultima_data: cmsgs[0].created_at,
+            ultima_mensagem: ultima.conteudo,
+            ultima_data: ultima.created_at,
             nao_lidas: naoLidas,
+            ultima_remetente_id: ultima.remetente_id,
+            ultima_lida: !!ultima.lida,
           });
         }
       }
