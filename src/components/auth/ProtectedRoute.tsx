@@ -1,4 +1,4 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 
@@ -8,7 +8,8 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, loading, roles, isAdmin } = useAuth();
+  const { user, loading, roles, isAdmin, profile } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
