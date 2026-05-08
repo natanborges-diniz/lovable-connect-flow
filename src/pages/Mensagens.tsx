@@ -61,6 +61,21 @@ export default function Mensagens() {
     refetchOnWindowFocus: true,
   });
 
+  // Nomes dos participantes do grupo selecionado (para rótulo de remetente nos balões)
+  const { data: participantesNomes } = useQuery({
+    queryKey: ["grupo-participantes-nomes", selectedOutro?.grupoId],
+    enabled: !!selectedOutro?.isGrupo && !!selectedOutro?.participantes?.length,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, nome")
+        .in("id", selectedOutro!.participantes!);
+      const map: Record<string, string> = {};
+      (data || []).forEach((p) => { map[p.id] = p.nome; });
+      return map;
+    },
+  });
+
   // Mark as read when opening a conversation
   useEffect(() => {
     if (selectedConversa && uid) {
