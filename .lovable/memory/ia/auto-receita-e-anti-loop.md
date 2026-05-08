@@ -165,3 +165,11 @@ Toda receita lida via OCR fica com `contatos.metadata.receita_confirmacao.pendin
 - **Hint de prompt**: novo bloco `[SISTEMA: NOVA RECEITA PENDENTE]` substitui o `[FLUXO PÓS-RECEITA OBRIGATÓRIO]` quando aplicável — força `interpretar_receita` AGORA com a imagem nova e proíbe usar receita antiga em `consultar_lentes`.
 - **Force-retry estendido** (bloco 9.4): dispara quando `hasPendingNewPrescriptionImage=true` mesmo com receita salva. Sucesso do retry faz append em `receitas[]` (FIFO 5) e marca `receita_confirmacao.pending=true` — preserva receita anterior.
 - **Quote-engine bloqueia** `consultar_lentes`/`consultar_lentes_contato` quando `hasPendingNewPrescriptionImage=true`: devolve "Recebi sua nova receita 👀… lendo" e loga `quote_blocked_new_rx_pending`.
+
+## "Recebi sua receita" só com envio real (caso Gabriely 2026-05-08)
+Fallback determinístico em `deterministicIntentFallback` NÃO pode disparar a frase "Recebi sua receita 👀…" só porque o texto contém a palavra "receita" / "grau" / "oftalmologista". Cliente que diz **"perdi a receita"** ou **"preciso refazer o exame"** não enviou nada — frase falsa de recebimento gera expectativa errada.
+
+Regra atual:
+- **Dispara "Recebi sua receita"** apenas com `isImageContext=true` (ramo de imagem) OU texto explícito de envio: `enviei (minha) receita`, `te mandei`, `recebeu minha receita`, `mandei a foto`, `segue a receita`, `acabei de mandar`.
+- **"Perdi / sem / refazer exame"** roteia para indicação de clínica parceira, pedindo bairro/região.
+- Outras menções a "receita" sem indicador de envio caem no ramo de orçamento que pede a foto.
