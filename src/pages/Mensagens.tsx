@@ -78,7 +78,13 @@ export default function Mensagens() {
 
   const handleSelectConversa = (c: Conversa) => {
     setSelectedConversa(c.conversa_id);
-    setSelectedOutro({ id: c.outro_id, nome: c.outro_nome });
+    setSelectedOutro({
+      id: c.outro_id,
+      nome: c.outro_nome,
+      isGrupo: c.is_grupo,
+      participantes: c.participantes,
+      grupoId: c.grupo_id,
+    });
   };
 
   const handleNovaConversa = (profile: { id: string; nome: string }) => {
@@ -89,13 +95,36 @@ export default function Mensagens() {
     setBuscaUsuario("");
   };
 
+  const handleGrupoCreated = async (grupoId: string) => {
+    // recarrega lista e abre o grupo recém-criado
+    await conversas.refetch();
+    const { data: g } = await supabase
+      .from("conversas_grupo")
+      .select("id, nome, participantes")
+      .eq("id", grupoId)
+      .maybeSingle();
+    if (g) {
+      setSelectedConversa(makeGroupConversaId(g.id));
+      setSelectedOutro({ id: g.id, nome: g.nome, isGrupo: true, participantes: g.participantes, grupoId: g.id });
+    }
+  };
+
   const handleEnviar = () => {
     if (!texto.trim() || !uid || !selectedOutro) return;
-    enviar.mutate({
-      remetenteId: uid,
-      destinatarioId: selectedOutro.id,
-      conteudo: texto.trim(),
-    });
+    if (selectedOutro.isGrupo && selectedOutro.grupoId && selectedOutro.participantes) {
+      enviar.mutate({
+        remetenteId: uid,
+        grupoId: selectedOutro.grupoId,
+        participantes: selectedOutro.participantes,
+        conteudo: texto.trim(),
+      });
+    } else {
+      enviar.mutate({
+        remetenteId: uid,
+        destinatarioId: selectedOutro.id,
+        conteudo: texto.trim(),
+      });
+    }
     setTexto("");
   };
 
