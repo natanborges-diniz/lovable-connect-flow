@@ -39,6 +39,8 @@ export interface MessageActionsMenuProps {
   forceHide?: boolean;
   /** Tom do botão para casar com a bolha */
   tone?: "light" | "dark";
+  /** Quando false, permite editar/excluir fora da janela de 15 min */
+  enforceEditWindow?: boolean;
 }
 
 export function isWithinEditWindow(createdAt: string) {
@@ -57,13 +59,14 @@ export function MessageActionsMenu({
   deleteWarning,
   forceHide,
   tone = "light",
+  enforceEditWindow = true,
 }: MessageActionsMenuProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (forceHide) return null;
   if (deletadaAt) return null;
   if (!currentUserId || !autorId || autorId !== currentUserId) return null;
-  if (!isWithinEditWindow(createdAt)) return null;
+  if (enforceEditWindow && !isWithinEditWindow(createdAt)) return null;
 
   return (
     <>
