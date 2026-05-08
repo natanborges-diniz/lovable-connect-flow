@@ -1,4 +1,4 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 
@@ -8,7 +8,8 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, loading, roles, isAdmin } = useAuth();
+  const { user, loading, roles, isAdmin, profile } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -20,6 +21,14 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
   if (!user) {
     return <Navigate to="/auth" replace />;
+  }
+
+  // tipo=loja só usa o InFoco Messenger; bloqueia Atrium web inteiro.
+  if (
+    profile?.tipo_usuario === "loja" &&
+    !location.pathname.startsWith("/somente-messenger")
+  ) {
+    return <Navigate to="/somente-messenger" replace />;
   }
 
   // If roles are specified, check access (admins always pass)

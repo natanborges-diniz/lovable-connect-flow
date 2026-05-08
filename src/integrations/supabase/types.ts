@@ -311,6 +311,7 @@ export type Database = {
       bot_menu_opcoes: {
         Row: {
           ativo: boolean
+          cargos_visiveis: string[]
           chave: string
           created_at: string
           descricao: string | null
@@ -327,6 +328,7 @@ export type Database = {
         }
         Insert: {
           ativo?: boolean
+          cargos_visiveis?: string[]
           chave: string
           created_at?: string
           descricao?: string | null
@@ -343,6 +345,7 @@ export type Database = {
         }
         Update: {
           ativo?: boolean
+          cargos_visiveis?: string[]
           chave?: string
           created_at?: string
           descricao?: string | null
@@ -1852,9 +1855,11 @@ export type Database = {
           ativo: boolean
           avatar_url: string | null
           cargo: string | null
+          cargo_loja: string | null
           created_at: string
           email: string | null
           id: string
+          lojas: string[]
           metadata: Json
           nome: string
           setor_id: string | null
@@ -1865,9 +1870,11 @@ export type Database = {
           ativo?: boolean
           avatar_url?: string | null
           cargo?: string | null
+          cargo_loja?: string | null
           created_at?: string
           email?: string | null
           id: string
+          lojas?: string[]
           metadata?: Json
           nome: string
           setor_id?: string | null
@@ -1878,9 +1885,11 @@ export type Database = {
           ativo?: boolean
           avatar_url?: string | null
           cargo?: string | null
+          cargo_loja?: string | null
           created_at?: string
           email?: string | null
           id?: string
+          lojas?: string[]
           metadata?: Json
           nome?: string
           setor_id?: string | null
@@ -2378,6 +2387,32 @@ export type Database = {
           _user_ids: string[]
         }
         Returns: undefined
+      }
+      get_menu_opcoes_para_cargo: {
+        Args: { _cargo: string; _parent_id: string; _tipo_bot: string }
+        Returns: {
+          ativo: boolean
+          cargos_visiveis: string[]
+          chave: string
+          created_at: string
+          descricao: string | null
+          emoji: string
+          fluxo: string
+          id: string
+          ordem: number
+          parent_id: string | null
+          setor_id: string | null
+          tipo: string
+          tipo_bot: string
+          titulo: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bot_menu_opcoes"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       get_template_by_alias: { Args: { _alias: string }; Returns: string }
       get_user_setor_ids: { Args: { _user_id: string }; Returns: string[] }

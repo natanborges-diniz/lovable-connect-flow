@@ -1,46 +1,31 @@
 ---
-name: Tipos de usuário no InFoco Messenger
-description: Profiles.tipo_usuario (loja|colaborador|setor_operador|admin) governa quem inicia 1:1 com quem. Wizard de cadastro em lote provisiona usuários a partir de telefones_lojas e fluxo_responsaveis.
+name: Tipos de usuário e cargo no InFoco Messenger
+description: profiles.tipo_usuario + cargo_loja + lojas[] como fonte da verdade. Trigger sync_user_roles_from_profile espelha em user_roles. tipo=loja só usa Messenger.
 type: feature
 ---
 
-## Regra
+## Modelo
 
-`profiles.tipo_usuario` (text, NOT NULL, default `setor_operador`, check em 4 valores) define o eixo de UX/segurança no InFoco Messenger. Setor + loja seguem em `user_roles`/`profiles.setor_id`.
+`profiles` carrega tudo:
+- `tipo_usuario` (loja|colaborador|setor_operador|admin)
+- `cargo_loja` (supervisor|gerente|operador) — só quando `tipo_usuario='loja'`
+- `lojas text[]` — lojas que o usuário cobre (multi)
+- `setor_id` — só quando `tipo_usuario='setor_operador'`
 
-| tipo_usuario | Pode iniciar 1:1 com |
-|---|---|
-| `loja` | outras lojas, colaboradores, admin |
-| `colaborador` | lojas, outros colaboradores, admin |
-| `setor_operador` | apenas operadores do MESMO setor (`setor_id` igual), admin |
-| `admin` | qualquer um |
+`user_roles` é **espelho** mantido pelo trigger `sync_user_roles_from_profile()` (AFTER INSERT/UPDATE em profiles). Admin não edita user_roles diretamente — edita profiles e o trigger reescreve.
 
-**Bloqueado**: loja/colaborador → setor_operador (e vice-versa) em chat solto. Comunicação só por demanda tipada (`conversa_id LIKE 'demanda_%'` segue liberado pela RLS).
+## Acesso ao Atrium web
 
-## Implementação
+`ProtectedRoute` redireciona qualquer usuário com `tipo_usuario='loja'` para `/somente-messenger` (página com botão para abrir o app). Eles autenticam pelo Atrium só para gerar magic link, mas não navegam internamente.
 
-- Função `public.pode_conversar_1a1(_remetente uuid, _destinatario uuid) RETURNS boolean` SECURITY DEFINER decide.
-- RLS `Users can send 1to1 or system messages` em `mensagens_internas` chama essa função para INSERTs cujo `conversa_id` não comece com `demanda_` ou `ponte_`.
-- `bot_fluxos.setor_destino_id` mapeia 14 fluxos aos setores reais para o wizard "Nova Demanda".
+## Menu de demandas por cargo
 
-## Provisionamento em lote (Atrium → Messenger)
+`bot_menu_opcoes.cargos_visiveis text[]` — lista de cargos que enxergam aquela opção. Vazio = todos. A função `get_menu_opcoes_para_cargo(_tipo_bot, _parent_id, _cargo)` filtra. O consumidor (InFoco Messenger) chama essa RPC passando `profiles.cargo_loja` do solicitante.
 
-InFoco Messenger não tem cadastro próprio — login é SSO via `sso-login` EF. Todos os usuários são criados no Atrium em `/configuracoes` → "Cadastro em lote" (`BulkUserProvisioningWizard`).
+## Cadastro
 
-**Fluxo do wizard (4 passos):**
-1. **Fonte** — escolhe `telefones_lojas` (lojas/colaboradores/departamentos) ou `fluxo_responsaveis` (operadores de setor).
-2. **Seleção** — checklist com telefones já existentes marcados como "já cadastrado" (match via `profiles.metadata->>telefone`). Operador preenche email (botão "Sugerir e-mails" gera `nome.usuario@oticasdiniz.local`).
-3. **Mapeamento** — confirma `tipo_usuario` (auto: `loja`→loja, `colaborador`→colaborador, `departamento`/`fluxo_responsaveis`→setor_operador) e setor (de `telefones_lojas.setor_destino_id` ou `bot_fluxos.setor_destino_id` via `fluxo_chave`).
-4. **Envio** — dispara `admin-bulk-provision-users` em chunks de 10. Mostra resultado por linha com `invite_url` copiável (botão "Copiar todos").
+Em `/configuracoes` → Gestão de Usuários, o botão ✏️ abre um diálogo único: **Tipo → (se loja) Cargo + Lojas (checklist multi) → (se setor) Setor**. Salvar grava `profiles`; o trigger sincroniza `user_roles`.
 
-**Edge function `admin-bulk-provision-users`** (idempotente, admin-only):
-- Lista até 50 candidatos por chamada.
-- Para cada: cria `auth.users` (ou reaproveita se já existe), atualiza `profiles.tipo_usuario/cargo/setor_id/metadata`, reseta `user_roles` com `role='setor_usuario'` (ou `admin`) + `setor_id`/`loja_nome`.
-- Persiste `profiles.metadata = { telefone, origem_cadastro, loja_nome }` para alimentar badges e match futuro.
-- Retorna `{ status: created|exists|error, invite_url, message }` por linha.
+## RLS 1:1
 
-## Badges visuais
-
-- `GestaoUsuariosCard`: coluna "Tipo (Messenger)" com select inline trocando `tipo_usuario` (badge colorido por tipo).
-- `TelefonesLojasCard`: coluna "Messenger" com badge ✓ Cadastrado / Pendente comparando telefone com `profiles.metadata->>telefone`.
-- `FluxoResponsaveisSection`: badge ✓ Messenger / Pendente em cada responsável.
+`pode_conversar_1a1()` continua valendo: loja↔setor segue proibido em chat livre (só via demanda tipada).
