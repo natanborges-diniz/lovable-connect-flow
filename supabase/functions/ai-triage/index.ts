@@ -246,6 +246,10 @@ const MSG_REVISAO_HUMANA_SUFIXO = "\n\n💡 _Como sua receita tem um detalhe esp
 
 const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Por ser uma *lente especial*, vou te conectar com um Consultor pra montar o orçamento certinho e confirmar prazo 🤝";
 
+// Após 2 tentativas falhas de confirmar a leitura da receita, IA admite a
+// dificuldade e escala para Consultor humano em vez de continuar o ciclo.
+const MSG_ESCALADA_RECEITA_LEITURA = "Desculpa, tô com dificuldade de bater os valores da sua receita certinho 😅 Vou te encaminhar pra um *Consultor humano* que vai conferir junto com você. Já avisei o time aqui 🙌";
+
 // ── Bloqueia escalada/oferta de "grau alto / sob encomenda" sem receita interpretada ──
 // Caso Franciana (Mai/2026): IA falou "Encontrei poucas opções automáticas para esse grau alto"
 // e ofereceu Consultor antes mesmo da receita ter sido enviada.
@@ -2257,6 +2261,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
                 ...contatoMeta.receita_confirmacao,
                 pending: false,
                 confirmed_at: new Date().toISOString(),
+                correction_count: 0,
               },
             },
           }).eq("id", contatoId);
@@ -2392,14 +2397,60 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           metadata: { rx_label: rxLabel, correction_count: newCount },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
-        let respRej: string;
+        // ── Escalada após 2 falhas de confirmação ──
+        // Cliente já rejeitou 2x: IA admite dificuldade e passa pra Consultor humano
+        // em vez de continuar o ciclo "Anotei! ✅ → Não → me passa por texto".
         if (newCount >= 2) {
-          respRej = MSG_PEDIR_RECEITA_TEXTO;
-        } else {
-          respRej = lastRx
-            ? buildMsgConfirmarReceita(lastRx, true) + "\n\nSe estiver errado, pode me passar os valores corretos por texto que eu atualizo aqui 😊"
-            : "Sem problema! Me passa os valores corretos por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? 📝";
+          const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+          const respEsc = isHorarioHumano() ? MSG_ESCALADA_RECEITA_LEITURA : mensagemEscaladaForaHorario(_np);
+          try {
+            // Limpa pending — Consultor assume daqui
+            await supabase.from("contatos").update({
+              metadata: {
+                ...contatoMeta,
+                receita_confirmacao: {
+                  ...contatoMeta.receita_confirmacao,
+                  pending: false,
+                  correction_count: newCount,
+                  last_rejected_at: new Date().toISOString(),
+                  escalado_humano_at: new Date().toISOString(),
+                },
+              },
+            }).eq("id", contatoId);
+            // Modo humano + flag de revisão
+            const { data: atFlag } = await supabase
+              .from("atendimentos").select("metadata").eq("id", atendimento_id).single();
+            const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
+            const motivosRev = Array.from(new Set([...(metaFlag.revisao_motivos || []), "receita_confirmacao_falhou_2x"]));
+            await supabase.from("atendimentos").update({
+              modo: "humano",
+              metadata: {
+                ...metaFlag,
+                revisao_humana_pendente: true,
+                revisao_motivos: motivosRev,
+                revisao_solicitada_at: new Date().toISOString(),
+              },
+            }).eq("id", atendimento_id);
+          } catch (_) { /* noop */ }
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_escalada_apos_2_rejeicoes",
+            descricao: `Cliente rejeitou leitura ${newCount}x — IA admitiu dificuldade e escalou para Consultor humano`,
+            metadata: {
+              rx_label: rxLabel,
+              correction_count: newCount,
+              last_rx: lastRx,
+              fora_horario: !isHorarioHumano(),
+            },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respEsc);
+          console.log(`[RX-CONFIRMACAO] Escalada após ${newCount} rejeições — modo humano`);
+          return jsonResponse({ status: "ok", tools_used: ["receita_escalada_humano"], intencao: "receita_oftalmologica", precisa_humano: true, pipeline_coluna_sugerida: "Aguardando Humano", modo: "humano" });
         }
+        const respRej = lastRx
+          ? buildMsgConfirmarReceita(lastRx, true) + "\n\nSe estiver errado, pode me passar os valores corretos por texto que eu atualizo aqui 😊"
+          : "Sem problema! Me passa os valores corretos por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? 📝";
         await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respRej);
         console.log(`[RX-CONFIRMACAO] Rejeição ${newCount} — repedindo confirmação/texto`);
         return jsonResponse({ status: "ok", tools_used: ["receita_rejeitada"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
@@ -3371,13 +3422,56 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
         // ── Em alto impacto: ENVIA pedido de confirmação determinístico e RETORNA antes do LLM ──
         if (isHighImpact) {
+          // Após 3+ correções textuais em sequência sem confirmação, IA admite
+          // dificuldade e escala — evita loop "Anotei! / Não / corrige de novo".
+          const corrCount = Number(newMeta?.receita_confirmacao?.correction_count || 0);
+          if (corrCount >= 3) {
+            const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+            const respEsc = isHorarioHumano() ? MSG_ESCALADA_RECEITA_LEITURA : mensagemEscaladaForaHorario(_np);
+            try {
+              const limpoMeta = {
+                ...newMeta,
+                receita_confirmacao: {
+                  ...newMeta.receita_confirmacao,
+                  pending: false,
+                  escalado_humano_at: new Date().toISOString(),
+                },
+              };
+              await supabase.from("contatos").update({ metadata: limpoMeta }).eq("id", contatoId);
+              contatoMeta = limpoMeta;
+              const { data: atFlag } = await supabase
+                .from("atendimentos").select("metadata").eq("id", atendimento_id).single();
+              const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
+              const motivosRev = Array.from(new Set([...(metaFlag.revisao_motivos || []), "receita_confirmacao_falhou_2x"]));
+              await supabase.from("atendimentos").update({
+                modo: "humano",
+                metadata: {
+                  ...metaFlag,
+                  revisao_humana_pendente: true,
+                  revisao_motivos: motivosRev,
+                  revisao_solicitada_at: new Date().toISOString(),
+                },
+              }).eq("id", atendimento_id);
+            } catch (_) { /* noop */ }
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "receita_escalada_apos_2_rejeicoes",
+              descricao: `Cliente fez ${corrCount} correções textuais consecutivas — IA admitiu dificuldade e escalou`,
+              metadata: { rx_label: merged.label, correction_count: corrCount, last_rx: merged, fora_horario: !isHorarioHumano(), via: "correcao_textual" },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            });
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respEsc);
+            console.log(`[RX-CORRECTION] Escalada após ${corrCount} correções textuais — modo humano`);
+            return jsonResponse({ status: "ok", tools_used: ["receita_escalada_humano"], intencao: "receita_oftalmologica", precisa_humano: true, pipeline_coluna_sugerida: "Aguardando Humano", modo: "humano" });
+          }
+
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(merged, true));
           try {
             const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
             delete m.ia_lock;
             await supabase.from("atendimentos").update({ metadata: m }).eq("id", atendimento_id);
           } catch (_) { /* noop */ }
-          console.log(`[RX-HIGH-IMPACT] Pedindo confirmação antes de cotar (Δod=${deltaOd}, Δoe=${deltaOe}, maxAbs=${maxNewAbs})`);
+          console.log(`[RX-HIGH-IMPACT] Pedindo confirmação antes de cotar (Δod=${deltaOd}, Δoe=${deltaOe}, maxAbs=${maxNewAbs}, corrCount=${corrCount})`);
           return jsonResponse({ status: "ok", tools_used: ["receita_alto_impacto_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
         }
 
