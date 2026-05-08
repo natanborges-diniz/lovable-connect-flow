@@ -246,6 +246,10 @@ const MSG_REVISAO_HUMANA_SUFIXO = "\n\n💡 _Como sua receita tem um detalhe esp
 
 const MSG_ESCALADA_GRAU_FORA_FAIXA = "Obrigado por confirmar! 🙌 Por ser uma *lente especial*, vou te conectar com um Consultor pra montar o orçamento certinho e confirmar prazo 🤝";
 
+// Após 2 tentativas falhas de confirmar a leitura da receita, IA admite a
+// dificuldade e escala para Consultor humano em vez de continuar o ciclo.
+const MSG_ESCALADA_RECEITA_LEITURA = "Desculpa, tô com dificuldade de bater os valores da sua receita certinho 😅 Vou te encaminhar pra um *Consultor humano* que vai conferir junto com você. Já avisei o time aqui 🙌";
+
 // ── Bloqueia escalada/oferta de "grau alto / sob encomenda" sem receita interpretada ──
 // Caso Franciana (Mai/2026): IA falou "Encontrei poucas opções automáticas para esse grau alto"
 // e ofereceu Consultor antes mesmo da receita ter sido enviada.
