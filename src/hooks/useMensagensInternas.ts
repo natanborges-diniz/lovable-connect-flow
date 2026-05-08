@@ -303,15 +303,31 @@ export function useDeleteMensagemInterna() {
   });
 }
 
-// Criar grupo (apenas admin via RLS)
+// Criar grupo (apenas admin via RLS) — sempre derivado de setor ou loja
 export function useCriarGrupo() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ nome, participantes, criadoPor }: { nome: string; participantes: string[]; criadoPor: string }) => {
-      const todos = [...new Set([criadoPor, ...participantes])];
+    mutationFn: async ({
+      nome,
+      criadoPor,
+      tipoOrigem,
+      origemRef,
+    }: {
+      nome: string;
+      criadoPor: string;
+      tipoOrigem: "setor" | "loja";
+      origemRef: string;
+    }) => {
+      // participantes são derivados pelo trigger no banco; passamos array vazio
       const { data, error } = await supabase
         .from("conversas_grupo")
-        .insert({ nome, participantes: todos, criado_por: criadoPor })
+        .insert({
+          nome,
+          criado_por: criadoPor,
+          participantes: [criadoPor],
+          tipo_origem: tipoOrigem,
+          origem_ref: origemRef,
+        } as any)
         .select()
         .single();
       if (error) throw error;

@@ -673,7 +673,9 @@ export type Database = {
           criado_por: string
           id: string
           nome: string
+          origem_ref: string | null
           participantes: string[]
+          tipo_origem: string
           updated_at: string
         }
         Insert: {
@@ -682,7 +684,9 @@ export type Database = {
           criado_por: string
           id?: string
           nome: string
+          origem_ref?: string | null
           participantes?: string[]
+          tipo_origem?: string
           updated_at?: string
         }
         Update: {
@@ -691,7 +695,9 @@ export type Database = {
           criado_por?: string
           id?: string
           nome?: string
+          origem_ref?: string | null
           participantes?: string[]
+          tipo_origem?: string
           updated_at?: string
         }
         Relationships: []
@@ -2355,6 +2361,10 @@ export type Database = {
       }
     }
     Functions: {
+      calcular_membros_grupo: {
+        Args: { _ref: string; _tipo: string }
+        Returns: string[]
+      }
       desanitize_corporate_contact: {
         Args: { _telefone: string }
         Returns: Json
