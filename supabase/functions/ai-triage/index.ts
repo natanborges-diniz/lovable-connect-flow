@@ -2397,14 +2397,60 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           metadata: { rx_label: rxLabel, correction_count: newCount },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
-        let respRej: string;
+        // ── Escalada após 2 falhas de confirmação ──
+        // Cliente já rejeitou 2x: IA admite dificuldade e passa pra Consultor humano
+        // em vez de continuar o ciclo "Anotei! ✅ → Não → me passa por texto".
         if (newCount >= 2) {
-          respRej = MSG_PEDIR_RECEITA_TEXTO;
-        } else {
-          respRej = lastRx
-            ? buildMsgConfirmarReceita(lastRx, true) + "\n\nSe estiver errado, pode me passar os valores corretos por texto que eu atualizo aqui 😊"
-            : "Sem problema! Me passa os valores corretos por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? 📝";
+          const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+          const respEsc = isHorarioHumano() ? MSG_ESCALADA_RECEITA_LEITURA : mensagemEscaladaForaHorario(_np);
+          try {
+            // Limpa pending — Consultor assume daqui
+            await supabase.from("contatos").update({
+              metadata: {
+                ...contatoMeta,
+                receita_confirmacao: {
+                  ...contatoMeta.receita_confirmacao,
+                  pending: false,
+                  correction_count: newCount,
+                  last_rejected_at: new Date().toISOString(),
+                  escalado_humano_at: new Date().toISOString(),
+                },
+              },
+            }).eq("id", contatoId);
+            // Modo humano + flag de revisão
+            const { data: atFlag } = await supabase
+              .from("atendimentos").select("metadata").eq("id", atendimento_id).single();
+            const metaFlag = (atFlag?.metadata as Record<string, any>) || {};
+            const motivosRev = Array.from(new Set([...(metaFlag.revisao_motivos || []), "receita_confirmacao_falhou_2x"]));
+            await supabase.from("atendimentos").update({
+              modo: "humano",
+              metadata: {
+                ...metaFlag,
+                revisao_humana_pendente: true,
+                revisao_motivos: motivosRev,
+                revisao_solicitada_at: new Date().toISOString(),
+              },
+            }).eq("id", atendimento_id);
+          } catch (_) { /* noop */ }
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_escalada_apos_2_rejeicoes",
+            descricao: `Cliente rejeitou leitura ${newCount}x — IA admitiu dificuldade e escalou para Consultor humano`,
+            metadata: {
+              rx_label: rxLabel,
+              correction_count: newCount,
+              last_rx: lastRx,
+              fora_horario: !isHorarioHumano(),
+            },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respEsc);
+          console.log(`[RX-CONFIRMACAO] Escalada após ${newCount} rejeições — modo humano`);
+          return jsonResponse({ status: "ok", tools_used: ["receita_escalada_humano"], intencao: "receita_oftalmologica", precisa_humano: true, pipeline_coluna_sugerida: "Aguardando Humano", modo: "humano" });
         }
+        const respRej = lastRx
+          ? buildMsgConfirmarReceita(lastRx, true) + "\n\nSe estiver errado, pode me passar os valores corretos por texto que eu atualizo aqui 😊"
+          : "Sem problema! Me passa os valores corretos por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? 📝";
         await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respRej);
         console.log(`[RX-CONFIRMACAO] Rejeição ${newCount} — repedindo confirmação/texto`);
         return jsonResponse({ status: "ok", tools_used: ["receita_rejeitada"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
