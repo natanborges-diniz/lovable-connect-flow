@@ -2261,6 +2261,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
                 ...contatoMeta.receita_confirmacao,
                 pending: false,
                 confirmed_at: new Date().toISOString(),
+                correction_count: 0,
               },
             },
           }).eq("id", contatoId);
