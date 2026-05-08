@@ -167,19 +167,26 @@ export default function PipelineFinanceiro() {
     const solicitacaoId = result.draggableId;
     const destColunaId = result.destination.droppableId;
     const sourceColunaId = result.source.droppableId;
+
+    if (destColunaId === sourceColunaId) return;
+
+    // Se a coluna destino é "devolver_para_loja", abre dialog (não move ainda)
+    const destCol: any = (colunas ?? []).find((c: any) => c.id === destColunaId);
+    if (destCol?.tipo_acao === "devolver_para_loja") {
+      setDevolverDialog({ id: solicitacaoId, colunaId: destColunaId });
+      return;
+    }
+
     updateSolicitacaoColuna.mutate({ id: solicitacaoId, pipeline_coluna_id: destColunaId });
 
-    // Trigger pipeline automations
-    if (destColunaId !== sourceColunaId) {
-      supabase.functions.invoke("pipeline-automations", {
-        body: {
-          entity_type: "solicitacao",
-          entity_id: solicitacaoId,
-          coluna_id: destColunaId,
-          coluna_anterior_id: sourceColunaId,
-        },
-      }).catch(e => console.warn("Automation call failed:", e));
-    }
+    supabase.functions.invoke("pipeline-automations", {
+      body: {
+        entity_type: "solicitacao",
+        entity_id: solicitacaoId,
+        coluna_id: destColunaId,
+        coluna_anterior_id: sourceColunaId,
+      },
+    }).catch(e => console.warn("Automation call failed:", e));
   };
 
   const startEditColuna = (id: string, nome: string) => {
@@ -380,7 +387,7 @@ export default function PipelineFinanceiro() {
                                               className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                setDeleteCardConfirm(sol.id);
+                                                setCancelDialogId(sol.id);
                                               }}
                                             >
                                               <Trash2 className="h-3 w-3" />
@@ -597,38 +604,27 @@ export default function PipelineFinanceiro() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Confirm delete card dialog */}
-      <AlertDialog open={!!deleteCardConfirm} onOpenChange={() => setDeleteCardConfirm(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir card?</AlertDialogTitle>
-            <AlertDialogDescription>
-              O card será removido do pipeline e marcado como cancelado.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (deleteCardConfirm) {
-                  deleteSolicitacao.mutate(deleteCardConfirm);
-                  setDeleteCardConfirm(null);
-                }
-              }}
-            >
-              Excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <CreateCardDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         pipelineType="financeiro"
         firstColumnId={firstColumnId}
         setorId={setorId}
+      />
+
+      <CancelarSolicitacaoDialog
+        solicitacaoId={cancelDialogId}
+        open={!!cancelDialogId}
+        onOpenChange={(o) => !o && setCancelDialogId(null)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] })}
+      />
+
+      <DevolverLojaDialog
+        solicitacaoId={devolverDialog?.id ?? null}
+        colunaDestinoId={devolverDialog?.colunaId ?? null}
+        open={!!devolverDialog}
+        onOpenChange={(o) => !o && setDevolverDialog(null)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] })}
       />
     </>
   );
