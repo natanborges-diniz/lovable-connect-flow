@@ -221,6 +221,11 @@ export default function PipelineAgendamentos() {
                                           )}
                                         </div>
                                       </div>
+                                      {(ag.metadata as any)?.origem_crm && (
+                                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 w-fit">
+                                          ← Veio do CRM
+                                        </Badge>
+                                      )}
                                       <div className="flex items-center gap-2">
                                         <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                         <span className="text-xs text-muted-foreground truncate">{ag.loja_nome}</span>
