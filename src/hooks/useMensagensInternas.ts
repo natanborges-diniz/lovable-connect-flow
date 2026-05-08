@@ -54,6 +54,13 @@ export function useMensagensInternas() {
           qc.invalidateQueries({ queryKey: ["total-nao-lidas"] });
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversas_grupo" },
+        () => {
+          qc.invalidateQueries({ queryKey: ["conversas-internas"] });
+        }
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [uid, qc, isAuthReady]);
