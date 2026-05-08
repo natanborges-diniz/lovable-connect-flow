@@ -366,6 +366,7 @@ export default function Mensagens() {
                               </p>
                             </>
                           )}
+                          </div>
                         </div>
                       )}
                     </div>
