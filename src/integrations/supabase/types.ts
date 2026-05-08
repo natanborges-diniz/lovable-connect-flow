@@ -1533,6 +1533,48 @@ export type Database = {
           },
         ]
       }
+      pipeline_card_eventos: {
+        Row: {
+          coluna_anterior_id: string | null
+          coluna_nova_id: string | null
+          created_at: string
+          descricao: string | null
+          entidade: string
+          entidade_id: string
+          id: string
+          metadata: Json
+          tipo: string
+          usuario_id: string | null
+          usuario_nome: string | null
+        }
+        Insert: {
+          coluna_anterior_id?: string | null
+          coluna_nova_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          entidade: string
+          entidade_id: string
+          id?: string
+          metadata?: Json
+          tipo: string
+          usuario_id?: string | null
+          usuario_nome?: string | null
+        }
+        Update: {
+          coluna_anterior_id?: string | null
+          coluna_nova_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          entidade?: string
+          entidade_id?: string
+          id?: string
+          metadata?: Json
+          tipo?: string
+          usuario_id?: string | null
+          usuario_nome?: string | null
+        }
+        Relationships: []
+      }
       pipeline_colunas: {
         Row: {
           ativo: boolean
@@ -1543,6 +1585,7 @@ export type Database = {
           nome: string
           ordem: number
           setor_id: string | null
+          tipo_acao: string | null
           updated_at: string
         }
         Insert: {
@@ -1554,6 +1597,7 @@ export type Database = {
           nome: string
           ordem?: number
           setor_id?: string | null
+          tipo_acao?: string | null
           updated_at?: string
         }
         Update: {
@@ -1565,6 +1609,7 @@ export type Database = {
           nome?: string
           ordem?: number
           setor_id?: string | null
+          tipo_acao?: string | null
           updated_at?: string
         }
         Relationships: [

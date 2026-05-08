@@ -1,79 +1,95 @@
-## Problema
 
-Gabriely descreveu que **perdeu a receita** e precisa **refazer o exame**. Não enviou imagem. Mesmo assim a IA respondeu:
+# Plano — Rastreabilidade e fluxos do Pipeline Financeiro
 
-> "Recebi sua receita 👀 Já estou analisando…"
+Três entregas conectadas, todas operando dentro do modelo Canal Único (App Atrium / `demandas_loja` + `mensagens_internas` + `notificacoes`).
 
-## Causa-raiz
+---
 
-`supabase/functions/ai-triage/index.ts` linha **867** (`deterministicIntentFallback`):
+## 1. Excluir / cancelar link de pagamento → reflete na demanda da loja
 
-```ts
-if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|enviei minha receita|recebeu minha receita/.test(n)) {
-  return {
-    resposta: "Recebi sua receita 👀 Já estou analisando…",
-    ...
-  };
-}
-```
+**Hoje:** o botão de excluir card seta `pipeline_coluna_id=null` e `status='cancelada'` na `solicitacoes`, mas a `demanda_loja` que originou o pedido continua "aberta" no app da loja, sem aviso.
 
-A regex casa qualquer texto contendo "receita" / "oftalmolog" — inclusive frases como "perdi a receita", "preciso refazer a receita". O ramo só faria sentido após confirmação de envio (`enviei minha receita`, `recebeu minha receita`), mas a alternância `|` aplica todos os termos isoladamente.
+**Vai passar a fazer:**
+- Quando o operador clica em excluir o card de link de pagamento:
+  - Confirma com dialog ("Cancelar este link?" + campo opcional de motivo).
+  - `solicitacoes.status = 'cancelada'` (como hoje) e registra evento de auditoria.
+  - Se houver `pagamentos_link` vinculado: `status = 'cancelado'` + `metadata.cancelado_por`/`motivo`.
+  - Se houver `demandas_loja` vinculada: `status = 'cancelada'` + posta uma `demanda_mensagens` automática ("Solicitação cancelada pelo Financeiro" + motivo, se houver).
+- No app da loja (lista e thread de demandas): card ganha **badge "Cancelado"** (vermelho, semântico) e a thread fica somente leitura.
+- Push opcional pra loja só se motivo foi preenchido.
 
-Ou seja: o ramo de imagem (linha 828, `isImageContext`) está correto; o problema é esse fallback textual genérico que finge ter recebido algo que não chegou.
+---
 
-## Mudanças
+## 2. Timeline de auditoria dentro do card (qualquer setor)
 
-### 1. `ai-triage/index.ts` linha 867 — refinar o gate
+**Hoje:** não existe registro de quem moveu/editou o card. `eventos_crm` só rastreia eventos do contato.
 
-- Remover do regex as palavras isoladas (`receita`, `grau`, `prescri…`, `oftalmolog…`).
-- Manter **somente** as frases que afirmam envio: `enviei minha receita`, `te mandei a receita`, `recebeu minha receita`, `mandei a foto`, `segue a receita`.
-- Para o caso geral em que o cliente fala sobre receita sem ter enviado nada, deixar cair nos ramos seguintes (`/lente|oculos|orçamento.../` linha 876) que pedem a foto: "Me manda uma foto da sua receita…".
+**Vai passar a existir:**
+- Nova tabela `pipeline_card_eventos` (genérica, serve Financeiro / TI / Interno / Loja / CRM):
+  - `entidade` (`solicitacao` | `demanda_loja` | `contato`) + `entidade_id`
+  - `tipo` (`movido_coluna`, `comentario`, `devolvido_loja`, `cancelado`, `link_recebido`, `pagamento_aprovado`, etc.)
+  - `coluna_anterior_id` / `coluna_nova_id`
+  - `usuario_id`, `usuario_nome` (snapshot)
+  - `descricao`, `metadata jsonb`
+  - `created_at`
+- Drag-drop no Kanban passa a inserir um evento `movido_coluna` (autor = `auth.uid()`).
+- Cancelamento (item 1), devolução (item 3) e comentários também inserem eventos.
+- Drawer do card ganha aba **"Histórico"** com timeline cronológica (autor, ação, observação, timestamp em pt-BR). Reutilizável nos quatro pipelines.
 
-### 2. Novo ramo "perdeu / sem receita / precisa refazer exame"
+RLS: `authenticated` lê tudo, `service_role` total. Insert via cliente carimbando `usuario_id = auth.uid()`.
 
-Antes do fallback de orçamento (linha 876), adicionar gate específico:
+---
 
-```ts
-if (/perdi a receita|sem receita|n[aã]o tenho (a )?receita|refazer (o )?exame|fazer (o )?exame|preciso de (uma )?receita|preciso fazer (o )?exame/.test(n)) {
-  return {
-    resposta: "Sem problema! Posso te indicar uma clínica parceira aqui perto pra refazer o exame — costuma virar desconto na sua compra. Me passa o bairro ou região que você está pra eu te orientar 😊",
-    intencao: "indicacao_clinica",
-    pipeline_coluna: "Orçamento",
-    precisa_humano: false,
-  };
-}
-```
+## 3. Devolver para a loja com motivo + volta automática
 
-Isso resolve o caso Gabriely: ela diz "perdi a receita … refazer o exame" → cai no ramo de indicação de clínica em vez de "Recebi sua receita".
+**Hoje:** quando o setor move pra coluna tipo "Dados incompletos", nada chega à loja e o ciclo morre.
 
-### 3. Validação
+**Vai passar a funcionar como ping-pong:**
 
-Curl `ai-triage` com payload simulando texto da Gabriely (sem imagem). Esperado: resposta de indicação de clínica, **não** "Recebi sua receita".
+- Coluna ganha flag opcional `tipo_acao = 'devolver_para_loja'` (configurável em `pipeline_colunas.metadata`).
+- Quando um card cai numa coluna desse tipo (drag-drop ou automação):
+  - Abre dialog **"O que está faltando?"** — texto obrigatório.
+  - Cria `demanda_mensagens` (direcao `operador_to_loja`) com o motivo, marca `demandas_loja.status = 'aguardando_complemento'`, dispara push pra loja com título "Pendência: dados faltando — #protocolo".
+  - Card ganha tag visual "Aguardando loja" + tempo desde devolução.
+- App da loja vê a demanda destacada como **"Aguardando seu retorno"**, com 3 ações:
+  1. **Responder** → loja envia complemento (texto/anexo).
+  2. **Encerrar/Desistir** → loja explica e cancela; demanda vira `cancelada`, card sai do pipeline com badge "Cancelado pela loja".
+  3. **Continuar conversa** (mensagens livres na thread).
+- Quando chega resposta da loja (`demanda_mensagens` direcao `loja_to_operador` numa demanda em `aguardando_complemento`):
+  - `bridge-demanda` (ou trigger) atualiza `demandas_loja.status = 'respondida'`.
+  - Card volta automaticamente para uma coluna marcada como `tipo_acao = 'reentrada_revisao'` (ex.: "Reenviado / Em revisão") no mesmo setor.
+  - Push para o operador que fez a devolução (e fallback pro setor todo).
+  - Evento `devolvido_pela_loja` na timeline do card.
 
-Auditoria pós-deploy:
+---
 
-```sql
-SELECT m.conteudo, e.created_at
-FROM eventos_crm e JOIN mensagens m ON m.id = e.mensagem_id
-WHERE m.conteudo ILIKE 'Recebi sua receita%'
-  AND e.created_at > now() - interval '7 days';
-```
+## Detalhes técnicos
 
-Para cada hit, conferir se a inbound imediatamente anterior tem anexo de imagem; nenhum caso textual puro deve aparecer.
+**DB (migration):**
+- Tabela `pipeline_card_eventos` (com RLS).
+- Campos novos em `pipeline_colunas.metadata`: `tipo_acao` (`devolver_para_loja` | `reentrada_revisao` | null).
+- Status novos em `demandas_loja.status`: `aguardando_complemento`, `respondida` (já existe na bridge), `cancelada`.
+- Trigger em `demanda_mensagens` AFTER INSERT: se demanda estava em `aguardando_complemento` e direcao `loja_to_operador` → muda card para coluna `reentrada_revisao` do mesmo setor + insere evento.
 
-### 4. Memory
+**Frontend:**
+- `src/pages/PipelineFinanceiro.tsx` (e demais Pipelines): drawer ganha aba `Histórico`, dialog de cancelamento, dialog de devolução.
+- Componente reutilizável `<CardTimeline entidade entidadeId />`.
+- `src/components/atendimentos/DemandaThreadView.tsx`: badge Cancelado / Aguardando complemento + botões Responder / Desistir.
 
-Atualizar `mem://ia/auto-receita-e-anti-loop` com nota:
+**Edge functions:**
+- `pipeline-automations`: aceita `tipo_acao=devolver_para_loja` (cria mensagem + atualiza status demanda) e `cancelar_link` (atualiza pagamento + demanda).
+- Pequeno ajuste em `bridge-demanda` para reagir a `aguardando_complemento` → `respondida` e mover card.
 
-> "Recebi sua receita" só dispara com imagem real (`isImageContext`) ou quando o cliente afirma envio explícito ("enviei", "te mandei", "segue", "recebeu"). Menção textual a "receita" / "perdi a receita" / "refazer exame" não confirma recebimento — roteia para indicação de clínica ou pedido de foto.
+**Out of scope:**
+- Reescrever o pipeline genérico de outros setores além de adotar a timeline (que é universal).
+- Notificações por e-mail.
+- Métricas/SLA sobre tempo da loja responder (fica para próximo ciclo).
 
-## Fora de escopo
+---
 
-- Outros caminhos do fluxo de receita (interpretar_receita, watchdogs).
-- Escalada após 2 rejeições (já entregue em plano anterior).
-- Frontend.
-
-## Arquivos
-
-- `supabase/functions/ai-triage/index.ts` (linhas ~867 e ~876).
-- `.lovable/memory/ia/auto-receita-e-anti-loop.md`.
+## Validação
+- Cancelar link no Financeiro → demanda da loja exibe badge "Cancelado" e mensagem do motivo.
+- Mover card para "Dados incompletos" → loja recebe push, motivo aparece na thread, status muda.
+- Loja responde → card volta sozinho para "Reenviado", evento na timeline.
+- Loja desiste → card sai do pipeline com badge "Cancelado pela loja".
+- Toda movimentação aparece na aba Histórico com nome do operador.

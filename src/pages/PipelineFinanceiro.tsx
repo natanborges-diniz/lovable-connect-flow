@@ -41,6 +41,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { CpfApprovalDialog, EntryPercentageBadge } from "@/components/financeiro/CpfApprovalDialog";
 import { useAutomacoes } from "@/hooks/useAutomacoes";
+import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
+import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
+import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
@@ -124,21 +127,8 @@ export default function PipelineFinanceiro() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }),
   });
 
-  const [deleteCardConfirm, setDeleteCardConfirm] = useState<string | null>(null);
-
-  const deleteSolicitacao = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("solicitacoes")
-        .update({ pipeline_coluna_id: null, status: "cancelada" as any } as any)
-        .eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
-      toast.success("Card removido do pipeline.");
-    },
-  });
+  const [cancelDialogId, setCancelDialogId] = useState<string | null>(null);
+  const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId: string } | null>(null);
 
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
