@@ -106,24 +106,22 @@ export function TransferPipelineDialog({
         const dataHorario = new Date(dataAgendamento);
         dataHorario.setHours(h, m, 0, 0);
 
-        const { error } = await supabase.functions.invoke("agendar-cliente", {
+        const { data: userData } = await supabase.auth.getUser();
+        const { error } = await supabase.functions.invoke("migrar-card-pipeline", {
           body: {
             contato_id: contatoId,
             loja_nome: lojaNome,
             loja_telefone: lojaTelefone,
             data_horario: dataHorario.toISOString(),
             observacoes: observacoes || null,
+            coluna_origem_id: null,
+            coluna_origem_nome: "CRM",
+            transferido_por: userData?.user?.id || null,
           },
         });
         if (error) throw error;
 
-        // Clear pipeline_coluna_id (exit CRM)
-        await supabase
-          .from("contatos")
-          .update({ pipeline_coluna_id: null } as any)
-          .eq("id", contatoId);
-
-        toast.success(`Agendamento criado — ${contatoNome} transferido para Lojas`);
+        toast.success(`Agendamento criado — ${contatoNome} transferido para Lojas com histórico de conversa`);
       } else {
         // Financeiro or TI
         if (!assunto) {
