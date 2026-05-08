@@ -217,8 +217,11 @@ export default function Mensagens() {
                   selectedConversa === c.conversa_id && "bg-muted"
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium truncate">{c.outro_nome}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {c.is_grupo && <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    {c.outro_nome}
+                  </span>
                   {c.nao_lidas > 0 && (
                     <Badge className="h-5 min-w-[20px] px-1.5 text-[10px]">{c.nao_lidas}</Badge>
                   )}
