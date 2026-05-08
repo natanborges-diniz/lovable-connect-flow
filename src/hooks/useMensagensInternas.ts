@@ -214,17 +214,21 @@ export function useMensagensConversa(conversaId: string | null) {
       if (error) throw error;
 
       // Em grupo, deduplicar pela linha "minha cópia" (cada msg foi inserida N-1 vezes, uma por destinatário)
+      // e calcular lida_por_todos = true sse todas as cópias daquela mensagem estiverem lidas.
       if (conversaId?.startsWith("grupo_")) {
-        const seen = new Set<string>();
-        const out: any[] = [];
+        const groups = new Map<string, any[]>();
         for (const m of data || []) {
-          // chave: remetente + conteudo + created_at(segundo) — mesma mensagem duplicada
           const key = `${m.remetente_id}|${m.conteudo}|${(m as any).anexo_url || ""}|${new Date(m.created_at).toISOString().slice(0, 19)}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            out.push(m);
-          }
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key)!.push(m);
         }
+        const out: any[] = [];
+        for (const copias of groups.values()) {
+          const base = copias[0];
+          const lidaPorTodos = copias.length > 0 && copias.every((c) => c.lida);
+          out.push({ ...base, lida_por_todos: lidaPorTodos, total_copias: copias.length, lidas_count: copias.filter((c) => c.lida).length });
+        }
+        out.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
         return out;
       }
       return data || [];
