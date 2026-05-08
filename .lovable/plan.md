@@ -1,97 +1,32 @@
-## Objetivo
+## Problema
 
-Tornar o cadastro de usuários "loja" intuitivo:
-- 1 usuário, 1 tela: tipo, **cargo**, lojas (múltiplas), setor.
-- Usuários "loja" só conseguem usar o **InFoco Messenger** (Atrium web bloqueado).
-- O **menu de demandas** do Messenger varia por cargo: supervisor vê tudo; gerente vê quase tudo; operador não vê itens sensíveis (ex.: pedir reembolso).
+O grupo "Setor — Loja" foi criado corretamente (existe no banco, com 11 membros), mas não aparece na lista de conversas do Atrium nem do InFoco Messenger.
 
-Exemplo final que vai funcionar: cadastrar Josivaldo → tipo `loja`, cargo `supervisor`, lojas `[Carapicuíba, Barueri]` → marcando uma única vez.
+**Causa:** a lista de conversas é montada lendo apenas a tabela `mensagens_internas`. Como ninguém ainda enviou mensagem nesse grupo, ele fica invisível — só aparece depois da primeira mensagem.
 
----
+E como o registro já existe em `conversas_grupo`, o índice único impede recriar (correto).
 
-## 1. Banco de dados
+## Solução
 
-**`profiles`**
-- Adicionar coluna `cargo_loja text` com check `('supervisor','gerente','operador')`. Nullable (só usado se `tipo_usuario='loja'`).
-- Adicionar coluna `lojas text[] DEFAULT '{}'` (lojas que o usuário cobre, fonte da verdade para "loja"). O campo `loja_nome` em `user_roles` continua existindo como espelho para RLS de pipeline.
+Listar grupos diretamente da tabela `conversas_grupo` (onde o usuário é participante), unindo com as conversas que já têm mensagens. Assim, todo grupo do qual o usuário faz parte aparece imediatamente após a criação, mesmo sem nenhuma mensagem.
 
-**`bot_menu_opcoes`**
-- Adicionar coluna `cargos_visiveis text[] DEFAULT '{supervisor,gerente,operador}'`. Quando vazio, vale para todos.
+### Mudanças
 
-**Trigger `sync_user_roles_from_profile()`**
-- Disparado em `AFTER UPDATE/INSERT` em `profiles` quando `lojas` ou `tipo_usuario` mudam.
-- Reescreve `user_roles` do usuário: 1 linha `setor_usuario` por loja em `profiles.lojas`, com `loja_nome` preenchido. Garante consistência sem o admin precisar editar nada manualmente.
+1. **`src/hooks/useMensagensInternas.ts` — query `conversas-internas`**
+   - Após buscar mensagens, buscar também `conversas_grupo` onde `auth.uid()` está em `participantes`.
+   - Para cada grupo retornado que ainda não está no mapa de conversas (sem mensagens), adicionar uma entrada "vazia" com:
+     - `ultima_mensagem`: placeholder ("Grupo criado — envie a primeira mensagem")
+     - `ultima_data`: `created_at` do grupo
+     - `nao_lidas`: 0
+   - Ordenação final continua por `ultima_data` desc.
 
----
+2. **Realtime**
+   - Adicionar listener de `INSERT` em `conversas_grupo` para invalidar `conversas-internas` quando um novo grupo for criado (caso o admin crie em outra aba/sessão).
 
-## 2. Edge function `bot-lojas`
+3. **Projeto InFoco Messenger** (`@project:2d68a67b...`)
+   - Aplicar a mesma mudança no hook equivalente lá. Vou inspecionar o projeto e replicar.
 
-Hoje monta o menu lendo `bot_menu_opcoes` filtrando por `tipo_bot` e `parent_id`. Vai passar a também filtrar por `cargos_visiveis`:
-- Identifica o cargo do solicitante via telefone → `profiles.cargo_loja`.
-- Se cargo encontrado, filtra opções cujo `cargos_visiveis` contém aquele cargo (ou está vazio).
-- Se cargo não encontrado, cai no comportamento atual (mostra tudo).
+### Fora do escopo
 
----
-
-## 3. Bloqueio do Atrium web para tipo=loja
-
-Em `src/components/auth/ProtectedRoute.tsx` e `AppLayout.tsx`:
-- Se `profile.tipo_usuario === 'loja'`, redirecionar para uma página simples `/somente-messenger` com botão "Abrir InFoco Messenger" (link para `desktop-joy-app.lovable.app`) e logout.
-- Login pelo Atrium continua possível (precisa, para gerar magic link), mas qualquer rota interna fica fechada.
-
----
-
-## 4. Tela "Gestão de Usuários" — redesenho
-
-Substituir a UX atual (Tipo + Nível + Áreas em colunas confusas) por **um formulário único** ao clicar em "Editar":
-
-```text
-┌─ Editar usuário ────────────────────────────────┐
-│ Nome:   Josivaldo                               │
-│ E-mail: josivaldo@…                             │
-│                                                 │
-│ Tipo:   ( ) Admin                               │
-│         ( ) Operador de Setor                   │
-│         (•) Loja                                │
-│         ( ) Colaborador                         │
-│                                                 │
-│ ── quando Tipo = Loja ─────────────────────     │
-│ Cargo:  (•) Supervisor                          │
-│         ( ) Gerente                             │
-│         ( ) Operador                            │
-│                                                 │
-│ Lojas:  [x] Carapicuíba   [x] Barueri           │
-│         [ ] Osasco        [ ] Tatuapé   …       │
-│                                                 │
-│ ── quando Tipo = Operador de Setor ────────     │
-│ Setor:  [ Financeiro ▾ ]                        │
-│                                                 │
-│ Acesso ao Atrium web: 🚫 (somente Messenger)    │
-│                                                 │
-│ [Cancelar]                       [Salvar]       │
-└─────────────────────────────────────────────────┘
-```
-
-Lista principal vira uma tabela enxuta: **Nome · E-mail · Tipo · Cargo/Setor · Lojas/Áreas · Ativo · Ações**.
-
-Salvar grava `profiles` (tipo_usuario, cargo_loja, lojas, setor_id) — o trigger sincroniza `user_roles` sozinho.
-
----
-
-## 5. Tela "Bot Menu" (Configurações)
-
-Em cada linha do `BotMenuCard`, adicionar um campo de chips **"Visível para cargos"** (`supervisor`, `gerente`, `operador`). Ao deixar tudo desmarcado: mostra para todos. Para a opção "Pedir reembolso", o admin desmarca `operador` e pronto.
-
----
-
-## 6. Memória / docs
-
-Atualizar `mem://arquitetura/tipos-usuario-app-interno` com `cargo_loja` + `lojas[]` + filtro de menu por cargo, e adicionar uma core rule curta no índice.
-
----
-
-## Fora do escopo
-
-- Não mexe no fluxo de WhatsApp Meta nem no Gael.
-- Não muda quem pode iniciar 1:1 (RLS `pode_conversar_1a1` continua).
-- Wizard de cadastro em lote será atualizado em uma segunda etapa para preencher `cargo_loja` e `lojas[]` (por enquanto continua funcional, só não preenche cargo).
+- Não mexer no `NovoGrupoDialog` nem nas RLS — já estão corretos.
+- Não enviar "mensagem de boas-vindas" automática (evitamos poluir o histórico).
