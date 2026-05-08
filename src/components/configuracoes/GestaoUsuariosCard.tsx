@@ -125,6 +125,7 @@ export function GestaoUsuariosCard() {
   // Reset password dialog state
   const [resetTarget, setResetTarget] = useState<{ id: string; nome: string } | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [editTarget, setEditTarget] = useState<any>(null);
 
   // Create user dialog state
   const [createOpen, setCreateOpen] = useState(false);
