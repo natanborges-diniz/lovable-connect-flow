@@ -391,6 +391,11 @@ export default function Mensagens() {
           )}
         </div>
       </div>
+      <NovoGrupoDialog
+        open={novoGrupoOpen}
+        onOpenChange={setNovoGrupoOpen}
+        onCreated={handleGrupoCreated}
+      />
     </div>
   );
 }
