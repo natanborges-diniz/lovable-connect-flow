@@ -864,10 +864,21 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     };
   }
 
-  if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|enviei minha receita|recebeu minha receita/.test(n)) {
+  // Cliente afirma que ENVIOU a receita (sem imagem detectada agora — pode ter chegado em msg anterior)
+  if (/enviei (minha |a )?receita|te mandei (a |minha )?receita|recebeu (minha |a )?receita|mandei a foto|segue (minha |a )?receita|acabei de mandar/.test(n)) {
     return {
       resposta: "Recebi sua receita 👀 Já estou analisando aqui pra te passar as opções compatíveis em seguida, um instante…",
       intencao: "receita_oftalmologica",
+      pipeline_coluna: "Orçamento",
+      precisa_humano: false,
+    };
+  }
+
+  // Cliente diz que NÃO tem receita / perdeu / precisa refazer exame → indicar clínica parceira
+  if (/perdi (a |minha )?receita|sem receita|n[aã]o tenho (a |minha )?receita|refazer (o )?exame|fazer (o )?exame|preciso de (uma |a )?receita|preciso fazer (o )?exame|exame de vista/.test(n)) {
+    return {
+      resposta: "Sem problema! Posso te indicar uma clínica parceira aqui perto pra refazer o exame — costuma virar desconto na sua compra. Me passa o bairro ou região que você está pra eu te orientar 😊",
+      intencao: "indicacao_clinica",
       pipeline_coluna: "Orçamento",
       precisa_humano: false,
     };

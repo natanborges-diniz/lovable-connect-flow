@@ -1,91 +1,79 @@
-## Objetivo
+## Problema
 
-Após 2 tentativas frustradas de confirmação de receita (cliente diz "Não" / corrige e ainda continua errada), IA admite a dificuldade de leitura e escala para Consultor humano em vez de continuar repetindo o ciclo "Anotei! ✅ → Não → me passa por texto".
+Gabriely descreveu que **perdeu a receita** e precisa **refazer o exame**. Não enviou imagem. Mesmo assim a IA respondeu:
 
-## Estado atual
+> "Recebi sua receita 👀 Já estou analisando…"
 
-`supabase/functions/ai-triage/index.ts` ~2374–2405 — ramo `detectRxRejeicao`:
+## Causa-raiz
+
+`supabase/functions/ai-triage/index.ts` linha **867** (`deterministicIntentFallback`):
 
 ```ts
-const newCount = correctionCount + 1;
-// ... incrementa metadata.receita_confirmacao.correction_count ...
-let respRej: string;
-if (newCount >= 2) {
-  respRej = MSG_PEDIR_RECEITA_TEXTO;          // ← apenas re-pede texto
-} else {
-  respRej = lastRx ? buildMsgConfirmarReceita(lastRx, true) + … : "...";
+if (/receita|grau|prescri[cç][aã]o|oftalmol[oó]g|enviei minha receita|recebeu minha receita/.test(n)) {
+  return {
+    resposta: "Recebi sua receita 👀 Já estou analisando…",
+    ...
+  };
 }
-await sendWhatsApp(...);
-return { precisa_humano: false, ... };
 ```
 
-`correction_count` também sobe em ~3353 quando há correção textual de alto impacto que dispara nova confirmação. Hoje nada lê esse contador para escalar.
+A regex casa qualquer texto contendo "receita" / "oftalmolog" — inclusive frases como "perdi a receita", "preciso refazer a receita". O ramo só faria sentido após confirmação de envio (`enviei minha receita`, `recebeu minha receita`), mas a alternância `|` aplica todos os termos isoladamente.
+
+Ou seja: o ramo de imagem (linha 828, `isImageContext`) está correto; o problema é esse fallback textual genérico que finge ter recebido algo que não chegou.
 
 ## Mudanças
 
-### 1. Escalada quando `correction_count >= 2`
+### 1. `ai-triage/index.ts` linha 867 — refinar o gate
 
-`ai-triage/index.ts` ~2395–2405: substituir o ramo `if (newCount >= 2)` por:
+- Remover do regex as palavras isoladas (`receita`, `grau`, `prescri…`, `oftalmolog…`).
+- Manter **somente** as frases que afirmam envio: `enviei minha receita`, `te mandei a receita`, `recebeu minha receita`, `mandei a foto`, `segue a receita`.
+- Para o caso geral em que o cliente fala sobre receita sem ter enviado nada, deixar cair nos ramos seguintes (`/lente|oculos|orçamento.../` linha 876) que pedem a foto: "Me manda uma foto da sua receita…".
 
-- Limpar `metadata.receita_confirmacao.pending` (consultor assume daqui).
-- Setar `atendimentos.metadata.revisao_humana_pendente = true` com `revisao_motivo = "receita_confirmacao_falhou_2x"` e `revisao_solicitada_at = now()`.
-- Trocar modo do atendimento para `humano` (mesmo padrão usado em `MSG_ESCALADA_GRAU_FORA_FAIXA` / outros pontos de escalada já existentes — reutilizar helper de escalada se houver, senão replicar update de `atendimentos`).
-- Mensagem ao cliente (sucinta, padrão Gael):
+### 2. Novo ramo "perdeu / sem receita / precisa refazer exame"
 
-  > "Desculpa, tô com dificuldade de bater os valores da sua receita certinho 😅 Vou te encaminhar pra um *Consultor humano* que vai conferir junto com você. Já avisei o time aqui."
-
-- Aplicar suffix de horário comercial igual às outras escaladas (fora do expediente, anexa próxima abertura). Reutilizar `buildHorarioSuffix` / similar já presente no arquivo.
-- Gravar evento `receita_escalada_apos_2_rejeicoes` em `eventos_crm` com metadata `{ correction_count, rx_label, last_rx_values }`.
-- Retornar `{ precisa_humano: true, tools_used: ["receita_escalada_humano"], pipeline_coluna_sugerida: <coluna humana padrão> }`.
-
-### 2. Mesma lógica no caminho de correção textual
-
-`ai-triage/index.ts` ~3344–3382: depois de incrementar `correction_count` no `receita_confirmacao` da correção de alto impacto, antes de enviar `buildMsgConfirmarReceita(merged, true)`, checar:
+Antes do fallback de orçamento (linha 876), adicionar gate específico:
 
 ```ts
-if (Number(newMeta.receita_confirmacao.correction_count) >= 3) {
-  // já houve 2 correções anteriores que continuaram divergindo → escala
-  ...
+if (/perdi a receita|sem receita|n[aã]o tenho (a )?receita|refazer (o )?exame|fazer (o )?exame|preciso de (uma )?receita|preciso fazer (o )?exame/.test(n)) {
+  return {
+    resposta: "Sem problema! Posso te indicar uma clínica parceira aqui perto pra refazer o exame — costuma virar desconto na sua compra. Me passa o bairro ou região que você está pra eu te orientar 😊",
+    intencao: "indicacao_clinica",
+    pipeline_coluna: "Orçamento",
+    precisa_humano: false,
+  };
 }
 ```
 
-Threshold = 3 nesse ponto porque a 1ª correção é o estado normal; a partir da 3ª correção textual em sequência (sem confirmação intermediária), tratamos como dificuldade de leitura e escalamos com a mesma mensagem do passo 1.
+Isso resolve o caso Gabriely: ela diz "perdi a receita … refazer o exame" → cai no ramo de indicação de clínica em vez de "Recebi sua receita".
 
-> Observação: contador é compartilhado, então qualquer combinação de "rejeições + correções" que somem ≥2 já dispara o ramo do passo 1. Aqui é só para o caso degenerado em que o cliente fica enviando texto novo sem nunca passar pelo gate de confirmação.
+### 3. Validação
 
-### 3. Reset do contador
+Curl `ai-triage` com payload simulando texto da Gabriely (sem imagem). Esperado: resposta de indicação de clínica, **não** "Recebi sua receita".
 
-Quando cliente confirma com sucesso (ramo `detectRxConfirmation` ~2237 que zera `pending`), zerar também `correction_count`. Garante que o contador não acumula entre receitas diferentes do mesmo contato.
+Auditoria pós-deploy:
 
-### 4. Validação pós-deploy
-
-Curl `ai-triage` simulando:
-1. Foto de receita → IA pede confirmação.
-2. Inbound "Não" → `correction_count=1`, IA repede.
-3. Inbound "Não" de novo → `correction_count=2`, esperado: mensagem de admissão + escalada humana, evento `receita_escalada_apos_2_rejeicoes`, `revisao_humana_pendente=true`.
-
-Query auditoria:
 ```sql
-SELECT contato_id, count(*) FROM eventos_crm
-WHERE tipo='receita_rejeitada_cliente' AND created_at > now() - interval '7 days'
-GROUP BY contato_id HAVING count(*) >= 2;
+SELECT m.conteudo, e.created_at
+FROM eventos_crm e JOIN mensagens m ON m.id = e.mensagem_id
+WHERE m.conteudo ILIKE 'Recebi sua receita%'
+  AND e.created_at > now() - interval '7 days';
 ```
-→ todos os IDs aqui devem ter um `receita_escalada_apos_2_rejeicoes` correspondente.
 
-### 5. Memory
+Para cada hit, conferir se a inbound imediatamente anterior tem anexo de imagem; nenhum caso textual puro deve aparecer.
 
-Atualizar `mem://ia/correcao-receita-por-texto` com nova seção:
+### 4. Memory
 
-> **Escalada após 2 falhas de confirmação:** quando `correction_count >= 2` no ramo de rejeição (ou ≥3 no ramo de correção textual de alto impacto), IA admite dificuldade de leitura e escala para Consultor (`revisao_humana_pendente=true`, modo=humano, evento `receita_escalada_apos_2_rejeicoes`). Mensagem fixa, com suffix de horário comercial. Contador zera ao confirmar.
+Atualizar `mem://ia/auto-receita-e-anti-loop` com nota:
+
+> "Recebi sua receita" só dispara com imagem real (`isImageContext`) ou quando o cliente afirma envio explícito ("enviei", "te mandei", "segue", "recebeu"). Menção textual a "receita" / "perdi a receita" / "refazer exame" não confirma recebimento — roteia para indicação de clínica ou pedido de foto.
 
 ## Fora de escopo
 
-- Herança de sinal no parser textual (problema de "+7,50" vs "-7,50") — fica para um plano separado.
-- Threshold `isHighImpact` (Δ≥0,75 / |sph|>10) — mantém.
-- Frontend e popover — sem mudança.
-- Lentes de contato — sem mudança.
+- Outros caminhos do fluxo de receita (interpretar_receita, watchdogs).
+- Escalada após 2 rejeições (já entregue em plano anterior).
+- Frontend.
 
 ## Arquivos
 
-- `supabase/functions/ai-triage/index.ts` (ramo rejeição ~2395–2405; ramo correção textual ~3344–3382; ramo confirmação ~2237 para zerar contador).
-- `.lovable/memory/ia/correcao-receita-por-texto.md`.
+- `supabase/functions/ai-triage/index.ts` (linhas ~867 e ~876).
+- `.lovable/memory/ia/auto-receita-e-anti-loop.md`.
