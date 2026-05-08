@@ -16,22 +16,24 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Send, Plus, MessageCircle, Search, Ban } from "lucide-react";
+import { Send, Plus, MessageCircle, Search, Ban, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
+import { NovoGrupoDialog } from "@/components/mensagens/NovoGrupoDialog";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { toast } from "sonner";
 
 export default function Mensagens() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const uid = user?.id;
-  const { conversas, makeConversaId } = useMensagensInternas();
+  const { conversas, makeConversaId, makeGroupConversaId } = useMensagensInternas();
   const [selectedConversa, setSelectedConversa] = useState<string | null>(null);
-  const [selectedOutro, setSelectedOutro] = useState<{ id: string; nome: string } | null>(null);
+  const [selectedOutro, setSelectedOutro] = useState<{ id: string; nome: string; isGrupo?: boolean; participantes?: string[]; grupoId?: string } | null>(null);
+  const [novoGrupoOpen, setNovoGrupoOpen] = useState(false);
   const { data: mensagens } = useMensagensConversa(selectedConversa);
   const enviar = useEnviarMensagem();
   const marcarLidas = useMarcarLidas();
