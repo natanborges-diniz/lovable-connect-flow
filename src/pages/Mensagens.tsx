@@ -294,16 +294,20 @@ export default function Mensagens() {
                           </p>
                         </div>
                       ) : (
-                        <div
-                          className={cn(
-                            "max-w-[70%] px-3 py-2 rounded-lg text-sm relative",
-                            isDeleted
-                              ? "bg-muted/50 text-muted-foreground italic border border-dashed"
-                              : isMine
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted text-foreground"
+                        <div className="max-w-[70%]">
+                          {showSenderName && (
+                            <p className="text-[11px] font-medium text-primary mb-0.5 ml-1">{senderName}</p>
                           )}
-                        >
+                          <div
+                            className={cn(
+                              "px-3 py-2 rounded-lg text-sm relative",
+                              isDeleted
+                                ? "bg-muted/50 text-muted-foreground italic border border-dashed"
+                                : isMine
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-foreground"
+                            )}
+                          >
                           {isEditing ? (
                             <EditableMessageBubble
                               initialValue={m.conteudo}
