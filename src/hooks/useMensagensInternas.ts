@@ -51,9 +51,13 @@ export function useMensagensInternas() {
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "mensagens_internas" },
-        () => {
+        (payload) => {
+          const msg = payload.new as any;
           qc.invalidateQueries({ queryKey: ["conversas-internas"] });
           qc.invalidateQueries({ queryKey: ["total-nao-lidas"] });
+          if (msg?.conversa_id) {
+            qc.invalidateQueries({ queryKey: ["mensagens-conversa", msg.conversa_id] });
+          }
         }
       )
       .on(
