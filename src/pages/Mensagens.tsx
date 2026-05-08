@@ -24,6 +24,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
 import { NovoGrupoDialog } from "@/components/mensagens/NovoGrupoDialog";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
+import { MessageTicks } from "@/components/shared/MessageTicks";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { toast } from "sonner";
 
