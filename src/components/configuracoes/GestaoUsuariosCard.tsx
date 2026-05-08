@@ -776,14 +776,14 @@ function EditarUsuarioDialog({ target, setores, lojas, onClose, onSaved }: Edita
   const [setorId, setSetorId] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
-  // Hidrata ao abrir
-  useState(() => {});
-  if (target && tipo !== ((target.tipo_usuario as TipoUsuario) || "setor_operador") && !saving) {
-    // primeira renderização para esse target
-  }
-  // Reset state quando target muda
-  // (usa useEffect via inline tecnica: keyed by id)
-  // Para simplicidade usamos uma key no Dialog para forçar remount.
+  // Hidrata sempre que abrir um novo target
+  useEffect(() => {
+    if (!target) return;
+    setTipo(((target.tipo_usuario as TipoUsuario) || "setor_operador"));
+    setCargoLoja((target.cargo_loja as any) || "operador");
+    setLojasSelected(Array.isArray(target.lojas) ? target.lojas : []);
+    setSetorId(target.setor_id || "");
+  }, [target?.id]);
 
   const onOpenChange = (o: boolean) => { if (!o) onClose(); };
 
