@@ -24,6 +24,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
 import { NovoGrupoDialog } from "@/components/mensagens/NovoGrupoDialog";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
+import { MessageTicks } from "@/components/shared/MessageTicks";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { toast } from "sonner";
 
@@ -241,7 +242,12 @@ export default function Mensagens() {
                     <Badge className="h-5 min-w-[20px] px-1.5 text-[10px]">{c.nao_lidas}</Badge>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{c.ultima_mensagem}</p>
+                <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+                  {c.ultima_remetente_id === uid && (
+                    <MessageTicks status={c.is_grupo ? "sent" : (c.ultima_lida ? "read" : "sent")} />
+                  )}
+                  <span className="truncate">{c.ultima_mensagem}</span>
+                </p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   {format(new Date(c.ultima_data), "dd/MM HH:mm", { locale: ptBR })}
                 </p>
@@ -362,6 +368,12 @@ export default function Mensagens() {
                                   <span title={`editada em ${format(new Date(m.editada_at), "dd/MM HH:mm", { locale: ptBR })}`}>
                                     • editada
                                   </span>
+                                )}
+                                {isMine && !isDeleted && (
+                                  <MessageTicks
+                                    status={selectedOutro?.isGrupo ? "sent" : (m.lida ? "read" : "sent")}
+                                    className="ml-0.5"
+                                  />
                                 )}
                               </p>
                             </>
