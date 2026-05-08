@@ -380,7 +380,7 @@ export default function PipelineFinanceiro() {
                                               className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                setDeleteCardConfirm(sol.id);
+                                                setCancelDialogId(sol.id);
                                               }}
                                             >
                                               <Trash2 className="h-3 w-3" />
