@@ -409,190 +409,55 @@ export function GestaoUsuariosCard() {
                 <TableRow>
                   <TableHead>Nome</TableHead>
                   <TableHead>E-mail</TableHead>
-                  <TableHead>
-                    <div className="flex items-center gap-1">
-                      Tipo (Messenger)
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[240px] text-xs">
-                          Controla quem pode iniciar conversa 1-a-1 com quem no Messenger interno.
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="flex items-center gap-1">
-                      Nível de Acesso
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[220px] text-xs">
-                          Define o que o usuário pode fazer no sistema
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="flex items-center gap-1">
-                      Áreas do Sistema
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[220px] text-xs">
-                          Define quais módulos o usuário pode ver (apenas para nível Setor)
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Cargo / Setor</TableHead>
+                  <TableHead>Lojas / Áreas</TableHead>
                   <TableHead>Ativo</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {profiles.map((p) => {
+                {profiles.map((p: any) => {
+                  const tipo = (p.tipo_usuario || "setor_operador") as TipoUsuario;
                   const userRoles = getRolesForUser(p.id);
-                  // Consider pending intent so UI reflects "Setor" choice even before first area is added
-                  const currentLevel = pendingSetorIntent.has(p.id)
-                    ? "setor_usuario"
-                    : getUserAccessLevel(userRoles);
                   const setorAreas = userRoles.filter((r) => r.role === "setor_usuario" && r.setor_id);
-
+                  const lojasArr: string[] = Array.isArray(p.lojas) ? p.lojas : [];
+                  const cargoLabel = tipo === "loja"
+                    ? (p.cargo_loja ? p.cargo_loja.charAt(0).toUpperCase() + p.cargo_loja.slice(1) : "—")
+                    : tipo === "setor_operador"
+                    ? (getSetorName(p.setor_id) || "—")
+                    : tipo === "admin"
+                    ? "Acesso total"
+                    : "—";
                   return (
                     <TableRow key={p.id}>
                       <TableCell className="font-medium">{p.nome}</TableCell>
                       <TableCell className="text-muted-foreground text-xs">{p.email || "—"}</TableCell>
-
-                      {/* Tipo Messenger */}
                       <TableCell>
-                        <Select
-                          value={(p as any).tipo_usuario || "setor_operador"}
-                          onValueChange={(v) =>
-                            updateTipoUsuario.mutate({ userId: p.id, tipo: v as TipoUsuario })
-                          }
-                        >
-                          <SelectTrigger className="h-8 w-32 text-xs">
-                            <SelectValue>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${TIPO_USUARIO_COLORS[((p as any).tipo_usuario || "setor_operador") as TipoUsuario]}`}
-                              >
-                                {TIPO_USUARIO_LABELS[((p as any).tipo_usuario || "setor_operador") as TipoUsuario]}
-                              </Badge>
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="loja">Loja</SelectItem>
-                            <SelectItem value="colaborador">Colaborador</SelectItem>
-                            <SelectItem value="setor_operador">Op. Setor</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Badge variant="outline" className={`text-[10px] ${TIPO_USUARIO_COLORS[tipo]}`}>
+                          {TIPO_USUARIO_LABELS[tipo]}
+                        </Badge>
                       </TableCell>
-
-                      {/* Nível de Acesso */}
+                      <TableCell className="text-xs">{cargoLabel}</TableCell>
                       <TableCell>
-                        <Select
-                          value={currentLevel || "none"}
-                          onValueChange={(v) => {
-                            if (v === "none") return;
-                            changeAccessLevel.mutate({ userId: p.id, newLevel: v as AppRole });
-                          }}
-                        >
-                          <SelectTrigger className="h-8 w-32 text-xs">
-                            <SelectValue placeholder="Sem acesso" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none" disabled>Sem acesso</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                            <SelectItem value="operador">Operador</SelectItem>
-                            <SelectItem value="setor_usuario">Setor</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-
-                      {/* Áreas do Sistema */}
-                      <TableCell>
-                        {currentLevel === "setor_usuario" ? (
-                          <div className="flex flex-wrap gap-1 items-center">
-                            {setorAreas.map((r) => (
-                              <Badge key={r.id} variant="outline" className="text-[10px] gap-1">
+                        <div className="flex flex-wrap gap-1">
+                          {tipo === "loja" && lojasArr.length > 0 ? (
+                            lojasArr.map((l) => (
+                              <Badge key={l} variant="outline" className="text-[10px]">{l}</Badge>
+                            ))
+                          ) : tipo === "setor_operador" && setorAreas.length > 0 ? (
+                            setorAreas.map((r) => (
+                              <Badge key={r.id} variant="outline" className="text-[10px]">
                                 {getSetorName(r.setor_id)}
-                                {r.loja_nome && <span className="opacity-70">· {r.loja_nome}</span>}
-                                <button
-                                  onClick={() => removeArea.mutate({ roleId: r.id, userId: p.id })}
-                                  className="ml-0.5 hover:text-destructive"
-                                  title="Remover área"
-                                >
-                                  ×
-                                </button>
                               </Badge>
-                            ))}
-
-                            {addingAreaFor === p.id ? (
-                              <div className="flex items-center gap-1">
-                                <Select value={newSetorId} onValueChange={(v) => { setNewSetorId(v); setNewLojaNome(""); }}>
-                                  <SelectTrigger className="h-6 w-28 text-[10px]">
-                                    <SelectValue placeholder="Setor" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {setores?.map((s) => (
-                                      <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-
-                                {isLojaSetor(newSetorId) && (
-                                  <Select value={newLojaNome} onValueChange={setNewLojaNome}>
-                                    <SelectTrigger className="h-6 w-36 text-[10px]">
-                                      <SelectValue placeholder="Selecione a loja" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {lojas?.map((l) => (
-                                        <SelectItem key={l} value={l}>{l}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                )}
-
-                                <Button
-                                  size="sm"
-                                  className="h-6 px-2 text-[10px]"
-                                  onClick={() => addArea.mutate({
-                                    userId: p.id,
-                                    setorId: newSetorId,
-                                    lojaNome: isLojaSetor(newSetorId) ? newLojaNome : undefined,
-                                  })}
-                                  disabled={addArea.isPending || !newSetorId || (isLojaSetor(newSetorId) && !newLojaNome)}
-                                >
-                                  OK
-                                </Button>
-                                <Button size="sm" variant="ghost" className="h-6 px-1" onClick={() => setAddingAreaFor(null)}>✕</Button>
-                              </div>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-5 w-5 p-0"
-                                onClick={() => setAddingAreaFor(p.id)}
-                                title="Adicionar área"
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            )}
-                          </div>
-                        ) : currentLevel === "admin" ? (
-                          <span className="text-xs text-muted-foreground">Acesso total</span>
-                        ) : currentLevel === "operador" ? (
-                          <span className="text-xs text-muted-foreground">Todas as áreas (leitura)</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                            ))
+                          ) : tipo === "admin" ? (
+                            <span className="text-xs text-muted-foreground">Todas</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </div>
                       </TableCell>
-
                       <TableCell>
                         <Switch
                           checked={p.ativo}
@@ -601,6 +466,21 @@ export function GestaoUsuariosCard() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={() => setEditTarget(p)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="text-xs">
+                              Editar tipo, cargo, lojas e setor
+                            </TooltipContent>
+                          </Tooltip>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -649,6 +529,15 @@ export function GestaoUsuariosCard() {
           )}
         </CardContent>
       </Card>
+
+      {/* Diálogo unificado de edição */}
+      <EditarUsuarioDialog
+        target={editTarget}
+        setores={setores || []}
+        lojas={lojas || []}
+        onClose={() => setEditTarget(null)}
+        onSaved={invalidateAll}
+      />
 
       <Dialog open={!!resetTarget} onOpenChange={(o) => !o && setResetTarget(null)}>
         <DialogContent className="sm:max-w-md">
