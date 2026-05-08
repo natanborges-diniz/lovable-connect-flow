@@ -1,47 +1,97 @@
 ## Objetivo
 
-Eliminar o risco de admins criarem grupos avulsos que dupliquem ou colidam com os canais já usados no atendimento humano (setores e lojas). O diálogo "Novo grupo" deixa de pedir uma lista livre de participantes — passa a oferecer **as mesmas opções já existentes no atendimento humano** (setores e lojas), e os membros são recalculados automaticamente quando alguém entra/sai.
+Tornar o cadastro de usuários "loja" intuitivo:
+- 1 usuário, 1 tela: tipo, **cargo**, lojas (múltiplas), setor.
+- Usuários "loja" só conseguem usar o **InFoco Messenger** (Atrium web bloqueado).
+- O **menu de demandas** do Messenger varia por cargo: supervisor vê tudo; gerente vê quase tudo; operador não vê itens sensíveis (ex.: pedir reembolso).
 
-## Modelo
+Exemplo final que vai funcionar: cadastrar Josivaldo → tipo `loja`, cargo `supervisor`, lojas `[Carapicuíba, Barueri]` → marcando uma única vez.
 
+---
+
+## 1. Banco de dados
+
+**`profiles`**
+- Adicionar coluna `cargo_loja text` com check `('supervisor','gerente','operador')`. Nullable (só usado se `tipo_usuario='loja'`).
+- Adicionar coluna `lojas text[] DEFAULT '{}'` (lojas que o usuário cobre, fonte da verdade para "loja"). O campo `loja_nome` em `user_roles` continua existindo como espelho para RLS de pipeline.
+
+**`bot_menu_opcoes`**
+- Adicionar coluna `cargos_visiveis text[] DEFAULT '{supervisor,gerente,operador}'`. Quando vazio, vale para todos.
+
+**Trigger `sync_user_roles_from_profile()`**
+- Disparado em `AFTER UPDATE/INSERT` em `profiles` quando `lojas` ou `tipo_usuario` mudam.
+- Reescreve `user_roles` do usuário: 1 linha `setor_usuario` por loja em `profiles.lojas`, com `loja_nome` preenchido. Garante consistência sem o admin precisar editar nada manualmente.
+
+---
+
+## 2. Edge function `bot-lojas`
+
+Hoje monta o menu lendo `bot_menu_opcoes` filtrando por `tipo_bot` e `parent_id`. Vai passar a também filtrar por `cargos_visiveis`:
+- Identifica o cargo do solicitante via telefone → `profiles.cargo_loja`.
+- Se cargo encontrado, filtra opções cujo `cargos_visiveis` contém aquele cargo (ou está vazio).
+- Se cargo não encontrado, cai no comportamento atual (mostra tudo).
+
+---
+
+## 3. Bloqueio do Atrium web para tipo=loja
+
+Em `src/components/auth/ProtectedRoute.tsx` e `AppLayout.tsx`:
+- Se `profile.tipo_usuario === 'loja'`, redirecionar para uma página simples `/somente-messenger` com botão "Abrir InFoco Messenger" (link para `desktop-joy-app.lovable.app`) e logout.
+- Login pelo Atrium continua possível (precisa, para gerar magic link), mas qualquer rota interna fica fechada.
+
+---
+
+## 4. Tela "Gestão de Usuários" — redesenho
+
+Substituir a UX atual (Tipo + Nível + Áreas em colunas confusas) por **um formulário único** ao clicar em "Editar":
+
+```text
+┌─ Editar usuário ────────────────────────────────┐
+│ Nome:   Josivaldo                               │
+│ E-mail: josivaldo@…                             │
+│                                                 │
+│ Tipo:   ( ) Admin                               │
+│         ( ) Operador de Setor                   │
+│         (•) Loja                                │
+│         ( ) Colaborador                         │
+│                                                 │
+│ ── quando Tipo = Loja ─────────────────────     │
+│ Cargo:  (•) Supervisor                          │
+│         ( ) Gerente                             │
+│         ( ) Operador                            │
+│                                                 │
+│ Lojas:  [x] Carapicuíba   [x] Barueri           │
+│         [ ] Osasco        [ ] Tatuapé   …       │
+│                                                 │
+│ ── quando Tipo = Operador de Setor ────────     │
+│ Setor:  [ Financeiro ▾ ]                        │
+│                                                 │
+│ Acesso ao Atrium web: 🚫 (somente Messenger)    │
+│                                                 │
+│ [Cancelar]                       [Salvar]       │
+└─────────────────────────────────────────────────┘
 ```
-conversas_grupo
- ├─ tipo_origem: 'setor' | 'loja' | 'custom'
- ├─ origem_ref:  setor_id  | loja_nome | null
- └─ participantes: uuid[]  ← agora derivado, recalculado por trigger/função
-```
 
-- **setor**: membros = todos os `profiles` ativos com `setor_id = origem_ref`.
-- **loja**: membros = todos os `profiles` ativos cujo `metadata->>'loja_nome' = origem_ref` (mesma chave usada hoje no pipeline da loja).
-- **custom**: caminho legado para os grupos que já existem; novos não podem mais ser criados como custom.
+Lista principal vira uma tabela enxuta: **Nome · E-mail · Tipo · Cargo/Setor · Lojas/Áreas · Ativo · Ações**.
 
-Apenas admin cria/edita/apaga (RLS atual mantida).
+Salvar grava `profiles` (tipo_usuario, cargo_loja, lojas, setor_id) — o trigger sincroniza `user_roles` sozinho.
 
-## Mudanças
+---
 
-### 1. Banco (migration)
-- `ALTER TABLE conversas_grupo ADD tipo_origem text NOT NULL DEFAULT 'custom'`, `ADD origem_ref text`.
-- Índice único parcial em `(tipo_origem, origem_ref) WHERE tipo_origem <> 'custom'` → impede dois grupos para o mesmo setor/loja.
-- Função `sync_grupo_membros(grupo_id)` que repopula `participantes` conforme `tipo_origem`/`origem_ref`.
-- Triggers:
-  - em `profiles` (INSERT/UPDATE/DELETE de `setor_id`, `ativo`, `metadata.loja_nome`) → ressincroniza grupos afetados.
-  - em `conversas_grupo` BEFORE INSERT/UPDATE → se `tipo_origem ≠ 'custom'`, calcula `participantes` automaticamente e força `nome` padrão ("Setor — X" ou "Loja — Y") se vazio.
-- Backfill: nada destrutivo. Grupos atuais ficam como `tipo_origem='custom'`.
+## 5. Tela "Bot Menu" (Configurações)
 
-### 2. Frontend
-- `NovoGrupoDialog.tsx` reescrito:
-  - Passo 1 (radio): **Setor** • **Loja**.
-  - Passo 2: select com a lista de setores ativos OU lojas distintas (mesma fonte que o atendimento humano usa — `setores` ativos / `loja_nome` distintos em `telefones_lojas`).
-  - Mostra preview dos membros derivados (somente leitura) e o nome sugerido editável.
-  - Bloqueia confirmar se já existir grupo para aquele setor/loja (lê o índice).
-  - Remove a busca livre de participantes e o checkbox manual.
-- `useCriarGrupo`: passa a enviar `{ tipo_origem, origem_ref, nome }`; backend resolve participantes.
-- `useMensagensInternas` / `Mensagens.tsx`: nada muda no consumo (lista, header, broadcast continuam por `grupo_<uuid>`).
+Em cada linha do `BotMenuCard`, adicionar um campo de chips **"Visível para cargos"** (`supervisor`, `gerente`, `operador`). Ao deixar tudo desmarcado: mostra para todos. Para a opção "Pedir reembolso", o admin desmarca `operador` e pronto.
 
-### 3. Memória
-Atualizar `mem://atendimento/conversas-grupo` para refletir: grupos são derivados de setor/loja, membros auto-sincronizados, criação restrita a admin, sem participantes manuais.
+---
 
-## Fora de escopo
-- App InFoco Messenger (mobile só consome).
-- Atendimento ao cliente final / WhatsApp Meta — inalterado.
-- Grupos custom existentes permanecem funcionando, mas a UI não permite criar novos do tipo custom.
+## 6. Memória / docs
+
+Atualizar `mem://arquitetura/tipos-usuario-app-interno` com `cargo_loja` + `lojas[]` + filtro de menu por cargo, e adicionar uma core rule curta no índice.
+
+---
+
+## Fora do escopo
+
+- Não mexe no fluxo de WhatsApp Meta nem no Gael.
+- Não muda quem pode iniciar 1:1 (RLS `pode_conversar_1a1` continua).
+- Wizard de cadastro em lote será atualizado em uma segunda etapa para preencher `cargo_loja` e `lojas[]` (por enquanto continua funcional, só não preenche cargo).
