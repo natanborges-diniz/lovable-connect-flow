@@ -19,6 +19,9 @@ interface Profile {
   setor_id: string | null;
   avatar_url: string | null;
   ativo: boolean;
+  tipo_usuario?: "loja" | "colaborador" | "setor_operador" | "admin";
+  cargo_loja?: "supervisor" | "gerente" | "operador" | null;
+  lojas?: string[];
 }
 
 interface SetorInfo {
