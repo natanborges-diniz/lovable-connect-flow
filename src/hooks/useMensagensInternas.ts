@@ -96,12 +96,26 @@ export function useMensagensInternas() {
         : { data: [] };
       const nameMap = new Map((profiles || []).map((p) => [p.id, p.nome]));
 
-      // Grupos
-      const grupoIds = [...map.keys()].filter(k => k.startsWith("grupo_")).map(k => k.slice(6));
-      const { data: grupos } = grupoIds.length > 0
-        ? await supabase.from("conversas_grupo").select("id, nome, participantes").in("id", grupoIds)
-        : { data: [] };
-      const grupoMap = new Map((grupos || []).map((g: any) => [g.id, g]));
+      // Grupos: junta os já presentes em mensagens + os grupos onde o usuário é participante (mesmo sem mensagens)
+      const grupoIdsComMsg = [...map.keys()].filter(k => k.startsWith("grupo_")).map(k => k.slice(6));
+      const { data: gruposMembro } = await supabase
+        .from("conversas_grupo")
+        .select("id, nome, participantes, created_at")
+        .contains("participantes", [uid!]);
+      const gruposMap = new Map<string, any>();
+      for (const g of (gruposMembro as any[] | null) || []) gruposMap.set(g.id, g);
+      // Garante presença mesmo se já listado por mensagem (para acesso a created_at quando não houver msg)
+      if (grupoIdsComMsg.length) {
+        const faltantes = grupoIdsComMsg.filter(id => !gruposMap.has(id));
+        if (faltantes.length) {
+          const { data: extras } = await supabase
+            .from("conversas_grupo")
+            .select("id, nome, participantes, created_at")
+            .in("id", faltantes);
+          for (const g of (extras as any[] | null) || []) gruposMap.set(g.id, g);
+        }
+      }
+      const grupoMap = gruposMap;
 
       const result: Conversa[] = [];
       for (const [cid, { msgs: cmsgs, outro_id, isGrupo }] of map) {
