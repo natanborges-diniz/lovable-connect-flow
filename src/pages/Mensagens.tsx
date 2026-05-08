@@ -186,6 +186,17 @@ export default function Mensagens() {
                 </div>
               </PopoverContent>
             </Popover>
+            {isAdmin && (
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-9 w-9"
+                title="Novo grupo"
+                onClick={() => setNovoGrupoOpen(true)}
+              >
+                <Users className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           <ScrollArea className="flex-1">
             {conversas.isLoading && (
