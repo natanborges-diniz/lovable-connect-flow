@@ -270,12 +270,36 @@ export default function Mensagens() {
               {/* Header */}
               <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
                 {selectedOutro?.isGrupo && <Users className="h-4 w-4 text-muted-foreground" />}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-semibold truncate">{selectedOutro?.nome}</h3>
                   {selectedOutro?.isGrupo && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {selectedOutro.participantes?.length ?? 0} participantes
-                    </p>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button className="text-[11px] text-muted-foreground hover:text-foreground hover:underline transition-colors text-left">
+                          {selectedOutro.participantes?.length ?? 0} participantes — ver lista
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-64 p-2" align="start">
+                        <p className="text-xs font-medium px-2 py-1 text-muted-foreground">
+                          Participantes ({selectedOutro.participantes?.length ?? 0})
+                        </p>
+                        <div className="max-h-72 overflow-y-auto pr-1">
+                          {(selectedOutro.participantes || []).map((pid) => (
+                            <div
+                              key={pid}
+                              className="px-2 py-1.5 text-sm rounded hover:bg-muted flex items-center gap-2"
+                            >
+                              <span className="truncate">
+                                {participantesNomes?.[pid] || "Carregando..."}
+                              </span>
+                              {pid === uid && (
+                                <span className="text-[10px] text-muted-foreground">(você)</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   )}
                 </div>
               </div>
