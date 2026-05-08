@@ -171,6 +171,36 @@ serve(async (req) => {
       }
     });
 
+    // G2) RESGATE DE ÓRFÃOS — qualquer card ativo com data_horario > 24h no passado
+    // e sem confirmação da loja é movido para no_show. Pega cards que escaparam
+    // do funil de cobrança (estado inconsistente: confirmacao_enviada=true mas
+    // tentativas_cobranca_loja=0, etc).
+    await safeRun("G2_orfaos_resgate", async () => {
+      const cutoff24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: orfaos } = await supabase
+        .from("agendamentos")
+        .select("id, contato_id, loja_nome, status, metadata")
+        .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+        .is("loja_confirmou_presenca", null)
+        .lt("data_horario", cutoff24h);
+
+      for (const ag of orfaos || []) {
+        const md = (ag.metadata || {}) as Record<string, any>;
+        await supabase.from("agendamentos").update({
+          status: "no_show",
+          metadata: { ...md, orfao_resgatado_at: new Date().toISOString(), orfao_status_anterior: ag.status },
+        }).eq("id", ag.id);
+        await supabase.from("eventos_crm").insert({
+          contato_id: ag.contato_id,
+          tipo: "agendamento_orfao_resgatado",
+          descricao: `Card órfão resgatado: estava em "${ag.status}" há mais de 24h sem retorno da loja (${ag.loja_nome || ""})`,
+          referencia_id: ag.id,
+          referencia_tipo: "agendamento",
+        });
+        results.push(`orfao_resgatado:${ag.id}`);
+      }
+    });
+
     console.log(`[CRON] Processed: ${results.join(", ") || "nothing"}`);
     await supabase.from("cron_jobs").update({ ultimo_disparo: new Date().toISOString() }).eq("funcao_alvo", "agendamentos-cron");
     return new Response(JSON.stringify({ status: "ok", processed: results }), {
