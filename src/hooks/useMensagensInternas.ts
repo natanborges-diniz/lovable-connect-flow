@@ -331,15 +331,35 @@ export function useEditMensagemInterna() {
         : [];
       historico.push({ at: new Date().toISOString(), conteudo_anterior: conteudoAnterior });
       const newMeta = { ...(metadata || {}), historico_edicoes: historico };
-      const { error } = await supabase
+      const editadaAt = new Date().toISOString();
+
+      // Lookup para detectar grupo e propagar para todas as cópias do broadcast
+      const { data: row } = await supabase
         .from("mensagens_internas")
-        .update({
-          conteudo: novoConteudo,
-          editada_at: new Date().toISOString(),
-          metadata: newMeta,
-        } as any)
-        .eq("id", id);
-      if (error) throw error;
+        .select("id, conversa_id, remetente_id, created_at")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (row?.conversa_id?.startsWith("grupo_")) {
+        const t = new Date(row.created_at).getTime();
+        const lo = new Date(t - 2000).toISOString();
+        const hi = new Date(t + 2000).toISOString();
+        const { error } = await supabase
+          .from("mensagens_internas")
+          .update({ conteudo: novoConteudo, editada_at: editadaAt, metadata: newMeta } as any)
+          .eq("conversa_id", row.conversa_id)
+          .eq("remetente_id", row.remetente_id)
+          .eq("conteudo", conteudoAnterior)
+          .gte("created_at", lo)
+          .lte("created_at", hi);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("mensagens_internas")
+          .update({ conteudo: novoConteudo, editada_at: editadaAt, metadata: newMeta } as any)
+          .eq("id", id);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["mensagens-conversa"] });
@@ -352,14 +372,33 @@ export function useDeleteMensagemInterna() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, userId }: { id: string; userId: string }) => {
-      const { error } = await supabase
+      const deletadaAt = new Date().toISOString();
+      const { data: row } = await supabase
         .from("mensagens_internas")
-        .update({
-          deletada_at: new Date().toISOString(),
-          deletada_por: userId,
-        } as any)
-        .eq("id", id);
-      if (error) throw error;
+        .select("id, conversa_id, remetente_id, conteudo, created_at")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (row?.conversa_id?.startsWith("grupo_")) {
+        const t = new Date(row.created_at).getTime();
+        const lo = new Date(t - 2000).toISOString();
+        const hi = new Date(t + 2000).toISOString();
+        const { error } = await supabase
+          .from("mensagens_internas")
+          .update({ deletada_at: deletadaAt, deletada_por: userId } as any)
+          .eq("conversa_id", row.conversa_id)
+          .eq("remetente_id", row.remetente_id)
+          .eq("conteudo", row.conteudo)
+          .gte("created_at", lo)
+          .lte("created_at", hi);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("mensagens_internas")
+          .update({ deletada_at: deletadaAt, deletada_por: userId } as any)
+          .eq("id", id);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["mensagens-conversa"] });
