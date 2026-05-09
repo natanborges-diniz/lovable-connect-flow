@@ -2254,6 +2254,35 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       const correctionCount = Number(contatoMeta.receita_confirmacao?.correction_count || 0);
       const lastRx = receitas[receitas.length - 1] || null;
 
+      // ── Defesa: pending corrompida com receita inválida (caso Yuri) ──
+      // Se a última receita salva não é válida, NUNCA aceitar "sim" — limpa pending,
+      // pede valores por texto e sai. Idempotente para conversas já corrompidas.
+      if (lastRx && !isReceitaValida(lastRx)) {
+        try {
+          await supabase.from("contatos").update({
+            metadata: {
+              ...contatoMeta,
+              receita_confirmacao: {
+                ...contatoMeta.receita_confirmacao,
+                pending: false,
+                invalidada_at: new Date().toISOString(),
+              },
+            },
+          }).eq("id", contatoId);
+          contatoMeta.receita_confirmacao = { ...(contatoMeta.receita_confirmacao || {}), pending: false, invalidada_at: new Date().toISOString() };
+        } catch (_) { /* noop */ }
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "receita_pending_invalidada",
+          descricao: "Pending corrompida (receita sem valores) — limpando e pedindo valores por texto",
+          metadata: { rx_label: rxLabel, last_rx_rxtype: lastRx?.rx_type ?? null },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).catch(() => {});
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_PEDIR_RECEITA_TEXTO);
+        console.log("[RX-CONFIRMACAO] Pending corrompida — limpa e pede texto");
+        return jsonResponse({ status: "ok", tools_used: ["receita_pending_invalidada"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+      }
+
       if (detectRxConfirmation(lastInboundText)) {
         try {
           // Marca a receita-alvo (rx_index se houver, senão a última) como confirmada
