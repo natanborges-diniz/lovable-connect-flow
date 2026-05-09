@@ -2254,6 +2254,35 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       const correctionCount = Number(contatoMeta.receita_confirmacao?.correction_count || 0);
       const lastRx = receitas[receitas.length - 1] || null;
 
+      // ── Defesa: pending corrompida com receita inválida (caso Yuri) ──
+      // Se a última receita salva não é válida, NUNCA aceitar "sim" — limpa pending,
+      // pede valores por texto e sai. Idempotente para conversas já corrompidas.
+      if (lastRx && !isReceitaValida(lastRx)) {
+        try {
+          await supabase.from("contatos").update({
+            metadata: {
+              ...contatoMeta,
+              receita_confirmacao: {
+                ...contatoMeta.receita_confirmacao,
+                pending: false,
+                invalidada_at: new Date().toISOString(),
+              },
+            },
+          }).eq("id", contatoId);
+          contatoMeta.receita_confirmacao = { ...(contatoMeta.receita_confirmacao || {}), pending: false, invalidada_at: new Date().toISOString() };
+        } catch (_) { /* noop */ }
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "receita_pending_invalidada",
+          descricao: "Pending corrompida (receita sem valores) — limpando e pedindo valores por texto",
+          metadata: { rx_label: rxLabel, last_rx_rxtype: lastRx?.rx_type ?? null },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).catch(() => {});
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_PEDIR_RECEITA_TEXTO);
+        console.log("[RX-CONFIRMACAO] Pending corrompida — limpa e pede texto");
+        return jsonResponse({ status: "ok", tools_used: ["receita_pending_invalidada"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+      }
+
       if (detectRxConfirmation(lastInboundText)) {
         try {
           // Marca a receita-alvo (rx_index se houver, senão a última) como confirmada
@@ -3967,6 +3996,32 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           data_leitura: new Date().toISOString(),
         };
 
+        // ── HARD GUARD: OCR inútil (foto não-receita / valores vazios) ──
+        // Caso Yuri (Mai/2026): foto ambígua → modelo retornou eyes={} mas confidence alta.
+        // Sem guarda, ramo final caía em `args.resposta` e LLM hallucinava o template
+        // "Li sua receita assim, ESF ? CIL ? EIXO ?". Bloqueia ANTES de salvar e pedir confirmação.
+        const _odNumCount = ["sphere","cylinder","axis","add"].filter((k) => typeof (od as any)[k] === "number").length;
+        const _oeNumCount = ["sphere","cylinder","axis","add"].filter((k) => typeof (oe as any)[k] === "number").length;
+        const _ocrSemValores = (_odNumCount + _oeNumCount) === 0;
+        const _ocrSoEsfericoZero =
+          (_odNumCount + _oeNumCount) > 0 &&
+          ![od.cylinder, oe.cylinder, od.axis, oe.axis, od.add, oe.add].some((v: any) => typeof v === "number") &&
+          (od.sphere === 0 || od.sphere == null) && (oe.sphere === 0 || oe.sphere == null);
+        const _ocrInutil = _ocrSemValores || _ocrSoEsfericoZero || rxType === "unknown";
+
+        if (_ocrInutil) {
+          resposta = MSG_PEDIR_RECEITA_TEXTO;
+          validatorFlags.push("ocr_inutil_pedindo_texto");
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_ocr_inutil",
+            descricao: `OCR retornou sem valores úteis (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%, odNum=${_odNumCount}, oeNum=${_oeNumCount}) — pedindo valores por texto`,
+            metadata: { confidence, rxType, odNumCount: _odNumCount, oeNumCount: _oeNumCount, args_resposta: args.resposta || null },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          console.log(`[RX-GUARD] OCR inútil bloqueado (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%, odNum=${_odNumCount}, oeNum=${_oeNumCount}) — não salva receita, pede texto`);
+          // NÃO salva em receitas[], NÃO marca pending. Cai direto pro sanitizer + sendWhatsApp.
+        } else {
         // Save to contact metadata — append to receitas[] array (max 5, FIFO)
         const { data: contatoData } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
         const existingMeta = (contatoData?.metadata as Record<string, any>) || {};
@@ -4046,10 +4101,25 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             resposta = "Consegui ler boa parte da sua receita, mas quero te passar a opção certinha. Posso te mostrar uma base e confirmar na loja? 😊";
             console.log(`[RX] Low confidence (${(confidence * 100).toFixed(0)}%) — cautious response`);
           }
-        } else {
+        } else if (rxJustValid) {
+          // Receita válida + cliente optou explicitamente por só guardar — usa resposta do LLM
           resposta = args.resposta;
+        } else {
+          // Defesa final: receita não-válida sem cair em needsHumanReview (não deveria ocorrer
+          // após o guard acima, mas mantém comportamento seguro).
+          resposta = MSG_PEDIR_RECEITA_TEXTO;
+          validatorFlags.push("ocr_invalido_pedindo_texto");
+          console.log(`[RX] Fallback de segurança — receita inválida sem human review`);
         }
         console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${rxJustValid && !explicitOptOut ? "pending_confirmation" : (explicitOptOut ? "client opted-out" : "no chain")}`);
+        }
+
+        // ── SANITIZER pós-LLM: nunca enviar template com placeholders vazios ──
+        if (resposta && /ESF\s*\?|CIL\s*\?|EIXO\s*\?°/.test(resposta)) {
+          console.warn("[RX-SANITIZE] resposta com placeholders vazios — substituindo por MSG_PEDIR_RECEITA_TEXTO");
+          resposta = MSG_PEDIR_RECEITA_TEXTO;
+          validatorFlags.push("rx_sanitize_empty_template");
+        }
 
       } else if ((fn === "consultar_lentes" || fn === "consultar_lentes_contato") && hasPendingNewPrescriptionImage) {
         // Bloqueia cotação com receita antiga quando há nova receita pendente de OCR

@@ -4,6 +4,39 @@ description: Receita salva com rx_type=unknown e olhos vazios não conta como re
 type: feature
 ---
 
+## Caso Yuri (Mai/2026) — foto não-receita + confidence alta
+
+Cliente mandou foto que não era receita. Modelo retornou `eyes.od={}`/`eyes.oe={}` (todos null) **com `confidence ≥ 0.80`**. Ramos antigos no `interpretar_receita` (~linha 4000):
+
+- `rxJustValid` falso (sem números) → não pediu confirmação canônica.
+- `needsHumanReview` falso (confidence alta) → não caiu em `MSG_PEDIR_RECEITA_TEXTO`.
+- Ramo `else` final usava `args.resposta` cru → LLM **alucinou** o template `"Li sua receita assim, ESF ? CIL ? EIXO ?°"`. Quando cliente respondeu "Isso", gate `~2257` aceitaria a confirmação e dispararia `runConsultarLentes` com receita zerada.
+
+### Hard guard pós-OCR (`fn === "interpretar_receita"`)
+
+Antes de salvar a receita, computa:
+
+```
+odNumCount + oeNumCount === 0     // nenhum número em qualquer olho
+|| (só sphere=0/null em ambos sem cyl/axis/add)
+|| rxType === "unknown"
+```
+
+Se `ocrInutil`: NÃO salva em `receitas[]`, NÃO marca `pending`, grava evento `receita_ocr_inutil` e responde `MSG_PEDIR_RECEITA_TEXTO` — **independente de `confidence`**.
+
+### Sanitizer pós-LLM
+
+Antes de qualquer `sendWhatsApp` no fluxo de OCR, regex `/ESF\s*\?|CIL\s*\?|EIXO\s*\?°/` substitui por `MSG_PEDIR_RECEITA_TEXTO` e marca `rx_sanitize_empty_template`.
+
+### Defesa no gate de confirmação (~linha 2251)
+
+Se `isReceitaPending` e `lastRx` falha em `isReceitaValida`, limpa `pending=false` + `invalidada_at`, grava `receita_pending_invalidada` e responde `MSG_PEDIR_RECEITA_TEXTO`. Idempotente para conversas já corrompidas.
+
+### Backfill
+
+Migration limpa `pending=true` em contatos cuja última receita tem `rx_type` em `('','unknown')`.
+
+
 # Receita Vazia e Shorthand na Correção (ai-triage)
 
 ## Problema (caso Jardel — 2026-04-25)
