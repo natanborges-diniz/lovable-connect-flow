@@ -4054,16 +4054,44 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         const _ocrInutil = _ocrSemValores || _ocrSoEsfericoZero || rxType === "unknown";
 
         if (_ocrInutil) {
-          resposta = MSG_PEDIR_RECEITA_TEXTO;
-          validatorFlags.push("ocr_inutil_pedindo_texto");
-          await supabase.from("eventos_crm").insert({
-            contato_id: contatoId,
-            tipo: "receita_ocr_inutil",
-            descricao: `OCR retornou sem valores úteis (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%, odNum=${_odNumCount}, oeNum=${_oeNumCount}) — pedindo valores por texto`,
-            metadata: { confidence, rxType, odNumCount: _odNumCount, oeNumCount: _oeNumCount, args_resposta: args.resposta || null },
-            referencia_tipo: "atendimento", referencia_id: atendimento_id,
-          });
-          console.log(`[RX-GUARD] OCR inútil bloqueado (rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%, odNum=${_odNumCount}, oeNum=${_oeNumCount}) — não salva receita, pede texto`);
+          // ── CONTADOR DE FALHAS DE OCR (anti-loop) ──
+          // Após 2 OCRs inúteis seguidos, escala pra humano em vez de pedir texto de novo.
+          const { data: _cFail } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+          const _failMeta = (_cFail?.metadata as Record<string, any>) || {};
+          const _falhasAtual = Number(_failMeta.ocr_falhas_count || 0) + 1;
+          await supabase.from("contatos").update({
+            metadata: { ..._failMeta, ocr_falhas_count: _falhasAtual, ocr_falhas_last_at: new Date().toISOString() },
+          }).eq("id", contatoId);
+
+          if (_falhasAtual >= 2) {
+            const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+            resposta = isHorarioHumano()
+              ? `Tô com dificuldade de ler sua receita aqui mesmo nas tentativas, ${_np || "amigo(a)"}. Vou chamar alguém da equipe pra te ajudar com isso, tá? 🙌`
+              : mensagemEscaladaForaHorario(_np);
+            precisa_humano = true;
+            intencao = "receita_oftalmologica";
+            pipeline_coluna = "Novo Contato";
+            validatorFlags.push("ocr_falhas_escalado_humano");
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "ocr_falhas_escalado",
+              descricao: `${_falhasAtual} falhas consecutivas de OCR — escalando pra humano`,
+              metadata: { ocr_falhas_count: _falhasAtual, confidence, rxType, odNumCount: _odNumCount, oeNumCount: _oeNumCount },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            });
+            console.log(`[RX-GUARD] ${_falhasAtual}× OCR inútil — escalando pra humano`);
+          } else {
+            resposta = MSG_PEDIR_RECEITA_TEXTO;
+            validatorFlags.push("ocr_inutil_pedindo_texto");
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "receita_ocr_inutil",
+              descricao: `OCR retornou sem valores úteis (tentativa ${_falhasAtual}, rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%, odNum=${_odNumCount}, oeNum=${_oeNumCount}) — pedindo valores por texto`,
+              metadata: { confidence, rxType, odNumCount: _odNumCount, oeNumCount: _oeNumCount, ocr_falhas_count: _falhasAtual, args_resposta: args.resposta || null },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            });
+            console.log(`[RX-GUARD] OCR inútil bloqueado (tentativa ${_falhasAtual}, rxType=${rxType}, conf=${(confidence * 100).toFixed(0)}%) — pede texto`);
+          }
           // NÃO salva em receitas[], NÃO marca pending. Cai direto pro sanitizer + sendWhatsApp.
         } else {
         // Save to contact metadata — append to receitas[] array (max 5, FIFO)
