@@ -225,7 +225,7 @@ serve(async (req) => {
         TEMPLATE_OU_RETOMADA_RE.test(String(o.conteudo || ""))
       );
 
-      if (horasDesdeUltimoInbound >= 2 && ultimosDoisOutboundsSaoTemplate) {
+      if (horasDesdeUltimoInbound >= LEAD_SILENCIOSO_H && ultimosDoisOutboundsSaoTemplate) {
         console.log(`[WATCHDOG] Lead silencioso ${at.id} — movendo para Perdidos (último inbound há ${horasDesdeUltimoInbound.toFixed(1)}h)`);
 
         // Busca coluna "Perdidos" do CRM (sem setor)
