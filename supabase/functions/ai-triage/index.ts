@@ -4115,7 +4115,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         if (existingReceitas.length > 5) existingReceitas = existingReceitas.slice(-5);
         
         await supabase.from("contatos").update({
-          metadata: { ...existingMeta, receitas: existingReceitas, ultima_receita: rxData },
+          metadata: { ...existingMeta, receitas: existingReceitas, ultima_receita: rxData, ocr_falhas_count: 0 },
         }).eq("id", contatoId);
 
         await supabase.from("eventos_crm").insert({
