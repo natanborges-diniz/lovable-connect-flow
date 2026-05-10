@@ -47,12 +47,12 @@ Retorne JSON estrito:
 }`;
 
   const user = `ACHADOS (${achados.length}):
-${JSON.stringify(achados, null, 1).slice(0, 14000)}
+${JSON.stringify(achados)}
 
 JÁ EXISTEM (não propor duplicatas):
-- Regras proibidas ativas: ${JSON.stringify(jaExistentes.regras).slice(0, 2000)}
-- Exemplos ativos (perguntas): ${JSON.stringify(jaExistentes.exemplos).slice(0, 2000)}
-- Diretrizes ativas: ${JSON.stringify(jaExistentes.instrucoes).slice(0, 2000)}`;
+- Regras proibidas ativas: ${JSON.stringify(jaExistentes.regras.slice(0, 40))}
+- Exemplos ativos (perguntas): ${JSON.stringify(jaExistentes.exemplos.slice(0, 40))}
+- Diretrizes ativas: ${JSON.stringify(jaExistentes.instrucoes.slice(0, 40))}`;
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -60,14 +60,26 @@ JÁ EXISTEM (não propor duplicatas):
     body: JSON.stringify({
       model: "google/gemini-2.5-pro",
       temperature: 0.2,
-      max_completion_tokens: 4000,
+      max_completion_tokens: 8000,
       response_format: { type: "json_object" },
       messages: [{ role: "system", content: sys }, { role: "user", content: user }],
     }),
   });
   if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
   const data = await res.json();
-  return JSON.parse(data.choices[0].message.content);
+  const raw = data.choices?.[0]?.message?.content || "{}";
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const start = cleaned.search(/[\{\[]/);
+    const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { /* fallthrough */ }
+    }
+    console.error("[consolidar] JSON parse falhou. Raw len:", raw.length, "preview:", raw.slice(0, 300));
+    return { grupos: [] };
+  }
 }
 
 Deno.serve(async (req) => {
