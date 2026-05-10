@@ -46,6 +46,12 @@ VETOR B — Disparos PROATIVOS (fora do turno; a IA não decide)
   B6 pipeline-automations ....... mensagens disparadas por movimento de coluna / status_alvo
   Tipo válido: ajustar_cron (alvo_ref = nome do cron/automação)
 
+  AUTO-APLICÁVEL quando o ajuste é apenas numérico em cron_jobs.payload.thresholds.
+  Whitelist por funcao_alvo (use EXATAMENTE estas chaves; valor numérico):
+    - watchdog-inbound-orfao: idade_min_min (1-60), idade_max_min (10-720), antiduplo_seg (30-600), pular_se_confirmou_horas (0-24)
+    - watchdog-loop-ia: outbound_min_minutos (2-30), similaridade_minima (0.5-0.95), lead_silencioso_horas (1-12)
+  Quando aplicável, INCLUA "payload_patch" na ação. Sem payload_patch → vira tarefa pra TI.
+
 VETOR C — Texto fora da janela 24h Meta
   Controles: whatsapp_templates + template_aliases
   Tipo válido: ajustar_template (alvo_ref = alias ou nome do template)
