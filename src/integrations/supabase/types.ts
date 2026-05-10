@@ -1360,6 +1360,39 @@ export type Database = {
         }
         Relationships: []
       }
+      ia_mensagens_fixas: {
+        Row: {
+          ativo: boolean
+          chave: string
+          created_at: string
+          descricao: string | null
+          texto: string
+          updated_at: string
+          updated_by: string | null
+          variaveis: string[]
+        }
+        Insert: {
+          ativo?: boolean
+          chave: string
+          created_at?: string
+          descricao?: string | null
+          texto: string
+          updated_at?: string
+          updated_by?: string | null
+          variaveis?: string[]
+        }
+        Update: {
+          ativo?: boolean
+          chave?: string
+          created_at?: string
+          descricao?: string | null
+          texto?: string
+          updated_at?: string
+          updated_by?: string | null
+          variaveis?: string[]
+        }
+        Relationships: []
+      }
       ia_regras_proibidas: {
         Row: {
           ativo: boolean
