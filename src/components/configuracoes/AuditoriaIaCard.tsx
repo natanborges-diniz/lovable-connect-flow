@@ -208,37 +208,49 @@ function RunDetailSheet({ runId, onClose }: { runId: string; onClose: () => void
         <SheetHeader>
           <SheetTitle>Achados da auditoria</SheetTitle>
           <SheetDescription>
-            Clique em uma conversa para ver o diagnóstico e decidir.
+            Veja problemas consolidados (recomendado) ou drill-down por conversa.
           </SheetDescription>
         </SheetHeader>
-        <div className="mt-6 space-y-2">
-          {auditorias?.length ? auditorias.map((a: any) => (
-            <button
-              key={a.id}
-              onClick={() => setAuditoriaSelecionada(a.id)}
-              className="w-full text-left p-3 rounded-md border hover:bg-accent transition-colors"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-medium text-sm truncate">
-                  {a.contato_nome || a.contato_telefone || "Sem nome"}
+
+        <Tabs defaultValue="grupos" className="mt-4">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="grupos"><Layers className="h-4 w-4 mr-2" />Problemas consolidados</TabsTrigger>
+            <TabsTrigger value="conversas">Por conversa</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="grupos" className="mt-4">
+            <GruposTab runId={runId} />
+          </TabsContent>
+
+          <TabsContent value="conversas" className="mt-4 space-y-2">
+            {auditorias?.length ? auditorias.map((a: any) => (
+              <button
+                key={a.id}
+                onClick={() => setAuditoriaSelecionada(a.id)}
+                className="w-full text-left p-3 rounded-md border hover:bg-accent transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium text-sm truncate">
+                    {a.contato_nome || a.contato_telefone || "Sem nome"}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge className={SEV_COLOR[a.severidade] || ""}>{SEV_LABEL[a.severidade] || a.severidade}</Badge>
+                    {a.score_global !== null && (
+                      <Badge variant="outline">{Number(a.score_global).toFixed(1)}/10</Badge>
+                    )}
+                    {a.status === "aplicado" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+                    {a.status === "ignorado" && <XCircle className="h-4 w-4 text-muted-foreground" />}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge className={SEV_COLOR[a.severidade] || ""}>{SEV_LABEL[a.severidade] || a.severidade}</Badge>
-                  {a.score_global !== null && (
-                    <Badge variant="outline">{Number(a.score_global).toFixed(1)}/10</Badge>
-                  )}
-                  {a.status === "aplicado" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-                  {a.status === "ignorado" && <XCircle className="h-4 w-4 text-muted-foreground" />}
-                </div>
-              </div>
-              {a.diagnostico && (
-                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{a.diagnostico}</p>
-              )}
-            </button>
-          )) : (
-            <p className="text-sm text-muted-foreground">Sem conversas avaliadas nesta auditoria.</p>
-          )}
-        </div>
+                {a.diagnostico && (
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{a.diagnostico}</p>
+                )}
+              </button>
+            )) : (
+              <p className="text-sm text-muted-foreground">Sem conversas avaliadas nesta auditoria.</p>
+            )}
+          </TabsContent>
+        </Tabs>
       </SheetContent>
       {auditoriaSelecionada && (
         <ConversaDialog
@@ -247,6 +259,181 @@ function RunDetailSheet({ runId, onClose }: { runId: string; onClose: () => void
         />
       )}
     </Sheet>
+  );
+}
+
+// ─── Aba "Problemas consolidados" ───
+function GruposTab({ runId }: { runId: string }) {
+  const [consolidando, setConsolidando] = useState(false);
+  const qc = useQueryClient();
+
+  const { data: grupos, refetch } = useQuery({
+    queryKey: ["ia_auditorias_grupos", runId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ia_auditorias_grupos" as any)
+        .select("*")
+        .eq("run_id", runId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  async function consolidar() {
+    setConsolidando(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("audit-ia-consolidar", {
+        body: { run_id: runId },
+      });
+      if (error) throw error;
+      toast.success(`${data?.total ?? 0} problema(s) consolidado(s)`);
+      await refetch();
+    } catch (e: any) {
+      toast.error(`Falhou: ${e.message}`);
+    } finally {
+      setConsolidando(false);
+    }
+  }
+
+  const pendentes = (grupos || []).filter((g) => g.status === "pendente");
+  const finalizados = (grupos || []).filter((g) => g.status !== "pendente");
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Achados agrupados por causa-raiz. Aplique a correção uma vez por problema (evita duplicidade).
+        </p>
+        <Button size="sm" variant="outline" onClick={consolidar} disabled={consolidando}>
+          {consolidando ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+          {grupos?.length ? "Reconsolidar" : "Consolidar achados"}
+        </Button>
+      </div>
+
+      {!grupos?.length && !consolidando && (
+        <p className="text-sm text-muted-foreground py-4 text-center">
+          Nenhum grupo ainda. Clique em "Consolidar achados" para a IA agrupar os problemas.
+        </p>
+      )}
+
+      {pendentes.map((g) => (
+        <GrupoCard key={g.id} grupo={g} onChanged={() => { refetch(); qc.invalidateQueries({ queryKey: ["ia_auditorias", runId] }); }} />
+      ))}
+
+      {finalizados.length > 0 && (
+        <details className="mt-4">
+          <summary className="text-xs font-medium text-muted-foreground cursor-pointer">
+            {finalizados.length} grupo(s) já tratado(s)
+          </summary>
+          <div className="space-y-2 mt-2">
+            {finalizados.map((g) => (
+              <GrupoCard key={g.id} grupo={g} onChanged={refetch} />
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) {
+  const [aplicando, setAplicando] = useState(false);
+  const [ignorarOpen, setIgnorarOpen] = useState(false);
+  const [motivo, setMotivo] = useState("");
+
+  async function aplicar() {
+    setAplicando(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("audit-ia-aplicar-grupo", {
+        body: { grupo_id: grupo.id },
+      });
+      if (error) throw error;
+      toast.success(`${data?.aplicadas?.length || 0} correção(ões) aplicada(s) — afeta ${data?.total_conversas || 0} conversa(s)`);
+      onChanged();
+    } catch (e: any) {
+      toast.error(`Falhou: ${e.message}`);
+    } finally {
+      setAplicando(false);
+    }
+  }
+
+  async function ignorar() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.functions.invoke("audit-ia-ignorar-grupo", {
+        body: { grupo_id: grupo.id, motivo, user_id: user?.id },
+      });
+      if (error) throw error;
+      toast.success("Grupo ignorado");
+      setIgnorarOpen(false);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
+
+  const acoes = Array.isArray(grupo.acoes_propostas) ? grupo.acoes_propostas : [];
+
+  return (
+    <div className="p-3 rounded-md border space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className={SEV_COLOR[grupo.severidade] || ""}>{SEV_LABEL[grupo.severidade] || grupo.severidade}</Badge>
+            <Badge variant="outline">{(grupo.auditoria_ids || []).length} conversa(s)</Badge>
+            {grupo.status === "aplicado" && <Badge className="bg-emerald-500 text-white">Aplicado</Badge>}
+            {grupo.status === "ignorado" && <Badge variant="outline">Ignorado</Badge>}
+          </div>
+          <h4 className="font-medium text-sm mt-1">{grupo.titulo}</h4>
+          {grupo.descricao && <p className="text-xs text-muted-foreground mt-1">{grupo.descricao}</p>}
+        </div>
+      </div>
+
+      {acoes.length > 0 && (
+        <div className="space-y-1.5 pt-1">
+          <p className="text-xs font-semibold text-muted-foreground">CORREÇÕES PROPOSTAS</p>
+          {acoes.map((ac: any, i: number) => {
+            const Icon = ACAO_ICON[ac.tipo] || FileText;
+            return (
+              <div key={i} className="flex items-start gap-2 text-xs bg-muted/40 rounded p-2">
+                <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">{ACAO_LABEL[ac.tipo] || ac.tipo}</div>
+                  <div className="text-muted-foreground line-clamp-2">
+                    {ac.texto || ac.instrucao || ac.pergunta || ac.titulo || ""}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {grupo.status === "pendente" && (
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
+            <XCircle className="h-3.5 w-3.5 mr-1" />Ignorar
+          </Button>
+          <Button size="sm" onClick={aplicar} disabled={aplicando}>
+            {aplicando ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
+            Aplicar correção
+          </Button>
+        </div>
+      )}
+
+      <Dialog open={ignorarOpen} onOpenChange={setIgnorarOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Ignorar grupo</DialogTitle></DialogHeader>
+          <Label>Motivo (opcional)</Label>
+          <Textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex: comportamento intencional, contexto especial..." />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIgnorarOpen(false)}>Cancelar</Button>
+            <Button onClick={ignorar}>Confirmar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
