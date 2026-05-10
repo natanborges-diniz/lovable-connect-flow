@@ -278,6 +278,8 @@ function GruposTab({ runId }: { runId: string }) {
       if (error) throw error;
       return data as any[];
     },
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
   async function consolidar() {
@@ -287,7 +289,14 @@ function GruposTab({ runId }: { runId: string }) {
         body: { run_id: runId },
       });
       if (error) throw error;
-      toast.success(`${data?.total ?? 0} problema(s) consolidado(s)`);
+      const total = data?.total ?? 0;
+      const motivo = data?.motivo;
+      if (total === 0) {
+        toast.warning(`Nenhum grupo gerado${motivo ? ` (${motivo})` : ""}. Tente novamente.`);
+      } else {
+        toast.success(`${total} problema(s) consolidado(s)`);
+      }
+      await qc.invalidateQueries({ queryKey: ["ia_auditorias_grupos", runId] });
       await refetch();
     } catch (e: any) {
       toast.error(`Falhou: ${e.message}`);
