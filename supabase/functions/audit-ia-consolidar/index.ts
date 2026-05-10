@@ -260,8 +260,37 @@ Deno.serve(async (req) => {
       ajustar_config: "codigo",
       tarefa_ti: "codigo",
     };
-    const classificarModo = (tipo: string): "auto" | "codigo" | "decisao" =>
-      MODO_POR_TIPO[tipo] || "codigo";
+    // Whitelist de thresholds editáveis em cron_jobs.payload.thresholds (mantida em sync com aplicador).
+    const CRON_THRESHOLDS_WHITELIST: Record<string, Record<string, [number, number]>> = {
+      "watchdog-inbound-orfao": {
+        idade_min_min: [1, 60], idade_max_min: [10, 720],
+        antiduplo_seg: [30, 600], pular_se_confirmou_horas: [0, 24],
+      },
+      "watchdog-loop-ia": {
+        outbound_min_minutos: [2, 30],
+        similaridade_minima: [0.5, 0.95],
+        lead_silencioso_horas: [1, 12],
+      },
+    };
+    const cronPatchValido = (alvo: string, patch: any): boolean => {
+      const wl = CRON_THRESHOLDS_WHITELIST[alvo];
+      const th = patch?.thresholds;
+      if (!wl || !th || typeof th !== "object") return false;
+      const keys = Object.keys(th);
+      if (!keys.length) return false;
+      return keys.every((k) => {
+        const range = wl[k];
+        const v = Number(th[k]);
+        return Array.isArray(range) && Number.isFinite(v) && v >= range[0] && v <= range[1];
+      });
+    };
+    const classificarModo = (ac: any): "auto" | "codigo" | "decisao" => {
+      const tipo = String(ac?.tipo || "");
+      if (tipo === "ajustar_cron" && cronPatchValido(String(ac?.alvo_ref || ""), ac?.payload_patch)) {
+        return "auto";
+      }
+      return MODO_POR_TIPO[tipo] || "codigo";
+    };
 
     for (const g of merged) {
       const ids = (g.auditoria_ids || []).filter((id: string) => validIds.has(id));
@@ -269,7 +298,7 @@ Deno.serve(async (req) => {
       const acoesRaw = Array.isArray(g.acoes) ? g.acoes : [];
       const acoes = acoesRaw.map((ac: any) => ({
         ...ac,
-        modo_aplicacao: ac?.modo_aplicacao || classificarModo(String(ac?.tipo || "")),
+        modo_aplicacao: ac?.modo_aplicacao || classificarModo(ac),
       }));
       const { data, error } = await supabase
         .from("ia_auditorias_grupos")
