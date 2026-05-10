@@ -65,6 +65,11 @@ VETOR F — Configurações operacionais
   Controle: app_config (horário humano, homologação, cadências, janelas) ou feriados
   Tipo válido: ajustar_config (alvo_ref = chave em app_config)
 
+VETOR G — Mensagens fixas determinísticas (sem LLM)
+  Controle: ia_mensagens_fixas (chaves: despedida_explicit_close, despedida_thanks, despedida_short_no, escalada_fora_horario, pedir_receita_texto, recuperacao_ia_despedida_final)
+  Tipo válido: ajustar_mensagem_fixa (alvo_ref = chave da mensagem; sugestao = novo texto com {placeholders} preservados)
+  Use quando o problema é o TEXTO de uma mensagem disparada de forma determinística (não passou pelo LLM): despedida canônica, escalada fora-horário, despedida final de recuperação ou pedido de receita por texto.
+
 HEURÍSTICAS DE ROTEAMENTO (use SEMPRE antes de escolher tipo):
 - Menciona "template", "fora da janela 24h", "retomada de contexto", "marketing/utility"  → VETOR C
 - "follow-up automático", "depois de N min sem resposta", "silêncio pós-inbound", "watchdog" → B3/B4
