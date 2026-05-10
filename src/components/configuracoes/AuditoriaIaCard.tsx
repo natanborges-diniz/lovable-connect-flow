@@ -360,7 +360,8 @@ function GruposTab({ runId }: { runId: string }) {
   }
 
   const pendentes = (grupos || []).filter((g) => g.status === "pendente");
-  const finalizados = (grupos || []).filter((g) => g.status !== "pendente");
+  const aguardandoCodigo = (grupos || []).filter((g) => g.status === "pendente_codigo" || g.status === "parcial");
+  const finalizados = (grupos || []).filter((g) => g.status === "aplicado" || g.status === "ignorado");
 
   return (
     <div className="space-y-3">
