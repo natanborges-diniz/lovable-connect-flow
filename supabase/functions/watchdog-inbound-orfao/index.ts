@@ -122,7 +122,7 @@ serve(async (req) => {
         const recemConfirmou = (agConf || []).some((ag: any) => {
           const at = ag?.metadata?.cliente_confirmou_at;
           if (!at) return false;
-          return now - new Date(at).getTime() < 60 * 60 * 1000; // <1h
+          return now - new Date(at).getTime() < CONFIRMOU_WINDOW_MS;
         });
         if (recemConfirmou) {
           console.log(`[ORFAO-WATCHDOG] skip ${o.atendimento_id}: cliente confirmou agendamento <1h`);
