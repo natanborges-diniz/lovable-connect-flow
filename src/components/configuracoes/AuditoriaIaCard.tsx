@@ -51,14 +51,37 @@ const ACAO_LABEL: Record<string, string> = {
 
 const TIPOS_PROMPT = new Set(["regra_proibida", "exemplo", "ajuste_prompt"]);
 
+// Modo de aplicação por tipo (espelha audit-ia-consolidar / aplicar-grupo)
+const MODO_POR_TIPO: Record<string, "auto" | "codigo" | "decisao"> = {
+  regra_proibida: "auto",
+  exemplo: "auto",
+  ajuste_prompt: "auto",
+  ajustar_cron: "codigo",
+  ajustar_template: "codigo",
+  ajustar_bot_fluxo: "codigo",
+  ajustar_config: "codigo",
+  tarefa_ti: "codigo",
+};
+
+const MODO_BADGE: Record<string, { label: string; className: string }> = {
+  auto:    { label: "Auto-aplicável",   className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" },
+  codigo:  { label: "Requer código",    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30" },
+  decisao: { label: "Requer decisão",   className: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30" },
+};
+
+function modoDeAcao(ac: any): "auto" | "codigo" | "decisao" {
+  return ac?.modo_aplicacao || MODO_POR_TIPO[String(ac?.tipo || "")] || "codigo";
+}
+
 // Normaliza ações que vêm em formatos variados do LLM
-function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: string; raw: any } {
-  if (!ac || typeof ac !== "object") return { tipo: "ajuste_prompt", texto: String(ac ?? ""), raw: ac };
+function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: string; modo: "auto" | "codigo" | "decisao"; raw: any } {
+  if (!ac || typeof ac !== "object") return { tipo: "ajuste_prompt", texto: String(ac ?? ""), modo: "auto", raw: ac };
   if (ac.tipo) {
     return {
       tipo: ac.tipo,
       texto: ac.texto || ac.instrucao || ac.descricao || ac.sugestao || ac.pergunta || ac.titulo || ac.regra || "",
       alvo_ref: ac.alvo_ref,
+      modo: modoDeAcao(ac),
       raw: ac,
     };
   }
@@ -70,10 +93,10 @@ function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: strin
       else if (v && typeof v === "object") {
         texto = v.descricao || v.instrucao || v.texto || v.sugestao || v.titulo || v.pergunta || v.resposta_ideal || JSON.stringify(v);
       }
-      return { tipo, texto, raw: ac };
+      return { tipo, texto, modo: modoDeAcao({ tipo }), raw: ac };
     }
   }
-  return { tipo: "ajuste_prompt", texto: ac.descricao || JSON.stringify(ac), raw: ac };
+  return { tipo: "ajuste_prompt", texto: ac.descricao || JSON.stringify(ac), modo: "auto", raw: ac };
 }
 
 export function AuditoriaIaCard() {
