@@ -91,12 +91,12 @@ serve(async (req) => {
       const ageMin = Math.floor(ageMs / 60_000);
       if (ageMin < IDADE_MIN_MIN || ageMin > IDADE_MAX_MIN) continue;
 
-      // Anti-duplo-disparo: ignora se já foi processado nos últimos 90s
+      // Anti-duplo-disparo
       const meta = (a.metadata as any) || {};
       const lastTrig = meta?.orfao_watchdog_last_at
         ? new Date(meta.orfao_watchdog_last_at).getTime()
         : 0;
-      if (now - lastTrig < 90_000) continue;
+      if (now - lastTrig < ANTIDUPLO_MS) continue;
 
       orfaos.push({ atendimento_id: a.id, contato_id: a.contato_id, idade_min: ageMin });
     }
