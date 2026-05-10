@@ -3158,14 +3158,14 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       let despedidaMsg: string;
       if (isExplicitClose) {
         const _tail = agendamentoFmt ? ` — te espero ${agendamentoFmt}` : "";
-        despedidaMsg = `Foi um prazer te atender${_commaName}! 🙏 Obrigado pelo contato${_tail}. Qualquer coisa, é só me chamar 👋`;
+        despedidaMsg = renderMsgFixa("despedida_explicit_close", { nome_comma: _commaName, tail: _tail });
       } else if (isThanksClose) {
         const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
-        despedidaMsg = `De nada${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+        despedidaMsg = renderMsgFixa("despedida_thanks", { nome_comma: _commaName, tail: _tail });
       } else {
         // isShortNoToHelp
         const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
-        despedidaMsg = `Combinado${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+        despedidaMsg = renderMsgFixa("despedida_short_no", { nome_comma: _commaName, tail: _tail });
       }
 
       // Anti-duplicação: se último outbound já é uma despedida canônica, silencia
