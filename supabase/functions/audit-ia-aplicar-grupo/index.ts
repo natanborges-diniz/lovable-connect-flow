@@ -49,8 +49,40 @@ Deno.serve(async (req) => {
       ajustar_config: "codigo",
       tarefa_ti: "codigo",
     };
-    const modoDe = (ac: any): "auto" | "codigo" | "decisao" =>
-      ac?.modo_aplicacao || MODO_POR_TIPO[String(ac?.tipo || "")] || "codigo";
+    // Whitelist de thresholds editáveis em cron_jobs.payload.thresholds (em sync com consolidador).
+    const CRON_THRESHOLDS_WHITELIST: Record<string, Record<string, [number, number]>> = {
+      "watchdog-inbound-orfao": {
+        idade_min_min: [1, 60], idade_max_min: [10, 720],
+        antiduplo_seg: [30, 600], pular_se_confirmou_horas: [0, 24],
+      },
+      "watchdog-loop-ia": {
+        outbound_min_minutos: [2, 30],
+        similaridade_minima: [0.5, 0.95],
+        lead_silencioso_horas: [1, 12],
+      },
+    };
+    const sanitizeCronPatch = (alvo: string, patch: any): Record<string, number> | null => {
+      const wl = CRON_THRESHOLDS_WHITELIST[alvo];
+      const th = patch?.thresholds;
+      if (!wl || !th || typeof th !== "object") return null;
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(th)) {
+        const range = wl[k];
+        const num = Number(v);
+        if (Array.isArray(range) && Number.isFinite(num) && num >= range[0] && num <= range[1]) {
+          out[k] = num;
+        }
+      }
+      return Object.keys(out).length ? out : null;
+    };
+    const modoDe = (ac: any): "auto" | "codigo" | "decisao" => {
+      if (ac?.modo_aplicacao) return ac.modo_aplicacao;
+      const tipo = String(ac?.tipo || "");
+      if (tipo === "ajustar_cron" && sanitizeCronPatch(String(ac?.alvo_ref || ""), ac?.payload_patch)) {
+        return "auto";
+      }
+      return MODO_POR_TIPO[tipo] || "codigo";
+    };
 
     // Mapeia tipos novos (vetores B/C/D/E/F) → criação de tarefa estruturada
     const TAREFA_TIPOS: Record<string, { rota: string; prefixo: string }> = {
@@ -106,6 +138,26 @@ Deno.serve(async (req) => {
           }
           alvoTabela = "ia_mensagens_fixas"; alvoId = null;
           payload = { chave, texto: novoTexto };
+        } else if (acao.tipo === "ajustar_cron" && sanitizeCronPatch(String(acao.alvo_ref || ""), acao.payload_patch)) {
+          // Vetor B — auto-aplica thresholds whitelisted em cron_jobs.payload.thresholds
+          const alvo = String(acao.alvo_ref);
+          const cleanPatch = sanitizeCronPatch(alvo, acao.payload_patch)!;
+          const { data: row } = await supabase
+            .from("cron_jobs").select("id, payload").eq("funcao_alvo", alvo).maybeSingle();
+          if (row) {
+            const merged = {
+              ...(row.payload || {}),
+              thresholds: { ...((row.payload || {}).thresholds || {}), ...cleanPatch },
+            };
+            await supabase.from("cron_jobs")
+              .update({ payload: merged, updated_at: new Date().toISOString() })
+              .eq("id", row.id);
+            alvoTabela = "cron_jobs"; alvoId = row.id;
+            payload = { funcao_alvo: alvo, thresholds_aplicados: cleanPatch };
+          } else {
+            console.warn("[aplicar-grupo] cron_jobs não encontrado para", alvo);
+            continue;
+          }
         } else if (TAREFA_TIPOS[acao.tipo]) {
           // Vetores B/C/D/E/F → cria tarefa estruturada (não aplica direto, exige revisão humana)
           const cfg = TAREFA_TIPOS[acao.tipo];
