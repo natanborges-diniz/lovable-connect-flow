@@ -1924,6 +1924,8 @@ serve(async (req) => {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  // Carrega/atualiza mensagens fixas editáveis (cache 60s)
+  await loadMensagensFixas(supabase);
 
   let atendimentoIdForCleanup: string | null = null;
 
