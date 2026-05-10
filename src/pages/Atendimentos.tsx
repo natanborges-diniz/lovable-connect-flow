@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MessageFeedback } from "@/components/atendimentos/MessageFeedback";
+import { TemplateMessageBubble } from "@/components/atendimentos/TemplateMessageBubble";
+import { useWhatsappTemplates } from "@/hooks/useWhatsappTemplates";
 import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
 import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
@@ -170,6 +172,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const { data: mensagens, refetch } = useMensagens(id);
   const createMensagem = useCreateMensagem();
   const { data: atendimentos } = useAtendimentos();
+  const { data: templatesCatalog } = useWhatsappTemplates();
   const atendimento = atendimentos?.find((a: any) => a.id === id) as any;
   const { profile, user } = useAuth();
   const uid = user?.id ?? null;
@@ -553,7 +556,11 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                         <ExternalLink className="ml-auto h-3.5 w-3.5" />
                       </a>
                     ) : null}
-                    {m.conteudo && m.conteudo !== "[image]" && <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>}
+                    {m.conteudo && m.conteudo !== "[image]" && (
+                      m.conteudo.startsWith("[Template:")
+                        ? <TemplateMessageBubble conteudo={m.conteudo} templates={templatesCatalog} />
+                        : <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
+                    )}
                     <div className="flex items-center justify-between gap-2 mt-1">
                       <p className="text-[10px] opacity-50 flex items-center gap-1">
                         <span>{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</span>
