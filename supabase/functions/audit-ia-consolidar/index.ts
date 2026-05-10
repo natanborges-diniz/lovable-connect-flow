@@ -96,7 +96,7 @@ SHAPE DAS AÇÕES (escolha UM tipo por ação):
   { "tipo": "regra_proibida",  "vetor": "A",  "texto": "...",                "categoria": "informacao_falsa|preco|tom|..." }
   { "tipo": "exemplo",         "vetor": "A",  "pergunta": "...",             "resposta_ideal": "...", "categoria": "..." }
   { "tipo": "ajuste_prompt",   "vetor": "A",  "instrucao": "...",            "categoria": "fluxo|tom|seguranca|fechamento" }
-  { "tipo": "ajustar_cron",    "vetor": "B1..B6", "alvo_ref": "<cron>",      "titulo": "...", "descricao": "...", "sugestao": "..." }
+  { "tipo": "ajustar_cron",    "vetor": "B1..B6", "alvo_ref": "<cron>",      "titulo": "...", "descricao": "...", "sugestao": "...", "payload_patch": { "thresholds": { "<chave_whitelisted>": <numero> } } }
   { "tipo": "ajustar_template","vetor": "C",  "alvo_ref": "<alias|template>","titulo": "...", "descricao": "...", "sugestao": "..." }
   { "tipo": "ajustar_bot_fluxo","vetor": "E", "alvo_ref": "<chave_fluxo>",   "titulo": "...", "descricao": "...", "sugestao": "..." }
   { "tipo": "ajustar_config",  "vetor": "F",  "alvo_ref": "<chave_app_config>","titulo": "...", "descricao": "...", "sugestao": "..." }
