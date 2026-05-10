@@ -247,6 +247,7 @@ Deno.serve(async (req) => {
       regra_proibida: "auto",
       exemplo: "auto",
       ajuste_prompt: "auto",
+      ajustar_mensagem_fixa: "auto",
       ajustar_cron: "codigo",
       ajustar_template: "codigo",
       ajustar_bot_fluxo: "codigo",
