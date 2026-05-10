@@ -36,42 +36,76 @@ Deno.serve(async (req) => {
     const auditoriaRef = (grupo.auditoria_ids || [])[0] || null;
     const aplicadas: any[] = [];
 
+    // Mapeia tipos novos (vetores B/C/D/E/F) → criação de tarefa estruturada
+    const TAREFA_TIPOS: Record<string, { rota: string; prefixo: string }> = {
+      ajustar_cron:        { rota: "/configuracoes?tab=cron-jobs",        prefixo: "[Cron]" },
+      ajustar_template:    { rota: "/configuracoes?tab=whatsapp-templates", prefixo: "[Template]" },
+      ajustar_bot_fluxo:   { rota: "/configuracoes?tab=bot-fluxos",       prefixo: "[Bot Fluxo]" },
+      ajustar_config:      { rota: "/configuracoes?tab=cron-jobs",        prefixo: "[Config]" },
+      tarefa_ti:           { rota: "/tarefas",                            prefixo: "[TI]" },
+    };
+
     for (const acao of acoes) {
       try {
         let alvoTabela = "";
         let alvoId: string | null = null;
         let payload: any = acao;
 
-        if (acao.tipo === "regra_proibida" && acao.texto) {
+        if (acao.tipo === "regra_proibida" && (acao.texto || acao.regra)) {
+          const regra = acao.texto || acao.regra;
           const { data } = await supabase.from("ia_regras_proibidas").insert({
-            regra: acao.texto, categoria: acao.categoria || "informacao_falsa", ativo: true,
+            regra, categoria: acao.categoria || "informacao_falsa", ativo: true,
           }).select().single();
           alvoTabela = "ia_regras_proibidas"; alvoId = data?.id ?? null;
-          payload = { regra: acao.texto, categoria: acao.categoria };
+          payload = { regra, categoria: acao.categoria };
         } else if (acao.tipo === "exemplo" && acao.pergunta && acao.resposta_ideal) {
           const { data } = await supabase.from("ia_exemplos").insert({
             pergunta: acao.pergunta, resposta_ideal: acao.resposta_ideal,
             categoria: acao.categoria || "geral", ativo: true,
           }).select().single();
           alvoTabela = "ia_exemplos"; alvoId = data?.id ?? null;
-        } else if (acao.tipo === "ajuste_prompt" && acao.instrucao) {
+        } else if (acao.tipo === "ajuste_prompt" && (acao.instrucao || acao.descricao)) {
+          const instrucao = acao.instrucao || acao.descricao;
           const { data } = await supabase.from("ia_instrucoes_prompt").insert({
-            instrucao: acao.instrucao, categoria: acao.categoria || "fluxo",
+            instrucao, categoria: acao.categoria || "fluxo",
             origem: "auditoria", origem_ref: auditoriaRef, ativo: true,
           }).select().single();
           alvoTabela = "ia_instrucoes_prompt"; alvoId = data?.id ?? null;
-        } else if (acao.tipo === "tarefa_ti" && acao.titulo) {
-          try {
-            const { data } = await supabase.from("tarefas").insert({
-              titulo: acao.titulo, descricao: acao.descricao || "",
-              status: "pendente", origem: "auditoria_ia",
-            } as any).select().single();
-            alvoId = data?.id ?? null;
-          } catch (e) {
-            console.warn("[tarefa_ti] insert falhou", e);
+        } else if (TAREFA_TIPOS[acao.tipo]) {
+          // Vetores B/C/D/E/F → cria tarefa estruturada (não aplica direto, exige revisão humana)
+          const cfg = TAREFA_TIPOS[acao.tipo];
+          const tituloBase = acao.titulo || acao.alvo_ref || `Revisar ${acao.tipo}`;
+          const descricao = [
+            acao.descricao || "",
+            acao.sugestao ? `\n\n**Sugestão:** ${acao.sugestao}` : "",
+            acao.alvo_ref ? `\n\n**Alvo:** \`${acao.alvo_ref}\`` : "",
+            acao.vetor ? `\n**Vetor:** ${acao.vetor}` : "",
+            `\n**Origem:** auditoria IA (grupo ${grupo_id})`,
+            `\n**Abrir:** ${cfg.rota}`,
+          ].join("");
+          const { data, error: tErr } = await supabase.from("tarefas").insert({
+            titulo: `${cfg.prefixo} ${tituloBase}`.slice(0, 200),
+            descricao,
+            status: "pendente",
+            prioridade: grupo.severidade === "critical" ? "alta" : "normal",
+            metadata: {
+              origem: "auditoria_ia",
+              auditoria_grupo_id: grupo_id,
+              auditoria_run_id: grupo.run_id,
+              tipo_acao: acao.tipo,
+              vetor: acao.vetor,
+              alvo_ref: acao.alvo_ref,
+              sugestao: acao.sugestao,
+              deep_link: cfg.rota,
+            },
+          } as any).select().single();
+          if (tErr) {
+            console.error("[aplicar-grupo] tarefa insert falhou", tErr);
+            continue;
           }
-          alvoTabela = "tarefas";
+          alvoTabela = "tarefas"; alvoId = data?.id ?? null;
         } else {
+          console.warn("[aplicar-grupo] ação ignorada (formato desconhecido)", acao);
           continue;
         }
 
