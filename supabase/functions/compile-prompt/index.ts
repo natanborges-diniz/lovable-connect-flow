@@ -47,18 +47,20 @@ serve(async (req) => {
 
   try {
     // 1. Load all sources in parallel
-    const [promptRes, exemplosRes, feedbacksRes] = await Promise.all([
+    const [promptRes, exemplosRes, feedbacksRes, instrucoesRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).order("created_at", { ascending: false }),
       supabase.from("ia_feedbacks").select("motivo, resposta_corrigida")
         .in("avaliacao", ["negativo", "corrigido"])
         .not("resposta_corrigida", "is", null)
         .order("created_at", { ascending: false }).limit(20),
+      supabase.from("ia_instrucoes_prompt").select("categoria, instrucao").eq("ativo", true).order("created_at", { ascending: false }),
     ]);
 
     const promptBase = promptRes.data?.valor || "";
     const exemplos = exemplosRes.data || [];
     const feedbacks = feedbacksRes.data || [];
+    const instrucoes = instrucoesRes.data || [];
 
     if (!promptBase) {
       return new Response(
