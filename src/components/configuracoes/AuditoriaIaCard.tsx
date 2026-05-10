@@ -551,6 +551,16 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
         </p>
       )}
 
+      {(grupo.status === "pendente_codigo" || grupo.status === "parcial") && (
+        <Link
+          to={`/tarefas?grupo=${grupo.id}`}
+          className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 hover:underline"
+        >
+          <ExternalLink className="h-3 w-3" />
+          Ver tarefa(s) criada(s) pra TI
+        </Link>
+      )}
+
       {editavel && (
         <div className="flex gap-2 pt-1">
           <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
