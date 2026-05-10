@@ -5086,12 +5086,39 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 validatorFlags.push("receita_confirmacao_solicitada");
                 console.log(`[FORCE-INTERPRETAR] Receita salva via retry (lc=${isLCContextGlobal}) — pedindo confirmação`);
               } else {
-                resposta = "Consegui abrir sua receita, mas não estou conseguindo ler os valores com clareza 😅 Pode me passar por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? Assim já te passo as opções certinhas.";
-                intencao = "receita_oftalmologica";
-                pipeline_coluna = "Orçamento";
-                precisa_humano = false;
-                validatorFlags.push("forced_interpretar_receita_low_confidence");
-                console.log("[FORCE-INTERPRETAR] Confiança baixa — pedindo valores por texto");
+                // ── CONTADOR DE FALHAS DE OCR (forced retry low-confidence) ──
+                const { data: _cFail2 } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+                const _failMeta2 = (_cFail2?.metadata as Record<string, any>) || {};
+                const _falhasAtual2 = Number(_failMeta2.ocr_falhas_count || 0) + 1;
+                await supabase.from("contatos").update({
+                  metadata: { ..._failMeta2, ocr_falhas_count: _falhasAtual2, ocr_falhas_last_at: new Date().toISOString() },
+                }).eq("id", contatoId);
+
+                if (_falhasAtual2 >= 2) {
+                  const _np2 = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+                  resposta = isHorarioHumano()
+                    ? `Tô com dificuldade de ler sua receita aqui mesmo nas tentativas, ${_np2 || "amigo(a)"}. Vou chamar alguém da equipe pra te ajudar com isso, tá? 🙌`
+                    : mensagemEscaladaForaHorario(_np2);
+                  precisa_humano = true;
+                  intencao = "receita_oftalmologica";
+                  pipeline_coluna = "Novo Contato";
+                  validatorFlags.push("forced_interpretar_receita_escalado_humano");
+                  await supabase.from("eventos_crm").insert({
+                    contato_id: contatoId,
+                    tipo: "ocr_falhas_escalado",
+                    descricao: `${_falhasAtual2} falhas consecutivas de OCR (forced retry) — escalando pra humano`,
+                    metadata: { ocr_falhas_count: _falhasAtual2, confidence, source: "forced_retry_low_conf" },
+                    referencia_tipo: "atendimento", referencia_id: atendimento_id,
+                  });
+                  console.log(`[FORCE-INTERPRETAR] ${_falhasAtual2}× confiança baixa — escalando pra humano`);
+                } else {
+                  resposta = "Consegui abrir sua receita, mas não estou conseguindo ler os valores com clareza 😅 Pode me passar por texto: OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo? Assim já te passo as opções certinhas.";
+                  intencao = "receita_oftalmologica";
+                  pipeline_coluna = "Orçamento";
+                  precisa_humano = false;
+                  validatorFlags.push("forced_interpretar_receita_low_confidence");
+                  console.log(`[FORCE-INTERPRETAR] Confiança baixa (tentativa ${_falhasAtual2}) — pedindo valores por texto`);
+                }
               }
             } catch (parseErr) {
               console.error("[FORCE-INTERPRETAR] Erro ao processar args:", parseErr);
