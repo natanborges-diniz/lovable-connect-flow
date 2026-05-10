@@ -18,6 +18,21 @@ function dentroDaJanelaEnvio(now: Date): boolean {
   return h >= 8 && h < 22;
 }
 
+// Carrega mensagem fixa editável (tabela ia_mensagens_fixas) com fallback.
+async function getMensagemFixa(client: any, chave: string, fallback: string, vars: Record<string, string> = {}): Promise<string> {
+  let texto = fallback;
+  try {
+    const { data } = await client.from("ia_mensagens_fixas").select("texto, ativo").eq("chave", chave).maybeSingle();
+    if (data?.ativo !== false && typeof data?.texto === "string" && data.texto.length > 0) {
+      texto = data.texto;
+    }
+  } catch { /* keep fallback */ }
+  for (const [k, v] of Object.entries(vars)) {
+    texto = texto.split(`{${k}}`).join(v ?? "");
+  }
+  return texto;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
