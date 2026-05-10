@@ -42,31 +42,33 @@ const ACAO_LABEL: Record<string, string> = {
   regra_proibida: "Regra proibida",
   exemplo: "Exemplo aprendido",
   ajuste_prompt: "Diretriz no prompt",
-  tarefa_ti: "Tarefa para TI",
+  tarefa_ti: "Tarefa técnica (TI)",
+  ajustar_cron: "Ajustar cron / disparo proativo",
+  ajustar_template: "Ajustar template WhatsApp",
+  ajustar_bot_fluxo: "Ajustar fluxo do bot",
+  ajustar_config: "Ajustar configuração operacional",
 };
 
-// Normaliza ações que vêm em formatos variados do LLM:
-//   { tipo, texto/instrucao/... }              ← formato esperado
-//   { ajuste_prompt: { categoria, descricao } }
-//   { regra_proibida: "..." }
-//   { exemplo: { pergunta, resposta_ideal } }
-//   { tarefa_ti: { titulo, descricao } }
-function normalizeAcao(ac: any): { tipo: string; texto: string; raw: any } {
+const TIPOS_PROMPT = new Set(["regra_proibida", "exemplo", "ajuste_prompt"]);
+
+// Normaliza ações que vêm em formatos variados do LLM
+function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: string; raw: any } {
   if (!ac || typeof ac !== "object") return { tipo: "ajuste_prompt", texto: String(ac ?? ""), raw: ac };
   if (ac.tipo) {
     return {
       tipo: ac.tipo,
-      texto: ac.texto || ac.instrucao || ac.pergunta || ac.titulo || ac.descricao || "",
+      texto: ac.texto || ac.instrucao || ac.descricao || ac.sugestao || ac.pergunta || ac.titulo || ac.regra || "",
+      alvo_ref: ac.alvo_ref,
       raw: ac,
     };
   }
-  for (const tipo of ["regra_proibida", "exemplo", "ajuste_prompt", "tarefa_ti"]) {
+  for (const tipo of ["regra_proibida", "exemplo", "ajuste_prompt", "tarefa_ti", "ajustar_cron", "ajustar_template", "ajustar_bot_fluxo", "ajustar_config"]) {
     if (ac[tipo] !== undefined) {
       const v = ac[tipo];
       let texto = "";
       if (typeof v === "string") texto = v;
       else if (v && typeof v === "object") {
-        texto = v.descricao || v.instrucao || v.texto || v.titulo || v.pergunta || v.resposta_ideal || JSON.stringify(v);
+        texto = v.descricao || v.instrucao || v.texto || v.sugestao || v.titulo || v.pergunta || v.resposta_ideal || JSON.stringify(v);
       }
       return { tipo, texto, raw: ac };
     }
