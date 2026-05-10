@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Play, AlertTriangle, CheckCircle2, XCircle, Undo2, ShieldAlert, FileText, Wrench, Lightbulb, Layers, Sparkles, RefreshCw } from "lucide-react";
+import { Loader2, Play, AlertTriangle, CheckCircle2, XCircle, Undo2, ShieldAlert, FileText, Wrench, Lightbulb, Layers, Sparkles, RefreshCw, ExternalLink } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -548,6 +549,16 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
         <p className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
           Este grupo não é resolvido pela auditoria sozinha — depende de mudança de código + deploy. Aplicar abre tarefa(s) pra TI; o problema continua até o deploy.
         </p>
+      )}
+
+      {(grupo.status === "pendente_codigo" || grupo.status === "parcial") && (
+        <Link
+          to={`/tarefas?grupo=${grupo.id}`}
+          className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 hover:underline"
+        >
+          <ExternalLink className="h-3 w-3" />
+          Ver tarefa(s) criada(s) pra TI
+        </Link>
       )}
 
       {editavel && (
