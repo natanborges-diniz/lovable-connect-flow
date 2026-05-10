@@ -148,7 +148,7 @@ serve(async (req) => {
       const outbounds = ordered.filter((m) => m.direcao === "outbound");
       if (outbounds.length < 2) continue;
       const sim = similarity(outbounds[outbounds.length - 1].conteudo, outbounds[outbounds.length - 2].conteudo);
-      if (sim <= 0.7) continue;
+      if (sim <= SIM_MIN) continue;
 
       // ── EXCEÇÃO: mensagens de confirmação de receita não contam como loop.
       // Repetir "Li sua receita assim, confere?" / "Anotei! Ficou assim:" é parte
