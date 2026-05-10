@@ -18,6 +18,21 @@ function dentroDaJanelaEnvio(now: Date): boolean {
   return h >= 8 && h < 22;
 }
 
+// Carrega mensagem fixa editável (tabela ia_mensagens_fixas) com fallback.
+async function getMensagemFixa(client: any, chave: string, fallback: string, vars: Record<string, string> = {}): Promise<string> {
+  let texto = fallback;
+  try {
+    const { data } = await client.from("ia_mensagens_fixas").select("texto, ativo").eq("chave", chave).maybeSingle();
+    if (data?.ativo !== false && typeof data?.texto === "string" && data.texto.length > 0) {
+      texto = data.texto;
+    }
+  } catch { /* keep fallback */ }
+  for (const [k, v] of Object.entries(vars)) {
+    texto = texto.split(`{${k}}`).join(v ?? "");
+  }
+  return texto;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -245,7 +260,12 @@ async function processContato(
         return result;
       }
       const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
-      const despedida = `Olá ${firstName}! 😊 Agradeço muito o seu contato com as Óticas Diniz Osasco. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨`;
+      const despedida = await getMensagemFixa(
+        supabase,
+        "recuperacao_ia_despedida_final",
+        `Olá ${firstName}! 😊 Agradeço muito o seu contato com as Óticas Diniz. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨`,
+        { first_name: firstName },
+      );
 
       // Envia mensagem fixa de despedida via send-whatsapp (Evolution mantém continuidade)
       try {

@@ -54,14 +54,56 @@ function proximaAberturaHumana(): string {
   return "amanhã às 09:00";
 }
 
+// ── MENSAGENS FIXAS EDITÁVEIS (tabela ia_mensagens_fixas) ──
+// Defaults preservados como fallback caso a tabela esteja indisponível.
+const _msgFixaDefaults: Record<string, string> = {
+  escalada_fora_horario:
+    "Vou acionar nossa equipe pra você{nome_saud}! 🙌 Só um detalhe: nosso time humano atende de seg a sex das 09h às 18h e sábado das 08h às 12h. Como estamos fora do horário agora, assim que abrir o próximo expediente ({proxima_abertura}), eles te respondem por aqui. Pode deixar registrado o que precisa que já encaminho 😉",
+  pedir_receita_texto:
+    "Tô tendo dificuldade de ler os valores na foto 😅 Pode me passar por texto, por favor?\n\nPreciso de:\n• *OD* (olho direito): esférico / cilíndrico / eixo (e adição se tiver)\n• *OE* (olho esquerdo): esférico / cilíndrico / eixo (e adição se tiver)\n\nEx: *OD -2,00 cil -0,75 eixo 180* / *OE -1,75 cil -0,50 eixo 170*\n\nSe preferir, mande outra foto com a receita inteira no enquadramento e boa iluminação 📸",
+  despedida_explicit_close:
+    "Foi um prazer te atender{nome_comma}! 🙏 Obrigado pelo contato{tail}. Qualquer coisa, é só me chamar 👋",
+  despedida_thanks:
+    "De nada{nome_comma}! {tail} 👋 Qualquer dúvida é só me chamar.",
+  despedida_short_no:
+    "Combinado{nome_comma}! {tail} 👋 Qualquer dúvida é só me chamar.",
+};
+const _msgFixaCache: Record<string, string> = { ..._msgFixaDefaults };
+let _msgFixaExpire = 0;
+async function loadMensagensFixas(client: any): Promise<void> {
+  if (Date.now() < _msgFixaExpire) return;
+  try {
+    const { data } = await client.from("ia_mensagens_fixas").select("chave, texto, ativo");
+    if (Array.isArray(data)) {
+      for (const r of data) {
+        if (r?.ativo !== false && typeof r?.texto === "string" && r.texto.length > 0) {
+          _msgFixaCache[r.chave] = r.texto;
+        }
+      }
+      MSG_PEDIR_RECEITA_TEXTO = _msgFixaCache.pedir_receita_texto || _msgFixaDefaults.pedir_receita_texto;
+    }
+  } catch (e) {
+    console.warn("[ia_mensagens_fixas] load falhou, usando defaults", (e as Error)?.message);
+  }
+  _msgFixaExpire = Date.now() + 60_000;
+}
+function renderMsgFixa(chave: string, vars: Record<string, string> = {}): string {
+  let t = _msgFixaCache[chave] || _msgFixaDefaults[chave] || "";
+  for (const [k, v] of Object.entries(vars)) {
+    t = t.split(`{${k}}`).join(v ?? "");
+  }
+  return t;
+}
 function mensagemEscaladaForaHorario(nomePrim: string): string {
-  const saud = nomePrim ? `, ${nomePrim}` : "";
-  return `Vou acionar nossa equipe pra você${saud}! 🙌 Só um detalhe: nosso time humano atende de seg a sex das 09h às 18h e sábado das 08h às 12h. Como estamos fora do horário agora, assim que abrir o próximo expediente (${proximaAberturaHumana()}), eles te respondem por aqui. Pode deixar registrado o que precisa que já encaminho 😉`;
+  return renderMsgFixa("escalada_fora_horario", {
+    nome_saud: nomePrim ? `, ${nomePrim}` : "",
+    proxima_abertura: proximaAberturaHumana(),
+  });
 }
 
-// Mensagem padrão quando OCR falha / receita ilegível: pede valores por texto
-// para destravar o fluxo sem repetir "estou analisando" e sem escalar.
-const MSG_PEDIR_RECEITA_TEXTO = "Tô tendo dificuldade de ler os valores na foto 😅 Pode me passar por texto, por favor?\n\nPreciso de:\n• *OD* (olho direito): esférico / cilíndrico / eixo (e adição se tiver)\n• *OE* (olho esquerdo): esférico / cilíndrico / eixo (e adição se tiver)\n\nEx: *OD -2,00 cil -0,75 eixo 180* / *OE -1,75 cil -0,50 eixo 170*\n\nSe preferir, mande outra foto com a receita inteira no enquadramento e boa iluminação 📸";
+// Mensagem padrão quando OCR falha / receita ilegível. Mutável: ressincronizada
+// pelo loader; mantém uso síncrono nos vários pontos do fluxo.
+let MSG_PEDIR_RECEITA_TEXTO = _msgFixaDefaults.pedir_receita_texto;
 
 // ═══════════════════════════════════════════
 // CONFIRMAÇÃO PÓS-OCR + CTA AGENDAMENTO + ESCOLHA CIDADE → LOJA (Mai/2026)
@@ -1882,6 +1924,8 @@ serve(async (req) => {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  // Carrega/atualiza mensagens fixas editáveis (cache 60s)
+  await loadMensagensFixas(supabase);
 
   let atendimentoIdForCleanup: string | null = null;
 
@@ -3114,14 +3158,14 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       let despedidaMsg: string;
       if (isExplicitClose) {
         const _tail = agendamentoFmt ? ` — te espero ${agendamentoFmt}` : "";
-        despedidaMsg = `Foi um prazer te atender${_commaName}! 🙏 Obrigado pelo contato${_tail}. Qualquer coisa, é só me chamar 👋`;
+        despedidaMsg = renderMsgFixa("despedida_explicit_close", { nome_comma: _commaName, tail: _tail });
       } else if (isThanksClose) {
         const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
-        despedidaMsg = `De nada${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+        despedidaMsg = renderMsgFixa("despedida_thanks", { nome_comma: _commaName, tail: _tail });
       } else {
         // isShortNoToHelp
         const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
-        despedidaMsg = `Combinado${_commaName}! ${_tail} 👋 Qualquer dúvida é só me chamar.`;
+        despedidaMsg = renderMsgFixa("despedida_short_no", { nome_comma: _commaName, tail: _tail });
       }
 
       // Anti-duplicação: se último outbound já é uma despedida canônica, silencia
