@@ -35,6 +35,21 @@ Deno.serve(async (req) => {
     const acoes = Array.isArray(grupo.acoes_propostas) ? grupo.acoes_propostas : [];
     const auditoriaRef = (grupo.auditoria_ids || [])[0] || null;
     const aplicadas: any[] = [];
+    const tarefasCriadas: any[] = [];
+
+    // Modos: 'auto' efetiva no banco; 'codigo' abre tarefa pra TI (não vira "aplicado").
+    const MODO_POR_TIPO: Record<string, "auto" | "codigo" | "decisao"> = {
+      regra_proibida: "auto",
+      exemplo: "auto",
+      ajuste_prompt: "auto",
+      ajustar_cron: "codigo",
+      ajustar_template: "codigo",
+      ajustar_bot_fluxo: "codigo",
+      ajustar_config: "codigo",
+      tarefa_ti: "codigo",
+    };
+    const modoDe = (ac: any): "auto" | "codigo" | "decisao" =>
+      ac?.modo_aplicacao || MODO_POR_TIPO[String(ac?.tipo || "")] || "codigo";
 
     // Mapeia tipos novos (vetores B/C/D/E/F) → criação de tarefa estruturada
     const TAREFA_TIPOS: Record<string, { rota: string; prefixo: string }> = {
