@@ -451,11 +451,22 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
           {acoes.map((raw: any, i: number) => {
             const ac = normalizeAcao(raw);
             const Icon = ACAO_ICON[ac.tipo] || FileText;
+            const isPrompt = TIPOS_PROMPT.has(ac.tipo);
             return (
               <div key={i} className="flex items-start gap-2 text-xs bg-muted/40 rounded p-2">
                 <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium">{ACAO_LABEL[ac.tipo] || ac.tipo}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium">{ACAO_LABEL[ac.tipo] || ac.tipo}</span>
+                    {!isPrompt && (
+                      <span className="text-[10px] uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                        cria tarefa
+                      </span>
+                    )}
+                    {ac.alvo_ref && (
+                      <code className="text-[10px] bg-background px-1 py-0.5 rounded border">{ac.alvo_ref}</code>
+                    )}
+                  </div>
                   <div className="text-muted-foreground line-clamp-3 whitespace-pre-wrap">
                     {ac.texto || "(sem descrição)"}
                   </div>
@@ -466,17 +477,23 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
         </div>
       )}
 
-      {grupo.status === "pendente" && (
-        <div className="flex gap-2 pt-1">
-          <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
-            <XCircle className="h-3.5 w-3.5 mr-1" />Ignorar
-          </Button>
-          <Button size="sm" onClick={aplicar} disabled={aplicando}>
-            {aplicando ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
-            Aplicar correção
-          </Button>
-        </div>
-      )}
+      {grupo.status === "pendente" && (() => {
+        const tiposPresentes = (acoes as any[]).map((r) => normalizeAcao(r).tipo);
+        const temNaoPrompt = tiposPresentes.some((t) => !TIPOS_PROMPT.has(t));
+        const todosNaoPrompt = tiposPresentes.length > 0 && tiposPresentes.every((t) => !TIPOS_PROMPT.has(t));
+        const label = todosNaoPrompt ? "Criar tarefa" : temNaoPrompt ? "Aplicar e criar tarefa" : "Aplicar correção";
+        return (
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
+              <XCircle className="h-3.5 w-3.5 mr-1" />Ignorar
+            </Button>
+            <Button size="sm" onClick={aplicar} disabled={aplicando}>
+              {aplicando ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
+              {label}
+            </Button>
+          </div>
+        );
+      })()}
 
       <Dialog open={ignorarOpen} onOpenChange={setIgnorarOpen}>
         <DialogContent>
