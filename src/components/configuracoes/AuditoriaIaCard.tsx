@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Play, AlertTriangle, CheckCircle2, XCircle, Undo2, ShieldAlert, FileText, Wrench, Lightbulb, Layers, Sparkles } from "lucide-react";
+import { Loader2, Play, AlertTriangle, CheckCircle2, XCircle, Undo2, ShieldAlert, FileText, Wrench, Lightbulb, Layers, Sparkles, RefreshCw } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -314,10 +314,25 @@ function GruposTab({ runId }: { runId: string }) {
         <p className="text-xs text-muted-foreground">
           Achados agrupados por causa-raiz. Aplique a correção uma vez por problema (evita duplicidade).
         </p>
-        <Button size="sm" variant="outline" onClick={consolidar} disabled={consolidando}>
-          {consolidando ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-          {grupos?.length ? "Reconsolidar" : "Consolidar achados"}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={async () => {
+              await qc.invalidateQueries({ queryKey: ["ia_auditorias_grupos", runId] });
+              const r = await refetch();
+              toast.success(`Atualizado: ${r.data?.length ?? 0} grupo(s)`);
+            }}
+            title="Forçar refetch dos grupos"
+          >
+            <RefreshCw className="h-3 w-3 mr-1" />
+            Atualizar grupos
+          </Button>
+          <Button size="sm" variant="outline" onClick={consolidar} disabled={consolidando}>
+            {consolidando ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+            {grupos?.length ? "Reconsolidar" : "Consolidar achados"}
+          </Button>
+        </div>
       </div>
 
       {!grupos?.length && !consolidando && (
