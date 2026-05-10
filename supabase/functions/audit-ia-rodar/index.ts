@@ -186,16 +186,40 @@ async function processarRun(
   amostra_limpos_pct: number,
 ) {
   try {
+    // Carrega colunas do pipeline de Loja — atendimentos cujo contato já está
+    // em uma dessas colunas são pós-handoff (agendado, confirmado, atendido,
+    // no-show, recuperação, etc.) e NÃO devem ser auditados como conversa de IA.
+    const { data: setoresLoja } = await supabase
+      .from("setores")
+      .select("id")
+      .ilike("nome", "loja");
+    const setorLojaIds = (setoresLoja || []).map((s: any) => s.id);
+    let colunasLojaIds: string[] = [];
+    if (setorLojaIds.length) {
+      const { data: colsLoja } = await supabase
+        .from("pipeline_colunas")
+        .select("id")
+        .in("setor_id", setorLojaIds);
+      colunasLojaIds = (colsLoja || []).map((c: any) => c.id);
+    }
+    const colunasLojaSet = new Set(colunasLojaIds);
+    console.log(`[audit-ia-rodar] colunas-loja excluídas=${colunasLojaSet.size}`);
+
     const { data: atendimentos, error: atErr } = await supabase
       .from("atendimentos")
-      .select("id, contato_id, modo, status, created_at, contato:contatos(id, nome, telefone)")
+      .select("id, contato_id, modo, status, created_at, contato:contatos(id, nome, telefone, pipeline_coluna_id)")
       .gte("updated_at", janela_inicio)
       .lte("updated_at", janela_fim)
       .order("updated_at", { ascending: false })
       .limit(MAX_ATENDIMENTOS);
     if (atErr) throw atErr;
 
-    const lista = atendimentos || [];
+    const lista = (atendimentos || []).filter((at: any) => {
+      const colId = at?.contato?.pipeline_coluna_id;
+      return !(colId && colunasLojaSet.has(colId));
+    });
+    const ignoradosLoja = (atendimentos?.length || 0) - lista.length;
+    if (ignoradosLoja > 0) console.log(`[audit-ia-rodar] ignorados pós-handoff Loja=${ignoradosLoja}`);
     let totalFlagged = 0;
     let totalLLM = 0;
     const sevOrder = ["ok", "info", "warn", "critical"];
