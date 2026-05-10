@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { StatusTarefa, Prioridade } from "@/types/database";
 
-export function useTarefas(filters?: { status?: StatusTarefa; search?: string }) {
+export function useTarefas(filters?: { status?: StatusTarefa; search?: string; grupo_id?: string }) {
   return useQuery({
     queryKey: ["tarefas", filters],
     queryFn: async () => {
@@ -13,6 +13,7 @@ export function useTarefas(filters?: { status?: StatusTarefa; search?: string })
         .order("created_at", { ascending: false });
       if (filters?.status) query = query.eq("status", filters.status);
       if (filters?.search) query = query.ilike("titulo", `%${filters.search}%`);
+      if (filters?.grupo_id) query = query.eq("metadata->>auditoria_grupo_id", filters.grupo_id);
       const { data, error } = await query;
       if (error) throw error;
       return data;
