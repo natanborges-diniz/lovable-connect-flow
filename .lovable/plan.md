@@ -1,82 +1,34 @@
-## Objetivo
+## Problema
 
-Mudar o fluxo de correção da Auditoria IA: em vez de aprovar conversa-por-conversa (que gera regras/exemplos duplicados), o sistema **agrega os achados de toda a run em "problemas consolidados"** e o admin confirma a correção **uma única vez por problema**.
+Ao rodar "Consolidar achados", a edge `audit-ia-consolidar` chama Gemini 2.5 Pro pedindo um JSON com todos os grupos de uma vez. Com muitos achados (a run atual tem dezenas), o modelo esgota o `max_completion_tokens` ainda no "thinking" e devolve JSON cortado (710 chars, parse falha → fallback `{ grupos: [] }`). Resultado: nenhum grupo aparece na UI mesmo com achados existentes.
 
-## Como vai funcionar (visão do usuário)
+## Correções em `supabase/functions/audit-ia-consolidar/index.ts`
 
-Ao abrir uma run de auditoria, o admin verá duas abas:
+1. **Trocar para `google/gemini-2.5-flash`** — mesma qualidade para tarefa de agrupamento, sem o overhead de thinking tokens do Pro.
+2. **Aumentar `max_completion_tokens` para 16000**.
+3. **Processar em lotes (chunking)** — dividir `achados` em blocos de 25 e chamar a LLM uma vez por bloco. Depois mesclar grupos retornados (titulos/categorias iguais viram o mesmo grupo, com `auditoria_ids` concatenados).
+4. **Pré-clusterizar por heurística** antes do LLM: agrupar achados que compartilham o mesmo `tipo` em `problemas` (ex.: todos `loop_repeticao` viram 1 cluster), assim o LLM recebe poucos clusters representativos em vez de N achados crus. Isso reduz drasticamente o tamanho do prompt e da resposta.
+5. **Logar `finish_reason` e `usage`** do Gemini quando o parse falhar, para diagnóstico futuro.
+6. **Mensagem de erro útil na UI**: se a função retornar `total: 0` mas houver achados elegíveis, devolver `{ grupos: [], total: 0, motivo: "llm_sem_grupos" }` para o frontend exibir um toast claro em vez de silêncio.
 
-1. **Problemas consolidados** (default) — lista curta agrupada por tema. Cada item mostra:
-   - Título do problema (ex.: "IA cita preço de Kodak")
-   - Severidade dominante e nº de conversas afetadas
-   - Diagnóstico unificado + correção proposta (1 ou mais ações: regra, exemplo, diretriz, tarefa TI)
-   - Botões **Aplicar correção** / **Ignorar** / **Ver conversas afetadas**
-2. **Por conversa** (modo atual, mantido para drill-down)
+## Estratégia de chunking (técnico)
 
-Aplicar a correção marca **todas as auditorias do grupo** como `aplicado` de uma só vez, evitando duplicidade.
-
-## Como agrupar (técnico)
-
-Novo edge function `audit-ia-consolidar` (chamado sob demanda quando o admin abre a run, ou ao final do `audit-ia-rodar`):
-
-1. Lê todas as `ia_auditorias` da run com severidade ≥ warn.
-2. Manda para o LLM (Gemini 2.5-pro) um lote com `{id, diagnostico, problemas, flags}` de cada achado e pede:
-   - Agrupar por causa-raiz
-   - Para cada grupo: título, descrição, severidade, lista de `auditoria_ids`, e `acoes_propostas[]` no mesmo formato hoje usado por `audit-ia-aplicar-correcao` (regra_proibida / exemplo / ajuste_prompt / tarefa_ti)
-   - Deduplicar contra `ia_regras_proibidas`, `ia_exemplos`, `ia_instrucoes_prompt` ativas (passar lista resumida no prompt) — não propor nada que já exista.
-3. Persiste em nova tabela `ia_auditorias_grupos`:
-
-```text
-ia_auditorias_grupos
-  id uuid pk
-  run_id uuid
-  titulo text
-  descricao text
-  severidade text
-  auditoria_ids uuid[]
-  acoes_propostas jsonb     -- mesmo schema das ações de hoje
-  status text               -- pendente | aplicado | ignorado
-  ignorado_motivo text
-  applied_at timestamptz
-  created_at timestamptz
+```
+clusters = group_by(achados, a => primary_problem_type(a))   // heurística local
+for each chunk of 25 achados (preservando clusters):
+  call LLM → grupos parciais
+merged = mergeByTitle(parciais)                              // dedup local
+insert merged into ia_auditorias_grupos
 ```
 
-RLS: read autenticado, write service_role (igual `ia_auditorias`).
+## Não escopo
 
-## Aplicação consolidada
+- Não mexe na UI do `AuditoriaIaCard.tsx` (já lê `ia_auditorias_grupos` corretamente).
+- Não altera schema; usa as tabelas existentes.
+- Não toca em `audit-ia-aplicar-grupo` / `audit-ia-ignorar-grupo`.
 
-Novo edge function `audit-ia-aplicar-grupo`:
+## Validação
 
-- Recebe `{ grupo_id }`.
-- Aplica cada ação de `acoes_propostas` **uma única vez** (mesma lógica do `aplicar-correcao` atual, extraída para função compartilhada inline).
-- Cria 1 linha em `ia_auditorias_acoes` por ação aplicada, vinculada à **primeira** auditoria do grupo + `metadata.grupo_id` para rastreio.
-- Atualiza `ia_auditorias_grupos.status = 'aplicado'` e marca todas as `ia_auditorias` do grupo como `status='aplicado'`.
-
-`audit-ia-ignorar-grupo` análogo (marca grupo + auditorias como `ignorado` com motivo).
-
-## Frontend
-
-`AuditoriaIaCard.tsx` (`RunDetailSheet`):
-
-- Adiciona Tabs "Problemas consolidados" / "Por conversa".
-- Aba consolidada: query em `ia_auditorias_grupos` por `run_id`. Se vazia, botão **"Consolidar achados"** que invoca `audit-ia-consolidar` (loading state).
-- Card por grupo com badge de severidade, contagem de conversas, lista de ações propostas (ícones já existentes), botões Aplicar/Ignorar/Ver conversas.
-- "Ver conversas afetadas" abre lista filtrada (reusa componente atual).
-- Fluxo por conversa permanece para casos pontuais.
-
-## Migration
-
-Criar tabela `ia_auditorias_grupos` com RLS conforme acima. Sem alterações em tabelas existentes.
-
-## Arquivos
-
-- **Novo:** `supabase/functions/audit-ia-consolidar/index.ts`
-- **Novo:** `supabase/functions/audit-ia-aplicar-grupo/index.ts`
-- **Novo:** `supabase/functions/audit-ia-ignorar-grupo/index.ts`
-- **Migration:** tabela `ia_auditorias_grupos` + RLS
-- **Editar:** `src/components/configuracoes/AuditoriaIaCard.tsx` (Tabs + nova lista de grupos)
-
-## Fora de escopo
-
-- Não altera o `audit-ia-rodar` (consolidação fica sob demanda; opcional disparar ao final num próximo round).
-- Não mexe em `compile-prompt` — as tabelas de destino (regras/exemplos/instruções) continuam as mesmas.
+- Rodar "Consolidar achados" na run atual (`f3d53f72…`) e verificar que retorna `total > 0`.
+- Conferir nos logs da edge que o parse de JSON não falha mais.
+- Verificar na aba "Problemas consolidados" que os grupos aparecem com `auditoria_ids` corretos.

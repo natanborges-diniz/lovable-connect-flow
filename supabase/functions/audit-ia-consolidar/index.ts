@@ -12,8 +12,21 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 
-async function consolidar(
-  achados: Array<{ id: string; severidade: string; diagnostico: string; problemas: any; flags: any }>,
+type Achado = {
+  id: string;
+  severidade: string;
+  diagnostico: string;
+  problemas: any[];
+  flags: any[];
+};
+
+function primaryType(a: Achado): string {
+  const p = (a.problemas?.[0]?.tipo) || (a.flags?.[0]?.tipo) || "outro";
+  return String(p);
+}
+
+async function consolidarChunk(
+  achados: Achado[],
   jaExistentes: { regras: string[]; exemplos: string[]; instrucoes: string[] },
 ): Promise<any> {
   const sys = `Você é engenheiro de prompts. Recebe uma LISTA de achados de auditoria (cada um é uma conversa com problema) e deve AGRUPAR por causa-raiz comum, propondo a correção UMA ÚNICA VEZ por grupo (evita duplicatas).
@@ -28,39 +41,23 @@ REGRAS:
   * "tarefa_ti": exige código/integração nova (titulo + descricao técnica).
 - Sempre português, imperativo, conciso.
 
-Retorne JSON estrito:
-{
-  "grupos": [
-    {
-      "titulo": "frase curta",
-      "descricao": "explicação 1-2 linhas",
-      "severidade": "critical|warn|info",
-      "auditoria_ids": ["uuid", ...],
-      "acoes": [
-        {"tipo":"regra_proibida","categoria":"...","texto":"..."},
-        {"tipo":"exemplo","categoria":"...","pergunta":"...","resposta_ideal":"..."},
-        {"tipo":"ajuste_prompt","categoria":"fluxo","instrucao":"..."},
-        {"tipo":"tarefa_ti","titulo":"...","descricao":"..."}
-      ]
-    }
-  ]
-}`;
+Retorne JSON estrito: {"grupos":[{"titulo":"...","descricao":"...","severidade":"critical|warn|info","auditoria_ids":["uuid"],"acoes":[...]}]}`;
 
   const user = `ACHADOS (${achados.length}):
 ${JSON.stringify(achados)}
 
-JÁ EXISTEM (não propor duplicatas):
-- Regras proibidas ativas: ${JSON.stringify(jaExistentes.regras.slice(0, 40))}
-- Exemplos ativos (perguntas): ${JSON.stringify(jaExistentes.exemplos.slice(0, 40))}
-- Diretrizes ativas: ${JSON.stringify(jaExistentes.instrucoes.slice(0, 40))}`;
+JÁ EXISTEM (não duplicar):
+- Regras: ${JSON.stringify(jaExistentes.regras.slice(0, 30))}
+- Exemplos (perguntas): ${JSON.stringify(jaExistentes.exemplos.slice(0, 30))}
+- Diretrizes: ${JSON.stringify(jaExistentes.instrucoes.slice(0, 30))}`;
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
     body: JSON.stringify({
-      model: "google/gemini-2.5-pro",
+      model: "google/gemini-2.5-flash",
       temperature: 0.2,
-      max_completion_tokens: 8000,
+      max_completion_tokens: 16000,
       response_format: { type: "json_object" },
       messages: [{ role: "system", content: sys }, { role: "user", content: user }],
     }),
@@ -68,18 +65,38 @@ JÁ EXISTEM (não propor duplicatas):
   if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
   const data = await res.json();
   const raw = data.choices?.[0]?.message?.content || "{}";
+  const finishReason = data.choices?.[0]?.finish_reason;
+  const usage = data.usage;
   try {
     return JSON.parse(raw);
-  } catch (e) {
+  } catch {
     const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
     const start = cleaned.search(/[\{\[]/);
     const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
     if (start >= 0 && end > start) {
       try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { /* fallthrough */ }
     }
-    console.error("[consolidar] JSON parse falhou. Raw len:", raw.length, "preview:", raw.slice(0, 300));
+    console.error("[consolidar] JSON parse falhou.", { len: raw.length, finishReason, usage, preview: raw.slice(0, 300) });
     return { grupos: [] };
   }
+}
+
+function mergeGrupos(parciais: any[]): any[] {
+  const map = new Map<string, any>();
+  for (const lote of parciais) {
+    for (const g of (lote?.grupos || [])) {
+      const key = String(g.titulo || "").trim().toLowerCase().slice(0, 80) || crypto.randomUUID();
+      if (map.has(key)) {
+        const cur = map.get(key);
+        const ids = new Set([...(cur.auditoria_ids || []), ...(g.auditoria_ids || [])]);
+        cur.auditoria_ids = Array.from(ids);
+        cur.acoes = [...(cur.acoes || []), ...(g.acoes || [])];
+      } else {
+        map.set(key, { ...g });
+      }
+    }
+  }
+  return Array.from(map.values());
 }
 
 Deno.serve(async (req) => {
@@ -94,7 +111,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Limpa grupos pendentes anteriores desta run
     await supabase.from("ia_auditorias_grupos").delete().eq("run_id", run_id).eq("status", "pendente");
 
     const { data: auditorias, error: errA } = await supabase
@@ -108,19 +124,20 @@ Deno.serve(async (req) => {
     const trimItem = (p: any) => ({
       tipo: p?.tipo,
       severidade: p?.severidade,
-      trecho: typeof p?.trecho === "string" ? p.trecho.slice(0, 200) : undefined,
-      motivo: typeof p?.motivo === "string" ? p.motivo.slice(0, 200) : undefined,
+      trecho: typeof p?.trecho === "string" ? p.trecho.slice(0, 160) : undefined,
     });
-    const achados = (auditorias || []).filter((a: any) => a.status !== "aplicado").map((a: any) => ({
-      id: a.id,
-      severidade: a.severidade,
-      diagnostico: (a.diagnostico || "").slice(0, 400),
-      problemas: (Array.isArray(a.problemas) ? a.problemas : []).slice(0, 5).map(trimItem),
-      flags: (Array.isArray(a.flags_heuristicos) ? a.flags_heuristicos : []).slice(0, 5).map(trimItem),
-    }));
+    const achados: Achado[] = (auditorias || [])
+      .filter((a: any) => a.status !== "aplicado")
+      .map((a: any) => ({
+        id: a.id,
+        severidade: a.severidade,
+        diagnostico: (a.diagnostico || "").slice(0, 240),
+        problemas: (Array.isArray(a.problemas) ? a.problemas : []).slice(0, 3).map(trimItem),
+        flags: (Array.isArray(a.flags_heuristicos) ? a.flags_heuristicos : []).slice(0, 3).map(trimItem),
+      }));
 
     if (achados.length === 0) {
-      return new Response(JSON.stringify({ grupos: [], total: 0 }), {
+      return new Response(JSON.stringify({ grupos: [], total: 0, motivo: "sem_achados_elegiveis" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -130,18 +147,43 @@ Deno.serve(async (req) => {
       supabase.from("ia_exemplos").select("pergunta").eq("ativo", true).limit(80),
       supabase.from("ia_instrucoes_prompt").select("instrucao").eq("ativo", true).limit(80),
     ]);
-
-    const decisao = await consolidar(achados, {
+    const ja = {
       regras: (regras || []).map((r: any) => r.regra),
       exemplos: (exemplos || []).map((e: any) => e.pergunta),
       instrucoes: (instr || []).map((i: any) => i.instrucao),
-    });
+    };
 
-    const gruposLLM = Array.isArray(decisao?.grupos) ? decisao.grupos : [];
+    // Pré-clusteriza por tipo de problema para que cada chunk vá com achados similares juntos
+    const byType = new Map<string, Achado[]>();
+    for (const a of achados) {
+      const t = primaryType(a);
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t)!.push(a);
+    }
+    const ordered: Achado[] = [];
+    for (const arr of byType.values()) ordered.push(...arr);
+
+    const CHUNK = 25;
+    const chunks: Achado[][] = [];
+    for (let i = 0; i < ordered.length; i += CHUNK) chunks.push(ordered.slice(i, i + CHUNK));
+
+    console.log(`[consolidar] achados=${achados.length} chunks=${chunks.length} types=${byType.size}`);
+
+    const parciais: any[] = [];
+    for (const c of chunks) {
+      try {
+        const r = await consolidarChunk(c, ja);
+        parciais.push(r);
+      } catch (e: any) {
+        console.error("[consolidar] chunk falhou:", e.message);
+      }
+    }
+
+    const merged = mergeGrupos(parciais);
     const validIds = new Set(achados.map((a) => a.id));
     const inseridos: any[] = [];
 
-    for (const g of gruposLLM) {
+    for (const g of merged) {
       const ids = (g.auditoria_ids || []).filter((id: string) => validIds.has(id));
       if (ids.length === 0) continue;
       const { data, error } = await supabase
@@ -164,7 +206,11 @@ Deno.serve(async (req) => {
       inseridos.push(data);
     }
 
-    return new Response(JSON.stringify({ grupos: inseridos, total: inseridos.length }), {
+    const motivo = inseridos.length === 0
+      ? (merged.length === 0 ? "llm_sem_grupos" : "grupos_sem_ids_validos")
+      : undefined;
+
+    return new Response(JSON.stringify({ grupos: inseridos, total: inseridos.length, motivo, debug: { achados: achados.length, chunks: chunks.length, merged: merged.length } }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
