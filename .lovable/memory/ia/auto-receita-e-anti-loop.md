@@ -173,3 +173,9 @@ Regra atual:
 - **Dispara "Recebi sua receita"** apenas com `isImageContext=true` (ramo de imagem) OU texto explícito de envio: `enviei (minha) receita`, `te mandei`, `recebeu minha receita`, `mandei a foto`, `segue a receita`, `acabei de mandar`.
 - **"Perdi / sem / refazer exame"** roteia para indicação de clínica parceira, pedindo bairro/região.
 - Outras menções a "receita" sem indicador de envio caem no ramo de orçamento que pede a foto.
+
+## 🆕 Mai/2026 — Contador `ocr_falhas_count` (anti-loop receita ilegível)
+
+**Bug:** branches `_ocrInutil` (eyes vazios / rxType=unknown) e `forced_interpretar_receita_low_confidence` (retry forçado com confidence<0.6) sempre devolviam `MSG_PEDIR_RECEITA_TEXTO` — sem contar tentativas. Cliente reenviando fotos ruins ficava em loop infinito de "manda por texto".
+
+**Fix:** `contatos.metadata.ocr_falhas_count` é incrementado nas duas branches; ao chegar em **2 falhas consecutivas**, IA escala pra humano (mensagem respeita `isHorarioHumano()`), com evento `ocr_falhas_escalado`. Sucesso de OCR (caminho normal e forced retry) reseta o contador para 0. Evita repetição da mesma frase em loop quando a foto está ruim/cliente insiste.
