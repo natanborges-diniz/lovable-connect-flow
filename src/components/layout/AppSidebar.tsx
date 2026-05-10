@@ -2,7 +2,7 @@ import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin,
+  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin, ShieldAlert,
   ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -108,6 +108,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
         { title: "Automações", url: "/configuracoes?tab=automacoes", icon: Zap },
         { title: "Crons", url: "/configuracoes?tab=crons", icon: Timer },
         { title: "Recuperação", url: "/configuracoes?tab=recuperacao", icon: LifeBuoy },
+        { title: "Auditoria IA", url: "/configuracoes?tab=auditoria-ia", icon: ShieldAlert },
       ],
     },
   ],

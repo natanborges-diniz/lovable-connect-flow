@@ -1047,6 +1047,181 @@ export type Database = {
         }
         Relationships: []
       }
+      ia_auditorias: {
+        Row: {
+          atendimento_id: string | null
+          categorias: Json
+          contato_id: string | null
+          contato_nome: string | null
+          contato_telefone: string | null
+          created_at: string
+          diagnostico: string | null
+          flags_heuristicos: Json
+          fonte: string
+          id: string
+          ignorado_at: string | null
+          ignorado_motivo: string | null
+          ignorado_por: string | null
+          problemas: Json
+          run_id: string
+          score_global: number | null
+          severidade: string
+          status: string
+          transcricao_resumo: string | null
+          updated_at: string
+        }
+        Insert: {
+          atendimento_id?: string | null
+          categorias?: Json
+          contato_id?: string | null
+          contato_nome?: string | null
+          contato_telefone?: string | null
+          created_at?: string
+          diagnostico?: string | null
+          flags_heuristicos?: Json
+          fonte?: string
+          id?: string
+          ignorado_at?: string | null
+          ignorado_motivo?: string | null
+          ignorado_por?: string | null
+          problemas?: Json
+          run_id: string
+          score_global?: number | null
+          severidade?: string
+          status?: string
+          transcricao_resumo?: string | null
+          updated_at?: string
+        }
+        Update: {
+          atendimento_id?: string | null
+          categorias?: Json
+          contato_id?: string | null
+          contato_nome?: string | null
+          contato_telefone?: string | null
+          created_at?: string
+          diagnostico?: string | null
+          flags_heuristicos?: Json
+          fonte?: string
+          id?: string
+          ignorado_at?: string | null
+          ignorado_motivo?: string | null
+          ignorado_por?: string | null
+          problemas?: Json
+          run_id?: string
+          score_global?: number | null
+          severidade?: string
+          status?: string
+          transcricao_resumo?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ia_auditorias_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ia_auditorias_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ia_auditorias_acoes: {
+        Row: {
+          alvo_id: string | null
+          alvo_tabela: string
+          auditoria_id: string
+          created_at: string
+          desfeita: boolean
+          desfeita_at: string | null
+          desfeita_por: string | null
+          id: string
+          payload: Json
+          tipo: string
+        }
+        Insert: {
+          alvo_id?: string | null
+          alvo_tabela: string
+          auditoria_id: string
+          created_at?: string
+          desfeita?: boolean
+          desfeita_at?: string | null
+          desfeita_por?: string | null
+          id?: string
+          payload?: Json
+          tipo: string
+        }
+        Update: {
+          alvo_id?: string | null
+          alvo_tabela?: string
+          auditoria_id?: string
+          created_at?: string
+          desfeita?: boolean
+          desfeita_at?: string | null
+          desfeita_por?: string | null
+          id?: string
+          payload?: Json
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ia_auditorias_acoes_auditoria_id_fkey"
+            columns: ["auditoria_id"]
+            isOneToOne: false
+            referencedRelation: "ia_auditorias"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ia_auditorias_runs: {
+        Row: {
+          amostra_limpos_pct: number
+          created_at: string
+          erro: string | null
+          finalizado_at: string | null
+          id: string
+          iniciado_por: string | null
+          janela_fim: string
+          janela_inicio: string
+          metadata: Json
+          severidade_minima: string
+          status: string
+          total_atendimentos: number
+          total_avaliados_llm: number
+          total_flagged: number
+        }
+        Insert: {
+          amostra_limpos_pct?: number
+          created_at?: string
+          erro?: string | null
+          finalizado_at?: string | null
+          id?: string
+          iniciado_por?: string | null
+          janela_fim: string
+          janela_inicio: string
+          metadata?: Json
+          severidade_minima?: string
+          status?: string
+          total_atendimentos?: number
+          total_avaliados_llm?: number
+          total_flagged?: number
+        }
+        Update: {
+          amostra_limpos_pct?: number
+          created_at?: string
+          erro?: string | null
+          finalizado_at?: string | null
+          id?: string
+          iniciado_por?: string | null
+          janela_fim?: string
+          janela_inicio?: string
+          metadata?: Json
+          severidade_minima?: string
+          status?: string
+          total_atendimentos?: number
+          total_avaliados_llm?: number
+          total_flagged?: number
+        }
+        Relationships: []
+      }
       ia_exemplos: {
         Row: {
           ativo: boolean | null
@@ -1104,6 +1279,39 @@ export type Database = {
           mensagem_id?: string | null
           motivo?: string | null
           resposta_corrigida?: string | null
+        }
+        Relationships: []
+      }
+      ia_instrucoes_prompt: {
+        Row: {
+          ativo: boolean
+          categoria: string
+          created_at: string
+          id: string
+          instrucao: string
+          origem: string
+          origem_ref: string | null
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          categoria?: string
+          created_at?: string
+          id?: string
+          instrucao: string
+          origem?: string
+          origem_ref?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          categoria?: string
+          created_at?: string
+          id?: string
+          instrucao?: string
+          origem?: string
+          origem_ref?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
