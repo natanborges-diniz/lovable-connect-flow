@@ -45,6 +45,35 @@ const ACAO_LABEL: Record<string, string> = {
   tarefa_ti: "Tarefa para TI",
 };
 
+// Normaliza ações que vêm em formatos variados do LLM:
+//   { tipo, texto/instrucao/... }              ← formato esperado
+//   { ajuste_prompt: { categoria, descricao } }
+//   { regra_proibida: "..." }
+//   { exemplo: { pergunta, resposta_ideal } }
+//   { tarefa_ti: { titulo, descricao } }
+function normalizeAcao(ac: any): { tipo: string; texto: string; raw: any } {
+  if (!ac || typeof ac !== "object") return { tipo: "ajuste_prompt", texto: String(ac ?? ""), raw: ac };
+  if (ac.tipo) {
+    return {
+      tipo: ac.tipo,
+      texto: ac.texto || ac.instrucao || ac.pergunta || ac.titulo || ac.descricao || "",
+      raw: ac,
+    };
+  }
+  for (const tipo of ["regra_proibida", "exemplo", "ajuste_prompt", "tarefa_ti"]) {
+    if (ac[tipo] !== undefined) {
+      const v = ac[tipo];
+      let texto = "";
+      if (typeof v === "string") texto = v;
+      else if (v && typeof v === "object") {
+        texto = v.descricao || v.instrucao || v.texto || v.titulo || v.pergunta || v.resposta_ideal || JSON.stringify(v);
+      }
+      return { tipo, texto, raw: ac };
+    }
+  }
+  return { tipo: "ajuste_prompt", texto: ac.descricao || JSON.stringify(ac), raw: ac };
+}
+
 export function AuditoriaIaCard() {
   const [janela, setJanela] = useState<Janela>("24h");
   const [severidade, setSeveridade] = useState<string>("warn");
