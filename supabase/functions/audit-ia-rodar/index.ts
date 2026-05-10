@@ -177,34 +177,15 @@ Retorne SOMENTE JSON:
 
 // ---------- Handler ----------
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
+async function processarRun(
+  supabase: any,
+  runId: string,
+  janela_inicio: string,
+  janela_fim: string,
+  severidade_minima: string,
+  amostra_limpos_pct: number,
+) {
   try {
-    const body = await req.json();
-    const janela_inicio = body.janela_inicio;
-    const janela_fim = body.janela_fim || new Date().toISOString();
-    const severidade_minima = body.severidade_minima || "warn";
-    const amostra_limpos_pct = Math.max(0, Math.min(100, body.amostra_limpos_pct ?? 10));
-    const iniciado_por = body.iniciado_por || null;
-
-    if (!janela_inicio) {
-      return new Response(JSON.stringify({ error: "janela_inicio é obrigatório" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Cria run
-    const { data: run, error: runErr } = await supabase
-      .from("ia_auditorias_runs")
-      .insert({ iniciado_por, janela_inicio, janela_fim, severidade_minima, amostra_limpos_pct })
-      .select()
-      .single();
-    if (runErr) throw runErr;
-
-    // Busca atendimentos no período (que tiveram mensagens IA = modo ia OU modo automatico)
     const { data: atendimentos, error: atErr } = await supabase
       .from("atendimentos")
       .select("id, contato_id, modo, status, created_at, contato:contatos(id, nome, telefone)")
@@ -214,8 +195,7 @@ Deno.serve(async (req) => {
       .limit(MAX_ATENDIMENTOS);
     if (atErr) throw atErr;
 
-    const lista = (atendimentos || []).filter((a: any) => a.modo === "ia" || a.modo === "automatico" || true);
-
+    const lista = atendimentos || [];
     let totalFlagged = 0;
     let totalLLM = 0;
     const sevOrder = ["ok", "info", "warn", "critical"];
@@ -258,7 +238,7 @@ Deno.serve(async (req) => {
       const contato: any = (at as any).contato;
 
       await supabase.from("ia_auditorias").insert({
-        run_id: run.id,
+        run_id: runId,
         atendimento_id: at.id,
         contato_id: at.contato_id,
         contato_nome: contato?.nome || null,
@@ -267,11 +247,20 @@ Deno.serve(async (req) => {
         severidade: sevFinal,
         categorias: avaliacao?.categorias || {},
         problemas: avaliacao?.problemas || flags,
-        diagnostico: avaliacao?.diagnostico || (flags.length ? `Heurísticas: ${flags.map((f) => f.tipo).join(", ")}` : null),
+        diagnostico: avaliacao?.diagnostico || (flags.length ? `Heurísticas: ${flags.map((f: any) => f.tipo).join(", ")}` : null),
         flags_heuristicos: flags,
         transcricao_resumo: montarTranscricao(msgs as Msg[]).slice(0, 4000),
         fonte,
       });
+
+      // Heartbeat: atualiza progressivo a cada 10 atendimentos para a UI poder acompanhar
+      if (totalFlagged % 10 === 0 || totalLLM % 10 === 0) {
+        await supabase.from("ia_auditorias_runs").update({
+          total_atendimentos: lista.length,
+          total_flagged: totalFlagged,
+          total_avaliados_llm: totalLLM,
+        }).eq("id", runId);
+      }
     }
 
     await supabase.from("ia_auditorias_runs").update({
@@ -280,14 +269,51 @@ Deno.serve(async (req) => {
       total_avaliados_llm: totalLLM,
       status: "concluido",
       finalizado_at: new Date().toISOString(),
-    }).eq("id", run.id);
+    }).eq("id", runId);
+  } catch (err: any) {
+    console.error("[audit-ia-rodar/bg] error:", err);
+    await supabase.from("ia_auditorias_runs").update({
+      status: "erro",
+      erro: err.message?.slice(0, 500) || "erro desconhecido",
+      finalizado_at: new Date().toISOString(),
+    }).eq("id", runId);
+  }
+}
 
-    return new Response(JSON.stringify({
-      run_id: run.id,
-      total_atendimentos: lista.length,
-      total_flagged: totalFlagged,
-      total_avaliados_llm: totalLLM,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  try {
+    const body = await req.json();
+    const janela_inicio = body.janela_inicio;
+    const janela_fim = body.janela_fim || new Date().toISOString();
+    const severidade_minima = body.severidade_minima || "warn";
+    const amostra_limpos_pct = Math.max(0, Math.min(100, body.amostra_limpos_pct ?? 10));
+    const iniciado_por = body.iniciado_por || null;
+
+    if (!janela_inicio) {
+      return new Response(JSON.stringify({ error: "janela_inicio é obrigatório" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: run, error: runErr } = await supabase
+      .from("ia_auditorias_runs")
+      .insert({ iniciado_por, janela_inicio, janela_fim, severidade_minima, amostra_limpos_pct, status: "rodando" })
+      .select()
+      .single();
+    if (runErr) throw runErr;
+
+    // Processa em background — devolve 202 imediatamente para evitar timeout (150s)
+    // @ts-ignore EdgeRuntime global do Deno Deploy
+    EdgeRuntime.waitUntil(processarRun(supabase, run.id, janela_inicio, janela_fim, severidade_minima, amostra_limpos_pct));
+
+    return new Response(JSON.stringify({ run_id: run.id, status: "rodando" }), {
+      status: 202,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err: any) {
     console.error("[audit-ia-rodar] error:", err);
     return new Response(JSON.stringify({ error: err.message }), {

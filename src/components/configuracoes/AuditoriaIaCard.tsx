@@ -63,6 +63,11 @@ export function AuditoriaIaCard() {
       if (error) throw error;
       return data as any[];
     },
+    // Polling enquanto houver run rodando, para refletir progresso e conclusão sem F5
+    refetchInterval: (q) => {
+      const list = (q.state.data as any[] | undefined) || [];
+      return list.some((r) => r.status === "rodando") ? 4000 : false;
+    },
   });
 
   async function rodar() {
@@ -81,9 +86,9 @@ export function AuditoriaIaCard() {
         },
       });
       if (error) throw error;
-      toast.success(`Auditoria concluída: ${data.total_atendimentos} conversas, ${data.total_flagged} achados`);
+      toast.success("Auditoria iniciada — processando em segundo plano. Você verá os achados aparecerem na lista abaixo.");
       qc.invalidateQueries({ queryKey: ["ia_auditorias_runs"] });
-      setRunSelecionada(data.run_id);
+      if (data?.run_id) setRunSelecionada(data.run_id);
     } catch (e: any) {
       toast.error(`Falhou: ${e.message}`);
     } finally {
