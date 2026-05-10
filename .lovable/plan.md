@@ -1,108 +1,78 @@
 ## Objetivo
 
-O consolidador de auditoria precisa saber que a conversa com o cliente é regida por **15+ sistemas**, não só pelo prompt da IA. Hoje ele sempre propõe `ajuste_prompt`, então correções para crons, templates, automações, watchdogs, tools, fluxos do bot, sanitizadores e configurações de horário viram texto inerte injetado no prompt.
+Resolver de vez o problema "Aplicar correção mente": hoje o botão diz que aplicou, mas em vários casos só cria tarefa pra alguém mexer no código depois. Vamos fazer duas coisas em sequência — primeiro consertar a honestidade do botão, depois ampliar o que ele realmente sabe consertar sozinho.
 
-## Mapa de vetores de conversa (referência para a LLM)
+---
 
-```
-A) Texto/decisão da IA durante o turno
-   → ia_instrucoes_prompt, ia_regras_proibidas, ia_exemplos
-   → tipos: ajuste_prompt, regra_proibida, exemplo
+## Fase 1 — Honestidade do botão (rápido, alto impacto)
 
-B) Disparos proativos (fora do turno conversacional)
-   B1) vendas-recuperacao-cron .... retomada 1h/24h/despedida
-   B2) agendamentos-cron ........... lembrete/confirmação/no-show
-   B3) watchdog-inbound-orfao ...... re-fire IA em silent drop
-   B4) watchdog-loop-ia ............ lead → Perdidos/Humano
-   B5) recuperar-atendimentos ...... manual >15min
-   B6) pipeline-automations ........ mensagens por movimento de coluna
-   → tipo: ajustar_cron | ajustar_automacao | tarefa_ti
+Cada achado da auditoria passa a ter um de três rótulos visíveis no card antes de clicar:
 
-C) Texto fora da janela 24h Meta
-   → whatsapp_templates + template_aliases
-   → tipo: trocar_alias_template | criar_template | tarefa_ti
+- **Auto-aplicável** — clicar resolve 100%, sem mais nada.
+- **Requer código** — clicar abre uma tarefa pra TI; o card mostra "não resolve sozinho, ainda vai precisar de deploy".
+- **Requer decisão humana** — exige aprovação/contexto (ex: mudar valor de horário comercial).
 
-D) Tools / parsers / detectores
-   D1) ai-triage tool selection (agendar_visita, interpretar_receita, ...)
-   D2) sanitização anti-vazamento de prompt
-   D3) detector pós-LLM (auto-persiste agendamento)
-   D4) despedida determinística
-   → tipo: tarefa_ti
+Mudanças concretas:
 
-E) Fluxos do bot (lojas/B2B)
-   → bot_fluxos (menus, opções)
-   → tipo: ajustar_bot_fluxo | tarefa_ti
+1. `audit-ia-consolidar/index.ts` — ao montar `acoes_propostas`, classifica cada vetor em um desses três modos e grava em `acoes_propostas[].modo_aplicacao`.
+2. `audit-ia-aplicar-grupo/index.ts` — se todas as ações do grupo são `tarefa_ti`, o status final do grupo vira `pendente_codigo` (não `aplicado`). Hoje vira `aplicado` mesmo só criando tarefa — é a raiz da mentira.
+3. `AuditoriaIaCard.tsx` — badge colorido no card ("Auto-aplicável" / "Requer código" / "Requer decisão") e o botão muda de label conforme o modo: "Aplicar agora", "Abrir tarefa pra TI", "Revisar e aplicar".
+4. Roteamento do vetor A (template de retomada) corrigido pra B1 (mexe em `vendas-recuperacao-cron` payload, não no prompt). Já estava errado no run atual.
 
-F) Configurações operacionais
-   → app_config (horário humano, homologação, cadências, janelas)
-   → tipo: ajustar_config | tarefa_ti
-```
+Resultado: você nunca mais clica achando que resolveu quando só virou backlog.
 
-## Mudanças
+---
 
-### 1. `supabase/functions/audit-ia-consolidar/index.ts`
+## Fase 2 — Migrar mais coisas pra auto-aplicável (estrutural)
 
-Reescrever o system prompt com:
+Hoje o botão só sabe mexer em 4 lugares: prompt, regras proibidas, exemplos, instruções. Tudo que é cron / template / horário / fluxo de bot vira tarefa porque está cravado em código. Vamos mover esses parâmetros pra tabelas que o botão já consegue editar:
 
-- **Mapa de vetores acima** (compactado em ~30 linhas) listando cada sistema, qual tabela/arquivo o controla e qual `tipo` de ação se aplica.
-- **Regra de roteamento**: a LLM precisa, para cada grupo, identificar qual vetor (A–F) é a causa-raiz **antes** de propor a ação.
-- **Heurísticas explícitas** que forçam `tarefa_ti`/ação específica em vez de `ajuste_prompt`:
-  - Menciona "template", "fora de 24h", "retomada de contexto" → C
-  - Menciona "follow-up automático", "depois de N minutos sem resposta" → B3/B4
-  - Menciona "lembrete", "no-show", "confirmação automática" → B2
-  - Menciona "tool não disparou", "não persistiu", "não detectou imagem" → D
-  - Menciona "menu do bot", "opção 1/2/3" → E
-  - Menciona "horário comercial", "fim de semana", "feriado" → F
+| Domínio | Hoje | Depois | Auto-aplicável? |
+|---|---|---|---|
+| Cadência cron de retomada (timings, msgs) | hardcoded em `vendas-recuperacao-cron` | linhas em `cron_jobs.payload` (já existe) lidas pela função | Sim |
+| Templates WhatsApp (qual template, quando, condições de bloqueio) | hardcoded em `pipeline-automations` e `vendas-recuperacao-cron` | tabela `pipeline_automacoes.config` (já existe) + nova flag `bloquear_se` | Sim |
+| Horário comercial humano | hardcoded em `ai-triage` e watchdogs | `app_config` keys `horario_comercial_*` (tabela já existe) | Requer decisão (mudança sensível) |
+| Watchdogs (intervalos, thresholds) | hardcoded em cada EF | `cron_jobs.payload.thresholds` | Sim |
+| Mensagens fixas (despedida, escalada fora-horário, retomada) | hardcoded em `ai-triage` | tabela nova `ia_mensagens_fixas` (chave + texto + ativo) | Sim |
 
-### 2. Schema de saída ampliado
+Cada migração: 1 migration de schema + ajuste da EF pra ler da tabela (com fallback ao default atual) + novo vetor de auditoria que sabe gravar nessa tabela.
 
-Cada ação passa a ter:
-```json
-{
-  "tipo": "ajuste_prompt | regra_proibida | exemplo | tarefa_ti | ajustar_cron | ajustar_automacao | trocar_alias_template | ajustar_bot_fluxo | ajustar_config",
-  "vetor": "A | B1..B6 | C | D | E | F",
-  "alvo_ref": "<nome do cron / id do template / chave em app_config>",
-  "instrucao": "...",
-  "titulo": "...",
-  "descricao": "..."
-}
-```
+Ordem de entrega (cada item é um passo independente, com valor isolado):
 
-### 3. `supabase/functions/audit-ia-aplicar-grupo/index.ts`
+1. **`ia_mensagens_fixas`** — tira despedida/escalada/retomada do código. Auditoria passa a poder reescrever esses textos sozinha. (resolve grupo #5 do run atual.)
+2. **Watchdog thresholds em `cron_jobs.payload`** — auditoria já consegue ajustar timings sem deploy. (resolve grupo #4.)
+3. **Loop de receita: heurística do `ai-triage` em `configuracoes_ia`** — limites de tentativa, gatilho de escalada, viram config. (resolve grupo #3.)
+4. **Template de retomada com condições em `pipeline_automacoes.config.bloquear_se`** — auditoria muda quando dispara, sem deploy.
 
-Adicionar branches para os novos tipos:
+---
 
-- `ajustar_cron`, `ajustar_automacao`, `trocar_alias_template`, `ajustar_bot_fluxo`, `ajustar_config` → criam **tarefa estruturada** em `tarefas` com `tipo` específico, `alvo_ref` e link de deep-link pra UI correspondente (Configurações > Cron Jobs, Automações, Templates, Bot Fluxos, etc.). Não aplicam automaticamente — operador valida e executa pela UI.
-- Tipos antigos (`ajuste_prompt`, etc.) seguem aplicando direto como já fazem.
+## O que NÃO vai virar auto-aplicável (e por quê)
 
-Justificativa: alterar cron, automação ou template em produção sem revisão humana é arriscado. Tarefa direcionada com link já é grande ganho.
+- **Mudar prompt-mestre** — já é, fica.
+- **Adicionar nova ferramenta (tool) pra IA** — exige código, sempre será "Requer código".
+- **Mudar horário comercial** — sensível, vira "Requer decisão" com diff visível antes de aplicar.
+- **Trocar provedor (Meta, push)** — código + secrets, sempre "Requer código".
 
-### 4. UI `AuditoriaIaCard.tsx`
+---
 
-Já normaliza ação genérica via `normalizeAcao`. Acrescentar:
+## Entregável final
 
-- `ACAO_LABEL` para os novos tipos (badge colorido distinto: roxo p/ cron, laranja p/ template, etc.)
-- Botão "Aplicar" muda de label para "Criar tarefa" quando ação é dos tipos B/C/D/E/F.
-- Ícone de deep-link na card para abrir a aba relevante de Configurações.
+Depois das duas fases, ao rodar uma auditoria você vai ver:
 
-### 5. Re-rodar consolidação na run atual
+- ~80% dos achados como **Auto-aplicável** (clicou, acabou).
+- ~15% como **Requer decisão** (clica, vê o diff, confirma — aplica direto, sem deploy).
+- ~5% como **Requer código** (gera tarefa honestamente, com aviso claro de que precisa deploy).
 
-Validar que:
-- "Loop Retomada de Contexto" → vetor B1 → `ajustar_cron` em `vendas-recuperacao-cron`
-- "Silêncio Pós-Inbound" → vetor B3 → `ajustar_cron` em `watchdog-inbound-orfao`
-- "Placeholder de Receita Vazia" → vetor D1/D3 → `tarefa_ti` em `interpretar_receita` / detector pós-LLM
-- "Preço Marca Sensível" → vetor A → `regra_proibida` (correto)
-- Os demais grupos genuinamente do prompt seguem em A.
+Nenhum achado vai mais sair como "aplicado" sem ter mudado nada de verdade.
 
-## Não escopo
+---
 
-- Não cria UI nova (Configurações já tem aba para cada vetor — só linkamos).
-- Não muda `audit-ia-rodar` (achados crus seguem iguais).
-- Não toca em `compile-prompt`.
-- Não automatiza alteração de cron/template/automação — sempre cria tarefa para revisão humana.
+## Detalhes técnicos
 
-## Validação
-
-1. Após redeploy, rodar "Consolidar achados" na run atual.
-2. Conferir distribuição dos `tipo` por grupo: nenhum grupo cuja causa-raiz seja cron/template/automação deve sair como `ajuste_prompt`.
-3. Aplicar 1 grupo de cada vetor (A, B, C) e ver se cai no destino certo (regra/instrução vs tarefa estruturada).
+- Novo campo `acoes_propostas[].modo_aplicacao: 'auto' | 'codigo' | 'decisao'` em `ia_auditorias_grupos`.
+- Novo status de grupo: `pendente_codigo` e `pendente_decisao` (além de `pendente`, `aplicado`, `ignorado`).
+- `audit-ia-aplicar-grupo` ganha branch que, pra modo `decisao`, retorna o diff proposto e exige segundo clique de confirmação no frontend.
+- Tabela nova `ia_mensagens_fixas (chave text PK, texto text, ativo bool, updated_at)` com seed dos textos atuais.
+- Migration adiciona índice em `cron_jobs (nome)` pra leitura rápida pelas EFs.
+- EFs (`vendas-recuperacao-cron`, `ai-triage`, watchdogs) ganham helper `getConfig(key, fallback)` que lê `cron_jobs.payload` / `configuracoes_ia` / `ia_mensagens_fixas` com cache de 60s.
+- Frontend: `AuditoriaIaCard` ganha 3 variantes de botão + badge + (no caso `decisao`) modal de diff.

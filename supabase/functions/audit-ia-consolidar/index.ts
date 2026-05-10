@@ -233,9 +233,31 @@ Deno.serve(async (req) => {
     const validIds = new Set(achados.map((a) => a.id));
     const inseridos: any[] = [];
 
+    // Classificação de modo de aplicação por tipo de ação.
+    // 'auto'   = botão aplica 100% sem precisar de deploy (mexe em tabela controlada pela auditoria).
+    // 'codigo' = aplicar = abrir tarefa pra TI; precisa de mudança em código + deploy.
+    // 'decisao'= mudança sensível, mostra diff e exige confirmação extra (reservado para evolução futura).
+    const MODO_POR_TIPO: Record<string, "auto" | "codigo" | "decisao"> = {
+      regra_proibida: "auto",
+      exemplo: "auto",
+      ajuste_prompt: "auto",
+      ajustar_cron: "codigo",
+      ajustar_template: "codigo",
+      ajustar_bot_fluxo: "codigo",
+      ajustar_config: "codigo",
+      tarefa_ti: "codigo",
+    };
+    const classificarModo = (tipo: string): "auto" | "codigo" | "decisao" =>
+      MODO_POR_TIPO[tipo] || "codigo";
+
     for (const g of merged) {
       const ids = (g.auditoria_ids || []).filter((id: string) => validIds.has(id));
       if (ids.length === 0) continue;
+      const acoesRaw = Array.isArray(g.acoes) ? g.acoes : [];
+      const acoes = acoesRaw.map((ac: any) => ({
+        ...ac,
+        modo_aplicacao: ac?.modo_aplicacao || classificarModo(String(ac?.tipo || "")),
+      }));
       const { data, error } = await supabase
         .from("ia_auditorias_grupos")
         .insert({
@@ -244,7 +266,7 @@ Deno.serve(async (req) => {
           descricao: g.descricao || null,
           severidade: ["critical", "warn", "info"].includes(g.severidade) ? g.severidade : "warn",
           auditoria_ids: ids,
-          acoes_propostas: Array.isArray(g.acoes) ? g.acoes : [],
+          acoes_propostas: acoes,
           status: "pendente",
         })
         .select()

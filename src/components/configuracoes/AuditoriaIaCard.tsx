@@ -51,14 +51,37 @@ const ACAO_LABEL: Record<string, string> = {
 
 const TIPOS_PROMPT = new Set(["regra_proibida", "exemplo", "ajuste_prompt"]);
 
+// Modo de aplicação por tipo (espelha audit-ia-consolidar / aplicar-grupo)
+const MODO_POR_TIPO: Record<string, "auto" | "codigo" | "decisao"> = {
+  regra_proibida: "auto",
+  exemplo: "auto",
+  ajuste_prompt: "auto",
+  ajustar_cron: "codigo",
+  ajustar_template: "codigo",
+  ajustar_bot_fluxo: "codigo",
+  ajustar_config: "codigo",
+  tarefa_ti: "codigo",
+};
+
+const MODO_BADGE: Record<string, { label: string; className: string }> = {
+  auto:    { label: "Auto-aplicável",   className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" },
+  codigo:  { label: "Requer código",    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30" },
+  decisao: { label: "Requer decisão",   className: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30" },
+};
+
+function modoDeAcao(ac: any): "auto" | "codigo" | "decisao" {
+  return ac?.modo_aplicacao || MODO_POR_TIPO[String(ac?.tipo || "")] || "codigo";
+}
+
 // Normaliza ações que vêm em formatos variados do LLM
-function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: string; raw: any } {
-  if (!ac || typeof ac !== "object") return { tipo: "ajuste_prompt", texto: String(ac ?? ""), raw: ac };
+function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: string; modo: "auto" | "codigo" | "decisao"; raw: any } {
+  if (!ac || typeof ac !== "object") return { tipo: "ajuste_prompt", texto: String(ac ?? ""), modo: "auto", raw: ac };
   if (ac.tipo) {
     return {
       tipo: ac.tipo,
       texto: ac.texto || ac.instrucao || ac.descricao || ac.sugestao || ac.pergunta || ac.titulo || ac.regra || "",
       alvo_ref: ac.alvo_ref,
+      modo: modoDeAcao(ac),
       raw: ac,
     };
   }
@@ -70,10 +93,10 @@ function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: strin
       else if (v && typeof v === "object") {
         texto = v.descricao || v.instrucao || v.texto || v.sugestao || v.titulo || v.pergunta || v.resposta_ideal || JSON.stringify(v);
       }
-      return { tipo, texto, raw: ac };
+      return { tipo, texto, modo: modoDeAcao({ tipo }), raw: ac };
     }
   }
-  return { tipo: "ajuste_prompt", texto: ac.descricao || JSON.stringify(ac), raw: ac };
+  return { tipo: "ajuste_prompt", texto: ac.descricao || JSON.stringify(ac), modo: "auto", raw: ac };
 }
 
 export function AuditoriaIaCard() {
@@ -337,7 +360,8 @@ function GruposTab({ runId }: { runId: string }) {
   }
 
   const pendentes = (grupos || []).filter((g) => g.status === "pendente");
-  const finalizados = (grupos || []).filter((g) => g.status !== "pendente");
+  const aguardandoCodigo = (grupos || []).filter((g) => g.status === "pendente_codigo" || g.status === "parcial");
+  const finalizados = (grupos || []).filter((g) => g.status === "aplicado" || g.status === "ignorado");
 
   return (
     <div className="space-y-3">
@@ -376,6 +400,19 @@ function GruposTab({ runId }: { runId: string }) {
         <GrupoCard key={g.id} grupo={g} onChanged={() => { refetch(); qc.invalidateQueries({ queryKey: ["ia_auditorias", runId] }); }} />
       ))}
 
+      {aguardandoCodigo.length > 0 && (
+        <details className="mt-4" open>
+          <summary className="text-xs font-medium text-amber-700 dark:text-amber-400 cursor-pointer">
+            {aguardandoCodigo.length} grupo(s) aguardando deploy de código (TI)
+          </summary>
+          <div className="space-y-2 mt-2">
+            {aguardandoCodigo.map((g) => (
+              <GrupoCard key={g.id} grupo={g} onChanged={refetch} />
+            ))}
+          </div>
+        </details>
+      )}
+
       {finalizados.length > 0 && (
         <details className="mt-4">
           <summary className="text-xs font-medium text-muted-foreground cursor-pointer">
@@ -404,7 +441,18 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
         body: { grupo_id: grupo.id },
       });
       if (error) throw error;
-      toast.success(`${data?.aplicadas?.length || 0} correção(ões) aplicada(s) — afeta ${data?.total_conversas || 0} conversa(s)`);
+      const auto = data?.aplicadas?.length || 0;
+      const tarefas = data?.tarefas_criadas?.length || 0;
+      const conv = data?.total_conversas || 0;
+      if (auto > 0 && tarefas > 0) {
+        toast.success(`${auto} aplicada(s) direto + ${tarefas} tarefa(s) pra TI — afeta ${conv} conversa(s)`);
+      } else if (auto > 0) {
+        toast.success(`${auto} correção(ões) aplicada(s) — afeta ${conv} conversa(s)`);
+      } else if (tarefas > 0) {
+        toast.warning(`${tarefas} tarefa(s) criada(s) pra TI. Nada foi aplicado direto — exige deploy de código.`);
+      } else {
+        toast.warning("Nenhuma ação efetivada.");
+      }
       onChanged();
     } catch (e: any) {
       toast.error(`Falhou: ${e.message}`);
@@ -429,6 +477,29 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
   }
 
   const acoes = Array.isArray(grupo.acoes_propostas) ? grupo.acoes_propostas : [];
+  const acoesNorm = acoes.map((r: any) => normalizeAcao(r));
+  const modos = new Set(acoesNorm.map((a) => a.modo));
+  const temAuto = modos.has("auto");
+  const temCodigo = modos.has("codigo");
+  const todoAuto = temAuto && !temCodigo;
+  const todoCodigo = temCodigo && !temAuto;
+
+  // Status visual honesto: 'aplicado' (verde), 'parcial' (azul), 'pendente_codigo' (âmbar) ou 'ignorado'.
+  const statusBadge = (() => {
+    if (grupo.status === "aplicado") return <Badge className="bg-emerald-500 text-white">Aplicado</Badge>;
+    if (grupo.status === "parcial") return <Badge className="bg-blue-500 text-white">Parcial — TI</Badge>;
+    if (grupo.status === "pendente_codigo") return <Badge className="bg-amber-500 text-white">Aguarda TI</Badge>;
+    if (grupo.status === "ignorado") return <Badge variant="outline">Ignorado</Badge>;
+    return null;
+  })();
+
+  const botaoLabel = todoAuto
+    ? "Aplicar agora"
+    : todoCodigo
+    ? "Abrir tarefa pra TI"
+    : "Aplicar + abrir tarefa";
+
+  const editavel = grupo.status === "pendente";
 
   return (
     <div className="p-3 rounded-md border space-y-2">
@@ -437,8 +508,7 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
           <div className="flex items-center gap-2 flex-wrap">
             <Badge className={SEV_COLOR[grupo.severidade] || ""}>{SEV_LABEL[grupo.severidade] || grupo.severidade}</Badge>
             <Badge variant="outline">{(grupo.auditoria_ids || []).length} conversa(s)</Badge>
-            {grupo.status === "aplicado" && <Badge className="bg-emerald-500 text-white">Aplicado</Badge>}
-            {grupo.status === "ignorado" && <Badge variant="outline">Ignorado</Badge>}
+            {statusBadge}
           </div>
           <h4 className="font-medium text-sm mt-1">{grupo.titulo}</h4>
           {grupo.descricao && <p className="text-xs text-muted-foreground mt-1">{grupo.descricao}</p>}
@@ -448,21 +518,18 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
       {acoes.length > 0 && (
         <div className="space-y-1.5 pt-1">
           <p className="text-xs font-semibold text-muted-foreground">CORREÇÕES PROPOSTAS</p>
-          {acoes.map((raw: any, i: number) => {
-            const ac = normalizeAcao(raw);
+          {acoesNorm.map((ac, i) => {
             const Icon = ACAO_ICON[ac.tipo] || FileText;
-            const isPrompt = TIPOS_PROMPT.has(ac.tipo);
+            const badge = MODO_BADGE[ac.modo];
             return (
               <div key={i} className="flex items-start gap-2 text-xs bg-muted/40 rounded p-2">
                 <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium">{ACAO_LABEL[ac.tipo] || ac.tipo}</span>
-                    {!isPrompt && (
-                      <span className="text-[10px] uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                        cria tarefa
-                      </span>
-                    )}
+                    <span className={cn("text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border", badge.className)}>
+                      {badge.label}
+                    </span>
                     {ac.alvo_ref && (
                       <code className="text-[10px] bg-background px-1 py-0.5 rounded border">{ac.alvo_ref}</code>
                     )}
@@ -477,23 +544,23 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
         </div>
       )}
 
-      {grupo.status === "pendente" && (() => {
-        const tiposPresentes = (acoes as any[]).map((r) => normalizeAcao(r).tipo);
-        const temNaoPrompt = tiposPresentes.some((t) => !TIPOS_PROMPT.has(t));
-        const todosNaoPrompt = tiposPresentes.length > 0 && tiposPresentes.every((t) => !TIPOS_PROMPT.has(t));
-        const label = todosNaoPrompt ? "Criar tarefa" : temNaoPrompt ? "Aplicar e criar tarefa" : "Aplicar correção";
-        return (
-          <div className="flex gap-2 pt-1">
-            <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
-              <XCircle className="h-3.5 w-3.5 mr-1" />Ignorar
-            </Button>
-            <Button size="sm" onClick={aplicar} disabled={aplicando}>
-              {aplicando ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
-              {label}
-            </Button>
-          </div>
-        );
-      })()}
+      {todoCodigo && editavel && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
+          Este grupo não é resolvido pela auditoria sozinha — depende de mudança de código + deploy. Aplicar abre tarefa(s) pra TI; o problema continua até o deploy.
+        </p>
+      )}
+
+      {editavel && (
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
+            <XCircle className="h-3.5 w-3.5 mr-1" />Ignorar
+          </Button>
+          <Button size="sm" onClick={aplicar} disabled={aplicando}>
+            {aplicando ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
+            {botaoLabel}
+          </Button>
+        </div>
+      )}
 
       <Dialog open={ignorarOpen} onOpenChange={setIgnorarOpen}>
         <DialogContent>

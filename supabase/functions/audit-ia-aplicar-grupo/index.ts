@@ -35,6 +35,21 @@ Deno.serve(async (req) => {
     const acoes = Array.isArray(grupo.acoes_propostas) ? grupo.acoes_propostas : [];
     const auditoriaRef = (grupo.auditoria_ids || [])[0] || null;
     const aplicadas: any[] = [];
+    const tarefasCriadas: any[] = [];
+
+    // Modos: 'auto' efetiva no banco; 'codigo' abre tarefa pra TI (não vira "aplicado").
+    const MODO_POR_TIPO: Record<string, "auto" | "codigo" | "decisao"> = {
+      regra_proibida: "auto",
+      exemplo: "auto",
+      ajuste_prompt: "auto",
+      ajustar_cron: "codigo",
+      ajustar_template: "codigo",
+      ajustar_bot_fluxo: "codigo",
+      ajustar_config: "codigo",
+      tarefa_ti: "codigo",
+    };
+    const modoDe = (ac: any): "auto" | "codigo" | "decisao" =>
+      ac?.modo_aplicacao || MODO_POR_TIPO[String(ac?.tipo || "")] || "codigo";
 
     // Mapeia tipos novos (vetores B/C/D/E/F) → criação de tarefa estruturada
     const TAREFA_TIPOS: Record<string, { rota: string; prefixo: string }> = {
@@ -104,6 +119,7 @@ Deno.serve(async (req) => {
             continue;
           }
           alvoTabela = "tarefas"; alvoId = data?.id ?? null;
+          tarefasCriadas.push({ tipo: acao.tipo, tarefa_id: alvoId });
         } else {
           console.warn("[aplicar-grupo] ação ignorada (formato desconhecido)", acao);
           continue;
@@ -112,25 +128,49 @@ Deno.serve(async (req) => {
         await supabase.from("ia_auditorias_acoes").insert({
           auditoria_id: auditoriaRef, tipo: acao.tipo,
           alvo_tabela: alvoTabela, alvo_id: alvoId,
-          payload: { ...payload, grupo_id, consolidado: true },
+          payload: { ...payload, grupo_id, consolidado: true, modo_aplicacao: modoDe(acao) },
         });
-        aplicadas.push({ tipo: acao.tipo, alvo_id: alvoId });
+        if (modoDe(acao) === "auto") {
+          aplicadas.push({ tipo: acao.tipo, alvo_id: alvoId });
+        }
       } catch (e: any) {
         console.error("[aplicar-grupo] falha em ação", acao, e?.message);
       }
     }
 
+    // Decide o status final HONESTAMENTE:
+    // - Se nenhuma ação 'auto' foi efetivada e só criou tarefa(s) → 'pendente_codigo' (NÃO 'aplicado').
+    // - Se efetivou pelo menos 1 'auto' e também tem tarefa(s) → 'parcial'.
+    // - Se efetivou 'auto' e nenhuma tarefa → 'aplicado'.
+    const temAuto = aplicadas.length > 0;
+    const temTarefa = tarefasCriadas.length > 0;
+    const statusFinal = temAuto && temTarefa
+      ? "parcial"
+      : temAuto
+      ? "aplicado"
+      : temTarefa
+      ? "pendente_codigo"
+      : "pendente"; // nada efetivado, deixa pendente
+
     await supabase.from("ia_auditorias_grupos").update({
-      status: "aplicado", applied_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      status: statusFinal,
+      applied_at: temAuto ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
     }).eq("id", grupo_id);
 
-    if ((grupo.auditoria_ids || []).length > 0) {
+    // Só marca as auditorias subjacentes como 'aplicado' se efetivamente houve correção 'auto'.
+    if (temAuto && (grupo.auditoria_ids || []).length > 0) {
       await supabase.from("ia_auditorias").update({
         status: "aplicado", updated_at: new Date().toISOString(),
       }).in("id", grupo.auditoria_ids);
     }
 
-    return new Response(JSON.stringify({ aplicadas, total_conversas: (grupo.auditoria_ids || []).length }), {
+    return new Response(JSON.stringify({
+      aplicadas,
+      tarefas_criadas: tarefasCriadas,
+      status_final: statusFinal,
+      total_conversas: (grupo.auditoria_ids || []).length,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
