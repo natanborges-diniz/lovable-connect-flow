@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Play, AlertTriangle, CheckCircle2, XCircle, Undo2, ShieldAlert, FileText, Wrench, Lightbulb, Layers, Sparkles, RefreshCw } from "lucide-react";
+import { Loader2, Play, AlertTriangle, CheckCircle2, XCircle, Undo2, ShieldAlert, FileText, Wrench, Lightbulb, Layers, Sparkles, RefreshCw, ExternalLink } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
