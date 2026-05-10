@@ -15,11 +15,28 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// Janela mínima e máxima (em minutos) para considerar inbound órfão.
-// - min 2min: dá tempo do debounce normal do ai-triage executar
-// - max 180min: evita reativar conversas muito antigas (já são caso para "recuperar-atendimentos")
-const IDADE_MIN_MIN = 2;
-const IDADE_MAX_MIN = 180;
+// Defaults — sobrescritos por cron_jobs.payload.thresholds (auto-editável via auditoria IA).
+const DEFAULTS = {
+  idade_min_min: 2,           // min: dá tempo ao debounce do ai-triage
+  idade_max_min: 180,         // max: > isso vira caso de "recuperar-atendimentos"
+  antiduplo_seg: 90,          // anti-duplo-disparo
+  pular_se_confirmou_horas: 1 // skip se cliente confirmou agendamento recém
+};
+
+async function loadThresholds(supabase: any) {
+  try {
+    const { data } = await supabase
+      .from("cron_jobs").select("payload")
+      .eq("funcao_alvo", "watchdog-inbound-orfao").maybeSingle();
+    const t = (data?.payload?.thresholds) || {};
+    return {
+      idade_min_min: Number(t.idade_min_min ?? DEFAULTS.idade_min_min),
+      idade_max_min: Number(t.idade_max_min ?? DEFAULTS.idade_max_min),
+      antiduplo_seg: Number(t.antiduplo_seg ?? DEFAULTS.antiduplo_seg),
+      pular_se_confirmou_horas: Number(t.pular_se_confirmou_horas ?? DEFAULTS.pular_se_confirmou_horas),
+    };
+  } catch { return { ...DEFAULTS }; }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -28,6 +45,11 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const startedAt = Date.now();
+  const TH = await loadThresholds(supabase);
+  const IDADE_MIN_MIN = TH.idade_min_min;
+  const IDADE_MAX_MIN = TH.idade_max_min;
+  const ANTIDUPLO_MS = TH.antiduplo_seg * 1000;
+  const CONFIRMOU_WINDOW_MS = TH.pular_se_confirmou_horas * 60 * 60 * 1000;
 
   try {
     // 1) Pega atendimentos abertos em modo IA
