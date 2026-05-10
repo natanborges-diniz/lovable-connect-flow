@@ -212,17 +212,18 @@ ${instrucoes.length > 0
       upsertConfig(supabase, "prompt_compilado_fontes", JSON.stringify({
         exemplos: exemplos.length,
         feedbacks: feedbacks.length,
+        instrucoes: instrucoes.length,
         prompt_base_length: promptBase.length,
       })),
     ]);
 
-    console.log(`[COMPILE] Success: ${finalPrompt.length}ch compiled from ${promptBase.length}ch base + ${exemplos.length} exemplos + ${feedbacks.length} feedbacks`);
+    console.log(`[COMPILE] Success: ${finalPrompt.length}ch compiled from ${promptBase.length}ch base + ${exemplos.length} exemplos + ${feedbacks.length} feedbacks + ${instrucoes.length} instrucoes`);
 
     return new Response(
       JSON.stringify({
         status: "ok",
         compiled_length: finalPrompt.length,
-        fontes: { exemplos: exemplos.length, feedbacks: feedbacks.length },
+        fontes: { exemplos: exemplos.length, feedbacks: feedbacks.length, instrucoes: instrucoes.length },
         prompt_compilado: finalPrompt,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
