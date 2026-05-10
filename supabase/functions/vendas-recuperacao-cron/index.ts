@@ -260,7 +260,12 @@ async function processContato(
         return result;
       }
       const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
-      const despedida = `Olá ${firstName}! 😊 Agradeço muito o seu contato com as Óticas Diniz Osasco. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨`;
+      const despedida = await getMensagemFixa(
+        supabase,
+        "recuperacao_ia_despedida_final",
+        `Olá ${firstName}! 😊 Agradeço muito o seu contato com as Óticas Diniz. Não quero te incomodar, então vou encerrar nossa conversa por aqui. Qualquer dúvida que surgir — sobre lentes, armações, agendamento ou orçamento — é só me chamar de volta, estou à disposição. Tenha um ótimo dia! ✨`,
+        { first_name: firstName },
+      );
 
       // Envia mensagem fixa de despedida via send-whatsapp (Evolution mantém continuidade)
       try {
