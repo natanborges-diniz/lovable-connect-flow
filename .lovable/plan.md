@@ -39,7 +39,7 @@ Cada migração: 1 migration de schema + ajuste da EF pra ler da tabela (com fal
 
 Ordem de entrega (cada item é um passo independente, com valor isolado):
 
-1. **`ia_mensagens_fixas`** — tira despedida/escalada/retomada do código. Auditoria passa a poder reescrever esses textos sozinha. (resolve grupo #5 do run atual.)
+1. ✅ **`ia_mensagens_fixas`** — feito. Tabela criada e populada com 6 chaves (despedida_explicit_close, despedida_thanks, despedida_short_no, escalada_fora_horario, pedir_receita_texto, recuperacao_ia_despedida_final). `ai-triage` carrega com cache 60s; `vendas-recuperacao-cron` consulta com fallback. Auditoria ganhou tipo `ajustar_mensagem_fixa` (auto-aplicável) — botão Aplicar reescreve direto sem deploy.
 2. **Watchdog thresholds em `cron_jobs.payload`** — auditoria já consegue ajustar timings sem deploy. (resolve grupo #4.)
 3. **Loop de receita: heurística do `ai-triage` em `configuracoes_ia`** — limites de tentativa, gatilho de escalada, viram config. (resolve grupo #3.)
 4. **Template de retomada com condições em `pipeline_automacoes.config.bloquear_se`** — auditoria muda quando dispara, sem deploy.
