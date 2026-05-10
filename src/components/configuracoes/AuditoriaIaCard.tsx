@@ -42,31 +42,33 @@ const ACAO_LABEL: Record<string, string> = {
   regra_proibida: "Regra proibida",
   exemplo: "Exemplo aprendido",
   ajuste_prompt: "Diretriz no prompt",
-  tarefa_ti: "Tarefa para TI",
+  tarefa_ti: "Tarefa técnica (TI)",
+  ajustar_cron: "Ajustar cron / disparo proativo",
+  ajustar_template: "Ajustar template WhatsApp",
+  ajustar_bot_fluxo: "Ajustar fluxo do bot",
+  ajustar_config: "Ajustar configuração operacional",
 };
 
-// Normaliza ações que vêm em formatos variados do LLM:
-//   { tipo, texto/instrucao/... }              ← formato esperado
-//   { ajuste_prompt: { categoria, descricao } }
-//   { regra_proibida: "..." }
-//   { exemplo: { pergunta, resposta_ideal } }
-//   { tarefa_ti: { titulo, descricao } }
-function normalizeAcao(ac: any): { tipo: string; texto: string; raw: any } {
+const TIPOS_PROMPT = new Set(["regra_proibida", "exemplo", "ajuste_prompt"]);
+
+// Normaliza ações que vêm em formatos variados do LLM
+function normalizeAcao(ac: any): { tipo: string; texto: string; alvo_ref?: string; raw: any } {
   if (!ac || typeof ac !== "object") return { tipo: "ajuste_prompt", texto: String(ac ?? ""), raw: ac };
   if (ac.tipo) {
     return {
       tipo: ac.tipo,
-      texto: ac.texto || ac.instrucao || ac.pergunta || ac.titulo || ac.descricao || "",
+      texto: ac.texto || ac.instrucao || ac.descricao || ac.sugestao || ac.pergunta || ac.titulo || ac.regra || "",
+      alvo_ref: ac.alvo_ref,
       raw: ac,
     };
   }
-  for (const tipo of ["regra_proibida", "exemplo", "ajuste_prompt", "tarefa_ti"]) {
+  for (const tipo of ["regra_proibida", "exemplo", "ajuste_prompt", "tarefa_ti", "ajustar_cron", "ajustar_template", "ajustar_bot_fluxo", "ajustar_config"]) {
     if (ac[tipo] !== undefined) {
       const v = ac[tipo];
       let texto = "";
       if (typeof v === "string") texto = v;
       else if (v && typeof v === "object") {
-        texto = v.descricao || v.instrucao || v.texto || v.titulo || v.pergunta || v.resposta_ideal || JSON.stringify(v);
+        texto = v.descricao || v.instrucao || v.texto || v.sugestao || v.titulo || v.pergunta || v.resposta_ideal || JSON.stringify(v);
       }
       return { tipo, texto, raw: ac };
     }
@@ -449,11 +451,22 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
           {acoes.map((raw: any, i: number) => {
             const ac = normalizeAcao(raw);
             const Icon = ACAO_ICON[ac.tipo] || FileText;
+            const isPrompt = TIPOS_PROMPT.has(ac.tipo);
             return (
               <div key={i} className="flex items-start gap-2 text-xs bg-muted/40 rounded p-2">
                 <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium">{ACAO_LABEL[ac.tipo] || ac.tipo}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium">{ACAO_LABEL[ac.tipo] || ac.tipo}</span>
+                    {!isPrompt && (
+                      <span className="text-[10px] uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                        cria tarefa
+                      </span>
+                    )}
+                    {ac.alvo_ref && (
+                      <code className="text-[10px] bg-background px-1 py-0.5 rounded border">{ac.alvo_ref}</code>
+                    )}
+                  </div>
                   <div className="text-muted-foreground line-clamp-3 whitespace-pre-wrap">
                     {ac.texto || "(sem descrição)"}
                   </div>
@@ -464,17 +477,23 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
         </div>
       )}
 
-      {grupo.status === "pendente" && (
-        <div className="flex gap-2 pt-1">
-          <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
-            <XCircle className="h-3.5 w-3.5 mr-1" />Ignorar
-          </Button>
-          <Button size="sm" onClick={aplicar} disabled={aplicando}>
-            {aplicando ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
-            Aplicar correção
-          </Button>
-        </div>
-      )}
+      {grupo.status === "pendente" && (() => {
+        const tiposPresentes = (acoes as any[]).map((r) => normalizeAcao(r).tipo);
+        const temNaoPrompt = tiposPresentes.some((t) => !TIPOS_PROMPT.has(t));
+        const todosNaoPrompt = tiposPresentes.length > 0 && tiposPresentes.every((t) => !TIPOS_PROMPT.has(t));
+        const label = todosNaoPrompt ? "Criar tarefa" : temNaoPrompt ? "Aplicar e criar tarefa" : "Aplicar correção";
+        return (
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" variant="outline" onClick={() => setIgnorarOpen(true)}>
+              <XCircle className="h-3.5 w-3.5 mr-1" />Ignorar
+            </Button>
+            <Button size="sm" onClick={aplicar} disabled={aplicando}>
+              {aplicando ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}
+              {label}
+            </Button>
+          </div>
+        );
+      })()}
 
       <Dialog open={ignorarOpen} onOpenChange={setIgnorarOpen}>
         <DialogContent>

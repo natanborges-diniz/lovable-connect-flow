@@ -29,17 +29,67 @@ async function consolidarChunk(
   achados: Achado[],
   jaExistentes: { regras: string[]; exemplos: string[]; instrucoes: string[] },
 ): Promise<any> {
-  const sys = `Você é engenheiro de prompts. Recebe uma LISTA de achados de auditoria (cada um é uma conversa com problema) e deve AGRUPAR por causa-raiz comum, propondo a correção UMA ÚNICA VEZ por grupo (evita duplicatas).
+  const sys = `Você é engenheiro de prompts e de operações. Recebe uma LISTA de achados de auditoria (cada um é uma conversa com problema) e deve AGRUPAR por causa-raiz comum, propondo a correção UMA ÚNICA VEZ por grupo (evita duplicatas).
+
+A conversa com o cliente é regida por VÁRIOS sistemas. Antes de propor a ação, você DEVE identificar qual VETOR é a causa-raiz do grupo:
+
+VETOR A — Texto/decisão da IA durante o turno conversacional
+  Controles: ia_instrucoes_prompt, ia_regras_proibidas, ia_exemplos
+  Tipos válidos: ajuste_prompt | regra_proibida | exemplo
+
+VETOR B — Disparos PROATIVOS (fora do turno; a IA não decide)
+  B1 vendas-recuperacao-cron .... retomada 1h/24h, despedida → Perdidos
+  B2 agendamentos-cron .......... lembrete véspera, no-show, confirmação
+  B3 watchdog-inbound-orfao ..... re-fire da IA em silent drop (1min)
+  B4 watchdog-loop-ia ........... move lead para Perdidos/Humano (2min)
+  B5 recuperar-atendimentos ..... recuperação manual >15min
+  B6 pipeline-automations ....... mensagens disparadas por movimento de coluna / status_alvo
+  Tipo válido: ajustar_cron (alvo_ref = nome do cron/automação)
+
+VETOR C — Texto fora da janela 24h Meta
+  Controles: whatsapp_templates + template_aliases
+  Tipo válido: ajustar_template (alvo_ref = alias ou nome do template)
+
+VETOR D — Tools / parsers / detectores no código
+  D1 ai-triage tool selection (agendar_visita, interpretar_receita, consultar_lentes_*, registrar_nome_cliente)
+  D2 sanitização anti-vazamento de prompt
+  D3 detector pós-LLM (auto-persiste agendamento prometido)
+  D4 despedida determinística
+  Tipo válido: tarefa_ti (alvo_ref = nome do arquivo/tool)
+
+VETOR E — Fluxos do bot de lojas/B2B
+  Controle: bot_fluxos (etapas, menus)
+  Tipo válido: ajustar_bot_fluxo (alvo_ref = chave do fluxo)
+
+VETOR F — Configurações operacionais
+  Controle: app_config (horário humano, homologação, cadências, janelas) ou feriados
+  Tipo válido: ajustar_config (alvo_ref = chave em app_config)
+
+HEURÍSTICAS DE ROTEAMENTO (use SEMPRE antes de escolher tipo):
+- Menciona "template", "fora da janela 24h", "retomada de contexto", "marketing/utility"  → VETOR C
+- "follow-up automático", "depois de N min sem resposta", "silêncio pós-inbound", "watchdog" → B3/B4
+- "lembrete", "no-show", "confirmação automática", "véspera"                                → B2
+- "retomada 1h/24h", "lead frio", "despedida proativa"                                      → B1
+- "tool não disparou", "não persistiu", "não detectou imagem", "OCR falhou", "regex"        → VETOR D
+- "menu do bot", "opção 1/2/3", "fluxo da loja"                                             → VETOR E
+- "horário comercial", "fim de semana", "feriado", "janela de envio", "cadência"            → VETOR F
+- Tom, persuasão, perguntas redundantes, alucinação de preço/marca, terminologia            → VETOR A
 
 REGRAS:
 - Mesmo padrão de erro em conversas diferentes = MESMO grupo. Ex: "IA citou preço Kodak" em 5 conversas = 1 grupo.
-- NÃO proponha regras/exemplos/instruções que já existam (lista abaixo).
-- Para cada grupo escolha 1+ ações que MELHOR previnam recorrência:
-  * "regra_proibida": conteúdo factualmente vetado (preço de marca não negociada, promessa indevida).
-  * "exemplo": padrão pergunta-resposta replicável (categoria: lentes_contato, receita, agendamento, preco, geral).
-  * "ajuste_prompt": regra de fluxo/decisão (categoria: fluxo, tom, seguranca, fechamento).
-  * "tarefa_ti": exige código/integração nova (titulo + descricao técnica).
-- Sempre português, imperativo, conciso.
+- NÃO proponha regras/exemplos/diretrizes que já existam (lista abaixo).
+- NUNCA proponha "ajuste_prompt" para coisas que o prompt não controla (cron, template, watchdog, tool, config). Use o tipo correto do vetor.
+- Sempre português, imperativo, conciso. Inclua "alvo_ref" sempre que possível.
+
+SHAPE DAS AÇÕES (escolha UM tipo por ação):
+  { "tipo": "regra_proibida",  "vetor": "A",  "texto": "...",                "categoria": "informacao_falsa|preco|tom|..." }
+  { "tipo": "exemplo",         "vetor": "A",  "pergunta": "...",             "resposta_ideal": "...", "categoria": "..." }
+  { "tipo": "ajuste_prompt",   "vetor": "A",  "instrucao": "...",            "categoria": "fluxo|tom|seguranca|fechamento" }
+  { "tipo": "ajustar_cron",    "vetor": "B1..B6", "alvo_ref": "<cron>",      "titulo": "...", "descricao": "...", "sugestao": "..." }
+  { "tipo": "ajustar_template","vetor": "C",  "alvo_ref": "<alias|template>","titulo": "...", "descricao": "...", "sugestao": "..." }
+  { "tipo": "ajustar_bot_fluxo","vetor": "E", "alvo_ref": "<chave_fluxo>",   "titulo": "...", "descricao": "...", "sugestao": "..." }
+  { "tipo": "ajustar_config",  "vetor": "F",  "alvo_ref": "<chave_app_config>","titulo": "...", "descricao": "...", "sugestao": "..." }
+  { "tipo": "tarefa_ti",       "vetor": "D",  "alvo_ref": "<arquivo/tool>",  "titulo": "...", "descricao": "..." }
 
 Retorne JSON estrito: {"grupos":[{"titulo":"...","descricao":"...","severidade":"critical|warn|info","auditoria_ids":["uuid"],"acoes":[...]}]}`;
 
