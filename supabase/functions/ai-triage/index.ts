@@ -5042,7 +5042,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 const rxLabel = args.label || (eRec.length === 0 ? "cliente" : `pessoa_${eRec.length + 1}`);
                 eRec.push({ ...rxData, label: rxLabel, confirmed_by_client_at: null });
                 if (eRec.length > 5) eRec = eRec.slice(-5);
-                await supabase.from("contatos").update({ metadata: { ...eMeta, receitas: eRec, ultima_receita: rxData } }).eq("id", contatoId);
+                await supabase.from("contatos").update({ metadata: { ...eMeta, receitas: eRec, ultima_receita: rxData, ocr_falhas_count: 0 } }).eq("id", contatoId);
                 await supabase.from("eventos_crm").insert({
                   contato_id: contatoId, tipo: "receita_interpretada",
                   descricao: `Receita interpretada via retry forçado (confidence=${confidence})`,
