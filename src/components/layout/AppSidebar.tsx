@@ -108,6 +108,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
         { title: "Automações", url: "/configuracoes?tab=automacoes", icon: Zap },
         { title: "Crons", url: "/configuracoes?tab=crons", icon: Timer },
         { title: "Recuperação", url: "/configuracoes?tab=recuperacao", icon: LifeBuoy },
+        { title: "Auditoria IA", url: "/configuracoes?tab=auditoria-ia", icon: ShieldAlert },
       ],
     },
   ],
