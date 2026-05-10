@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useTarefas, useCreateTarefa, useUpdateTarefaStatus, useChecklistItems, useCreateChecklistItem, useToggleChecklistItem } from "@/hooks/useTarefas";
 import { PrioridadeBadge, TarefaStatusBadge } from "@/components/shared/StatusBadge";
@@ -12,12 +13,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
-import { Plus, Search, CheckSquare, ListTodo } from "lucide-react";
+import { Plus, Search, CheckSquare, ListTodo, X } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { StatusTarefa, Prioridade } from "@/types/database";
 
 export default function Tarefas() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const grupoId = searchParams.get("grupo") || undefined;
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("todos");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -26,6 +29,7 @@ export default function Tarefas() {
   const filters = {
     search: search || undefined,
     status: statusFilter !== "todos" ? (statusFilter as StatusTarefa) : undefined,
+    grupo_id: grupoId,
   };
 
   const { data: tarefas, isLoading } = useTarefas(filters);
@@ -51,6 +55,22 @@ export default function Tarefas() {
 
       <Card className="shadow-card">
         <CardContent className="pt-6">
+          {grupoId && (
+            <div className="mb-3 flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/30 rounded p-2">
+              <span className="font-medium text-amber-700 dark:text-amber-400">
+                Filtrando por grupo de auditoria IA
+              </span>
+              <code className="text-[10px] bg-background px-1.5 py-0.5 rounded border">{grupoId.slice(0, 8)}</code>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 ml-auto"
+                onClick={() => { searchParams.delete("grupo"); setSearchParams(searchParams); }}
+              >
+                <X className="h-3 w-3 mr-1" /> Limpar
+              </Button>
+            </div>
+          )}
           <div className="flex items-center gap-3 mb-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
