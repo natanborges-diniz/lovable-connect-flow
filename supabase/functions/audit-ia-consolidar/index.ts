@@ -94,6 +94,7 @@ SHAPE DAS AÇÕES (escolha UM tipo por ação):
   { "tipo": "ajustar_template","vetor": "C",  "alvo_ref": "<alias|template>","titulo": "...", "descricao": "...", "sugestao": "..." }
   { "tipo": "ajustar_bot_fluxo","vetor": "E", "alvo_ref": "<chave_fluxo>",   "titulo": "...", "descricao": "...", "sugestao": "..." }
   { "tipo": "ajustar_config",  "vetor": "F",  "alvo_ref": "<chave_app_config>","titulo": "...", "descricao": "...", "sugestao": "..." }
+  { "tipo": "ajustar_mensagem_fixa", "vetor": "G", "alvo_ref": "<chave_mensagem>", "titulo": "...", "descricao": "...", "sugestao": "<novo_texto_com_placeholders>" }
   { "tipo": "tarefa_ti",       "vetor": "D",  "alvo_ref": "<arquivo/tool>",  "titulo": "...", "descricao": "..." }
 
 Retorne JSON estrito: {"grupos":[{"titulo":"...","descricao":"...","severidade":"critical|warn|info","auditoria_ids":["uuid"],"acoes":[...]}]}`;
