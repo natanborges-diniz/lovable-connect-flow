@@ -1171,6 +1171,51 @@ export type Database = {
           },
         ]
       }
+      ia_auditorias_grupos: {
+        Row: {
+          acoes_propostas: Json
+          applied_at: string | null
+          auditoria_ids: string[]
+          created_at: string
+          descricao: string | null
+          id: string
+          ignorado_motivo: string | null
+          run_id: string
+          severidade: string
+          status: string
+          titulo: string
+          updated_at: string
+        }
+        Insert: {
+          acoes_propostas?: Json
+          applied_at?: string | null
+          auditoria_ids?: string[]
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          ignorado_motivo?: string | null
+          run_id: string
+          severidade?: string
+          status?: string
+          titulo: string
+          updated_at?: string
+        }
+        Update: {
+          acoes_propostas?: Json
+          applied_at?: string | null
+          auditoria_ids?: string[]
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          ignorado_motivo?: string | null
+          run_id?: string
+          severidade?: string
+          status?: string
+          titulo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ia_auditorias_runs: {
         Row: {
           amostra_limpos_pct: number

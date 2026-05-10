@@ -1,52 +1,82 @@
 ## Objetivo
 
-Na visualização do chat de Atendimentos, quando uma mensagem outbound for um template (`conteudo` salvo como `[Template: NOME] Params: v1, v2, ...`), exibir o **texto final que o cliente recebeu** — exatamente como ele leu no WhatsApp — em vez da string técnica.
+Mudar o fluxo de correção da Auditoria IA: em vez de aprovar conversa-por-conversa (que gera regras/exemplos duplicados), o sistema **agrega os achados de toda a run em "problemas consolidados"** e o admin confirma a correção **uma única vez por problema**.
 
-Mudança puramente de UI/apresentação. Nenhuma alteração no envio, nas Edge Functions, no banco ou no formato armazenado.
+## Como vai funcionar (visão do usuário)
 
-## Comportamento
+Ao abrir uma run de auditoria, o admin verá duas abas:
 
-Antes (hoje):
+1. **Problemas consolidados** (default) — lista curta agrupada por tema. Cada item mostra:
+   - Título do problema (ex.: "IA cita preço de Kodak")
+   - Severidade dominante e nº de conversas afetadas
+   - Diagnóstico unificado + correção proposta (1 ou mais ações: regra, exemplo, diretriz, tarefa TI)
+   - Botões **Aplicar correção** / **Ignorar** / **Ver conversas afetadas**
+2. **Por conversa** (modo atual, mantido para drill-down)
+
+Aplicar a correção marca **todas as auditorias do grupo** como `aplicado` de uma só vez, evitando duplicidade.
+
+## Como agrupar (técnico)
+
+Novo edge function `audit-ia-consolidar` (chamado sob demanda quando o admin abre a run, ou ao final do `audit-ia-rodar`):
+
+1. Lê todas as `ia_auditorias` da run com severidade ≥ warn.
+2. Manda para o LLM (Gemini 2.5-pro) um lote com `{id, diagnostico, problemas, flags}` de cada achado e pede:
+   - Agrupar por causa-raiz
+   - Para cada grupo: título, descrição, severidade, lista de `auditoria_ids`, e `acoes_propostas[]` no mesmo formato hoje usado por `audit-ia-aplicar-correcao` (regra_proibida / exemplo / ajuste_prompt / tarefa_ti)
+   - Deduplicar contra `ia_regras_proibidas`, `ia_exemplos`, `ia_instrucoes_prompt` ativas (passar lista resumida no prompt) — não propor nada que já exista.
+3. Persiste em nova tabela `ia_auditorias_grupos`:
+
+```text
+ia_auditorias_grupos
+  id uuid pk
+  run_id uuid
+  titulo text
+  descricao text
+  severidade text
+  auditoria_ids uuid[]
+  acoes_propostas jsonb     -- mesmo schema das ações de hoje
+  status text               -- pendente | aplicado | ignorado
+  ignorado_motivo text
+  applied_at timestamptz
+  created_at timestamptz
 ```
-[Template: retomada_contexto_1] Params: Thalia, seus óculos
-```
 
-Depois:
-```
-┌──────────────────────────────────────────────────────────┐
-│ 📨 Template • retomada_contexto_1                        │
-│ Oi Thalia! Estávamos conversando sobre seus óculos.      │
-│ Ficou com alguma dúvida? Estou aqui pra te ajudar 😊     │
-└──────────────────────────────────────────────────────────┘
-```
+RLS: read autenticado, write service_role (igual `ia_auditorias`).
 
-- Pequeno selo discreto no topo (`📨 Template • <nome>`) deixa claro que foi disparo automático.
-- Corpo: texto do template com `{{1}}`, `{{2}}`, … substituídos pelos params na ordem.
-- Fallback: se o template não existir mais no catálogo ou o parsing falhar, mostra o `conteudo` original (comportamento atual) — nunca quebra.
+## Aplicação consolidada
 
-## Implementação
+Novo edge function `audit-ia-aplicar-grupo`:
 
-1. **Util de parsing/render** (novo `src/lib/whatsapp-template-render.ts`):
-   - `parseTemplateMessage(conteudo)` → `{ name, params } | null` via regex `^\[Template:\s*([^\]]+)\]\s*Params:\s*(.*)$` (split params por vírgula com `trim`).
-   - `renderTemplateBody(body, params)` → substitui `{{1}}..{{N}}` pelos valores; placeholders sem param ficam vazios.
+- Recebe `{ grupo_id }`.
+- Aplica cada ação de `acoes_propostas` **uma única vez** (mesma lógica do `aplicar-correcao` atual, extraída para função compartilhada inline).
+- Cria 1 linha em `ia_auditorias_acoes` por ação aplicada, vinculada à **primeira** auditoria do grupo + `metadata.grupo_id` para rastreio.
+- Atualiza `ia_auditorias_grupos.status = 'aplicado'` e marca todas as `ia_auditorias` do grupo como `status='aplicado'`.
 
-2. **Hook de catálogo** (novo `src/hooks/useWhatsappTemplates.ts`):
-   - `useQuery` com `staleTime` longo (ex.: 5 min) buscando `nome, body` de `whatsapp_templates`.
-   - Retorna `Map<nome, body>` para lookup O(1).
+`audit-ia-ignorar-grupo` análogo (marca grupo + auditorias como `ignorado` com motivo).
 
-3. **Componente de bolha de template** (novo `src/components/atendimentos/TemplateMessageBubble.tsx`):
-   - Recebe `conteudo` e `templates`. Faz parse + render. Renderiza selo + texto. Se parse falhar ou template ausente → renderiza fallback (`<p>{conteudo}</p>`).
+## Frontend
 
-4. **Integração em `src/pages/Atendimentos.tsx`** (linha ~556):
-   - Carregar `useWhatsappTemplates()` no componente.
-   - No render da mensagem, se `m.conteudo?.startsWith("[Template:")` → usa `<TemplateMessageBubble />`; caso contrário, mantém `<p className="whitespace-pre-wrap break-words">{m.conteudo}</p>` atual.
-   - Mantém demais elementos da bolha (timestamps, status, MessageFeedback) intactos.
+`AuditoriaIaCard.tsx` (`RunDetailSheet`):
+
+- Adiciona Tabs "Problemas consolidados" / "Por conversa".
+- Aba consolidada: query em `ia_auditorias_grupos` por `run_id`. Se vazia, botão **"Consolidar achados"** que invoca `audit-ia-consolidar` (loading state).
+- Card por grupo com badge de severidade, contagem de conversas, lista de ações propostas (ícones já existentes), botões Aplicar/Ignorar/Ver conversas.
+- "Ver conversas afetadas" abre lista filtrada (reusa componente atual).
+- Fluxo por conversa permanece para casos pontuais.
+
+## Migration
+
+Criar tabela `ia_auditorias_grupos` com RLS conforme acima. Sem alterações em tabelas existentes.
 
 ## Arquivos
 
-- Criar: `src/lib/whatsapp-template-render.ts`, `src/hooks/useWhatsappTemplates.ts`, `src/components/atendimentos/TemplateMessageBubble.tsx`.
-- Editar: `src/pages/Atendimentos.tsx` (apenas o trecho de render da mensagem).
+- **Novo:** `supabase/functions/audit-ia-consolidar/index.ts`
+- **Novo:** `supabase/functions/audit-ia-aplicar-grupo/index.ts`
+- **Novo:** `supabase/functions/audit-ia-ignorar-grupo/index.ts`
+- **Migration:** tabela `ia_auditorias_grupos` + RLS
+- **Editar:** `src/components/configuracoes/AuditoriaIaCard.tsx` (Tabs + nova lista de grupos)
 
-## Fora do escopo
+## Fora de escopo
 
-- Não altera Edge Functions, cron de recuperação, conteúdo armazenado em `mensagens.conteudo`, ou seleção de template. A confusão semântica entre "remarcação" vs "óculos em geral" continua existindo no envio — fica para a Opção B em outra rodada, se desejar.
+- Não altera o `audit-ia-rodar` (consolidação fica sob demanda; opcional disparar ao final num próximo round).
+- Não mexe em `compile-prompt` — as tabelas de destino (regras/exemplos/instruções) continuam as mesmas.
