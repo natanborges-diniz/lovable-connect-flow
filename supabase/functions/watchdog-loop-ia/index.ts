@@ -63,15 +63,39 @@ function proximaAberturaHumana(): string {
   return "amanhã às 09:00";
 }
 
+// Defaults — sobrescritos por cron_jobs.payload.thresholds (auto-editável via auditoria IA).
+const LOOP_DEFAULTS = {
+  outbound_min_minutos: 5,
+  similaridade_minima: 0.7,
+  lead_silencioso_horas: 2,
+};
+async function loadLoopThresholds(supabase: any) {
+  try {
+    const { data } = await supabase
+      .from("cron_jobs").select("payload")
+      .eq("funcao_alvo", "watchdog-loop-ia").maybeSingle();
+    const t = (data?.payload?.thresholds) || {};
+    return {
+      outbound_min_minutos: Number(t.outbound_min_minutos ?? LOOP_DEFAULTS.outbound_min_minutos),
+      similaridade_minima: Number(t.similaridade_minima ?? LOOP_DEFAULTS.similaridade_minima),
+      lead_silencioso_horas: Number(t.lead_silencioso_horas ?? LOOP_DEFAULTS.lead_silencioso_horas),
+    };
+  } catch { return { ...LOOP_DEFAULTS }; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const TH = await loadLoopThresholds(supabase);
+  const OUTBOUND_MIN_MS = TH.outbound_min_minutos * 60 * 1000;
+  const SIM_MIN = TH.similaridade_minima;
+  const LEAD_SILENCIOSO_H = TH.lead_silencioso_horas;
 
   try {
-    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const fiveMinAgo = new Date(Date.now() - OUTBOUND_MIN_MS).toISOString();
 
     // Fetch open atendimentos in IA mode
     const { data: atendimentos, error: atErr } = await supabase
