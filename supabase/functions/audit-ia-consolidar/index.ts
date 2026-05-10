@@ -105,12 +105,18 @@ Deno.serve(async (req) => {
       .neq("status", "ignorado");
     if (errA) throw errA;
 
+    const trimItem = (p: any) => ({
+      tipo: p?.tipo,
+      severidade: p?.severidade,
+      trecho: typeof p?.trecho === "string" ? p.trecho.slice(0, 200) : undefined,
+      motivo: typeof p?.motivo === "string" ? p.motivo.slice(0, 200) : undefined,
+    });
     const achados = (auditorias || []).filter((a: any) => a.status !== "aplicado").map((a: any) => ({
       id: a.id,
       severidade: a.severidade,
-      diagnostico: (a.diagnostico || "").slice(0, 800),
-      problemas: a.problemas || [],
-      flags: a.flags_heuristicos || [],
+      diagnostico: (a.diagnostico || "").slice(0, 400),
+      problemas: (Array.isArray(a.problemas) ? a.problemas : []).slice(0, 5).map(trimItem),
+      flags: (Array.isArray(a.flags_heuristicos) ? a.flags_heuristicos : []).slice(0, 5).map(trimItem),
     }));
 
     if (achados.length === 0) {
