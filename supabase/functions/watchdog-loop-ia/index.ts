@@ -133,7 +133,7 @@ serve(async (req) => {
       if (last.direcao !== "outbound") continue;
       // Older than 5 min
       const lastMs = new Date(last.created_at).getTime();
-      if (Date.now() - lastMs < 5 * 60 * 1000) continue;
+      if (Date.now() - lastMs < OUTBOUND_MIN_MS) continue;
       // Skip if message is from a human operator (only loop on IA-generated outbound)
       const sender = String(last.remetente_nome || "").toLowerCase();
       if (sender && !["assistente ia", "sistema", "recuperação", "bot lojas"].includes(sender.trim())) {
