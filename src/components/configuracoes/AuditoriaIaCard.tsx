@@ -400,6 +400,19 @@ function GruposTab({ runId }: { runId: string }) {
         <GrupoCard key={g.id} grupo={g} onChanged={() => { refetch(); qc.invalidateQueries({ queryKey: ["ia_auditorias", runId] }); }} />
       ))}
 
+      {aguardandoCodigo.length > 0 && (
+        <details className="mt-4" open>
+          <summary className="text-xs font-medium text-amber-700 dark:text-amber-400 cursor-pointer">
+            {aguardandoCodigo.length} grupo(s) aguardando deploy de código (TI)
+          </summary>
+          <div className="space-y-2 mt-2">
+            {aguardandoCodigo.map((g) => (
+              <GrupoCard key={g.id} grupo={g} onChanged={refetch} />
+            ))}
+          </div>
+        </details>
+      )}
+
       {finalizados.length > 0 && (
         <details className="mt-4">
           <summary className="text-xs font-medium text-muted-foreground cursor-pointer">
