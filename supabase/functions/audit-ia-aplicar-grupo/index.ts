@@ -87,6 +87,25 @@ Deno.serve(async (req) => {
             origem: "auditoria", origem_ref: auditoriaRef, ativo: true,
           }).select().single();
           alvoTabela = "ia_instrucoes_prompt"; alvoId = data?.id ?? null;
+        } else if (acao.tipo === "ajustar_mensagem_fixa" && acao.alvo_ref && acao.sugestao) {
+          // Vetor G — atualiza/insere texto editável em ia_mensagens_fixas (auto-aplicável).
+          const chave = String(acao.alvo_ref).trim();
+          const novoTexto = String(acao.sugestao);
+          const { data: existente } = await supabase
+            .from("ia_mensagens_fixas").select("chave").eq("chave", chave).maybeSingle();
+          if (existente) {
+            await supabase.from("ia_mensagens_fixas")
+              .update({ texto: novoTexto, ativo: true })
+              .eq("chave", chave);
+          } else {
+            await supabase.from("ia_mensagens_fixas").insert({
+              chave, texto: novoTexto,
+              descricao: acao.descricao || null,
+              ativo: true,
+            });
+          }
+          alvoTabela = "ia_mensagens_fixas"; alvoId = chave;
+          payload = { chave, texto: novoTexto };
         } else if (TAREFA_TIPOS[acao.tipo]) {
           // Vetores B/C/D/E/F → cria tarefa estruturada (não aplica direto, exige revisão humana)
           const cfg = TAREFA_TIPOS[acao.tipo];
