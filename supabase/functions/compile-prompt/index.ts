@@ -109,7 +109,15 @@ ${exemplos.length > 0
 
 ${feedbacks.length > 0
   ? feedbacks.map((f: any) => `- Erro: ${f.motivo || "não especificado"} → Correto: ${f.resposta_corrigida}`).join("\n")
-  : "(nenhuma correção cadastrada)"}`;
+  : "(nenhuma correção cadastrada)"}
+
+## INSTRUÇÕES OPERACIONAIS DA AUDITORIA (${instrucoes.length} ativas)
+
+Estas instruções vieram da auditoria de conversas reais. Integre-as na seção de regras do prompt como bullets em "Diretrizes operacionais aprendidas". Mantenha o texto literal de cada instrução.
+
+${instrucoes.length > 0
+  ? instrucoes.map((i: any) => `- [${i.categoria}] ${i.instrucao}`).join("\n")
+  : "(nenhuma instrução cadastrada)"}`;
 
     // 3. Call AI to compile
     console.log(`[COMPILE] Starting compilation: prompt=${promptBase.length}ch, exemplos=${exemplos.length}, feedbacks=${feedbacks.length}`);
