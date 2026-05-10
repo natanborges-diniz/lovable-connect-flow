@@ -446,15 +446,16 @@ function GrupoCard({ grupo, onChanged }: { grupo: any; onChanged: () => void }) 
       {acoes.length > 0 && (
         <div className="space-y-1.5 pt-1">
           <p className="text-xs font-semibold text-muted-foreground">CORREÇÕES PROPOSTAS</p>
-          {acoes.map((ac: any, i: number) => {
+          {acoes.map((raw: any, i: number) => {
+            const ac = normalizeAcao(raw);
             const Icon = ACAO_ICON[ac.tipo] || FileText;
             return (
               <div key={i} className="flex items-start gap-2 text-xs bg-muted/40 rounded p-2">
                 <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="font-medium">{ACAO_LABEL[ac.tipo] || ac.tipo}</div>
-                  <div className="text-muted-foreground line-clamp-2">
-                    {ac.texto || ac.instrucao || ac.pergunta || ac.titulo || ""}
+                  <div className="text-muted-foreground line-clamp-3 whitespace-pre-wrap">
+                    {ac.texto || "(sem descrição)"}
                   </div>
                 </div>
               </div>
