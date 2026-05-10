@@ -138,6 +138,26 @@ Deno.serve(async (req) => {
           }
           alvoTabela = "ia_mensagens_fixas"; alvoId = null;
           payload = { chave, texto: novoTexto };
+        } else if (acao.tipo === "ajustar_cron" && sanitizeCronPatch(String(acao.alvo_ref || ""), acao.payload_patch)) {
+          // Vetor B — auto-aplica thresholds whitelisted em cron_jobs.payload.thresholds
+          const alvo = String(acao.alvo_ref);
+          const cleanPatch = sanitizeCronPatch(alvo, acao.payload_patch)!;
+          const { data: row } = await supabase
+            .from("cron_jobs").select("id, payload").eq("funcao_alvo", alvo).maybeSingle();
+          if (row) {
+            const merged = {
+              ...(row.payload || {}),
+              thresholds: { ...((row.payload || {}).thresholds || {}), ...cleanPatch },
+            };
+            await supabase.from("cron_jobs")
+              .update({ payload: merged, updated_at: new Date().toISOString() })
+              .eq("id", row.id);
+            alvoTabela = "cron_jobs"; alvoId = row.id;
+            payload = { funcao_alvo: alvo, thresholds_aplicados: cleanPatch };
+          } else {
+            console.warn("[aplicar-grupo] cron_jobs não encontrado para", alvo);
+            continue;
+          }
         } else if (TAREFA_TIPOS[acao.tipo]) {
           // Vetores B/C/D/E/F → cria tarefa estruturada (não aplica direto, exige revisão humana)
           const cfg = TAREFA_TIPOS[acao.tipo];
