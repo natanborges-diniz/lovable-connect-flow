@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
               ativo: true,
             });
           }
-          alvoTabela = "ia_mensagens_fixas"; alvoId = chave;
+          alvoTabela = "ia_mensagens_fixas"; alvoId = null;
           payload = { chave, texto: novoTexto };
         } else if (TAREFA_TIPOS[acao.tipo]) {
           // Vetores B/C/D/E/F → cria tarefa estruturada (não aplica direto, exige revisão humana)
