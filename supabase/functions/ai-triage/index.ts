@@ -436,10 +436,34 @@ async function loadOsKeywords(client: any): Promise<string[]> {
   _osKeywordsExpire = Date.now() + 60_000;
   return _osKeywordsCache;
 }
+// Regex "núcleo" do intent (sempre ativas, independem das keywords editáveis).
+// Cobrem paráfrases comuns: "quanto tempo fica pronto", "ia/vou retirar",
+// "fiz pedido online esperando", "tô aguardando meu pedido", "pedido atrasado".
+const OS_INTENT_CORE_REGEX: RegExp[] = [
+  // "OS 12345" / "OS #45123"
+  /\bos\s*[#nº]?\s*\d{3,8}\b/i,
+  // tempo/prazo + ficar pronto/demorar/chegar
+  /\b(quanto|qual)\s+(o\s+)?(tempo|prazo)\b[\s\S]{0,40}\b(pronto|fica|demora|leva|chega|chegar|entrega|entregar)\b/i,
+  // "(meu/minha) pedido/encomenda/compra/os" + status/retirar/aguardando/atrasado
+  /\b(meu|minha|o|a)?\s*(pedido|encomenda|compra|os|[oó]culos|len(te|tes))\b[\s\S]{0,40}\b(pronto|chega|chegou|atras|aguardando|esperando|status|previs|retirar|retirada|ficou|fica)\b/i,
+  // "ia/vou/queria/gostaria + retirar"
+  /\b(ia|vou|queria|gostaria|pretendo|pra|para)\b[\s\S]{0,20}\bretir(ar|ada)\b/i,
+  // "fiz/comprei/encomendei + pedido/compra/oculos/lente + online/loja/site/aguardando/esperando/urgência"
+  /\b(fiz|comprei|encomendei|pedi)\b[\s\S]{0,40}\b(pedido|compra|[oó]culos|len(te|tes))\b[\s\S]{0,40}\b(online|loja|site|aguardando|esperando|urg[eê]ncia|h[aá] dias|atras)\b/i,
+  // "esperando/aguardando + pedido/encomenda/óculos/chegada/entrega"
+  /\b(esperando|aguardando|t[oôó]\s+esperando)\b[\s\S]{0,30}\b(pedido|encomenda|[oó]culos|len(te|tes)|chegada|entrega)\b/i,
+  // "pedido (está) atrasado/demorando"
+  /\b(pedido|encomenda|[oó]culos|compra)\b[\s\S]{0,20}\b(atras|demor(a|ando)|n[aã]o chegou|ainda n[aã]o)\b/i,
+];
+
 function matchesConsultaOs(msg: string, keywords: string[]): boolean {
+  if (!msg) return false;
   const n = norm(msg);
-  // Sinal extra: "OS 12345" (número de 4-7 dígitos perto da palavra OS)
-  if (/\bos\s*[#nº]?\s*\d{3,8}\b/i.test(msg)) return true;
+  // 1) Regex "núcleo" — paráfrases comuns
+  for (const re of OS_INTENT_CORE_REGEX) {
+    if (re.test(msg) || re.test(n)) return true;
+  }
+  // 2) Keywords editáveis pela auditoria (substring case/accent-insensitive)
   return keywords.some((k) => k && n.includes(k));
 }
 
