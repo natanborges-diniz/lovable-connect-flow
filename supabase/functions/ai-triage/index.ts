@@ -2143,7 +2143,8 @@ serve(async (req) => {
     // ── 2. PRE-LLM ROUTER: keyword escalation ──
     if (matchesEscalation(currentMsg)) {
       console.log("[ROUTER] Escalation keyword detected");
-      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword");
+      const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword", _np);
     }
 
     // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
