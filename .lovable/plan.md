@@ -1,60 +1,77 @@
-## Diagnóstico
+## Triagem de Consulta de OS — escalada direta para humano
 
-O projeto **Infoco Optical Business** (`supabase/functions/payment-links/index.ts`, linhas ~370-393) já envia para o nosso `payment-webhook` do Atrium o payload completo no momento da confirmação:
+Objetivo: quando o cliente pergunta sobre **status do pedido** ("óculos pronto?", "posso retirar?", "cadê meu óculos?", "número da OS"), a IA **NÃO pode pedir receita** nem oferecer orçamento. Deve reconhecer o intent e **encaminhar imediatamente para um atendente humano**, com contexto.
 
-```
-payment_link_id, status, tid, nsu, authorization,
-dateTime, date, time, valor, installments,
-cardBin, last4, brand, brandName, kind,
-origem_ref, origem
-```
+### 1. Detector de intent `consulta_os` (em `ai-triage`)
 
-Ou seja, **bandeira (`brand`/`brandName`), autorização da adquirente (`authorization`), data/hora oficial da Rede (`dateTime`/`date`/`time`), BIN do cartão (`cardBin`) e tipo (`kind` — crédito/débito)** já chegam até nós.
+Antes do LLM rodar, um detector determinístico por regex/keywords classifica a mensagem como `consulta_os` quando aparecem sinais como:
 
-No nosso `supabase/functions/payment-webhook/index.ts` hoje só consumimos:
-`tid, authorization, valor, origem_ref, nsu, last4, installments, descricao, nome_cliente`.
+- "óculos pronto", "ficou pronto", "está pronto", "tá pronto"
+- "posso retirar", "já chegou", "chegou meu", "quando fica pronto", "quando chega"
+- "cadê meu pedido", "onde está meu pedido", "status do pedido"
+- "minha OS", "ordem de serviço", "número da OS", "OS 12345"
 
-Resultado: bandeira, kind, cardBin e dateTime oficial são descartados — não vão para `pagamentos_link`, não vão para `solicitacoes.metadata` e não aparecem no comprovante "picote" entregue à loja. O `authorization` até é lido, mas só usamos quando a Infoco envia explicitamente (estava OK).
+Lista editável em `configuracoes_ia` (chave `os_intent_keywords`) — auditoria pode tunar sem redeploy.
 
-## O que mudar (somente `supabase/functions/payment-webhook/index.ts`)
+### 2. Bloqueios obrigatórios quando `consulta_os = true`
 
-1. **Ler os novos campos** do payload:
-   - `brand` / `brandName` → bandeira (Visa, Master, Elo…)
-   - `cardBin` → BIN
-   - `kind` → `credit` / `debit`
-   - `dateTime` (ISO com offset -03:00), `date`, `time` → momento oficial da Rede
-   - manter compatibilidade: se Infoco não enviar, cair no `now()` atual
+Aplicados **antes** de chamar o LLM (hard guards, não confiam no modelo):
 
-2. **Espelhar em `pagamentos_link`** (upsert já existente):
-   - Adicionar ao `metadata` do upsert: `brand`, `card_bin`, `kind`, `rede_datetime`, `rede_date`, `rede_time`.
-   - `pago_at` passa a usar `dateTime` quando vier; senão `now()` (fallback).
-   - Não precisa de migração se mantivermos tudo dentro de `metadata` (jsonb). Se quisermos colunas dedicadas (`brand`, `kind`, `card_bin`), aí sim faz migração — proponho começar só por `metadata` para destravar rápido.
+- **Proíbe** as tools `interpretar_receita`, `consultar_lentes_estimativa`, `consultar_lentes_contato` e `agendar_visita`
+- **Bloqueia** qualquer texto que peça receita, foto, grau, ADD, CIL, esférico
+- **Bloqueia** orçamento — não pode citar preço, faixa, marca de lente
+- Anti-loop: se a IA já pediu receita 1x antes e a próxima mensagem do cliente bater nesse intent, força a escalada imediatamente
 
-3. **Espelhar em `solicitacoes.metadata`**:
-   - Acrescentar `brand`, `card_bin`, `kind`, `rede_datetime` no `updatedMeta`.
+### 3. Resposta padrão e escalada
 
-4. **Comprovante "picote" (loja via app Atrium Messenger)**:
-   - Linha do cartão passa de `Cartão: **** 1234 | 3x` para
-     `💳 Visa Crédito **** 1234 — 3x` (quando bandeira e kind existirem).
-   - Trocar `dateStr/timeStr` (que hoje usam `new Date()` local) por `date`/`time` vindos da Rede quando presentes — assim o horário no comprovante bate com o horário oficial da adquirente, não com o instante em que nosso webhook foi processado.
-   - Adicionar linha `🔐 Autorização: <authorizationCode>` (já temos `authorization` mas não é exibido hoje).
+A IA responde **uma única mensagem fixa** (editável em `ia_mensagens_fixas`, chave `os_escalada`):
 
-5. **`eventos_crm.pagamento_confirmado.metadata`**:
-   - Incluir `brand`, `kind`, `card_bin`, `rede_datetime` para auditoria e relatórios futuros.
+> "Claro! Para consultar o status do seu pedido vou te passar para um atendente da loja agora. Pode me confirmar **seu nome completo** e, se tiver em mãos, o **número da OS** (vem no comprovante de compra). Já estou chamando alguém pra te atender."
 
-## O que NÃO muda
+Em seguida, **automaticamente**:
+- Atendimento muda para `modo='humano'`
+- Card vai para coluna **"Consulta de OS"** (nova) no pipeline correspondente
+- Disparo de push/notificação aos usuários da loja vinculada ao contato (ou setor Atendimento Corporativo se não houver loja)
+- `eventos_crm` registra `tipo='consulta_os'` com a mensagem original do cliente
 
-- Sem alterações em `pipeline-automations`, em `pagamentos_link_eventos`, no espelho de tag `comprador`, ou no fluxo de coluna ("Link Pago" / "Cancelado").
-- Sem alterações no Infoco OB — ele já envia tudo.
-- Sem migração de banco nesta primeira etapa (tudo cabe em `metadata` jsonb).
+Fora do horário humano (Seg-Sex 09-18 / Sáb 08-12 SP), copy adicional informa quando a loja retorna — usa o mesmo padrão já existente do horário comercial humano.
 
-## Validação
+### 4. Roteamento no CRM
 
-1. Disparar um pagamento de teste no Infoco OB com link originado em `ATRIUM_INFOCO`.
-2. Conferir `pagamentos_link.metadata` na tela `/financeiro/pagamentos` (drawer) — deve mostrar bandeira e autorização.
-3. Conferir comentário automático do "Sistema Financeiro" no card da solicitação — deve aparecer bandeira + autorização + horário Rede.
-4. Conferir push/notificação para a loja com o novo formato.
+- **Coluna nova "Consulta de OS"** criada via migração, no setor **Atendimento Corporativo** (ou no setor Lojas, conforme decisão) — ordem após "Pós-Venda"
+- Card é movido para essa coluna no momento da escalada, com `metadata.intent='consulta_os'` e a frase original do cliente
+- Operador da loja resolve usando seu próprio sistema (ERP) e responde pelo Atrium normalmente
 
-## Extensão opcional (para depois, se quiser)
+### 5. Treinamento defensivo (memória de longo prazo)
 
-Promover `brand`, `kind`, `card_bin`, `authorization_code` (já existe), `rede_datetime` de `metadata` para colunas dedicadas em `pagamentos_link`, permitindo filtros/relatórios na tela `/financeiro/pagamentos` (ex.: "todas as vendas no crédito Visa do mês"). Isso requer migração simples + ajuste de `PagamentosLink.tsx`.
+- 3 exemplos novos em `ia_exemplos` categoria `consulta_os` ensinando: cliente pergunta status → IA escala, NÃO pede receita
+- 1 regra em `ia_regras_proibidas` categoria `comportamento`: "Quando cliente pergunta sobre status do pedido/OS/óculos pronto, JAMAIS peça receita, foto ou ofereça orçamento. Sempre escale para humano."
+- Compilador de prompt (`compile-prompt`) já injeta automaticamente essas duas fontes — basta inserir as linhas via migração
+
+### 6. Por que essa abordagem (sem integrar com ERP agora)
+
+- Resolve **imediatamente** o problema relatado (IA confundindo consulta com orçamento e pedindo receita)
+- Zero dependência externa — não precisa do endpoint do Infoco OB nem do Firebird Bridge funcionando
+- Operacionalmente seguro: humano tem acesso ao ERP, IA não inventa prazo nem etapa
+- Se no futuro quiser automatizar a resposta consultando o ERP, dá pra plugar uma tool `consultar_status_os` sem desfazer nada
+
+---
+
+### Resumo técnico
+
+**Arquivos editados:**
+- `supabase/functions/ai-triage/index.ts` — detector `consulta_os`, hard guards (bloquear tools de receita/orçamento), escalada automática
+- `supabase/functions/compile-prompt/index.ts` — sem mudança (já consome `ia_exemplos` + `ia_regras_proibidas`)
+
+**Migração SQL:**
+- Inserir 1 linha em `pipeline_colunas` ("Consulta de OS") no setor Atendimento Corporativo
+- Inserir chave `os_intent_keywords` em `configuracoes_ia` (lista JSON de regex/keywords)
+- Inserir chave `os_escalada` em `ia_mensagens_fixas` (mensagem padrão)
+- Inserir 3 linhas em `ia_exemplos` (categoria `consulta_os`)
+- Inserir 1 linha em `ia_regras_proibidas` (proibir pedir receita em consulta_os)
+
+**Sem secrets novos.** **Sem dependência cross-project.**
+
+**Validação:**
+- Simular 5 frases de teste no `ai-triage` ("meu óculos tá pronto?", "qual número OS minha?", "quando posso retirar?", etc.) e conferir que escalou para humano e não pediu receita
+- Conferir card aparece na coluna "Consulta de OS" e push chegou aos usuários da loja
