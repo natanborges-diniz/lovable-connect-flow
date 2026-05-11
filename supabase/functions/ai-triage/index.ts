@@ -453,7 +453,9 @@ const OS_INTENT_CORE_REGEX: RegExp[] = [
   // "esperando/aguardando + pedido/encomenda/óculos/chegada/entrega"
   /\b(esperando|aguardando|t[oôó]\s+esperando)\b[\s\S]{0,30}\b(pedido|encomenda|[oó]culos|len(te|tes)|chegada|entrega)\b/i,
   // "pedido (está) atrasado/demorando"
-  /\b(pedido|encomenda|[oó]culos|compra)\b[\s\S]{0,20}\b(atras|demor(a|ando)|n[aã]o chegou|ainda n[aã]o)\b/i,
+  /\b(pedido|encomenda|[oó]culos|compra)\b[\s\S]{0,20}\b(atras(ado|ada)?|demor(a|ando|ou)|n[aã]o chegou|ainda n[aã]o)\b/i,
+  // "cad[eê] (meu) pedido/oculos/encomenda"
+  /\bcad[eê]\b[\s\S]{0,20}\b(meu|minha|o|a)?\s*(pedido|encomenda|[oó]culos|compra|os)\b/i,
 ];
 
 function matchesConsultaOs(msg: string, keywords: string[]): boolean {
