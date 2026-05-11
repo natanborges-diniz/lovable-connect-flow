@@ -160,15 +160,22 @@ serve(async (req) => {
         const { data: contato } = await supabase
           .from("contatos").select("id, nome, telefone").eq("id", solicitacao.contato_id).single();
 
-        const dateStr = now.toLocaleDateString("pt-BR");
-        const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const dateStr = redeDate
+          ? redeDate.split("-").reverse().join("/")
+          : now.toLocaleDateString("pt-BR");
+        const timeStr = redeTime
+          ? redeTime.slice(0, 5)
+          : now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
         const clienteName = nome_cliente || "N/A";
         const valorFmt = valor ? `R$ ${Number(valor).toFixed(2)}` : "N/A";
         const descFmt = descricao || "";
         const nsuFmt = nsu || "N/A";
         const tidFmt = tid || "N/A";
+        const authFmt = authorization || "N/A";
         const last4Fmt = last4 || "****";
         const installmentsFmt = installments || 1;
+        const kindLabel = kind === "credit" ? "Crédito" : kind === "debit" ? "Débito" : "";
+        const cartaoLinha = [bandeira, kindLabel].filter(Boolean).join(" ").trim();
 
         let receiptMsg = `📩 *Comprovante de pagamento — ${clienteName}*\n\n`;
         receiptMsg += `✅ *Pagamento Confirmado!*\n`;
@@ -179,8 +186,9 @@ serve(async (req) => {
         receiptMsg += `   ↳ Use para baixa no sistema\n`;
         receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
         receiptMsg += `🆔 TID: ${tidFmt}\n`;
+        receiptMsg += `🔐 Autorização: ${authFmt}\n`;
         receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
-        receiptMsg += `💳 Cartão: **** ${last4Fmt} | ${installmentsFmt}x`;
+        receiptMsg += `💳 ${cartaoLinha ? `${cartaoLinha} ` : ""}**** ${last4Fmt} — ${installmentsFmt}x`;
 
         const lojaNome = contato?.nome || "Loja";
         const { data: dests } = await supabase
