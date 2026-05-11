@@ -1106,18 +1106,46 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
 
   const handleSend = async () => {
     const texto = msgText.trim();
-    if (!texto) return;
+    if (!texto && !attachment) return;
 
     try {
       if (msgDirecao === "outbound" && atendimento?.canal === "whatsapp") {
         setSendingOutbound(true);
+
+        let mediaUrl: string | undefined;
+        let mimeType: string | undefined;
+        if (attachment) {
+          setUploadingAttachment(true);
+          const { data: userData } = await supabase.auth.getUser();
+          const uid = userData?.user?.id;
+          if (!uid) throw new Error("Sessão expirada. Faça login novamente.");
+          const ext = attachment.name.split(".").pop()?.toLowerCase() || "jpg";
+          const path = `${uid}/atendimentos/${atendimentoId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("mensagens-anexos")
+            .upload(path, attachment, { contentType: attachment.type, upsert: false });
+          setUploadingAttachment(false);
+          if (upErr) throw new Error("Falha no upload: " + upErr.message);
+          const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+          mediaUrl = pub.publicUrl;
+          mimeType = attachment.type;
+        }
+
         const { data, error } = await supabase.functions.invoke("send-whatsapp", {
-          body: { atendimento_id: atendimentoId, texto, remetente_nome: "Operador" },
+          body: {
+            atendimento_id: atendimentoId,
+            ...(mediaUrl ? { media_url: mediaUrl, mime_type: mimeType, caption: texto || undefined } : { texto }),
+            remetente_nome: "Operador",
+          },
         });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        toast.success("Mensagem enviada ao WhatsApp");
+        toast.success(mediaUrl ? "Imagem enviada ao WhatsApp" : "Mensagem enviada ao WhatsApp");
       } else {
+        if (!texto) {
+          toast.error("Notas internas não suportam anexo. Digite um texto.");
+          return;
+        }
         await createMensagem.mutateAsync({
           atendimento_id: atendimentoId,
           conteudo: texto,
@@ -1126,10 +1154,12 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
         });
       }
       setMsgText("");
+      clearAttachment();
     } catch (e: any) {
       toast.error("Falha ao enviar: " + (e?.message || "Erro desconhecido"));
     } finally {
       setSendingOutbound(false);
+      setUploadingAttachment(false);
     }
   };
 
