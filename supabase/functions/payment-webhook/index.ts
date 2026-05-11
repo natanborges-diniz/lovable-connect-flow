@@ -88,6 +88,12 @@ serve(async (req) => {
       installments: installments || null,
       descricao: descricao || null,
       nome_cliente: nome_cliente || null,
+      brand: bandeira,
+      card_bin: cardBin || null,
+      kind: kind || null,
+      rede_datetime: redeDateTime,
+      rede_date: redeDate,
+      rede_time: redeTime,
       payment_status: status,
       payment_confirmed_at: now.toISOString(),
     };
