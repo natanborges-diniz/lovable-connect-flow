@@ -3402,13 +3402,13 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 - Se as últimas mensagens forem vagas e nenhuma intenção for clara, responda CURTO e contextual ("Voltei pra te ajudar — em que posso continuar?") em vez de escalar.${pendingIntent ? `\n\nINTENÇÃO PENDENTE DETECTADA: ${pendingIntent.intent.toUpperCase()} — ${pendingIntent.hint}` : ""}`,
           }]
         : []),
-      ...(hasRecentUnparsedPrescriptionImage && !hasValidReceitas
+      ...(hasRecentUnparsedPrescriptionImage && !hasValidReceitas && !isConsultaOsActive
         ? [{
             role: "system",
             content: "[SISTEMA: PRIORIDADE MÁXIMA — RECEITA PENDENTE] O cliente enviou uma imagem (provável receita) nas últimas mensagens e ela AINDA NÃO foi interpretada com sucesso (RECEITAS JÁ INTERPRETADAS está vazio ou inválido). REGRAS: 1) Você DEVE chamar a tool interpretar_receita usando a imagem mais recente entregue no histórico, ANTES de qualquer outra ação (não escale, não peça reenvio, não responda genericamente). 2) Se a imagem foi entregue ao modelo, use-a — mesmo que a última mensagem do cliente seja curta ('ok', 'então?', 'cadê'). 3) Só peça reenvio se o sistema avisar explicitamente que a imagem NÃO foi entregue. 4) Só escale para humano se a imagem estiver claramente ilegível APÓS a tentativa de interpretação.]",
           }]
         : []),
-      ...(hasPendingNewPrescriptionImage
+      ...(hasPendingNewPrescriptionImage && !isConsultaOsActive
         ? [{
             role: "system",
             content: "[SISTEMA: NOVA RECEITA PENDENTE] O cliente declarou ter NOVA RECEITA e enviou uma imagem mais recente que a última receita salva. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA com a imagem mais recente do histórico — NÃO use consultar_lentes/consultar_lentes_contato com a receita antiga (ela está desatualizada). Após interpretar, peça confirmação dos novos valores ao cliente antes de cotar. Se a imagem estiver ilegível APÓS a tentativa de OCR, peça reenvio uma única vez.",
