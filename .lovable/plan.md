@@ -1,77 +1,78 @@
-## Triagem de Consulta de OS — escalada direta para humano
+## Por que ainda pede receita
 
-Objetivo: quando o cliente pergunta sobre **status do pedido** ("óculos pronto?", "posso retirar?", "cadê meu óculos?", "número da OS"), a IA **NÃO pode pedir receita** nem oferecer orçamento. Deve reconhecer o intent e **encaminhar imediatamente para um atendente humano**, com contexto.
+Hoje o detector `consulta_os` (em `ai-triage`) só dispara quando a frase do cliente bate **substring exata** com uma das keywords salvas em `configuracoes_ia.os_intent_keywords` (ou `OS <número>`).
 
-### 1. Detector de intent `consulta_os` (em `ai-triage`)
+Olhando o tráfego das últimas 24h, ele falhou em frases reais como:
 
-Antes do LLM rodar, um detector determinístico por regex/keywords classifica a mensagem como `consulta_os` quando aparecem sinais como:
+- "Quanto tempo fica pronto a lente?" → caiu no LLM e virou pitch de prazo + agendamento
+- "Ia pedir para retirar" → caiu no fallback de imagem e respondeu "Recebi sua receita 👀 Já estou analisando..."
+- "eu fiz um pedido pela loja oticas diniz online" / "e estou esperando o pedido com urgencia" → atendimento estava em `modo=ponte`, o router de OS nem rodou
 
-- "óculos pronto", "ficou pronto", "está pronto", "tá pronto"
-- "posso retirar", "já chegou", "chegou meu", "quando fica pronto", "quando chega"
-- "cadê meu pedido", "onde está meu pedido", "status do pedido"
-- "minha OS", "ordem de serviço", "número da OS", "OS 12345"
+Causas:
 
-Lista editável em `configuracoes_ia` (chave `os_intent_keywords`) — auditoria pode tunar sem redeploy.
+1. Frases parafraseadas ("quanto tempo fica pronto a lente", "ia pedir para retirar", "fiz um pedido online e estou esperando") não estão na lista de substrings.
+2. O router de OS hoje só roda para `modo=ia` (`if (!isHibrido)` impede híbrido, e `modo=humano/ponte` já sai do triage antes). Quando o operador devolve para IA em híbrido, ou quando a conversa está em ponte, o intent some.
+3. Em paralelo, três caminhos do `ai-triage` ainda forçam fluxo de receita:
+   - `precisaForcarInterpretacao` (re-dispara `interpretar_receita` em qualquer imagem nova)
+   - `deterministicIntentFallback` para imagens (responde "Recebi sua receita…")
+   - hint "PRIORIDADE MÁXIMA — RECEITA PENDENTE" injetado no prompt
+   Nenhum deles verifica se o intent atual é `consulta_os` — então, se uma foto entrar junto da pergunta de pedido, a IA volta a pedir receita.
 
-### 2. Bloqueios obrigatórios quando `consulta_os = true`
+## O que muda
 
-Aplicados **antes** de chamar o LLM (hard guards, não confiam no modelo):
+### 1. Detector mais robusto (regex + sinônimos)
 
-- **Proíbe** as tools `interpretar_receita`, `consultar_lentes_estimativa`, `consultar_lentes_contato` e `agendar_visita`
-- **Bloqueia** qualquer texto que peça receita, foto, grau, ADD, CIL, esférico
-- **Bloqueia** orçamento — não pode citar preço, faixa, marca de lente
-- Anti-loop: se a IA já pediu receita 1x antes e a próxima mensagem do cliente bater nesse intent, força a escalada imediatamente
+Substituir o `matchesConsultaOs` por uma combinação de:
 
-### 3. Resposta padrão e escalada
+- Lista de keywords atual (mantida em `configuracoes_ia.os_intent_keywords`, editável)
+- **Conjunto de regex** que cobre o padrão "verbo + pedido/encomenda/óculos/lente + tempo/status/retirada", por exemplo:
+  - `\b(quanto|qual)\s+(tempo|prazo)\b.*\b(pronto|fica|demora|leva|chega)\b`
+  - `\b(meu|minha)?\s*(pedido|encomenda|compra|os)\b.*\b(pronto|chega|chegou|atras|aguardando|esperando|status|previs|retirar|retirada)\b`
+  - `\b(ia|vou|gostaria|queria|pra|para)\b.*\bretirar\b`
+  - `\b(fiz|comprei|encomendei)\b.*\b(pedido|compra|oculos|óculos|lente)\b.*\b(online|loja|site|aguardando|esperando|urg[eê]ncia)\b`
+  - `\b(esperando|aguardando)\b.*\b(pedido|encomenda|oculos|óculos|chegada|entrega)\b`
 
-A IA responde **uma única mensagem fixa** (editável em `ia_mensagens_fixas`, chave `os_escalada`):
+As regex ficam **codadas** (não editáveis pelo auditor) porque são o "núcleo" do intent; a lista de keywords continua sendo a porta para auditoria adicionar variações novas sem deploy.
 
-> "Claro! Para consultar o status do seu pedido vou te passar para um atendente da loja agora. Pode me confirmar **seu nome completo** e, se tiver em mãos, o **número da OS** (vem no comprovante de compra). Já estou chamando alguém pra te atender."
+### 2. Rodar o router também em híbrido e ponte
 
-Em seguida, **automaticamente**:
-- Atendimento muda para `modo='humano'`
-- Card vai para coluna **"Consulta de OS"** (nova) no pipeline correspondente
-- Disparo de push/notificação aos usuários da loja vinculada ao contato (ou setor Atendimento Corporativo se não houver loja)
-- `eventos_crm` registra `tipo='consulta_os'` com a mensagem original do cliente
+- Em **híbrido** (`isHibrido=true`): hoje há bypass. Vou remover o bypass apenas para esse intent — se o cliente perguntar pedido/OS, mesmo em híbrido o card volta para `modo=humano` e vai pra coluna "Consulta de OS". Operador continua no comando, só ganha contexto.
+- Em **ponte** (`atendimento.modo === 'ponte'`): hoje o triage faz `return skipped` antes do router. Vou mover a checagem de `consulta_os` para **antes** desse return, e em vez de devolver para IA, registrar `eventos_crm.tipo='consulta_os'` + `metadata.intent='consulta_os'` no atendimento ponte, para o operador da loja ver o badge na conversa. Não envia mensagem automática nesse caso (operador já está respondendo manualmente).
 
-Fora do horário humano (Seg-Sex 09-18 / Sáb 08-12 SP), copy adicional informa quando a loja retorna — usa o mesmo padrão já existente do horário comercial humano.
+### 3. Hard guards que blindam o fluxo de receita
 
-### 4. Roteamento no CRM
+Quando o detector classificar como `consulta_os`, marcar `atendimento.metadata.intent_consulta_os_at = now()` e usar essa flag em três pontos:
 
-- **Coluna nova "Consulta de OS"** criada via migração, no setor **Atendimento Corporativo** (ou no setor Lojas, conforme decisão) — ordem após "Pós-Venda"
-- Card é movido para essa coluna no momento da escalada, com `metadata.intent='consulta_os'` e a frase original do cliente
-- Operador da loja resolve usando seu próprio sistema (ERP) e responde pelo Atrium normalmente
+- `precisaForcarInterpretacao`: retornar `false` se `intent_consulta_os_at` foi setado nos últimos 30 minutos
+- `deterministicIntentFallback` (ramo `isImageContext`): pular o pool "Recebi sua receita…" e responder a mensagem fixa `os_escalada`
+- `compile-prompt` / hint "RECEITA PENDENTE": suprimir esse hint quando `intent_consulta_os_at` recente
 
-### 5. Treinamento defensivo (memória de longo prazo)
+Assim, mesmo se vier foto junto da pergunta, a IA não cai em receita.
 
-- 3 exemplos novos em `ia_exemplos` categoria `consulta_os` ensinando: cliente pergunta status → IA escala, NÃO pede receita
-- 1 regra em `ia_regras_proibidas` categoria `comportamento`: "Quando cliente pergunta sobre status do pedido/OS/óculos pronto, JAMAIS peça receita, foto ou ofereça orçamento. Sempre escale para humano."
-- Compilador de prompt (`compile-prompt`) já injeta automaticamente essas duas fontes — basta inserir as linhas via migração
+### 4. Watchdog editável
 
-### 6. Por que essa abordagem (sem integrar com ERP agora)
+Manter `os_intent_keywords` e mensagem `os_escalada` editáveis pela auditoria, e adicionar 5 novas variações de frase em `ia_exemplos` categoria `consulta_os` cobrindo os casos reais detectados:
 
-- Resolve **imediatamente** o problema relatado (IA confundindo consulta com orçamento e pedindo receita)
-- Zero dependência externa — não precisa do endpoint do Infoco OB nem do Firebird Bridge funcionando
-- Operacionalmente seguro: humano tem acesso ao ERP, IA não inventa prazo nem etapa
-- Se no futuro quiser automatizar a resposta consultando o ERP, dá pra plugar uma tool `consultar_status_os` sem desfazer nada
+- "quanto tempo fica pronto a lente"
+- "ia pedir para retirar"
+- "fiz um pedido online e estou esperando"
+- "tô esperando meu pedido"
+- "meu pedido está atrasado"
+
+### 5. Validação
+
+- Rodar `ai-triage` com 8 mensagens-teste (incluindo os casos reais que falharam) e conferir:
+  - `[ROUTER] Consulta de OS detectada` no log
+  - Evento `consulta_os` criado em `eventos_crm`
+  - Card movido para "Consulta de OS"
+  - Nenhuma chamada a `interpretar_receita` / `consultar_lentes*`
+- Repetir um caso com imagem anexada à mesma mensagem para garantir que o guard contra `precisaForcarInterpretacao` está funcionando.
 
 ---
 
-### Resumo técnico
+### Arquivos tocados
 
-**Arquivos editados:**
-- `supabase/functions/ai-triage/index.ts` — detector `consulta_os`, hard guards (bloquear tools de receita/orçamento), escalada automática
-- `supabase/functions/compile-prompt/index.ts` — sem mudança (já consome `ia_exemplos` + `ia_regras_proibidas`)
+- `supabase/functions/ai-triage/index.ts` — regex set + remoção do bypass de híbrido para o intent + flag `intent_consulta_os_at` + 3 hard guards
+- Migração SQL — inserir 5 novos exemplos em `ia_exemplos` categoria `consulta_os`
 
-**Migração SQL:**
-- Inserir 1 linha em `pipeline_colunas` ("Consulta de OS") no setor Atendimento Corporativo
-- Inserir chave `os_intent_keywords` em `configuracoes_ia` (lista JSON de regex/keywords)
-- Inserir chave `os_escalada` em `ia_mensagens_fixas` (mensagem padrão)
-- Inserir 3 linhas em `ia_exemplos` (categoria `consulta_os`)
-- Inserir 1 linha em `ia_regras_proibidas` (proibir pedir receita em consulta_os)
-
-**Sem secrets novos.** **Sem dependência cross-project.**
-
-**Validação:**
-- Simular 5 frases de teste no `ai-triage` ("meu óculos tá pronto?", "qual número OS minha?", "quando posso retirar?", etc.) e conferir que escalou para humano e não pediu receita
-- Conferir card aparece na coluna "Consulta de OS" e push chegou aos usuários da loja
+**Sem secrets, sem nova tabela, sem dependência cross-project.**
