@@ -2143,7 +2143,8 @@ serve(async (req) => {
     // ── 2. PRE-LLM ROUTER: keyword escalation ──
     if (matchesEscalation(currentMsg)) {
       console.log("[ROUTER] Escalation keyword detected");
-      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword");
+      const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword", _np);
     }
 
     // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
@@ -6364,12 +6365,16 @@ async function logEvent(supabase: any, contatoId: string, atendimentoId: string,
 
 async function handleEscalation(
   supabase: any, supabaseUrl: string, serviceKey: string,
-  atendimentoId: string, contatoId: string, mensagem: string, trigger: string
+  atendimentoId: string, contatoId: string, mensagem: string, trigger: string,
+  nomePrim: string = ""
 ) {
+  const dentroExpediente = isHorarioHumano();
   // Use custom message for contact lens, default for others
   const resposta = trigger === "lentes_de_contato"
     ? mensagem
-    : "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Posso te ajudar com algo rápido enquanto isso? 😊";
+    : (dentroExpediente
+        ? "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Posso te ajudar com algo rápido enquanto isso? 😊"
+        : mensagemEscaladaForaHorario(nomePrim));
 
   await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, resposta);
 
@@ -6389,8 +6394,12 @@ async function handleEscalation(
 
   await supabase.from("eventos_crm").insert({
     contato_id: contatoId, tipo: "escalonamento_humano",
-    descricao: `Escalonamento (${trigger}): cliente pediu Consultor`,
-    metadata: { trigger, motivo: trigger, mensagem },
+    descricao: `Escalonamento (${trigger}): cliente pediu Consultor${dentroExpediente ? "" : " — fora do expediente"}`,
+    metadata: {
+      trigger, motivo: trigger, mensagem,
+      fora_horario: !dentroExpediente,
+      proxima_abertura: dentroExpediente ? null : proximaAberturaHumana(),
+    },
     referencia_tipo: "atendimento", referencia_id: atendimentoId,
   });
 
