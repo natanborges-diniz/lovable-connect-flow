@@ -716,6 +716,15 @@ function detectPrescriptionCorrection(text: string): {
   let t = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2");
   // Remove asteriscos de markdown ("*OD*", "*CIL")
   t = t.replace(/\*/g, " ");
+  // Normaliza formas longas/variantes pt-BR para tokens curtos "od"/"oe"
+  // (cliente costuma responder "Olho direito/esquerdo" porque o próprio prompt
+  // da IA traz "OD (olho direito)").
+  t = t.replace(/\bolho\s+direito\b/g, "od");
+  t = t.replace(/\bolho\s+esquerdo\b/g, "oe");
+  t = t.replace(/\bolho\s+dir(?:eito)?\.?\b/g, "od");
+  t = t.replace(/\bolho\s+esq(?:uerdo)?\.?\b/g, "oe");
+  t = t.replace(/\bo\.d\.?\b/g, "od");
+  t = t.replace(/\bo\.e\.?\b/g, "oe");
   // Convenções ópticas: pl/plano/neutro/zerado/sc → 0.00
   t = t.replace(/-\s*(pl|plano|neutro|zerado|zero)\b/g, "0");
   t = t.replace(/\b(pl|plano|neutro|zerado)\b/g, "0");

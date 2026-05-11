@@ -1,78 +1,73 @@
-## Objetivo
+## O que aconteceu com a Beatriz
 
-Resolver de vez o problema "Aplicar correção mente": hoje o botão diz que aplicou, mas em vários casos só cria tarefa pra alguém mexer no código depois. Vamos fazer duas coisas em sequência — primeiro consertar a honestidade do botão, depois ampliar o que ele realmente sabe consertar sozinho.
+Sequência reconstruída (eventos_crm + mensagens):
 
----
+1. **15:20** — cliente mandou foto da receita.
+2. **15:21 / 15:22** — IA respondeu **duas vezes** a frase canned "Recebi sua receita 👀 Já estou analisando..." sem chamar `interpretar_receita` (eventos com `validator_flags=[no_tool_deterministic]`).
+3. **15:28** — `watchdog-loop-ia` detectou o loop "analisando" e disparou a mensagem `MSG_PEDIR_RECEITA_TEXTO` ("Tô tendo dificuldade de ler os valores… me passa por texto"). Evento `loop_ia_resgate_pedindo_texto`.
+4. **19:13** — cliente respondeu por texto:
+   ```
+   Olho direito: -4,25 Cilíndrico: -0,25 Eixo: 90°
+   Olho esquerdo: -4,0 Cilíndrico: 0 Eixo:0
+   ```
+5. **19:13** — `ai-triage` registrou `loop_ia_detectado_pre_llm` (similaridade 100% entre as duas frases "Recebi sua receita…" repetidas em 15:21/15:22) e, sem `forcedIntent` claro, fez `loop_ia_escalado` → `atendimento.modo=humano` + mensagem fora do horário.
 
-## Fase 1 — Honestidade do botão (rápido, alto impacto)
+A receita **nunca foi interpretada** e nenhum orçamento foi gerado.
 
-Cada achado da auditoria passa a ter um de três rótulos visíveis no card antes de clicar:
+## Por que o gate de receita digitada falhou
 
-- **Auto-aplicável** — clicar resolve 100%, sem mais nada.
-- **Requer código** — clicar abre uma tarefa pra TI; o card mostra "não resolve sozinho, ainda vai precisar de deploy".
-- **Requer decisão humana** — exige aprovação/contexto (ex: mudar valor de horário comercial).
+`ai-triage/index.ts` tem um bypass do detector de loop:
 
-Mudanças concretas:
+```
+if (loopCheck.detected && !correctionApplied) { … escala humano … }
+```
 
-1. `audit-ia-consolidar/index.ts` — ao montar `acoes_propostas`, classifica cada vetor em um desses três modos e grava em `acoes_propostas[].modo_aplicacao`.
-2. `audit-ia-aplicar-grupo/index.ts` — se todas as ações do grupo são `tarefa_ti`, o status final do grupo vira `pendente_codigo` (não `aplicado`). Hoje vira `aplicado` mesmo só criando tarefa — é a raiz da mentira.
-3. `AuditoriaIaCard.tsx` — badge colorido no card ("Auto-aplicável" / "Requer código" / "Requer decisão") e o botão muda de label conforme o modo: "Aplicar agora", "Abrir tarefa pra TI", "Revisar e aplicar".
-4. Roteamento do vetor A (template de retomada) corrigido pra B1 (mexe em `vendas-recuperacao-cron` payload, não no prompt). Já estava errado no run atual.
+O `correctionApplied` só fica `true` se `detectPrescriptionCorrection(lastInboundText)` retornar um objeto válido. No caso da Beatriz, retornou `null`.
 
-Resultado: você nunca mais clica achando que resolveu quando só virou backlog.
+Por que retornou `null` (parser em `detectPrescriptionCorrection`, linhas 707-835):
 
----
+- O extrator percorre blocos via regex `/\b(od|oe|os)\b…/gi` — só casa as **abreviações** "OD"/"OE"/"OS".
+- O texto da cliente usa **"Olho direito" / "Olho esquerdo"** (forma natural, inclusive sugerida pelo próprio prompt da IA: "OD (olho direito)").
+- Resultado: nenhum bloco por olho é encontrado → `od.sphere` e `oe.sphere` ficam `null` → função retorna `null` na linha 829.
+- O gate de markers passa (`cilíndrico` + `eixo` = 2 hits), mas como nada é extraído, cai fora.
 
-## Fase 2 — Migrar mais coisas pra auto-aplicável (estrutural)
+Ou seja, o cliente respondeu **exatamente** o que a IA pediu, mas o parser não entende "Olho direito/esquerdo" — só "OD/OE". Sem prescription detectada, o loop detector pré-LLM venceu e escalou para humano.
 
-Hoje o botão só sabe mexer em 4 lugares: prompt, regras proibidas, exemplos, instruções. Tudo que é cron / template / horário / fluxo de bot vira tarefa porque está cravado em código. Vamos mover esses parâmetros pra tabelas que o botão já consegue editar:
+## Correção proposta
 
-| Domínio | Hoje | Depois | Auto-aplicável? |
-|---|---|---|---|
-| Cadência cron de retomada (timings, msgs) | hardcoded em `vendas-recuperacao-cron` | linhas em `cron_jobs.payload` (já existe) lidas pela função | Sim |
-| Templates WhatsApp (qual template, quando, condições de bloqueio) | hardcoded em `pipeline-automations` e `vendas-recuperacao-cron` | tabela `pipeline_automacoes.config` (já existe) + nova flag `bloquear_se` | Sim |
-| Horário comercial humano | hardcoded em `ai-triage` e watchdogs | `app_config` keys `horario_comercial_*` (tabela já existe) | Requer decisão (mudança sensível) |
-| Watchdogs (intervalos, thresholds) | hardcoded em cada EF | `cron_jobs.payload.thresholds` | Sim |
-| Mensagens fixas (despedida, escalada fora-horário, retomada) | hardcoded em `ai-triage` | tabela nova `ia_mensagens_fixas` (chave + texto + ativo) | Sim |
+Tornar `detectPrescriptionCorrection` tolerante a "Olho direito/esquerdo" (e variantes) sem afrouxar o anti-falso-positivo já existente.
 
-Cada migração: 1 migration de schema + ajuste da EF pra ler da tabela (com fallback ao default atual) + novo vetor de auditoria que sabe gravar nessa tabela.
+**Arquivo:** `supabase/functions/ai-triage/index.ts`
 
-Ordem de entrega (cada item é um passo independente, com valor isolado):
+1. **Normalização no início da função (após linha 718)** — antes dos markers e da extração por bloco, mapear as formas longas para os tokens curtos que o resto do parser já entende:
 
-1. ✅ **`ia_mensagens_fixas`** — feito. Tabela criada e populada com 6 chaves (despedida_explicit_close, despedida_thanks, despedida_short_no, escalada_fora_horario, pedir_receita_texto, recuperacao_ia_despedida_final). `ai-triage` carrega com cache 60s; `vendas-recuperacao-cron` consulta com fallback. Auditoria ganhou tipo `ajustar_mensagem_fixa` (auto-aplicável) — botão Aplicar reescreve direto sem deploy.
-2. **Watchdog thresholds em `cron_jobs.payload`** — auditoria já consegue ajustar timings sem deploy. (resolve grupo #4.)
-3. **Loop de receita: heurística do `ai-triage` em `configuracoes_ia`** — limites de tentativa, gatilho de escalada, viram config. (resolve grupo #3.)
-4. **Template de retomada com condições em `pipeline_automacoes.config.bloquear_se`** — auditoria muda quando dispara, sem deploy.
+   ```
+   t = t.replace(/\bolho\s+direito\b/g, "od");
+   t = t.replace(/\bolho\s+esquerdo\b/g, "oe");
+   // tolerância opcional a abreviações comuns
+   t = t.replace(/\bo\.?d\.?\b/g, "od");
+   t = t.replace(/\bo\.?e\.?\b/g, "oe");
+   ```
 
----
+   Isso faz `eyeBlockRe` casar normalmente, sem mexer no resto da lógica (validação anti-hallucination, parseDiopter, parseAxis, fallback longe/perto continuam idênticos).
 
-## O que NÃO vai virar auto-aplicável (e por quê)
+2. **Manter intacto** o bloco do detector (linhas 3433-3464) — o `iaJustAskedForText` já casa com a mensagem do watchdog (regex bate em "tô tendo dificuldade de ler" e "me passar por texto"), então o ramo `client_typed_first` será disparado.
 
-- **Mudar prompt-mestre** — já é, fica.
-- **Adicionar nova ferramenta (tool) pra IA** — exige código, sempre será "Requer código".
-- **Mudar horário comercial** — sensível, vira "Requer decisão" com diff visível antes de aplicar.
-- **Trocar provedor (Meta, push)** — código + secrets, sempre "Requer código".
+3. **Sanity check anti-hallucination** já cobre os números desse formato: "−4,25", "−0,25", "90", "0" todos aparecem no texto-fonte, então `validateField` mantém todos.
 
----
+Não mexer no loop detector nem na escalada — o problema é só de leitura do texto.
 
-## Entregável final
+## Verificação
 
-Depois das duas fases, ao rodar uma auditoria você vai ver:
+- **Unit-style sanity:** rodar o detector mentalmente com o texto da Beatriz após a correção:
+  - normaliza para `od: -4,25 cilíndrico: -0,25 eixo: 90 oe: -4,0 cilíndrico: 0 eixo:0`
+  - blocos por olho extraem `od={sphere:-4.25, cylinder:-0.25, axis:90}` e `oe={sphere:-4.00, cylinder:0, axis:0}` ✓
+  - `rx_type=single_vision`, sem add ✓
+- **Reproducibilidade:** considerar variações "olho direito/OD", "OE — olho esquerdo", "olho dir/olho esq" — pelo menos as duas primeiras precisam funcionar; podemos adicionar `\bolho\s+dir\b` / `\bolho\s+esq\b` opcionalmente.
+- Logs `[RX-VALIDATE]` permanecem para depuração.
 
-- ~80% dos achados como **Auto-aplicável** (clicou, acabou).
-- ~15% como **Requer decisão** (clica, vê o diff, confirma — aplica direto, sem deploy).
-- ~5% como **Requer código** (gera tarefa honestamente, com aviso claro de que precisa deploy).
+## Impacto
 
-Nenhum achado vai mais sair como "aplicado" sem ter mudado nada de verdade.
-
----
-
-## Detalhes técnicos
-
-- Novo campo `acoes_propostas[].modo_aplicacao: 'auto' | 'codigo' | 'decisao'` em `ia_auditorias_grupos`.
-- Novo status de grupo: `pendente_codigo` e `pendente_decisao` (além de `pendente`, `aplicado`, `ignorado`).
-- `audit-ia-aplicar-grupo` ganha branch que, pra modo `decisao`, retorna o diff proposto e exige segundo clique de confirmação no frontend.
-- Tabela nova `ia_mensagens_fixas (chave text PK, texto text, ativo bool, updated_at)` com seed dos textos atuais.
-- Migration adiciona índice em `cron_jobs (nome)` pra leitura rápida pelas EFs.
-- EFs (`vendas-recuperacao-cron`, `ai-triage`, watchdogs) ganham helper `getConfig(key, fallback)` que lê `cron_jobs.payload` / `configuracoes_ia` / `ia_mensagens_fixas` com cache de 60s.
-- Frontend: `AuditoriaIaCard` ganha 3 variantes de botão + badge + (no caso `decisao`) modal de diff.
+- Casos antigos que já funcionavam (texto com "OD/OE") continuam idênticos.
+- Casos novos com "Olho direito/esquerdo" passam a ser parseados, evitando que o loop detector + ausência de `correctionApplied` empurre o atendimento para humano.
+- Sem alteração de banco, sem mudança de UI.
