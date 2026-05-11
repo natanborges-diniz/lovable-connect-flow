@@ -436,10 +436,36 @@ async function loadOsKeywords(client: any): Promise<string[]> {
   _osKeywordsExpire = Date.now() + 60_000;
   return _osKeywordsCache;
 }
+// Regex "núcleo" do intent (sempre ativas, independem das keywords editáveis).
+// Cobrem paráfrases comuns: "quanto tempo fica pronto", "ia/vou retirar",
+// "fiz pedido online esperando", "tô aguardando meu pedido", "pedido atrasado".
+const OS_INTENT_CORE_REGEX: RegExp[] = [
+  // "OS 12345" / "OS #45123"
+  /\bos\s*[#nº]?\s*\d{3,8}\b/i,
+  // tempo/prazo + ficar pronto/demorar/chegar
+  /\b(quanto|qual)\s+(o\s+)?(tempo|prazo)\b[\s\S]{0,40}\b(pronto|fica|demora|leva|chega|chegar|entrega|entregar)\b/i,
+  // "(meu/minha) pedido/encomenda/compra/os" + status/retirar/aguardando/atrasado
+  /\b(meu|minha|o|a)?\s*(pedido|encomenda|compra|os|[oó]culos|len(te|tes))\b[\s\S]{0,40}\b(pronto|chega|chegou|atras|aguardando|esperando|status|previs|retirar|retirada|ficou|fica)\b/i,
+  // "ia/vou/queria/gostaria + retirar"
+  /\b(ia|vou|queria|gostaria|pretendo|pra|para)\b[\s\S]{0,20}\bretir(ar|ada)\b/i,
+  // "fiz/comprei/encomendei + pedido/compra/oculos/lente + online/loja/site/aguardando/esperando/urgência"
+  /\b(fiz|comprei|encomendei|pedi)\b[\s\S]{0,40}\b(pedido|compra|[oó]culos|len(te|tes))\b[\s\S]{0,40}\b(online|loja|site|aguardando|esperando|urg[eê]ncia|h[aá] dias|atras)\b/i,
+  // "esperando/aguardando + pedido/encomenda/óculos/chegada/entrega"
+  /\b(esperando|aguardando|t[oôó]\s+esperando)\b[\s\S]{0,30}\b(pedido|encomenda|[oó]culos|len(te|tes)|chegada|entrega)\b/i,
+  // "pedido (está) atrasado/demorando"
+  /\b(pedido|encomenda|[oó]culos|compra)\b[\s\S]{0,20}\b(atras(ado|ada)?|demor(a|ando|ou)|n[aã]o chegou|ainda n[aã]o)\b/i,
+  // "cad[eê] (meu) pedido/oculos/encomenda"
+  /\bcad[eê]\b[\s\S]{0,20}\b(meu|minha|o|a)?\s*(pedido|encomenda|[oó]culos|compra|os)\b/i,
+];
+
 function matchesConsultaOs(msg: string, keywords: string[]): boolean {
+  if (!msg) return false;
   const n = norm(msg);
-  // Sinal extra: "OS 12345" (número de 4-7 dígitos perto da palavra OS)
-  if (/\bos\s*[#nº]?\s*\d{3,8}\b/i.test(msg)) return true;
+  // 1) Regex "núcleo" — paráfrases comuns
+  for (const re of OS_INTENT_CORE_REGEX) {
+    if (re.test(msg) || re.test(n)) return true;
+  }
+  // 2) Keywords editáveis pela auditoria (substring case/accent-insensitive)
   return keywords.some((k) => k && n.includes(k));
 }
 
@@ -1992,6 +2018,40 @@ serve(async (req) => {
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
 
+    // ── PRE-SKIP: Consulta de OS roda em QUALQUER modo (ia/hibrido/humano/ponte) ──
+    // Em humano/ponte: apenas marca flag + evento para o operador ver o contexto. NÃO envia mensagem.
+    // Em ia/hibrido: escala completa (flag + mensagem + move card).
+    try {
+      const _msgPre = (mensagem_texto || "").trim();
+      if (_msgPre) {
+        const _osKwPre = await loadOsKeywords(supabase);
+        if (matchesConsultaOs(_msgPre, _osKwPre)) {
+          const _metaPre = (atendimento.metadata as Record<string, any>) || {};
+          const _lastFlag = _metaPre.intent_consulta_os_at ? Date.parse(_metaPre.intent_consulta_os_at) : 0;
+          const _isFresh = !_lastFlag || (Date.now() - _lastFlag) > 60_000; // não duplica eventos por <1min
+          if (atendimento.modo === "humano" || atendimento.modo === "ponte") {
+            if (_isFresh) {
+              console.log(`[ROUTER] Consulta de OS detectada em modo=${atendimento.modo} — flag + evento (sem auto-mensagem)`);
+              await supabase.from("atendimentos").update({
+                metadata: { ..._metaPre, intent_consulta_os_at: new Date().toISOString() },
+              }).eq("id", atendimento_id);
+              await supabase.from("eventos_crm").insert({
+                contato_id: atendimento.contato_id,
+                tipo: "consulta_os",
+                descricao: `Cliente perguntou status do pedido / OS (modo=${atendimento.modo})`,
+                metadata: { mensagem_cliente: _msgPre, modo: atendimento.modo },
+                referencia_tipo: "atendimento",
+                referencia_id: atendimento_id,
+              });
+            }
+            return jsonResponse({ status: "skipped", reason: `modo ${atendimento.modo} (consulta_os registrada)` });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[OS-PRESKIP] falhou:", (e as Error)?.message);
+    }
+
     if (atendimento.modo === "humano") {
       return jsonResponse({ status: "skipped", reason: "modo humano" });
     }
@@ -2057,6 +2117,12 @@ serve(async (req) => {
     const contatoId = contato_id || atendimento.contato_id;
     const currentMsg = mensagem_texto || "";
 
+    // Flag: cliente está em fluxo de Consulta de OS (set pelo router pre-LLM).
+    // Quando ativa (<30min), bloqueia guards de "receita pendente" — evita IA voltar a pedir receita.
+    const _osIntentAt = meta.intent_consulta_os_at ? Date.parse(meta.intent_consulta_os_at) : 0;
+    const isConsultaOsActive = _osIntentAt > 0 && (Date.now() - _osIntentAt) < 30 * 60_000;
+    if (isConsultaOsActive) console.log("[GUARD] intent_consulta_os ativo — bloqueando guards de receita pendente");
+
     // ── 1.6. DETECT ESCALATED SUBJECT for hybrid mode ──
     let escalatedSubject: string | null = null;
     if (isHibrido) {
@@ -2081,15 +2147,20 @@ serve(async (req) => {
     }
 
     // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
-    // Sempre escala para humano — IA NUNCA pede receita nem oferece orçamento nesse intent.
-    if (!isHibrido) {
+    // Sempre escala para humano (inclusive em híbrido) — IA NUNCA pede receita nem oferece orçamento nesse intent.
+    {
       const osKw = await loadOsKeywords(supabase);
       if (matchesConsultaOs(currentMsg, osKw)) {
-        console.log("[ROUTER] Consulta de OS detectada — escalando para humano");
+        console.log(`[ROUTER] Consulta de OS detectada (modo=${atendimento.modo}) — escalando para humano`);
         await loadMensagensFixas(supabase);
         const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", contatoId).maybeSingle();
         const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
         const osMsg = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
+
+        // Marca flag de intent — bloqueia guards de receita pendente
+        await supabase.from("atendimentos").update({
+          metadata: { ...meta, intent_consulta_os_at: new Date().toISOString() },
+        }).eq("id", atendimento_id);
 
         // Move card para a coluna "Consulta de OS" do setor Atendimento Corporativo, se existir
         const { data: osCol } = await supabase
@@ -2108,7 +2179,7 @@ serve(async (req) => {
           contato_id: contatoId,
           tipo: "consulta_os",
           descricao: "Cliente perguntou status do pedido / OS — escalado para humano",
-          metadata: { mensagem_cliente: currentMsg },
+          metadata: { mensagem_cliente: currentMsg, modo: atendimento.modo },
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
@@ -3333,13 +3404,13 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 - Se as últimas mensagens forem vagas e nenhuma intenção for clara, responda CURTO e contextual ("Voltei pra te ajudar — em que posso continuar?") em vez de escalar.${pendingIntent ? `\n\nINTENÇÃO PENDENTE DETECTADA: ${pendingIntent.intent.toUpperCase()} — ${pendingIntent.hint}` : ""}`,
           }]
         : []),
-      ...(hasRecentUnparsedPrescriptionImage && !hasValidReceitas
+      ...(hasRecentUnparsedPrescriptionImage && !hasValidReceitas && !isConsultaOsActive
         ? [{
             role: "system",
             content: "[SISTEMA: PRIORIDADE MÁXIMA — RECEITA PENDENTE] O cliente enviou uma imagem (provável receita) nas últimas mensagens e ela AINDA NÃO foi interpretada com sucesso (RECEITAS JÁ INTERPRETADAS está vazio ou inválido). REGRAS: 1) Você DEVE chamar a tool interpretar_receita usando a imagem mais recente entregue no histórico, ANTES de qualquer outra ação (não escale, não peça reenvio, não responda genericamente). 2) Se a imagem foi entregue ao modelo, use-a — mesmo que a última mensagem do cliente seja curta ('ok', 'então?', 'cadê'). 3) Só peça reenvio se o sistema avisar explicitamente que a imagem NÃO foi entregue. 4) Só escale para humano se a imagem estiver claramente ilegível APÓS a tentativa de interpretação.]",
           }]
         : []),
-      ...(hasPendingNewPrescriptionImage
+      ...(hasPendingNewPrescriptionImage && !isConsultaOsActive
         ? [{
             role: "system",
             content: "[SISTEMA: NOVA RECEITA PENDENTE] O cliente declarou ter NOVA RECEITA e enviou uma imagem mais recente que a última receita salva. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA com a imagem mais recente do histórico — NÃO use consultar_lentes/consultar_lentes_contato com a receita antiga (ela está desatualizada). Após interpretar, peça confirmação dos novos valores ao cliente antes de cotar. Se a imagem estiver ilegível APÓS a tentativa de OCR, peça reenvio uma única vez.",
@@ -5072,7 +5143,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // Caso Artur Borges 24/04 15:13: modelo retornou texto ("Recebi sua receita 👀 Já estou analisando…")
     // sem chamar interpretar_receita. Sem retry, a conversa morre — cliente fica esperando indefinidamente.
     const interpretouReceitaNesteTurno = (toolCalls || []).some((tc: any) => tc.function?.name === "interpretar_receita");
-    const precisaForcarInterpretacao = !interpretouReceitaNesteTurno && !precisa_humano && (
+    const precisaForcarInterpretacao = !interpretouReceitaNesteTurno && !precisa_humano && !isConsultaOsActive && (
       (isImageContext && !hasValidReceitas) || hasPendingNewPrescriptionImage
     );
 
