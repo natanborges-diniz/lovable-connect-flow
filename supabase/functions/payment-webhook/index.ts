@@ -151,7 +151,7 @@ serve(async (req) => {
         : `Status do link atualizado para ${status}`,
       referencia_tipo: "solicitacao",
       referencia_id: solicitacao.id,
-      metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments },
+      metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments, brand: bandeira, card_bin: cardBin || null, kind: kind || null, rede_datetime: redeDateTime },
     });
 
     // Comprovante "picote" entregue via app Atrium Messenger (notificações + comentário no ticket).
