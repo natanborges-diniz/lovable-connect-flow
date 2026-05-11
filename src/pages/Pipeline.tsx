@@ -1007,7 +1007,34 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
   const [msgDirecao, setMsgDirecao] = useState<"outbound" | "internal">("outbound");
   const [sendingOutbound, setSendingOutbound] = useState(false);
   const [modoLoading, setModoLoading] = useState<"ia" | "humano" | null>(null);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handlePickAttachment = (file: File | null) => {
+    if (!file) return;
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      toast.error("Formato não suportado. Envie JPG, PNG ou WEBP.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem maior que 5MB. Reduza antes de enviar.");
+      return;
+    }
+    setAttachment(file);
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachmentPreview(URL.createObjectURL(file));
+  };
+
+  const clearAttachment = () => {
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachment(null);
+    setAttachmentPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   // Fetch atendimento details
   const { data: atendimento } = useQuery({
