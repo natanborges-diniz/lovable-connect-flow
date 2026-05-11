@@ -407,6 +407,42 @@ function matchesFornecedorB2B(msg: string): boolean {
   return FORNECEDOR_B2B_PATTERNS.some((re) => re.test(msg));
 }
 
+// ── PRE-LLM: Consulta de OS / status do pedido ──
+// Detecta perguntas tipo "óculos pronto?", "posso retirar?", "número da OS", "cadê meu pedido"
+// Lista padrão; a lista efetiva é carregada de configuracoes_ia.os_intent_keywords (case/accent-insensitive).
+const OS_INTENT_DEFAULT_KEYWORDS: string[] = [
+  "oculos pronto", "ficou pronto", "esta pronto", "ta pronto",
+  "posso retirar", "ja chegou", "chegou meu", "quando fica pronto", "quando chega",
+  "cade meu pedido", "cade meu oculos", "onde esta meu pedido",
+  "status do pedido", "status da os",
+  "minha os", "numero da os", "ordem de servico",
+  "previsao de entrega", "pedido ficou pronto", "retirar meu oculos",
+];
+let _osKeywordsCache: string[] = OS_INTENT_DEFAULT_KEYWORDS;
+let _osKeywordsExpire = 0;
+async function loadOsKeywords(client: any): Promise<string[]> {
+  if (Date.now() < _osKeywordsExpire) return _osKeywordsCache;
+  try {
+    const { data } = await client.from("configuracoes_ia").select("valor").eq("chave", "os_intent_keywords").maybeSingle();
+    if (data?.valor) {
+      const parsed = JSON.parse(data.valor);
+      if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+        _osKeywordsCache = parsed.map((s) => norm(s)).filter(Boolean);
+      }
+    }
+  } catch (e) {
+    console.warn("[os-keywords] load falhou, usando defaults", (e as Error)?.message);
+  }
+  _osKeywordsExpire = Date.now() + 60_000;
+  return _osKeywordsCache;
+}
+function matchesConsultaOs(msg: string, keywords: string[]): boolean {
+  const n = norm(msg);
+  // Sinal extra: "OS 12345" (número de 4-7 dígitos perto da palavra OS)
+  if (/\bos\s*[#nº]?\s*\d{3,8}\b/i.test(msg)) return true;
+  return keywords.some((k) => k && n.includes(k));
+}
+
 function norm(t: string): string {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
@@ -2042,6 +2078,46 @@ serve(async (req) => {
     if (matchesEscalation(currentMsg)) {
       console.log("[ROUTER] Escalation keyword detected");
       return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword");
+    }
+
+    // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
+    // Sempre escala para humano — IA NUNCA pede receita nem oferece orçamento nesse intent.
+    if (!isHibrido) {
+      const osKw = await loadOsKeywords(supabase);
+      if (matchesConsultaOs(currentMsg, osKw)) {
+        console.log("[ROUTER] Consulta de OS detectada — escalando para humano");
+        await loadMensagensFixas(supabase);
+        const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", contatoId).maybeSingle();
+        const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
+        const osMsg = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
+
+        // Move card para a coluna "Consulta de OS" do setor Atendimento Corporativo, se existir
+        const { data: osCol } = await supabase
+          .from("pipeline_colunas")
+          .select("id")
+          .eq("nome", "Consulta de OS")
+          .eq("ativo", true)
+          .limit(1)
+          .maybeSingle();
+        if (osCol?.id) {
+          await supabase.from("contatos").update({ pipeline_coluna_id: osCol.id }).eq("id", contatoId);
+        }
+
+        // Registra evento dedicado com a mensagem original do cliente
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consulta_os",
+          descricao: "Cliente perguntou status do pedido / OS — escalado para humano",
+          metadata: { mensagem_cliente: currentMsg },
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+        });
+
+        return await handleNonClientEscalation(
+          supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+          atendimento_id, contatoId, osMsg, "consulta_os"
+        );
+      }
     }
 
     // ── 2.5. (REMOVIDO) Escalação determinística de lentes de contato ──
