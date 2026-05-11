@@ -27,9 +27,15 @@ serve(async (req) => {
     const {
       payment_link_id, status, tid, authorization, valor, origem_ref,
       nsu, last4, installments, descricao, nome_cliente,
+      brand, brandName, cardBin, kind, dateTime, date, time,
     } = payload;
 
-    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref });
+    const bandeira: string | null = brand || brandName || null;
+    const redeDateTime: string | null = dateTime || null;
+    const redeDate: string | null = date || (redeDateTime ? redeDateTime.slice(0, 10) : null);
+    const redeTime: string | null = time || (redeDateTime ? redeDateTime.slice(11, 19) : null);
+
+    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref, brand: bandeira, kind, cardBin });
     if (!payment_link_id) throw new Error("payment_link_id é obrigatório");
 
     const { data: solicitacoes } = await supabase
@@ -82,6 +88,12 @@ serve(async (req) => {
       installments: installments || null,
       descricao: descricao || null,
       nome_cliente: nome_cliente || null,
+      brand: bandeira,
+      card_bin: cardBin || null,
+      kind: kind || null,
+      rede_datetime: redeDateTime,
+      rede_date: redeDate,
+      rede_time: redeTime,
       payment_status: status,
       payment_confirmed_at: now.toISOString(),
     };
@@ -122,7 +134,7 @@ serve(async (req) => {
         authorization_code: authorization || null,
         last4: last4 || null,
         link_url: existingMeta.url as string || null,
-        pago_at: status === "PAGO" ? now.toISOString() : null,
+        pago_at: status === "PAGO" ? (redeDateTime || now.toISOString()) : null,
         enviado_at: existingMeta.enviado_at as string || null,
         metadata: updatedMeta,
       }, { onConflict: "payment_link_id" });
@@ -139,7 +151,7 @@ serve(async (req) => {
         : `Status do link atualizado para ${status}`,
       referencia_tipo: "solicitacao",
       referencia_id: solicitacao.id,
-      metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments },
+      metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments, brand: bandeira, card_bin: cardBin || null, kind: kind || null, rede_datetime: redeDateTime },
     });
 
     // Comprovante "picote" entregue via app Atrium Messenger (notificações + comentário no ticket).
@@ -148,15 +160,22 @@ serve(async (req) => {
         const { data: contato } = await supabase
           .from("contatos").select("id, nome, telefone").eq("id", solicitacao.contato_id).single();
 
-        const dateStr = now.toLocaleDateString("pt-BR");
-        const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const dateStr = redeDate
+          ? redeDate.split("-").reverse().join("/")
+          : now.toLocaleDateString("pt-BR");
+        const timeStr = redeTime
+          ? redeTime.slice(0, 5)
+          : now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
         const clienteName = nome_cliente || "N/A";
         const valorFmt = valor ? `R$ ${Number(valor).toFixed(2)}` : "N/A";
         const descFmt = descricao || "";
         const nsuFmt = nsu || "N/A";
         const tidFmt = tid || "N/A";
+        const authFmt = authorization || "N/A";
         const last4Fmt = last4 || "****";
         const installmentsFmt = installments || 1;
+        const kindLabel = kind === "credit" ? "Crédito" : kind === "debit" ? "Débito" : "";
+        const cartaoLinha = [bandeira, kindLabel].filter(Boolean).join(" ").trim();
 
         let receiptMsg = `📩 *Comprovante de pagamento — ${clienteName}*\n\n`;
         receiptMsg += `✅ *Pagamento Confirmado!*\n`;
@@ -167,8 +186,9 @@ serve(async (req) => {
         receiptMsg += `   ↳ Use para baixa no sistema\n`;
         receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
         receiptMsg += `🆔 TID: ${tidFmt}\n`;
+        receiptMsg += `🔐 Autorização: ${authFmt}\n`;
         receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
-        receiptMsg += `💳 Cartão: **** ${last4Fmt} | ${installmentsFmt}x`;
+        receiptMsg += `💳 ${cartaoLinha ? `${cartaoLinha} ` : ""}**** ${last4Fmt} — ${installmentsFmt}x`;
 
         const lojaNome = contato?.nome || "Loja";
         const { data: dests } = await supabase
