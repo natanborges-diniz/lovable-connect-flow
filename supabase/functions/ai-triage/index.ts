@@ -2080,6 +2080,46 @@ serve(async (req) => {
       return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "keyword");
     }
 
+    // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
+    // Sempre escala para humano — IA NUNCA pede receita nem oferece orçamento nesse intent.
+    if (!isHibrido) {
+      const osKw = await loadOsKeywords(supabase);
+      if (matchesConsultaOs(currentMsg, osKw)) {
+        console.log("[ROUTER] Consulta de OS detectada — escalando para humano");
+        await loadMensagensFixas(supabase);
+        const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", contatoId).maybeSingle();
+        const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
+        const osMsg = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
+
+        // Move card para a coluna "Consulta de OS" do setor Atendimento Corporativo, se existir
+        const { data: osCol } = await supabase
+          .from("pipeline_colunas")
+          .select("id")
+          .eq("nome", "Consulta de OS")
+          .eq("ativo", true)
+          .limit(1)
+          .maybeSingle();
+        if (osCol?.id) {
+          await supabase.from("contatos").update({ pipeline_coluna_id: osCol.id }).eq("id", contatoId);
+        }
+
+        // Registra evento dedicado com a mensagem original do cliente
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consulta_os",
+          descricao: "Cliente perguntou status do pedido / OS — escalado para humano",
+          metadata: { mensagem_cliente: currentMsg },
+          referencia_tipo: "atendimento",
+          referencia_id: atendimento_id,
+        });
+
+        return await handleNonClientEscalation(
+          supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+          atendimento_id, contatoId, osMsg, "consulta_os"
+        );
+      }
+    }
+
     // ── 2.5. (REMOVIDO) Escalação determinística de lentes de contato ──
     // Agora a IA tem catálogo (pricing_lentes_contato) e usa a tool consultar_lentes_contato.
     // Tóricas: aviso "sob encomenda — pagamento confirma o pedido".
