@@ -134,7 +134,7 @@ serve(async (req) => {
         authorization_code: authorization || null,
         last4: last4 || null,
         link_url: existingMeta.url as string || null,
-        pago_at: status === "PAGO" ? now.toISOString() : null,
+        pago_at: status === "PAGO" ? (redeDateTime || now.toISOString()) : null,
         enviado_at: existingMeta.enviado_at as string || null,
         metadata: updatedMeta,
       }, { onConflict: "payment_link_id" });
