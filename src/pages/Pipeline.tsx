@@ -1292,6 +1292,20 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
 
       {/* Composer fixo no rodapé */}
       <div className="border-t p-3 shrink-0 bg-background">
+        {attachmentPreview && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 p-2">
+            <img src={attachmentPreview} alt="Pré-visualização do anexo" className="h-14 w-14 rounded object-cover" />
+            <div className="flex-1 min-w-0 text-xs">
+              <p className="truncate font-medium">{attachment?.name}</p>
+              <p className="text-muted-foreground">
+                {attachment ? (attachment.size / 1024).toFixed(0) : 0} KB • legenda opcional abaixo
+              </p>
+            </div>
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={clearAttachment} aria-label="Remover anexo">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <div className="flex-1 min-w-0 space-y-1">
             <div className="flex gap-1">
@@ -1301,14 +1315,47 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
             <Textarea
               value={msgText}
               onChange={(e) => setMsgText(e.target.value)}
-              placeholder={msgDirecao === "internal" ? "Nota interna..." : "Digite sua mensagem..."}
+              placeholder={
+                msgDirecao === "internal"
+                  ? "Nota interna..."
+                  : attachment
+                    ? "Legenda da imagem (opcional)..."
+                    : "Digite sua mensagem..."
+              }
               rows={2}
               className="resize-none"
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             />
           </div>
-          <Button onClick={handleSend} disabled={!msgText.trim() || createMensagem.isPending || sendingOutbound} size="icon" className="h-10 w-10 shrink-0">
-            {sendingOutbound ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {msgDirecao === "outbound" && atendimento?.canal === "whatsapp" && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => handlePickAttachment(e.target.files?.[0] || null)}
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sendingOutbound || uploadingAttachment}
+                aria-label="Anexar imagem"
+                title="Anexar imagem"
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          <Button
+            onClick={handleSend}
+            disabled={(!msgText.trim() && !attachment) || createMensagem.isPending || sendingOutbound || uploadingAttachment}
+            size="icon"
+            className="h-10 w-10 shrink-0"
+          >
+            {sendingOutbound || uploadingAttachment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>
       </div>
