@@ -27,9 +27,15 @@ serve(async (req) => {
     const {
       payment_link_id, status, tid, authorization, valor, origem_ref,
       nsu, last4, installments, descricao, nome_cliente,
+      brand, brandName, cardBin, kind, dateTime, date, time,
     } = payload;
 
-    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref });
+    const bandeira: string | null = brand || brandName || null;
+    const redeDateTime: string | null = dateTime || null;
+    const redeDate: string | null = date || (redeDateTime ? redeDateTime.slice(0, 10) : null);
+    const redeTime: string | null = time || (redeDateTime ? redeDateTime.slice(11, 19) : null);
+
+    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref, brand: bandeira, kind, cardBin });
     if (!payment_link_id) throw new Error("payment_link_id é obrigatório");
 
     const { data: solicitacoes } = await supabase
