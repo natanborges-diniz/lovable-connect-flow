@@ -407,6 +407,42 @@ function matchesFornecedorB2B(msg: string): boolean {
   return FORNECEDOR_B2B_PATTERNS.some((re) => re.test(msg));
 }
 
+// ── PRE-LLM: Consulta de OS / status do pedido ──
+// Detecta perguntas tipo "óculos pronto?", "posso retirar?", "número da OS", "cadê meu pedido"
+// Lista padrão; a lista efetiva é carregada de configuracoes_ia.os_intent_keywords (case/accent-insensitive).
+const OS_INTENT_DEFAULT_KEYWORDS: string[] = [
+  "oculos pronto", "ficou pronto", "esta pronto", "ta pronto",
+  "posso retirar", "ja chegou", "chegou meu", "quando fica pronto", "quando chega",
+  "cade meu pedido", "cade meu oculos", "onde esta meu pedido",
+  "status do pedido", "status da os",
+  "minha os", "numero da os", "ordem de servico",
+  "previsao de entrega", "pedido ficou pronto", "retirar meu oculos",
+];
+let _osKeywordsCache: string[] = OS_INTENT_DEFAULT_KEYWORDS;
+let _osKeywordsExpire = 0;
+async function loadOsKeywords(client: any): Promise<string[]> {
+  if (Date.now() < _osKeywordsExpire) return _osKeywordsCache;
+  try {
+    const { data } = await client.from("configuracoes_ia").select("valor").eq("chave", "os_intent_keywords").maybeSingle();
+    if (data?.valor) {
+      const parsed = JSON.parse(data.valor);
+      if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+        _osKeywordsCache = parsed.map((s) => norm(s)).filter(Boolean);
+      }
+    }
+  } catch (e) {
+    console.warn("[os-keywords] load falhou, usando defaults", (e as Error)?.message);
+  }
+  _osKeywordsExpire = Date.now() + 60_000;
+  return _osKeywordsCache;
+}
+function matchesConsultaOs(msg: string, keywords: string[]): boolean {
+  const n = norm(msg);
+  // Sinal extra: "OS 12345" (número de 4-7 dígitos perto da palavra OS)
+  if (/\bos\s*[#nº]?\s*\d{3,8}\b/i.test(msg)) return true;
+  return keywords.some((k) => k && n.includes(k));
+}
+
 function norm(t: string): string {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
