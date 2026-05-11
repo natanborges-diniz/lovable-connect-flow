@@ -2139,15 +2139,20 @@ serve(async (req) => {
     }
 
     // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
-    // Sempre escala para humano — IA NUNCA pede receita nem oferece orçamento nesse intent.
-    if (!isHibrido) {
+    // Sempre escala para humano (inclusive em híbrido) — IA NUNCA pede receita nem oferece orçamento nesse intent.
+    {
       const osKw = await loadOsKeywords(supabase);
       if (matchesConsultaOs(currentMsg, osKw)) {
-        console.log("[ROUTER] Consulta de OS detectada — escalando para humano");
+        console.log(`[ROUTER] Consulta de OS detectada (modo=${atendimento.modo}) — escalando para humano`);
         await loadMensagensFixas(supabase);
         const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", contatoId).maybeSingle();
         const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
         const osMsg = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
+
+        // Marca flag de intent — bloqueia guards de receita pendente
+        await supabase.from("atendimentos").update({
+          metadata: { ...meta, intent_consulta_os_at: new Date().toISOString() },
+        }).eq("id", atendimento_id);
 
         // Move card para a coluna "Consulta de OS" do setor Atendimento Corporativo, se existir
         const { data: osCol } = await supabase
@@ -2166,7 +2171,7 @@ serve(async (req) => {
           contato_id: contatoId,
           tipo: "consulta_os",
           descricao: "Cliente perguntou status do pedido / OS — escalado para humano",
-          metadata: { mensagem_cliente: currentMsg },
+          metadata: { mensagem_cliente: currentMsg, modo: atendimento.modo },
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });
