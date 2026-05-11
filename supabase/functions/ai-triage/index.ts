@@ -2016,6 +2016,40 @@ serve(async (req) => {
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
 
+    // ── PRE-SKIP: Consulta de OS roda em QUALQUER modo (ia/hibrido/humano/ponte) ──
+    // Em humano/ponte: apenas marca flag + evento para o operador ver o contexto. NÃO envia mensagem.
+    // Em ia/hibrido: escala completa (flag + mensagem + move card).
+    try {
+      const _msgPre = (mensagem_texto || "").trim();
+      if (_msgPre) {
+        const _osKwPre = await loadOsKeywords(supabase);
+        if (matchesConsultaOs(_msgPre, _osKwPre)) {
+          const _metaPre = (atendimento.metadata as Record<string, any>) || {};
+          const _lastFlag = _metaPre.intent_consulta_os_at ? Date.parse(_metaPre.intent_consulta_os_at) : 0;
+          const _isFresh = !_lastFlag || (Date.now() - _lastFlag) > 60_000; // não duplica eventos por <1min
+          if (atendimento.modo === "humano" || atendimento.modo === "ponte") {
+            if (_isFresh) {
+              console.log(`[ROUTER] Consulta de OS detectada em modo=${atendimento.modo} — flag + evento (sem auto-mensagem)`);
+              await supabase.from("atendimentos").update({
+                metadata: { ..._metaPre, intent_consulta_os_at: new Date().toISOString() },
+              }).eq("id", atendimento_id);
+              await supabase.from("eventos_crm").insert({
+                contato_id: atendimento.contato_id,
+                tipo: "consulta_os",
+                descricao: `Cliente perguntou status do pedido / OS (modo=${atendimento.modo})`,
+                metadata: { mensagem_cliente: _msgPre, modo: atendimento.modo },
+                referencia_tipo: "atendimento",
+                referencia_id: atendimento_id,
+              });
+            }
+            return jsonResponse({ status: "skipped", reason: `modo ${atendimento.modo} (consulta_os registrada)` });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[OS-PRESKIP] falhou:", (e as Error)?.message);
+    }
+
     if (atendimento.modo === "humano") {
       return jsonResponse({ status: "skipped", reason: "modo humano" });
     }
