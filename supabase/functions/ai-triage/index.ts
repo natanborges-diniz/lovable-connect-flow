@@ -2115,6 +2115,12 @@ serve(async (req) => {
     const contatoId = contato_id || atendimento.contato_id;
     const currentMsg = mensagem_texto || "";
 
+    // Flag: cliente está em fluxo de Consulta de OS (set pelo router pre-LLM).
+    // Quando ativa (<30min), bloqueia guards de "receita pendente" — evita IA voltar a pedir receita.
+    const _osIntentAt = meta.intent_consulta_os_at ? Date.parse(meta.intent_consulta_os_at) : 0;
+    const isConsultaOsActive = _osIntentAt > 0 && (Date.now() - _osIntentAt) < 30 * 60_000;
+    if (isConsultaOsActive) console.log("[GUARD] intent_consulta_os ativo — bloqueando guards de receita pendente");
+
     // ── 1.6. DETECT ESCALATED SUBJECT for hybrid mode ──
     let escalatedSubject: string | null = null;
     if (isHibrido) {
