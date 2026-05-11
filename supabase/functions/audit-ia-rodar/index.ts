@@ -205,31 +205,81 @@ async function processarRun(
     const colunasLojaSet = new Set(colunasLojaIds);
     console.log(`[audit-ia-rodar] colunas-loja excluídas=${colunasLojaSet.size}`);
 
+    // Seleciona atendimentos por atividade REAL de mensagens dentro da janela
+    // (não por updated_at do atendimento, que pode ser mexido por templates/cron).
+    const { data: msgsJanela, error: msgErr } = await supabase
+      .from("mensagens")
+      .select("atendimento_id, direcao, created_at")
+      .gte("created_at", janela_inicio)
+      .lte("created_at", janela_fim)
+      .order("created_at", { ascending: false })
+      .limit(20000);
+    if (msgErr) throw msgErr;
+
+    const atividadePorAtend = new Map<string, { inbound: number; outbound: number; max: string }>();
+    for (const m of (msgsJanela || [])) {
+      const cur = atividadePorAtend.get(m.atendimento_id) || { inbound: 0, outbound: 0, max: m.created_at };
+      if (m.direcao === "inbound") cur.inbound++;
+      else if (m.direcao === "outbound") cur.outbound++;
+      if (m.created_at > cur.max) cur.max = m.created_at;
+      atividadePorAtend.set(m.atendimento_id, cur);
+    }
+    // Exige ao menos 1 inbound + 1 outbound dentro da janela (descarta atendimentos
+    // só com templates de retomada automática, sem cliente respondendo).
+    const atendIds = Array.from(atividadePorAtend.entries())
+      .filter(([_, v]) => v.inbound >= 1 && v.outbound >= 1)
+      .map(([id]) => id)
+      .slice(0, MAX_ATENDIMENTOS);
+
+    if (atendIds.length === 0) {
+      await supabase.from("ia_auditorias_runs").update({
+        total_atendimentos: 0, total_flagged: 0, total_avaliados_llm: 0,
+        status: "concluido", finalizado_at: new Date().toISOString(),
+      }).eq("id", runId);
+      return;
+    }
+
     const { data: atendimentos, error: atErr } = await supabase
       .from("atendimentos")
       .select("id, contato_id, modo, status, created_at, contato:contatos(id, nome, telefone, pipeline_coluna_id)")
-      .gte("updated_at", janela_inicio)
-      .lte("updated_at", janela_fim)
-      .order("updated_at", { ascending: false })
-      .limit(MAX_ATENDIMENTOS);
+      .in("id", atendIds);
     if (atErr) throw atErr;
+
+    // Dedupe: pula atendimento já auditado APÓS a última mensagem da janela
+    // (significa que aquela conversa já foi apurada — não repetir).
+    const { data: auditsExist } = await supabase
+      .from("ia_auditorias")
+      .select("atendimento_id, created_at")
+      .in("atendimento_id", atendIds)
+      .order("created_at", { ascending: false });
+    const ultimaAuditoria = new Map<string, string>();
+    for (const a of (auditsExist || [])) {
+      if (!ultimaAuditoria.has(a.atendimento_id)) ultimaAuditoria.set(a.atendimento_id, a.created_at);
+    }
 
     const lista = (atendimentos || []).filter((at: any) => {
       const colId = at?.contato?.pipeline_coluna_id;
-      return !(colId && colunasLojaSet.has(colId));
+      if (colId && colunasLojaSet.has(colId)) return false;
+      const ult = ultimaAuditoria.get(at.id);
+      const maxMsg = atividadePorAtend.get(at.id)?.max;
+      if (ult && maxMsg && ult >= maxMsg) return false; // já auditado depois da última msg
+      return true;
     });
     const ignoradosLoja = (atendimentos?.length || 0) - lista.length;
-    if (ignoradosLoja > 0) console.log(`[audit-ia-rodar] ignorados pós-handoff Loja=${ignoradosLoja}`);
+    console.log(`[audit-ia-rodar] janela=${janela_inicio}→${janela_fim} candidatos=${atendIds.length} elegíveis=${lista.length} ignorados=${ignoradosLoja}`);
     let totalFlagged = 0;
     let totalLLM = 0;
     const sevOrder = ["ok", "info", "warn", "critical"];
     const minIdx = sevOrder.indexOf(severidade_minima);
 
     for (const at of lista) {
+      // Carrega mensagens APENAS dentro da janela — auditoria fiel ao período pedido.
       const { data: msgs } = await supabase
         .from("mensagens")
         .select("id, direcao, conteudo, tipo_conteudo, created_at")
         .eq("atendimento_id", at.id)
+        .gte("created_at", janela_inicio)
+        .lte("created_at", janela_fim)
         .order("created_at", { ascending: true })
         .limit(200);
 
