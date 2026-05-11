@@ -274,7 +274,14 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         });
 
         // Intercepta 422 outside_24h_window: prepara reabertura via template
-        const errPayload = (error as any)?.context?.body || data;
+        let errPayload: any = data;
+        if (error && (error as any).context && typeof (error as any).context.json === "function") {
+          try {
+            errPayload = await (error as any).context.clone().json();
+          } catch {
+            try { errPayload = await (error as any).context.clone().text(); } catch { /* noop */ }
+          }
+        }
         const errStr = typeof errPayload === "string" ? errPayload : JSON.stringify(errPayload || {});
         if (errStr.includes("outside_24h_window")) {
           let horas = 0;
