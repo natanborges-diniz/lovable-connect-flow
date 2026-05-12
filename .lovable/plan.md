@@ -1,63 +1,55 @@
-## Diagnóstico do caso Emerson
+## Objetivo
+Corrigir o caso em que a IA fica em “analisando...” sem continuar o fluxo e reduzir o tempo de resposta percebido nas conversas, principalmente quando há foto de receita.
 
-Linha do tempo no banco:
-- 14:55:12 — cliente envia foto da receita.
-- 14:56:18 — IA responde "Recebi sua receita 👀 Já estou analisando…" (fallback determinístico de imagem em `ai-triage` linha 1008).
-- Nenhum evento `receita_interpretada` ou `receita_confirmacao_solicitada` foi gravado → **OCR nunca rodou com sucesso**.
-- 16:00 — `vendas-recuperacao-cron` dispara `retomada_contexto_1` 2× porque atendimento ficou "silencioso".
-- 16:06 — `watchdog-loop-ia` marca como loop.
+## O que vou implementar
+1. **Criar um caminho rápido para receita/imagem no `ai-triage`**
+   - Tratar OCR pendente, receita digitada por texto e confirmação de receita **antes** de montar o prompt completo.
+   - Quando o caso já estiver claro, seguir por rota determinística ou por uma chamada de tool mais enxuta, sem carregar todo o contexto comercial.
+   - Manter a regra: se não conseguir ler a foto, pedir texto; se o cliente disser que não consegue digitar, escalar para humano.
 
-A frase "analisando…" deveria ser substituída em até 1 turno por:
-- (a) `interpretar_receita` salvando a receita, **ou**
-- (b) `MSG_PEDIR_RECEITA_TEXTO` ("não consegui ler, me passa por texto OD/OE…").
+2. **Reduzir a latência do pipeline principal de IA**
+   - Evitar carregar conhecimento, exemplos, feedbacks, lojas e histórico longo em todo turno quando isso não for necessário.
+   - Enxugar a janela de contexto para fluxos de receita e orçamento simples.
+   - Remover retrabalho de imagem/contexto em reprocessamentos do mesmo atendimento.
 
-Existe um **forced retry** em `ai-triage` (linha 5227+) que tenta forçar `tool_choice=interpretar_receita`. No caso do Emerson ele:
-- não retornou tool_call (modelo recusou), **ou**
-- lançou exceção silenciosa, **ou**
-- `isImageContext` virou false até esse ponto.
+3. **Diminuir o custo da chamada ao modelo**
+   - Substituir o uso indiscriminado do `openai/gpt-5` por uma estratégia mais leve para roteamento e OCR forçado.
+   - Reservar o modelo mais pesado só para casos realmente complexos, sem mexer nas regras de negócio.
 
-Em qualquer um desses três ramos a `resposta` permanece como "analisando…" e o cliente fica esperando indefinidamente — exatamente o que o usuário relatou.
+4. **Fechar o bug do “analisando...” órfão**
+   - Reforçar no `ai-triage` que qualquer saída “recebi sua receita / estou analisando” sem `receita_interpretada` no mesmo ciclo vira pedido de texto imediatamente.
+   - Manter o `watchdog-inbound-orfao` como rede de segurança para recuperar atendimentos que escaparem.
 
-## Plano
+5. **Instrumentar tempo por etapa**
+   - Adicionar logs de duração para: leitura de dados, montagem de contexto, download de mídia, chamada ao modelo e execução de tool.
+   - Isso permite confirmar exatamente onde a demora está acontecendo depois do deploy.
 
-### 1. `ai-triage`: failsafe quando o forced retry não consegue salvar receita
+## Achados da investigação
+- O backend hospedado está saudável; a lentidão não parece ser indisponibilidade da infraestrutura.
+- O `ai-triage` está montando um prompt muito grande em chamadas repetidas: **~49k caracteres**.
+- Em fluxos com receita, a função baixa a imagem novamente e faz chamadas pesadas ao modelo em ciclos sucessivos.
+- Hoje existem casos com **duas chamadas ao modelo** no mesmo atendimento: a chamada principal e o retry forçado de `interpretar_receita`.
+- O fluxo atual carrega muita coisa em paralelo mesmo quando o cliente só mandou receita ou confirmou dados.
 
-Em `supabase/functions/ai-triage/index.ts` no bloco `precisaForcarInterpretacao` (linha 5235+):
+## Detalhes técnicos
+- **Arquivos alvo:**
+  - `supabase/functions/ai-triage/index.ts`
+  - `supabase/functions/watchdog-inbound-orfao/index.ts`
+- **Sem migração de banco** nesta etapa.
+- **Abordagem de performance:**
+  - fast-path antes do bloco `LOAD ALL DATA IN PARALLEL`
+  - contexto menor para OCR/receita
+  - menos chamadas ao gateway de IA
+  - logs com tempos por fase
 
-- Detectar se a `resposta` atual é a frase determinística de "analisando" (regex `MSG_ANALISANDO_RE` já existe na linha 365).
-- Quando o forced retry **não** produz `interpretar_receita` (modelo sem tool_call, HTTP erro, exceção, ou args vazios) **e** `resposta` casa com `MSG_ANALISANDO_RE`, **substituir** por `MSG_PEDIR_RECEITA_TEXTO` antes de enviar e adicionar flag `force_interpretar_failed_pedindo_texto`.
-- Já existe ramo de low-confidence que faz isso após 1 falha; precisamos do mesmo comportamento quando o retry sequer retorna tool_call.
-
-Resultado: cliente recebe **na mesma resposta** o pedido para digitar OD/OE em vez de "analisando…" pendurado.
-
-### 2. Watchdog para casos onde nenhum forced retry rodou
-
-Em `supabase/functions/watchdog-inbound-orfao/index.ts` (cron 1min, já varre 113 atendimentos):
-
-- Adicionar passo: se o último outbound de um atendimento `modo=ia` casa com `MSG_ANALISANDO_RE`, foi enviado há **>2min e <30min**, e **não existe** evento `receita_interpretada` posterior nem `receita_confirmacao_solicitada` nem mensagem outbound posterior, então:
-  - Enviar `MSG_PEDIR_RECEITA_TEXTO` direto via `send-whatsapp`.
-  - Gravar evento `receita_ocr_orfao_pedido_texto`.
-  - Marcar `metadata.ocr_falhas_count += 1` no contato.
-  - Se `ocr_falhas_count >= 2`, escalar pra humano (`atendimentos.modo=humano`, `revisao_humana_pendente=true`, motivo `ocr_orfao_2_falhas`) com a mensagem padrão dentro/fora do horário.
-
-Isso fecha o buraco para conversas em produção onde o forced retry inline já falhou e o cliente está parado esperando.
-
-### 3. Reforçar tratamento de "não consigo digitar" → humano
-
-Verificar/adicionar no `ai-triage`: quando o último outbound foi `MSG_PEDIR_RECEITA_TEXTO` e o cliente responde com regex tipo `n[ãa]o (consigo|sei|tenho como) (digitar|passar|ler)|t[ôo] sem (a )?receita aqui|n[ãa]o entendo (de|nada)|me ajuda` → escalar pra humano com mensagem "Sem problema, vou chamar alguém da equipe pra te ajudar com isso 🙌" (ou `mensagemEscaladaForaHorario` fora do expediente). Evento `receita_texto_recusada_escalado_humano`.
-
-### 4. Memória
-
-Atualizar `mem://ia/auto-receita-e-anti-loop.md` adicionando o failsafe pós forced-retry e a nova rota do watchdog-inbound-orfao para "analisando órfão".
-
-## Fora do escopo
-
-- Mudar o modelo de OCR ou prompt de `interpretar_receita` (problema é entrega/persistência, não qualidade do OCR neste caso).
-- Mexer em `vendas-recuperacao-cron` (a recuperação só disparou porque a IA travou — corrigindo a trava, o cron volta a se comportar).
-- Backfill em conversas antigas (Emerson e similares ficam para o operador resolver manualmente).
-
-## Arquivos afetados
-
-- `supabase/functions/ai-triage/index.ts` (failsafe pós forced retry + tratamento "não consigo digitar")
-- `supabase/functions/watchdog-inbound-orfao/index.ts` (novo passo de "analisando órfão")
-- `.lovable/memory/ia/auto-receita-e-anti-loop.md` (atualização)
+## Como vou validar
+- Verificar logs do `ai-triage` comparando antes/depois:
+  - tamanho do prompt
+  - quantidade de chamadas ao modelo
+  - tempo por execução
+- Confirmar que o fluxo segue corretamente nos cenários:
+  - foto legível → interpretar → confirmar → continuar
+  - foto ilegível → pedir texto
+  - cliente não consegue digitar → escalar humano
+  - “analisando...” sem continuação → watchdog/failsafe recupera
+- Validar se o `watchdog-inbound-orfao` passa a registrar claramente os eventos do passo de recuperação de “analisando...” órfão.
