@@ -4080,6 +4080,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         callMessages.push({ role: "system", content: retryCorrection });
       }
 
+      const _t_ai = Date.now();
       const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -4098,6 +4099,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           max_completion_tokens: 2500,
         }),
       });
+      console.log(`[PERF] ai_gateway_main=${Date.now() - _t_ai}ms status=${aiResponse.status}`);
 
       if (!aiResponse.ok) {
         const errText = await aiResponse.text();
