@@ -197,13 +197,23 @@ function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): any | n
   return null;
 }
 
-function fmtRxLine(eye: any, name: string): string {
+function fmtRxLine(eye: any, name: string): { line: string; missing: string[] } {
   const esf = (eye?.sphere ?? null);
   const cil = (eye?.cylinder ?? null);
   const eixo = (eye?.axis ?? null);
-  const add = (typeof eye?.add === "number" && eye.add !== 0) ? ` ADD +${eye.add}` : "";
-  const fmtNum = (v: any) => (v == null ? "?" : (Number(v) === 0 ? "0,00" : (Number(v) > 0 ? "+" : "") + Number(v).toFixed(2).replace(".", ",")));
-  return `👁️ *${name}*: ESF ${fmtNum(esf)} CIL ${fmtNum(cil)} EIXO ${eixo ?? "?"}°${add}`;
+  const addVal = (typeof eye?.add === "number" && eye.add !== 0) ? eye.add : null;
+  const fmtNum = (v: any) => (Number(v) === 0 ? "0,00" : (Number(v) > 0 ? "+" : "") + Number(v).toFixed(2).replace(".", ","));
+  const parts: string[] = [];
+  const missing: string[] = [];
+  if (esf != null) parts.push(`ESF ${fmtNum(esf)}`); else missing.push(`esférico do ${name}`);
+  if (cil != null && cil !== 0) {
+    parts.push(`CIL ${fmtNum(cil)}`);
+    // Eixo só faz sentido se houver cilindro
+    if (eixo != null) parts.push(`EIXO ${eixo}°`); else missing.push(`eixo do ${name}`);
+  }
+  if (addVal != null) parts.push(`ADD +${addVal}`);
+  const body = parts.length ? parts.join(" ") : "(não consegui ler)";
+  return { line: `👁️ *${name}*: ${body}`, missing };
 }
 
 function buildMsgConfirmarReceita(rx: any, isCorrection: boolean): string {
@@ -211,7 +221,14 @@ function buildMsgConfirmarReceita(rx: any, isCorrection: boolean): string {
   const oe = rx?.eyes?.oe || {};
   const head = isCorrection ? "Anotei! Ficou assim:" : "Li sua receita assim, confere? 😊";
   const tail = isCorrection ? "Agora tá certo? ✅" : "Está certinho?";
-  return `${head}\n${fmtRxLine(od, "OD")}\n${fmtRxLine(oe, "OE")}\n\n${tail}`;
+  const odLine = fmtRxLine(od, "OD");
+  const oeLine = fmtRxLine(oe, "OE");
+  const missing = [...odLine.missing, ...oeLine.missing];
+  let nota = "";
+  if (missing.length) {
+    nota = `\n\n_Não consegui identificar: ${missing.join(", ")}. Se tiver na receita, me passa por texto que eu completo aqui 🙏_`;
+  }
+  return `${head}\n${odLine.line}\n${oeLine.line}${nota}\n\n${tail}`;
 }
 
 function detectRxConfirmation(text: string): boolean {
