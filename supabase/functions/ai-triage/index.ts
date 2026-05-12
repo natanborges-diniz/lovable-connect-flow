@@ -2445,7 +2445,11 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // Detect if the CURRENT message (last inbound) is an image
     const inboundMsgs = allMsgs.filter((m: any) => m.direcao === "inbound");
     const lastInbound = inboundMsgs.slice(-1)[0];
+    // lastInboundText = última inbound; recentInboundText = junção das últimas 3 inbound
+    // (cobre "?" / "Teria?" como follow-up curto da intenção real anterior).
     const lastInboundText = String(lastInbound?.conteudo || currentMsg || "");
+    const recentInboundText = inboundMsgs.slice(-3)
+      .map((m: any) => String(m?.conteudo || "")).filter(Boolean).join(" \n ");
     // Check if there's an inbound image among the LAST 5 inbound messages (not just the very last)
     // This catches cases where customer sent prescription, then a short text like "Ok" / "ué" / "?"
     const last5Inbound = inboundMsgs.slice(-5);
