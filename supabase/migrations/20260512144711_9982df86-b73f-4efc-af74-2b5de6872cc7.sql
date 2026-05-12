@@ -1,0 +1,1 @@
+UPDATE public.atendimentos SET modo='ia', status='aguardando', updated_at=now() WHERE id='4689bd82-ffb4-438b-bb79-9360e7294e67';
