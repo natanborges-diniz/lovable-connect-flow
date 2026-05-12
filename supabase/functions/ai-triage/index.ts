@@ -2298,17 +2298,20 @@ serve(async (req) => {
     //         para que possa consultar o agendamento ativo e variar a resposta. ──
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
+    const _t_load = Date.now();
     const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes, contatoMetaRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_compilado").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
-      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(30),
-      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").in("avaliacao", ["negativo", "corrigido"]).order("created_at", { ascending: false }).limit(10),
+      // PERF: 30→12 exemplos (priorização por sinais já filtra os relevantes)
+      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(12),
+      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").in("avaliacao", ["negativo", "corrigido"]).order("created_at", { ascending: false }).limit(8),
       supabase.from("ia_regras_proibidas").select("regra, categoria").eq("ativo", true),
+      // PERF: 60→30 mensagens (janela suficiente p/ contexto, prompt encolhe ~40%)
       supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
-        .limit(60),
+        .limit(30),
       supabase.from("pipeline_colunas").select("id, nome, setor_id").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("id, nome_loja, telefone, endereco, horario_abertura, horario_fechamento, horarios_semana, departamento, google_profile_url").eq("ativo", true),
@@ -2331,6 +2334,7 @@ serve(async (req) => {
     let contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
     const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
+    console.log(`[PERF] load_all_data=${Date.now() - _t_load}ms`);
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
     const precisaConfirmarNome = contatoMeta.precisa_confirmar_nome === true && !nomeConfirmado;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
@@ -4076,6 +4080,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         callMessages.push({ role: "system", content: retryCorrection });
       }
 
+      const _t_ai = Date.now();
       const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -4094,6 +4099,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           max_completion_tokens: 2500,
         }),
       });
+      console.log(`[PERF] ai_gateway_main=${Date.now() - _t_ai}ms status=${aiResponse.status}`);
 
       if (!aiResponse.ok) {
         const errText = await aiResponse.text();
@@ -5280,17 +5286,20 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           ...messages,
           { role: "system" as const, content: "[SISTEMA: TOOL FORÇADA] Você DEVE chamar interpretar_receita AGORA com a imagem da receita do cliente que está no histórico. Não responda em texto. Não escale. Apenas execute a tool com os valores que conseguir ler da imagem." },
         ];
+        const _t_forced = Date.now();
         const forcedResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "openai/gpt-5",
+            // PERF: gpt-5-mini para retry de OCR — mais rápido e suficiente p/ visão+tool call
+            model: "openai/gpt-5-mini",
             messages: forcedMessages,
             tools: TOOLS,
             tool_choice: { type: "function", function: { name: "interpretar_receita" } },
             max_completion_tokens: 1500,
           }),
         });
+        console.log(`[PERF] ai_gateway_forced_ocr=${Date.now() - _t_forced}ms status=${forcedResp.status}`);
         if (forcedResp.ok) {
           const forcedData = await forcedResp.json();
           const forcedToolCalls = forcedData?.choices?.[0]?.message?.tool_calls || [];
