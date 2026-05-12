@@ -2413,6 +2413,42 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
+    // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA (1ª interação ou confirmação de nome pendente) ──
+    // Elimina vazamento de prompt (proximo_passo, instruções internas) e reduz latência.
+    // Só dispara para texto puro — imagens (receita) seguem o fluxo normal.
+    {
+      const _lastInboundFP = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
+      const _isImageFP = (_lastInboundFP?.tipo_conteudo || "text") === "image"
+        || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+      const _greetingEligible =
+        !_isImageFP &&
+        
+        contatoTipo === "cliente" &&
+        (inboundCount === 1 || (precisaConfirmarNome && !nomeConfirmado));
+
+      if (_greetingEligible) {
+        const candidato = (nomePerfilWhatsapp || contatoNomeAtual || "").trim();
+        const looksReal = !!candidato
+          && /[A-Za-zÀ-ÿ]{2,}/.test(candidato)
+          && !/^\+?\d[\d\s()+-]*$/.test(candidato);
+        let greetingMsg: string;
+        if (looksReal && !nomeConfirmado) {
+          const primeiroNome = candidato.split(/\s+/)[0];
+          greetingMsg = inboundCount > 1
+            ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
+            : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
+        } else {
+          greetingMsg = inboundCount > 1
+            ? `Antes de seguir, posso saber seu nome, por favor? 😊`
+            : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+        }
+        console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} nomeWa="${nomePerfilWhatsapp}"`);
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, greetingMsg);
+        await logEvent(supabase, contatoId, atendimento_id, "saudacao_deterministica", greetingMsg);
+        return jsonResponse({ status: "ok", tools_used: ["greeting_deterministic"], intencao: "saudacao", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+      }
+    }
+
     // ── DETECTA REGIÃO/CEP do cliente nas últimas 5 inbound ──
     const inboundTextsForLoc = allMsgs
       .filter((m: any) => m.direcao === "inbound")
@@ -4186,20 +4222,23 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           validatorFlags.push("escalada_grau_sem_receita_bloqueada");
           continue;
         }
-        // Merge proximo_passo into resposta if not already included.
-        // Evita duplicar pergunta: se a `resposta` já termina com '?' E o
-        // `proximo_passo` também é pergunta, descarta o proximo_passo (o
-        // modelo costuma reformular a mesma pergunta com outras palavras).
+        // Merge proximo_passo into resposta APENAS se for pergunta (terminar com '?').
+        // proximo_passo descritivo/imperativo ("Confirmar nome", "Aguardar resposta", etc.)
+        // é METADADO INTERNO — nunca deve aparecer no texto enviado ao cliente.
+        // Se já é pergunta repetida, também descarta.
         resposta = args.resposta || "";
         const _respTail = resposta.slice(-150).trim();
         const _respJaPergunta = /\?\s*$/.test(_respTail);
-        const _ppEhPergunta = !!args.proximo_passo && /\?/.test(args.proximo_passo);
+        const _ppEhPergunta = !!args.proximo_passo && /\?\s*$/.test(String(args.proximo_passo).trim());
         if (
           args.proximo_passo &&
+          _ppEhPergunta &&
           !resposta.includes(args.proximo_passo) &&
-          !(_respJaPergunta && _ppEhPergunta)
+          !_respJaPergunta
         ) {
           resposta = resposta.trimEnd().replace(/[.!]$/, "") + " " + args.proximo_passo;
+        } else if (args.proximo_passo && !_ppEhPergunta) {
+          console.log(`[GUARDRAIL] proximo_passo descritivo descartado (não-pergunta): ${JSON.stringify(String(args.proximo_passo).slice(0, 120))}`);
         }
         intencao = args.intencao || "outro";
         pipeline_coluna = args.coluna_pipeline || "Novo Contato";
@@ -5152,13 +5191,16 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 retryResposta = retryArgs.resposta || "";
                 const _rTail = retryResposta.slice(-150).trim();
                 const _rJaPergunta = /\?\s*$/.test(_rTail);
-                const _rPpPergunta = !!retryArgs.proximo_passo && /\?/.test(retryArgs.proximo_passo);
+                const _rPpPergunta = !!retryArgs.proximo_passo && /\?\s*$/.test(String(retryArgs.proximo_passo).trim());
                 if (
                   retryArgs.proximo_passo &&
+                  _rPpPergunta &&
                   !retryResposta.includes(retryArgs.proximo_passo) &&
-                  !(_rJaPergunta && _rPpPergunta)
+                  !_rJaPergunta
                 ) {
                   retryResposta = retryResposta.trimEnd().replace(/[.!]$/, "") + " " + retryArgs.proximo_passo;
+                } else if (retryArgs.proximo_passo && !_rPpPergunta) {
+                  console.log(`[GUARDRAIL retry] proximo_passo descritivo descartado: ${JSON.stringify(String(retryArgs.proximo_passo).slice(0, 120))}`);
                 }
                 intencao = retryArgs.intencao || intencao;
                 pipeline_coluna = retryArgs.coluna_pipeline || pipeline_coluna;
@@ -6529,6 +6571,12 @@ function sanitizeLeakedInstructions(texto: string): string {
     /^\s*-\s+(envie|regra|se\s+o\s+cliente|s[óo]\s+depois|n[ãa]o\s+mencione)[^\n]*/gim,
     /##?\s+(mensagem\s+a\s+enviar|regras\s+internas)[^\n]*/gi,
     /#\s+primeira\s+intera[çc][ãa]o[^\n]*/gi,
+    // proximo_passo descritivo vazado (campo de metadado interno)
+    /confirmar\s+o\s+nome\s+do\s+cliente[^\n]*/gi,
+    /dar\s+sequ[êe]ncia\s+(no|ao)\s+atendimento[^\n]*/gi,
+    /\bpara\s+(prosseguir|continuar|seguir|dar\s+sequ[êe]ncia)\b[^\n]*/gi,
+    /aguardar\s+(resposta|retorno|confirma[çc][ãa]o)\s+do\s+cliente[^\n]*/gi,
+    /verificar\s+(se|com)\s+o\s+cliente[^\n]*/gi,
   ];
   let cleaned = texto;
   let hadLeak = false;
