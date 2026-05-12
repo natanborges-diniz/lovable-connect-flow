@@ -5375,6 +5375,63 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     }
 
+    // ── 9.4b. FORCED RETRY: consultar_lentes em brand_refinement (transitions/varilux/zeiss/etc.) ──
+    // Caso Thais Santiago (12/05/2026): cliente perguntou "Eu queria uma lente transition. Teria?"
+    // após orçamento. forcedIntent disparou brand_refinement:photo, mas o modelo respondeu
+    // "Encontro as opções fotossensíveis... agora e te aviso na sequência" sem nunca chamar a tool.
+    // Mesmo anti-pattern de receita ("Já estou analisando…" sem follow-up). Forçamos a execução.
+    try {
+      const chamouConsultarLentes = (toolCalls || []).some((tc: any) => tc.function?.name === "consultar_lentes");
+      const isBrandRefinement = !!forcedIntent
+        && forcedIntent.tool === "consultar_lentes"
+        && typeof forcedIntent.reason === "string"
+        && forcedIntent.reason.startsWith("brand_refinement:");
+      const stallPhraseRe = /\b(encontro|busco|procuro|verifico|confirmo|j[áa] (vou|estou) (buscar|montar|verificar|consultar))\b.*\b(op[cç][oõ]es|fotossens[ií]veis?|lentes|transitions?|varilux|zeiss|hoya|essilor)\b/i;
+      const respostaIsStall = typeof resposta === "string" && stallPhraseRe.test(resposta);
+
+      if (isBrandRefinement && receitas.length > 0 && !isLCContextGlobal && !precisa_humano && (!chamouConsultarLentes || respostaIsStall)) {
+        const reasonParts = forcedIntent!.reason!.split(":"); // ["brand_refinement", token, raw]
+        const token = (reasonParts[1] || "").toLowerCase();
+        const params: any = {};
+        if (token === "photo") params.filtro_photo = true;
+        else if (token === "blue") params.filtro_blue = true;
+        else if (token === "varilux" || token === "essilor" || token === "eyezen" || token === "crizal" || token === "stellest") params.preferencia_marca = "ESSILOR";
+        else if (token === "zeiss") params.preferencia_marca = "ZEISS";
+        else if (token === "hoya") params.preferencia_marca = "HOYA";
+        else if (token === "kodak") params.preferencia_marca = "KODAK";
+        else if (token === "dnz") params.preferencia_marca = "DNZ";
+        else if (token === "dmax") params.preferencia_marca = "DMAX";
+
+        console.log(`[FORCE-CONSULTAR-LENTES] brand_refinement token=${token} params=${JSON.stringify(params)} chamou=${chamouConsultarLentes} stall=${respostaIsStall}`);
+        try {
+          const qr = await runConsultarLentes(supabase, contatoId, recentOutbound, params, atendimento_id);
+          if (qr?.resposta) {
+            resposta = qr.resposta;
+            intencao = "orcamento";
+            pipeline_coluna = "Orçamento";
+            precisa_humano = false;
+            const flagSuffix = token === "photo" ? "fotossensivel" : token === "blue" ? "filtro_azul" : `marca_${token}`;
+            validatorFlags.push(`forced_consultar_lentes_retry_ok_${flagSuffix}`);
+            if (/preciso confirmar a disponibilidade/i.test(qr.resposta)) {
+              validatorFlags.push("forced_consultar_lentes_zero_results");
+            }
+            // Espelha pattern do guardrail-analisando: anexa sufixo de revisão humana se aplicável.
+            try {
+              const _ultimaRx2 = receitas[receitas.length - 1];
+              const rev = requerRevisaoHumanaPosOrcamento(_ultimaRx2);
+              if (rev.precisa && resposta && !resposta.includes(MSG_REVISAO_HUMANA_SUFIXO)) {
+                resposta = resposta + MSG_REVISAO_HUMANA_SUFIXO;
+              }
+            } catch (_) { /* noop */ }
+          }
+        } catch (e) {
+          console.error("[FORCE-CONSULTAR-LENTES] runConsultarLentes falhou:", e);
+        }
+      }
+    } catch (e) {
+      console.error("[FORCE-CONSULTAR-LENTES] exception:", e);
+    }
+
     // ── 9.5. GUARDRAIL ANTI-LOOP "dois caminhos" ──
     // Se a resposta contém "dois caminhos" / "te mostrar opções ou montar um orçamento" e a mesma
     // frase já foi enviada antes, descarta e força o caminho correto. Caso Artur Borges (24/04):
@@ -5887,8 +5944,8 @@ async function runConsultarLentes(
   const hasAddition = addValues.length > 0;
 
   const categoryMap: Record<string, string[]> = {
-    single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids"],
-    progressive: ["progressive", "occupational"],
+    single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids", "single", "digital", "visao_simples", "special_myopia", "special_drive", "special_sport", "myopia_control", "especial", "special"],
+    progressive: ["progressive", "progressiva", "occupational", "ocupacional"],
   };
   const categories = categoryMap[rxType] || [rxType];
 
