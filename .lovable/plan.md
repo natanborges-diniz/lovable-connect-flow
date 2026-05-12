@@ -1,38 +1,43 @@
 ## Problema
 
-Quando o cliente pede explicitamente "Quero falar com atendente" (como o Roberto às 19:11, fora do expediente Seg-Sex 09–18), a IA responde com:
+Thais digitou:
+```
+OD: Esférico Plano / -2,5 cil / 05 eixo
+OE: Esférico Plano / -2,75 cil / 175 eixo
+```
 
-> "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve…"
+A IA ignorou e escalou para humano. A causa está em `detectPrescriptionCorrection` (`supabase/functions/ai-triage/index.ts` ~linhas 769-900):
 
-Sem avisar que o atendimento humano está fora do horário. O memory `horario-comercial-humano` exige que TODA escalada use `mensagemEscaladaForaHorario()` fora do expediente, mas a função `handleEscalation` (em `supabase/functions/ai-triage/index.ts`, linha 6365) é o único caminho de escalada que ainda usa string hardcoded, ignorando `isHorarioHumano()`.
+1. Linhas 791-792 normalizam `pl|plano|neutro|zerado|zero` → `0` no texto de trabalho `t`. Isso é correto: dá `sphere = 0` para os dois olhos.
+2. **Mas a validação anti-hallucination (linhas 874-898) reconstrói `sourceNumbers` a partir do texto ORIGINAL (`text`)** — onde "Plano" é palavra, não número. O `0.00` da esfera não está em `sourceNumbers`, então `validateField` descarta ambas as esferas.
+3. Linha 900: `if (od.sphere == null && oe.sphere == null) return null;` — função retorna `null`, parser não detecta correção, fluxo cai no LLM que escala para humano.
 
-Esse caminho é acionado pelo router de keywords ("falar com atendente", "quero atendente", "consultor especializado", etc. — definido por volta da linha 355) e dispara em `linha 2146`.
+A receita do cliente é totalmente válida (esférico zero + cilindro = puramente astigmática) e o parser tinha extraído tudo certo antes da validação descartar.
 
 ## Mudança
 
-Em `handleEscalation` (linha 6365–6372):
+Em `detectPrescriptionCorrection` (linha ~877), aplicar as mesmas normalizações de keyword óptica → `0` ao construir `rawNorm` antes de extrair `sourceNumbers`. Assim "plano/pl/neutro/zerado/zero/sc" também viram `0` no haystack e a validação não descarta `sphere=0` legítimo.
 
-1. Aceitar `nomePrim` como parâmetro opcional (ou buscar de `contatos.nome` via `contatoId` quando não fornecido — já temos `supabase` no escopo).
-2. Substituir a string fixa por:
-   ```ts
-   const resposta = trigger === "lentes_de_contato"
-     ? mensagem
-     : (isHorarioHumano()
-         ? "Entendido! Já acionei um Consultor especializado para te atender. Ele entrará em contato em breve. Posso te ajudar com algo rápido enquanto isso? 😊"
-         : mensagemEscaladaForaHorario(nomePrim));
-   ```
-3. No único chamador (linha 2146), passar o primeiro nome (já existe `_np`/`nomePrim` computado várias vezes no arquivo; usar a mesma derivação local).
-4. Registrar `fora_horario: !isHorarioHumano()` + `proxima_abertura` no `eventos_crm.metadata` da escalada (mesmo padrão de linhas 2683/5399), para auditoria.
+Patch (~linha 877):
+```ts
+const rawNorm = text.toLowerCase()
+  .replace(/([+\-])\s+(\d)/g, "$1$2")
+  .replace(/\*/g, " ")
+  .replace(/-\s*(pl|plano|neutro|zerado|zero)\b/g, "0")
+  .replace(/\b(pl|plano|neutro|zerado)\b/g, "0")
+  .replace(/\bsc\b/g, "");
+```
+
+Adicionar log `[RX-VALIDATE] sphere=0 aceito via keyword 'plano'` para auditoria quando aplicável (opcional, via flag local).
 
 ## Validação
 
-- Mensagem "quero falar com atendente" enviada 19:11 SP → resposta começa com "Olá {nome}! Nossos consultores estão fora do expediente…" + próxima abertura.
-- Mesma mensagem enviada 14:00 SP → resposta atual mantida ("Já acionei um Consultor…").
-- `atendimentos.modo='humano'` continua sendo setado nos dois casos (handoff hard preserva).
-- `eventos_crm` registra `fora_horario` no payload.
+- Mensagem da Thais reprocessada → `correction` retorna `{ od:{sphere:0,cylinder:-2.5,axis:5}, oe:{sphere:0,cylinder:-2.75,axis:175} }`. Como `iaJustAskedForText=true` (a outbound anterior é exatamente o template `MSG_PEDIR_RECEITA_TEXTO`), entra no modo `client_typed_first`, salva receita e força `consultar_lentes`.
+- Caso Manel (correção alto impacto via texto) e Bianca (`Od -4.50 / Oe -pl`) continuam funcionando — o segundo `replace` cobre `-pl`/`pl`.
+- Anti-hallucination continua bloqueando números fantasma reais: só relaxa para tokens que já eram normalizados pelo próprio parser.
 
 ## Arquivos
 
-- `supabase/functions/ai-triage/index.ts` — patch em `handleEscalation` + ajuste do call site (linha 2146).
+- `supabase/functions/ai-triage/index.ts` — patch de ~6 linhas em `detectPrescriptionCorrection` (~linha 877).
 
-Sem migração, sem novos secrets.
+Sem migração, sem secrets, sem cron.
