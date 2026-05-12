@@ -2413,6 +2413,42 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
+    // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA (1ª interação ou confirmação de nome pendente) ──
+    // Elimina vazamento de prompt (proximo_passo, instruções internas) e reduz latência.
+    // Só dispara para texto puro — imagens (receita) seguem o fluxo normal.
+    {
+      const _lastInboundFP = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
+      const _isImageFP = (_lastInboundFP?.tipo_conteudo || "text") === "image"
+        || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+      const _greetingEligible =
+        !_isImageFP &&
+        !isHomologacao &&
+        contatoTipo === "cliente" &&
+        (inboundCount === 1 || (precisaConfirmarNome && !nomeConfirmado));
+
+      if (_greetingEligible) {
+        const candidato = (nomePerfilWhatsapp || contatoNomeAtual || "").trim();
+        const looksReal = !!candidato
+          && /[A-Za-zÀ-ÿ]{2,}/.test(candidato)
+          && !/^\+?\d[\d\s()+-]*$/.test(candidato);
+        let greetingMsg: string;
+        if (looksReal && !nomeConfirmado) {
+          const primeiroNome = candidato.split(/\s+/)[0];
+          greetingMsg = inboundCount > 1
+            ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
+            : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
+        } else {
+          greetingMsg = inboundCount > 1
+            ? `Antes de seguir, posso saber seu nome, por favor? 😊`
+            : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+        }
+        console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} nomeWa="${nomePerfilWhatsapp}"`);
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, greetingMsg);
+        await logEvent(supabase, contatoId, atendimento_id, "saudacao_deterministica", greetingMsg);
+        return jsonResponse({ status: "ok", tools_used: ["greeting_deterministic"], intencao: "saudacao", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+      }
+    }
+
     // ── DETECTA REGIÃO/CEP do cliente nas últimas 5 inbound ──
     const inboundTextsForLoc = allMsgs
       .filter((m: any) => m.direcao === "inbound")
