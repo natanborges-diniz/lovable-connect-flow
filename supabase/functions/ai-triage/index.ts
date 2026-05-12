@@ -5191,13 +5191,16 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 retryResposta = retryArgs.resposta || "";
                 const _rTail = retryResposta.slice(-150).trim();
                 const _rJaPergunta = /\?\s*$/.test(_rTail);
-                const _rPpPergunta = !!retryArgs.proximo_passo && /\?/.test(retryArgs.proximo_passo);
+                const _rPpPergunta = !!retryArgs.proximo_passo && /\?\s*$/.test(String(retryArgs.proximo_passo).trim());
                 if (
                   retryArgs.proximo_passo &&
+                  _rPpPergunta &&
                   !retryResposta.includes(retryArgs.proximo_passo) &&
-                  !(_rJaPergunta && _rPpPergunta)
+                  !_rJaPergunta
                 ) {
                   retryResposta = retryResposta.trimEnd().replace(/[.!]$/, "") + " " + retryArgs.proximo_passo;
+                } else if (retryArgs.proximo_passo && !_rPpPergunta) {
+                  console.log(`[GUARDRAIL retry] proximo_passo descritivo descartado: ${JSON.stringify(String(retryArgs.proximo_passo).slice(0, 120))}`);
                 }
                 intencao = retryArgs.intencao || intencao;
                 pipeline_coluna = retryArgs.coluna_pipeline || pipeline_coluna;
