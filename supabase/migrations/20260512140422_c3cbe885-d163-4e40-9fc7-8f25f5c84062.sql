@@ -1,0 +1,1 @@
+UPDATE public.tarefas SET status='concluida', updated_at=now() WHERE id='eac51703-84f7-415e-a052-43937f2d33d4';
