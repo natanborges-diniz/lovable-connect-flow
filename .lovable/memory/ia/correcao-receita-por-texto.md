@@ -1,6 +1,6 @@
 ---
 name: Receita Digitada por Texto (Primeira ou Correção)
-description: Aceita receita digitada como PRIMEIRA leitura (quando IA pediu por texto após OCR falhar) ou como correção; entende pl/plano/neutro=0 e esf-only; bypassa loop_escalation; correções de ALTO IMPACTO exigem confirmação explícita antes de cotar/escalar
+description: Aceita receita digitada como PRIMEIRA leitura (quando IA pediu por texto após OCR falhar) ou como correção; entende pl/plano/neutro=0 (inclusive na validação anti-hallucination); bypassa loop_escalation; correções de ALTO IMPACTO exigem confirmação explícita antes de cotar/escalar
 type: feature
 ---
 
@@ -13,11 +13,12 @@ type: feature
 ## Parser por bloco de olho + validação anti-fantasma (Mai/2026)
 - Pre-normalização remove asteriscos de markdown (`*OD*`, `*CIL`).
 - Texto é dividido em blocos por olho (`/\b(od|oe|os)\b([\s\S]*?)(?=…)/`). Em cada bloco extraímos `axis`/`add` por palavra-chave (e removemos do bloco), e os 2 primeiros números restantes viram `sphere` e `cylinder`. Elimina dependência de `com/x//` e ignora rótulos `esf`/`cil`/`*`/`:`.
-- **Validação anti-hallucination:** todo número que sobreviver é checado contra os números presentes no texto-fonte original (Math.abs com 2 casas). Se não bater, o campo é **descartado** (`null`) — log `[RX-VALIDATE] descartando {campo}…`. Garante que o merge nunca persiste valor fantasma.
+- **Validação anti-hallucination:** todo número que sobreviver é checado contra os números presentes no texto-fonte original (Math.abs com 2 casas). Se não bater, o campo é **descartado** (`null`) — log `[RX-VALIDATE] descartando {campo}…`.
+- **Caso Thais (Nov/2026):** `OD: Esférico Plano / -2,5 cil / 05 eixo` foi descartado porque `sphere=0` (vindo de "Plano") não estava em `sourceNumbers` (haystack construído do texto cru, sem normalizar keywords). Corrigido aplicando as MESMAS substituições `pl|plano|neutro|zerado|zero|sc` → `0` ao construir `rawNorm` antes de extrair `sourceNumbers`. Agora receita puramente astigmática (esférico zero + cilindro) passa pela validação.
 - Caso Franciana (Mai/2026): `*OD*: ESF -13,50 *CIL -0,50` antes não capturava `-0,50` porque o regex Pattern A não tolerava a palavra `cil` entre os números → cilindro antigo (`-0,80` do OCR) sobrevivia ao merge. Parser por bloco corrige.
 
 ## Convenções parseadas
-- `pl`, `plano`, `neutro`, `zerado`, `zero` → `0`. `sc` removido.
+- `pl`, `plano`, `neutro`, `zerado`, `zero` → `0`. `sc` removido. (Aplicado tanto no parser quanto no haystack de validação.)
 - Aceita vírgula/ponto, sinal opcional, espaço entre sinal e número (`-  425` → -4.25).
 - Shorthand óptico (`-400` → -4.00).
 - Esf-only é válido (cilindro/eixo permanecem null).
@@ -61,3 +62,4 @@ Substituído "grau alto / sob encomenda" por "lente especial / lente personaliza
 - **Jardel (25/04)**: shorthand "-400" — corrigido no parser.
 - **Bianca (28/04)**: `Od -4.50 / Oe -pl` digitada como 1ª leitura — modo "first" implementado.
 - **Manel (Mai/2026)**: cliente corrigiu OE de -1.00 para -14.50 (Δ=13.5) — antes a IA pulava direto para escala humana sem confirmar; agora dispara confirmação determinística antes de qualquer cotação/escalada.
+- **Thais (Nov/2026)**: receita puramente astigmática (`Esférico Plano / -2,5 cil / 05 eixo`) — antes o anti-hallucination descartava `sphere=0` por "Plano" não ser número no texto cru, e o parser retornava `null`. Agora `rawNorm` aplica as mesmas normalizações de keyword e a receita passa.
