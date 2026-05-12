@@ -4222,20 +4222,23 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           validatorFlags.push("escalada_grau_sem_receita_bloqueada");
           continue;
         }
-        // Merge proximo_passo into resposta if not already included.
-        // Evita duplicar pergunta: se a `resposta` já termina com '?' E o
-        // `proximo_passo` também é pergunta, descarta o proximo_passo (o
-        // modelo costuma reformular a mesma pergunta com outras palavras).
+        // Merge proximo_passo into resposta APENAS se for pergunta (terminar com '?').
+        // proximo_passo descritivo/imperativo ("Confirmar nome", "Aguardar resposta", etc.)
+        // é METADADO INTERNO — nunca deve aparecer no texto enviado ao cliente.
+        // Se já é pergunta repetida, também descarta.
         resposta = args.resposta || "";
         const _respTail = resposta.slice(-150).trim();
         const _respJaPergunta = /\?\s*$/.test(_respTail);
-        const _ppEhPergunta = !!args.proximo_passo && /\?/.test(args.proximo_passo);
+        const _ppEhPergunta = !!args.proximo_passo && /\?\s*$/.test(String(args.proximo_passo).trim());
         if (
           args.proximo_passo &&
+          _ppEhPergunta &&
           !resposta.includes(args.proximo_passo) &&
-          !(_respJaPergunta && _ppEhPergunta)
+          !_respJaPergunta
         ) {
           resposta = resposta.trimEnd().replace(/[.!]$/, "") + " " + args.proximo_passo;
+        } else if (args.proximo_passo && !_ppEhPergunta) {
+          console.log(`[GUARDRAIL] proximo_passo descritivo descartado (não-pergunta): ${JSON.stringify(String(args.proximo_passo).slice(0, 120))}`);
         }
         intencao = args.intencao || "outro";
         pipeline_coluna = args.coluna_pipeline || "Novo Contato";
