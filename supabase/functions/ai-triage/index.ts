@@ -3955,8 +3955,29 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita" || forcedIntent.tool === "responder_pedindo_receita")) {
       const isRegionTrigger = /respondeu regi[aã]o/i.test(forcedIntent.reason || "");
+      const brandRefMatch = (forcedIntent.reason || "").match(/^brand_refinement:([a-z]+):(.*)$/i);
+      const brandHint: string | null = brandRefMatch ? (() => {
+        const tok = brandRefMatch[1];
+        const raw = brandRefMatch[2];
+        if (tok === "kodak") {
+          return `[SISTEMA: REFINAMENTO MARCA — KODAK] Cliente perguntou sobre KODAK. Trabalhamos sim (linha Precise multifocal), mas o catálogo da Kodak NÃO está na nossa tabela de preços online. AÇÃO: confirme "Trabalhamos com Kodak sim 😊" e ESCALE para humano com mensagem curta tipo "vou chamar a equipe pra te passar os valores certinhos". NÃO invente preço. NÃO chame consultar_lentes pra Kodak.`;
+        }
+        const params: string[] = [];
+        let label = raw;
+        if (tok === "photo") { params.push("filtro_photo:true"); label = "fotossensível/Transitions"; }
+        else if (tok === "blue") { params.push("filtro_blue:true"); label = "filtro azul/antirreflexo"; }
+        else if (tok === "polar") { params.push('preferencia_marca:"HOYA"'); label = "polarizado"; }
+        else if (tok === "essilor") { params.push('preferencia_marca:"ESSILOR"'); label = `${raw} (família ESSILOR)`; }
+        else if (tok === "zeiss") { params.push('preferencia_marca:"ZEISS"'); label = "ZEISS"; }
+        else if (tok === "hoya") { params.push('preferencia_marca:"HOYA"'); label = "HOYA"; }
+        else if (tok === "dnz") { params.push('preferencia_marca:"DNZ"'); label = "DNZ"; }
+        else if (tok === "dmax") { params.push('preferencia_marca:"DMAX"'); label = "DMAX"; }
+        return `[SISTEMA: REFINAMENTO POR TRATAMENTO/MARCA] Cliente perguntou se temos ${label}. Há receita salva e o catálogo é a fonte da verdade. AÇÃO OBRIGATÓRIA AGORA: chame consultar_lentes com {${params.join(", ")}} e a receita mais recente. Apresente 2-3 opções compatíveis com nome da família e preço (ex.: "Hoya Sensity Original — R$ X", "DMAX Foto — R$ Y"). Se nenhuma opção compatível, diga isso explicitamente e ofereça alternativa equivalente em outra marca/tratamento. ⛔ PROIBIDO responder "preciso confirmar na loja", "preciso verificar disponibilidade", "vou checar com um especialista" — o catálogo já responde. ⛔ PROIBIDO escalar para humano. ⛔ PROIBIDO perguntar região antes de mostrar as opções.`;
+      })() : null;
       const hint = forcedIntent.tool === "consultar_lentes"
-        ? (isRegionTrigger
+        ? (brandHint
+            ? brandHint
+            : isRegionTrigger
             ? "[SISTEMA: REGIÃO RECEBIDA APÓS ORÇAMENTO PROMETIDO] Cliente acabou de responder a região/bairro que VOCÊ pediu na mensagem anterior, e há receita salva. AÇÃO OBRIGATÓRIA AGORA (NÃO ADIE): chame consultar_lentes IMEDIATAMENTE com a receita mais recente. PROIBIDO mandar 'obrigado pela região, já vou separar', 'preciso confirmar na loja', 'vou verificar com um especialista' ou qualquer mensagem de espera — o orçamento sai NESTE turno, junto com a indicação da loja mais próxima da região informada. PROIBIDO escalar pra humano."
             : "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere.")
         : forcedIntent.tool === "consultar_lentes_contato"
