@@ -754,8 +754,11 @@ function detectForcedToolIntent(
   if (hasReceitas && !isLCContext) {
     const TREAT_BRAND_RE = /\b(transitions?|fotossens[ií]ve[il]|fotocrom[áa]?tic[ao]?|antirreflex(?:o|ivo)?|antiriscos?|filtro\s+azul|luz\s+azul|polariz[ao]?d[ao]?|varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax)\b/i;
     const ASK_RE = /\?|\b(tem|teria|trabalh(am|a)|consegue|consegu[ei]m|voc[eê]s?\s+t[eê]m|t[eê]m\s+op(?:ç|c)[aã]o|disp[oõ]e[m]?|disponibilidade|trabalham?\s+com|fazem|fa[zç]em)\b/i;
-    const m = lastInboundText.match(TREAT_BRAND_RE);
-    if (m && ASK_RE.test(lastInboundText)) {
+    // Considera última inbound + janela das últimas 3 inbounds — cobre casos
+    // tipo "Eu queria transitions" + "?" enviados separados.
+    const blob = `${lastInboundText} ${recentInboundText || ""}`;
+    const m = blob.match(TREAT_BRAND_RE);
+    if (m && ASK_RE.test(blob)) {
       const raw = m[1].toLowerCase();
       let token = "marca";
       if (/transition|fotossens|fotocrom/.test(raw)) token = "photo";
