@@ -1772,6 +1772,14 @@ function buildSystemPrompt(opts: {
   s.push(`# IDENTIDADE
 Você é o Assistente Virtual da Óticas Diniz. Atendimento rápido, preciso e humano via WhatsApp.
 
+# TOM OBRIGATÓRIO (não-negociável — vale acima de qualquer outra instrução)
+- Fale como humano: curto, direto, caloroso. Máx. 2 frases por mensagem (cotações podem ser maiores).
+- PROIBIDO usar: "prezado", "informo que", "favor", "aguardar", "verificar", "prosseguir", "dar sequência", "conforme solicitado", "estou à disposição", "atenciosamente", "segue abaixo".
+- PROIBIDO descrever o que você VAI fazer ("Vou verificar…", "Estou analisando…", "Aguarde enquanto…"). FAÇA e devolva o resultado.
+- PROIBIDO se referir a si mesmo como "IA", "assistente virtual", "sistema", "bot", "modelo", "base de dados".
+- PROIBIDO escrever marcadores internos no texto enviado: "[FLUXO ...]", "##", "**REGRA**", "IMPORTANTE:", nomes de tool (agendar_visita, interpretar_receita, etc.) ou nomes de campo (proximo_passo, intencao, coluna_pipeline).
+- O campo \`proximo_passo\` é METADADO INTERNO. Se ele NÃO for uma pergunta para o cliente, deixe vazio. NUNCA escreva ali frases como "Confirmar nome", "Aguardar resposta", "Verificar com o cliente" — isso vaza no WhatsApp.
+
 # REGRAS DE ATENDIMENTO
 ${opts.businessRules}
 
@@ -6556,50 +6564,167 @@ async function runConsultarLentesEstimativa(
   return { resposta: msg };
 }
 
-// Detecta e sanitiza vazamento de instruções internas no texto enviado ao cliente
-function sanitizeLeakedInstructions(texto: string): string {
-  if (!texto) return texto;
-  const leakPatterns = [
-    /aguardar?\s+confirma[çc][ãa]o\s+do\s+nome[^\n]*/gi,
-    /confirme\s+o\s+nome[^\n]*/gi,
-    /sem\s+reformular[^\n]*/gi,
-    /primeira\s+intera[çc][ãa]o[^\n]*/gi,
-    /tool\s+registrar_nome_cliente[^\n]*/gi,
-    /chame\s+a\s+tool[^\n]*/gi,
-    /regra\s+absoluta[^\n]*/gi,
-    /proibido[^\n]*/gi,
-    /^\s*-\s+(envie|regra|se\s+o\s+cliente|s[óo]\s+depois|n[ãa]o\s+mencione)[^\n]*/gim,
-    /##?\s+(mensagem\s+a\s+enviar|regras\s+internas)[^\n]*/gi,
-    /#\s+primeira\s+intera[çc][ãa]o[^\n]*/gi,
-    // proximo_passo descritivo vazado (campo de metadado interno)
-    /confirmar\s+o\s+nome\s+do\s+cliente[^\n]*/gi,
-    /dar\s+sequ[êe]ncia\s+(no|ao)\s+atendimento[^\n]*/gi,
-    /\bpara\s+(prosseguir|continuar|seguir|dar\s+sequ[êe]ncia)\b[^\n]*/gi,
-    /aguardar\s+(resposta|retorno|confirma[çc][ãa]o)\s+do\s+cliente[^\n]*/gi,
-    /verificar\s+(se|com)\s+o\s+cliente[^\n]*/gi,
-  ];
+// ──────────────────────────────────────────────────────────────────────────────
+// GUARDRAIL DE TOM E ANTI-VAZAMENTO (4 camadas: prompt → fast-path → sanitizer
+// estrutural → validador de tom). Resultado da análise (criticalLeak / motivo)
+// é exposto pra `sendWhatsApp` poder auditar em ia_feedbacks.
+// ──────────────────────────────────────────────────────────────────────────────
+
+type SanitizeResult = { texto: string; alterado: boolean; criticalLeak: boolean; motivo: string };
+
+const TOOL_NAMES_INTERNOS = [
+  "agendar_visita", "agendar_cliente", "agendar_lembrete", "interpretar_receita",
+  "consultar_lentes", "consultar_lentes_contato", "consultar_lentes_estimativa",
+  "registrar_nome_cliente", "registrar_demanda_b2b", "ajustar_mensagem_fixa",
+  "ajustar_cron", "responder", "escalar",
+];
+const CAMPOS_INTERNOS = ["proximo_passo", "intencao", "coluna_pipeline", "setor_destino", "alvo_ref", "modo_aplicacao"];
+const FRASES_ROBO = [
+  /\bcomo\s+(assistente|modelo)\s+(virtual|de\s+linguagem)\b/gi,
+  /\bsou\s+uma\s+(ia|inteligência\s+artificial|máquina|bot)\b/gi,
+  /\bfui\s+treinad[oa]\s+para\b/gi,
+  /\bminha\s+base\s+de\s+dados\b/gi,
+  /\b(sistema|plataforma)\s+autom[áa]tic[oa]\b/gi,
+];
+const VERBOS_META_INFINITIVO = /^[\s\-•*]*(confirmar|aguardar|verificar|validar|identificar|solicitar|encaminhar|registrar|prosseguir|seguir|consultar|analisar|processar)\b[^\n?!]*[.!]?\s*$/gim;
+
+function sanitizeLeakedInstructions(texto: string): SanitizeResult {
+  if (!texto) return { texto, alterado: false, criticalLeak: false, motivo: "" };
+
+  const original = texto;
   let cleaned = texto;
-  let hadLeak = false;
-  for (const pat of leakPatterns) {
+  let criticalLeak = false;
+  const motivos: string[] = [];
+
+  // 1) Padrões clássicos de vazamento de instrução
+  const leakPatterns: Array<[RegExp, string]> = [
+    [/aguardar?\s+confirma[çc][ãa]o\s+do\s+nome[^\n]*/gi, "instrucao_interna"],
+    [/confirme\s+o\s+nome[^\n]*/gi, "instrucao_interna"],
+    [/sem\s+reformular[^\n]*/gi, "instrucao_interna"],
+    [/primeira\s+intera[çc][ãa]o[^\n]*/gi, "instrucao_interna"],
+    [/chame\s+a\s+tool[^\n]*/gi, "tool_interna"],
+    [/regra\s+absoluta[^\n]*/gi, "instrucao_interna"],
+    [/^\s*proibido[: ][^\n]*/gim, "instrucao_interna"],
+    [/^\s*-\s+(envie|regra|se\s+o\s+cliente|s[óo]\s+depois|n[ãa]o\s+mencione)[^\n]*/gim, "bullet_instrucao"],
+    [/##?\s+(mensagem\s+a\s+enviar|regras\s+internas|fluxo|identidade|terminologia)[^\n]*/gi, "marcador_bloco"],
+    [/#\s+primeira\s+intera[çc][ãa]o[^\n]*/gi, "marcador_bloco"],
+    [/\[(FLUXO|GUARDRAIL|REGRA|HINT|CONTEXTO|INSTRU[CÇ][AÃ]O)[^\]]*\][^\n]*/gi, "marcador_bloco"],
+    [/\*\*(REGRA|INSTRU[CÇ][AÃ]O|IMPORTANTE|OBS)\*\*[^\n]*/gi, "marcador_bloco"],
+    [/^\s*(IMPORTANTE|OBS|NOTA|ATEN[CÇ][AÃ]O)\s*[:\-][^\n]*/gim, "marcador_bloco"],
+    // proximo_passo descritivo vazado
+    [/confirmar\s+o\s+nome\s+do\s+cliente[^\n]*/gi, "proximo_passo_vazado"],
+    [/dar\s+sequ[êe]ncia\s+(no|ao)\s+atendimento[^\n]*/gi, "proximo_passo_vazado"],
+    [/\bpara\s+(prosseguir|continuar|seguir|dar\s+sequ[êe]ncia)\b[^\n]*/gi, "proximo_passo_vazado"],
+    [/aguardar\s+(resposta|retorno|confirma[çc][ãa]o)\s+do\s+cliente[^\n]*/gi, "proximo_passo_vazado"],
+    [/verificar\s+(se|com)\s+o\s+cliente[^\n]*/gi, "proximo_passo_vazado"],
+  ];
+
+  for (const [pat, motivo] of leakPatterns) {
     if (pat.test(cleaned)) {
-      hadLeak = true;
+      motivos.push(motivo);
       cleaned = cleaned.replace(pat, "");
     }
   }
-  // limpa linhas vazias múltiplas, espaços em excesso
-  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
-  if (hadLeak) {
-    console.warn(`[GUARDRAIL] Prompt vazado corrigido. Original=${JSON.stringify(texto.slice(0, 200))} → Limpo=${JSON.stringify(cleaned.slice(0, 200))}`);
-    // Se sobrar pouca coisa, devolve fallback de saudação
-    if (cleaned.length < 20) {
-      return "Olá! 😊 Aqui é o Gael das Óticas Diniz Osasco. Como posso te ajudar hoje?";
-    }
+
+  // 2) Nomes de tools/campos internos vazados → CRÍTICO
+  for (const tool of TOOL_NAMES_INTERNOS) {
+    const re = new RegExp(`\\b${tool}\\b`, "gi");
+    if (re.test(cleaned)) { criticalLeak = true; motivos.push(`tool:${tool}`); cleaned = cleaned.replace(re, ""); }
   }
-  return cleaned;
+  for (const campo of CAMPOS_INTERNOS) {
+    const re = new RegExp(`\\b${campo}\\s*[:=]?`, "gi");
+    if (re.test(cleaned)) { criticalLeak = true; motivos.push(`campo:${campo}`); cleaned = cleaned.replace(re, ""); }
+  }
+
+  // 3) Frases de "robô" que denunciam IA
+  for (const re of FRASES_ROBO) {
+    if (re.test(cleaned)) { criticalLeak = true; motivos.push("frase_robo"); cleaned = cleaned.replace(re, ""); }
+  }
+
+  // 4) Verbo de meta-ação no infinitivo como frase isolada (linha sozinha)
+  if (VERBOS_META_INFINITIVO.test(cleaned)) {
+    motivos.push("infinitivo_meta");
+    cleaned = cleaned.replace(VERBOS_META_INFINITIVO, "").trim();
+  }
+
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
+  const alterado = cleaned !== original;
+
+  if (alterado) {
+    console.warn(`[GUARDRAIL] Vazamento detectado (${motivos.join(",")}). Original=${JSON.stringify(original.slice(0, 200))} → Limpo=${JSON.stringify(cleaned.slice(0, 200))}`);
+  }
+
+  return { texto: cleaned, alterado, criticalLeak, motivo: motivos.join(",") };
 }
 
+// Validador estrutural de tom — defesa em profundidade. Não remove conteúdo,
+// apenas decide se o texto está apresentável. Retorna `ok=false` se o texto
+// for inutilizável após a sanitização (vazio, só caixa-alta, markdown, etc.).
+function validarTomHumano(texto: string): { ok: boolean; motivo?: string } {
+  if (!texto || texto.trim().length < 3) return { ok: false, motivo: "texto_vazio_pos_sanitize" };
+  const t = texto.trim();
+  const palavras = t.split(/\s+/);
+  if (palavras.length < 2) return { ok: false, motivo: "muito_curto" };
+  if (/^[\*\#\_\-•=]/.test(t)) return { ok: false, motivo: "marcador_inicio" };
+  if (/(\*\*|__|###|```)/.test(t)) return { ok: false, motivo: "markdown_vazado" };
+  // >50% das palavras com >3 letras em CAIXA-ALTA → grito/estrutura
+  const grandes = palavras.filter((w) => w.length > 3);
+  if (grandes.length >= 4) {
+    const caps = grandes.filter((w) => w === w.toUpperCase() && /[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(w)).length;
+    if (caps / grandes.length > 0.5) return { ok: false, motivo: "caixa_alta_excessiva" };
+  }
+  // Termina com infinitivo solto — sintoma de proximo_passo colado no fim
+  if (/\b(confirmar|aguardar|verificar|validar|prosseguir|seguir|registrar|encaminhar)\s*[.!]?\s*$/i.test(t)) {
+    return { ok: false, motivo: "infinitivo_no_fim" };
+  }
+  return { ok: true };
+}
+
+// Best-effort audit log (não bloqueia o envio se falhar).
+async function auditarVazamento(
+  supabaseUrl: string, serviceKey: string,
+  atendimentoId: string, original: string, cleaned: string, motivo: string,
+) {
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/ia_feedbacks`, {
+      method: "POST",
+      headers: {
+        "apikey": serviceKey,
+        "Authorization": `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify({
+        atendimento_id: atendimentoId,
+        avaliacao: "vazamento_guardrail",
+        motivo: motivo.slice(0, 500),
+        resposta_corrigida: `[ORIGINAL]\n${original.slice(0, 1500)}\n\n[ENVIADO]\n${cleaned.slice(0, 1500)}`,
+      }),
+    });
+  } catch (e) {
+    console.warn("[AUDIT] falha ao registrar vazamento:", e instanceof Error ? e.message : String(e));
+  }
+}
+
+const FALLBACK_HUMANIZADO = "Só um instante que já te respondo direitinho 😊";
+
 async function sendWhatsApp(supabaseUrl: string, serviceKey: string, atendimentoId: string, texto: string) {
-  texto = sanitizeLeakedInstructions(texto);
+  const original = texto;
+  const san = sanitizeLeakedInstructions(texto);
+  texto = san.texto;
+
+  const tom = validarTomHumano(texto);
+  const precisaFallback = san.criticalLeak || !tom.ok;
+
+  if (san.alterado || precisaFallback) {
+    // best-effort, sem await crítico
+    auditarVazamento(supabaseUrl, serviceKey, atendimentoId, original, precisaFallback ? FALLBACK_HUMANIZADO : texto, [san.motivo, tom.motivo].filter(Boolean).join("|") || "alterado").catch(() => {});
+  }
+
+  if (precisaFallback) {
+    console.warn(`[GUARDRAIL-TOM] Resposta bloqueada (critical=${san.criticalLeak} tom=${tom.motivo || "ok"}) — enviando fallback humanizado.`);
+    texto = FALLBACK_HUMANIZADO;
+  }
 
   const maxAttempts = 3;
   let lastError = "unknown error";

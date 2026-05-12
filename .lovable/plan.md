@@ -1,52 +1,71 @@
-## Diagnóstico
+## Problema
 
-A mensagem chegou assim ao cliente:
+Duas dores reais aparecendo nas conversas dos clientes:
 
-> "Olá! Falo com Gi? 😊 Aqui é o Gael das Óticas Diniz Osasco **Confirmar o nome do cliente para dar sequência no atendimento.**"
+1. **Vazamento de instruções internas** colando no texto enviado (ex.: "Confirmar o nome do cliente para dar sequência no atendimento", "Aguardar resposta", "Para prosseguir…"). Já corrigi a saudação inicial com fast-path determinístico, mas o vazamento pode acontecer em **qualquer turno** — não só no 1º.
+2. **Tom robotizado** em vários momentos (frases longas, formais, cheias de "prezado", "informo que", "favor aguardar"), denunciando que é IA.
 
-Duas coisas distintas aconteceram:
+Hoje só temos o `sanitizeLeakedInstructions` cobrindo ~12 padrões e o filtro `proximo_passo` só pergunta. Falta:
+- **Guardrail estrutural** (não só regex) que rejeite QUALQUER texto que pareça meta-instrução, em qualquer turno.
+- **Camada de "humanização"** que padronize o tom Gael (curto, natural, sem jargão corporativo) antes do envio.
+- **Auditoria visível** — hoje vazamento vira log, mas a operadora não vê. Precisa aparecer no painel de auditoria pra corrigir o prompt na origem.
 
-### 1. Vazamento do campo `proximo_passo` no texto enviado
-- O bloco `# PRIMEIRA INTERAÇÃO — CONFIRMAR NOME` (em `ai-triage/index.ts` linha 1503) já entrega ao modelo a **mensagem literal** a enviar: `"Olá! Falo com Gi? 😊 Aqui é o Gael das Óticas Diniz Osasco."`
-- O modelo copiou essa frase como `resposta`, mas preencheu `proximo_passo` com a descrição interna **"Confirmar o nome do cliente para dar sequência no atendimento."**
-- Em `index.ts` linha 4189-4202, o código **concatena `proximo_passo` na resposta** sempre que ele não for pergunta repetida. Como a frase não terminava em "?", o filtro `_ppEhPergunta` não bloqueou e ela foi colada no texto final.
-- O `sanitizeLeakedInstructions` (linha 6517) cobre vários padrões mas **não cobre essa frase específica**.
+## O que vou implementar
 
-### 2. Nome "Gi" em vez de "Mary"
-- O webhook capturou o `senderName` do WhatsApp como "Gi" (apelido configurado no perfil dela). É o dado real que o Meta entregou — não é bug do nosso lado, é como ela aparece no WhatsApp. A confirmação de nome existe exatamente pra esse caso: ela responde "Mary" e a tool `registrar_nome_cliente` corrige.
+### 1. Guardrail anti-vazamento universal (todos os turnos)
 
-## O que vou corrigir
+Em `sanitizeLeakedInstructions` (`ai-triage/index.ts` ~linha 6560), expandir para detectar:
 
-### A. Tornar a 1ª saudação 100% determinística (elimina o vazamento na raiz)
-Quando `buildFirstContactBlock` produz uma mensagem literal entre aspas (1ª interação ou `precisa_confirmar_nome`), **pular o LLM** e enviar `msg` direto via `sendWhatsApp`. Isso:
-- Elimina qualquer chance de vazamento de `proximo_passo` ou de instruções internas na saudação.
-- Reduz latência da 1ª resposta (sem chamada ao gateway).
-- Mantém a tool `registrar_nome_cliente` ativa no próximo turno, quando o cliente responder.
+- **Verbos de meta-ação no infinitivo no fim da frase**: "Confirmar X", "Aguardar Y", "Verificar Z", "Validar…", "Identificar…", "Solicitar…", "Encaminhar…", "Registrar…", "Prosseguir…", "Seguir com…", "Dar sequência…" — quando aparecem como frase isolada (não dentro de uma fala natural).
+- **Marcadores de bloco de prompt vazados**: linhas começando com `[`, `##`, `**REGRA**`, `**INSTRUÇÃO**`, `IMPORTANTE:`, `OBS:` no meio do texto enviado.
+- **Nomes de tools/campos internos**: `agendar_visita`, `interpretar_receita`, `consultar_lentes`, `proximo_passo`, `intencao`, `coluna_pipeline`, `setor_destino`.
+- **Frases "de robô"**: "como assistente virtual", "sou uma IA", "modelo de linguagem", "fui treinado", "minha base de dados".
 
-A saudação fica exatamente:
-- Com nome candidato → `"Olá! Falo com [PrimeiroNome]? 😊 Aqui é o Gael das Óticas Diniz Osasco."`
-- Sem nome → `"Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"`
+Quando detectar vazamento crítico (tool name, campo interno, marcador de bloco), **bloqueia o envio** e dispara fallback humanizado contextual em vez de só remover trecho — hoje remove e pode mandar mensagem mutilada.
 
-### B. Endurecer o merge de `proximo_passo` (defesa em profundidade)
-Em `index.ts` ~linha 4197: só concatenar `proximo_passo` na `resposta` se ele **for uma pergunta** (terminar em `?`). Se for descritivo/imperativo ("Confirmar…", "Aguardar…", "Verificar…", "Prosseguir com…"), **descartar** — esse campo é metadado interno, não texto pro cliente. Aplicar a mesma regra no retry da linha 5155.
+### 2. Validador estrutural pré-envio (defesa em profundidade)
 
-### C. Ampliar `sanitizeLeakedInstructions`
-Adicionar padrões que cobrem descrições de ação tipicamente vazadas como `proximo_passo`:
-- `confirmar o nome do cliente[^\n]*`
-- `dar sequ[êe]ncia (no|ao) atendimento[^\n]*`
-- `para (prosseguir|continuar|seguir)[^\n]*`
-- `aguardar (resposta|retorno) do cliente[^\n]*`
+Antes de `sendWhatsApp`, novo passo `validarTomHumano(texto)`:
+- Rejeita se `texto.split(' ').length < 3` (muito curto pós-sanitização).
+- Rejeita se >40% das palavras forem caixa-alta ou houver `**`/`__`/`###` (markdown vazado).
+- Rejeita se terminar com infinitivo solto ("…confirmar.", "…verificar.", "…aguardar.").
+- Em caso de rejeição: loga `[GUARDRAIL-TOM]`, registra em `eventos_crm` (`tipo='resposta_bloqueada_tom'` com payload do texto original) e envia fallback genérico humano ("Só um instante, já te respondo 😊" + agenda re-disparo via watchdog).
 
-### D. Memória
-Atualizar `mem://ia/saudacao-confirma-nome` documentando que a 1ª saudação é determinística (não passa pelo LLM) e que `proximo_passo` só é anexado se for pergunta.
+### 3. Reforço de tom Gael no prompt
+
+Em `buildSystemPrompt`/`configuracoes_ia.regras_globais` (carregado no `ai-triage`), adicionar bloco fixo no topo:
+
+```
+TOM OBRIGATÓRIO (não-negociável):
+- Fale como humano: curto, direto, caloroso. Máx 2 frases por mensagem (salvo cotação).
+- PROIBIDO: "prezado", "informo que", "favor", "aguardar", "verificar", "prosseguir", "dar sequência", "conforme solicitado", "estou à disposição", "atenciosamente".
+- PROIBIDO descrever o que VOCÊ vai fazer ("Vou verificar…", "Estou analisando…"). Faça e responda o resultado.
+- PROIBIDO mencionar "IA", "assistente virtual", "sistema", "base de dados".
+- proximo_passo é METADADO INTERNO. NUNCA escreva nele texto que possa ser lido pelo cliente como instrução.
+```
+
+### 4. Auditoria visível
+
+Quando guardrail dispara (vazamento ou tom), além de log:
+- Insere registro em `ia_feedbacks` com `tipo='vazamento_guardrail'`, `resposta_original`, `resposta_corrigida`, `motivo`.
+- Aparece no `AuditoriaIaCard` em Configurações para a operadora revisar e ajustar prompt/exemplo na origem.
+
+### 5. Memória
+
+Atualizar `mem://ia/saudacao-confirma-nome` e criar `mem://ia/guardrail-tom-humano` documentando os 4 níveis de defesa: prompt → fast-path → sanitizer → validador estrutural → auditoria.
 
 ## Arquivos afetados
-- `supabase/functions/ai-triage/index.ts` — short-circuit da 1ª saudação, hardening do merge `proximo_passo`, ampliação do sanitizer.
-- `.lovable/memory/ia/saudacao-confirma-nome.md` — registrar a regra.
 
-Sem migração de banco. Sem mudança de UI.
+- `supabase/functions/ai-triage/index.ts` — expandir `sanitizeLeakedInstructions`, novo `validarTomHumano`, hooks de auditoria.
+- `configuracoes_ia.regras_globais` (linha de DB, via migration) — bloco TOM OBRIGATÓRIO no topo.
+- `src/components/configuracoes/AuditoriaIaCard.tsx` — novo filtro/badge para `vazamento_guardrail`.
+- Memórias novas/atualizadas.
+
+Sem mudança de UI no CRM. Sem mudança de schema relevante (só seed em `configuracoes_ia` e novo `tipo` em `ia_feedbacks`, que já é texto livre).
 
 ## Validação
-- Reproduzir o caso Mary/Gi: novo contato com `senderName="Gi"` → mensagem enviada deve ser exatamente `"Olá! Falo com Gi? 😊 Aqui é o Gael das Óticas Diniz Osasco."` sem sufixo.
-- Conferir log: deve aparecer `[FAST-PATH] greeting_deterministic_sent` e **nenhuma** chamada ao `ai-gateway` nesse turno.
-- Forçar caso onde modelo retorna `proximo_passo="Aguardar resposta do cliente."` em outro turno → confirmar que o texto enviado **não contém** essa frase.
+
+- Reproduzir o caso Mary/Gi → mensagem sai limpa.
+- Forçar modelo a retornar `proximo_passo="Aguardar resposta"` num turno qualquer (não só 1º) → bloqueado e auditado.
+- Forçar resposta com "Prezado cliente, informo que estarei verificando" → bloqueado por tom.
+- Conferir `AuditoriaIaCard` mostrando os bloqueios para a operadora corrigir.
