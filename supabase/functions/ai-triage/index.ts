@@ -5944,8 +5944,8 @@ async function runConsultarLentes(
   const hasAddition = addValues.length > 0;
 
   const categoryMap: Record<string, string[]> = {
-    single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids"],
-    progressive: ["progressive", "occupational"],
+    single_vision: ["single_vision", "single_vision_digital", "single_vision_stock", "single_vision_digital_kids", "single", "digital", "visao_simples", "special_myopia", "special_drive", "special_sport", "myopia_control", "especial", "special"],
+    progressive: ["progressive", "progressiva", "occupational", "ocupacional"],
   };
   const categories = categoryMap[rxType] || [rxType];
 
