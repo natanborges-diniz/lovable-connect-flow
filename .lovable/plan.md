@@ -1,43 +1,27 @@
-## Problema
+## Contexto
 
-Thais digitou:
-```
-OD: Esférico Plano / -2,5 cil / 05 eixo
-OE: Esférico Plano / -2,75 cil / 175 eixo
-```
+Atendimento `4689bd82-ffb4-438b-bb79-9360e7294e67` (Thais Santiago, 5511967141957) está em `modo=ia / status=aguardando`. A última inbound é a receita digitada (`OD: Esférico Plano / -2,5 cil / 05 eixo / OE: Esférico Plano / -2,75 cil / 175 eixo`) e a última outbound é a escalada genérica fora-de-horário enviada antes do fix do parser.
 
-A IA ignorou e escalou para humano. A causa está em `detectPrescriptionCorrection` (`supabase/functions/ai-triage/index.ts` ~linhas 769-900):
+Com o patch já mergeado em `detectPrescriptionCorrection`, basta re-disparar `ai-triage` para esse atendimento que ele:
+1. Detecta o prompt anterior pedindo receita por texto → entra em modo `client_typed_first`.
+2. Persiste `receitas[0]` em `contatos.metadata` com `od:{sphere:0,cyl:-2.5,axis:5}` e `oe:{sphere:0,cyl:-2.75,axis:175}`, `rx_type=single_vision`.
+3. Hint pós-correção força `consultar_lentes` e responde com 3 faixas de orçamento.
 
-1. Linhas 791-792 normalizam `pl|plano|neutro|zerado|zero` → `0` no texto de trabalho `t`. Isso é correto: dá `sphere = 0` para os dois olhos.
-2. **Mas a validação anti-hallucination (linhas 874-898) reconstrói `sourceNumbers` a partir do texto ORIGINAL (`text`)** — onde "Plano" é palavra, não número. O `0.00` da esfera não está em `sourceNumbers`, então `validateField` descarta ambas as esferas.
-3. Linha 900: `if (od.sphere == null && oe.sphere == null) return null;` — função retorna `null`, parser não detecta correção, fluxo cai no LLM que escala para humano.
+## Ação
 
-A receita do cliente é totalmente válida (esférico zero + cilindro = puramente astigmática) e o parser tinha extraído tudo certo antes da validação descartar.
+Invocar `supabase.functions.invoke('ai-triage', { atendimento_id, contato_id, force_resume: true, motivo: 'reprocessar_receita_digitada_pos_fix_parser' })` via `curl_edge_functions` (ou `supabase--curl_edge_functions`) com a service-role key.
 
-## Mudança
+Antes: confirmar via `read_query` que a receita ainda não está salva (`metadata->'receitas' is null`). Já confirmado.
 
-Em `detectPrescriptionCorrection` (linha ~877), aplicar as mesmas normalizações de keyword óptica → `0` ao construir `rawNorm` antes de extrair `sourceNumbers`. Assim "plano/pl/neutro/zerado/zero/sc" também viram `0` no haystack e a validação não descarta `sphere=0` legítimo.
+Depois: `read_query` em `mensagens` ordenado por `created_at desc` para validar:
+- Outbound nova com 3 faixas de orçamento OU pergunta de tipo de lente.
+- `contatos.metadata->'receitas'` populado.
 
-Patch (~linha 877):
-```ts
-const rawNorm = text.toLowerCase()
-  .replace(/([+\-])\s+(\d)/g, "$1$2")
-  .replace(/\*/g, " ")
-  .replace(/-\s*(pl|plano|neutro|zerado|zero)\b/g, "0")
-  .replace(/\b(pl|plano|neutro|zerado)\b/g, "0")
-  .replace(/\bsc\b/g, "");
-```
+## Reversão / segurança
 
-Adicionar log `[RX-VALIDATE] sphere=0 aceito via keyword 'plano'` para auditoria quando aplicável (opcional, via flag local).
-
-## Validação
-
-- Mensagem da Thais reprocessada → `correction` retorna `{ od:{sphere:0,cylinder:-2.5,axis:5}, oe:{sphere:0,cylinder:-2.75,axis:175} }`. Como `iaJustAskedForText=true` (a outbound anterior é exatamente o template `MSG_PEDIR_RECEITA_TEXTO`), entra no modo `client_typed_first`, salva receita e força `consultar_lentes`.
-- Caso Manel (correção alto impacto via texto) e Bianca (`Od -4.50 / Oe -pl`) continuam funcionando — o segundo `replace` cobre `-pl`/`pl`.
-- Anti-hallucination continua bloqueando números fantasma reais: só relaxa para tokens que já eram normalizados pelo próprio parser.
+- Se a IA escalar de novo, voltar ao plano anterior e investigar logs (`supabase--edge_function_logs ai-triage`).
+- Operação idempotente: ai-triage debounce (5s) e detector de receita evitam duplicar mensagem.
 
 ## Arquivos
 
-- `supabase/functions/ai-triage/index.ts` — patch de ~6 linhas em `detectPrescriptionCorrection` (~linha 877).
-
-Sem migração, sem secrets, sem cron.
+Nenhum. Apenas chamada operacional à edge function existente.
