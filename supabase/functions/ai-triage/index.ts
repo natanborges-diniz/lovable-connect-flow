@@ -695,6 +695,7 @@ function detectForcedToolIntent(
   isLCContext = false,
   hasLCQuotePresented = false,
   lastOutboundText = "",
+  recentInboundText = "",
 ): { tool: string; reason: string } | null {
   const t = norm(lastInboundText);
   if (!t) return null;
@@ -742,6 +743,34 @@ function detectForcedToolIntent(
     }
     if (hasLCQuotePresented && (hasBrand || hasReserveVerb)) {
       return { tool: "agendar_cliente_intent", reason: hasBrand ? "cliente escolheu marca após orçamento LC — agendar na loja" : "cliente pediu reservar após orçamento LC — agendar na loja" };
+    }
+  }
+
+  // ── REFINAMENTO POR TRATAMENTO/MARCA APÓS RECEITA (ÓCULOS) ──
+  // Cliente já tem receita salva e pergunta sobre tratamento/marca específico
+  // ("teria transitions?", "tem varilux?", "trabalham com zeiss?", "tem antirreflexo?").
+  // É pedido implícito de cotação — força consultar_lentes com filtro adequado.
+  // O token vai no `reason` para o hint downstream montar os parâmetros corretos.
+  if (hasReceitas && !isLCContext) {
+    const TREAT_BRAND_RE = /\b(transitions?|fotossens[ií]ve[il]|fotocrom[áa]?tic[ao]?|antirreflex(?:o|ivo)?|antiriscos?|filtro\s+azul|luz\s+azul|polariz[ao]?d[ao]?|varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax)\b/i;
+    const ASK_RE = /\?|\b(tem|teria|trabalh(am|a)|consegue|consegu[ei]m|voc[eê]s?\s+t[eê]m|t[eê]m\s+op(?:ç|c)[aã]o|disp[oõ]e[m]?|disponibilidade|trabalham?\s+com|fazem|fa[zç]em)\b/i;
+    // Considera última inbound + janela das últimas 3 inbounds — cobre casos
+    // tipo "Eu queria transitions" + "?" enviados separados.
+    const blob = `${lastInboundText} ${recentInboundText || ""}`;
+    const m = blob.match(TREAT_BRAND_RE);
+    if (m && ASK_RE.test(blob)) {
+      const raw = m[1].toLowerCase();
+      let token = "marca";
+      if (/transition|fotossens|fotocrom/.test(raw)) token = "photo";
+      else if (/blue|azul|antirreflex|antirisco/.test(raw)) token = "blue";
+      else if (/polariz/.test(raw)) token = "polar";
+      else if (/varilux|essilor|eyezen|crizal|stellest/.test(raw)) token = "essilor";
+      else if (/zeiss/.test(raw)) token = "zeiss";
+      else if (/hoya/.test(raw)) token = "hoya";
+      else if (/kodak/.test(raw)) token = "kodak";
+      else if (/dnz/.test(raw)) token = "dnz";
+      else if (/dmax/.test(raw)) token = "dmax";
+      return { tool: "consultar_lentes", reason: `brand_refinement:${token}:${raw}` };
     }
   }
 
@@ -2420,7 +2449,11 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // Detect if the CURRENT message (last inbound) is an image
     const inboundMsgs = allMsgs.filter((m: any) => m.direcao === "inbound");
     const lastInbound = inboundMsgs.slice(-1)[0];
+    // lastInboundText = última inbound; recentInboundText = junção das últimas 3 inbound
+    // (cobre "?" / "Teria?" como follow-up curto da intenção real anterior).
     const lastInboundText = String(lastInbound?.conteudo || currentMsg || "");
+    const recentInboundText = inboundMsgs.slice(-5)
+      .map((m: any) => String(m?.conteudo || "")).filter(Boolean).join(" \n ");
     // Check if there's an inbound image among the LAST 5 inbound messages (not just the very last)
     // This catches cases where customer sent prescription, then a short text like "Ok" / "ué" / "?"
     const last5Inbound = inboundMsgs.slice(-5);
@@ -3789,6 +3822,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       isLCContextGlobal,
       hasLCQuotePresented,
       lastOutboundForIntent,
+      recentInboundText,
     );
 
     // ── REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR ──
@@ -3850,11 +3884,16 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // Detecta pedido EXPLÍCITO de preço/orçamento na mensagem atual.
         // Só nesse caso permitimos rodar consultar_lentes/consultar_lentes_contato de novo.
         const explicitPriceAsk = /\b(or[çc]amento|pre[çc]o|valor|quanto (custa|sai|fica|d[áa]|ficar[ií]a)|tem (de )?(quanto|por quanto)|sai por quanto)\b/i.test(lastInLow);
+        // Pergunta DIRETA de disponibilidade de tratamento/marca conhecida ("teria transitions?",
+        // "tem varilux?", "trabalham com zeiss?") = pedido implícito de cotação. Libera consultar_lentes
+        // mesmo com agendamento ativo (mas sem perguntar região — loja já está definida).
+        const askTreatBrand = /(\?|\b(tem|teria|trabalh(am|a)|consegue|fazem|fa[zç]em|disp[oõ]e[m]?|disponibilidade|trabalham?\s+com|voc[eê]s?\s+t[eê]m)\b)/i.test(lastInLow)
+          && /\b(transitions?|fotossens[ií]ve[il]|fotocrom[áa]?tic[ao]?|antirreflex(?:o|ivo)?|filtro\s+azul|luz\s+azul|polariz[ao]?d[ao]?|varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax)\b/i.test(lastInLow);
         messages.push({
           role: "system",
           content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}${_lojaAg ? " na " + _lojaAg : ""}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja ou cancelar.
 
-⛔ PROIBIDO chamar consultar_lentes/consultar_lentes_contato apenas porque o cliente mencionou um tratamento, material, cor, marca ou estilo (transitions, fotossensível, filtro azul, antirreflexo, índice, preto, tartaruga, dourado, clássica, gatinho, varilux etc.). Trate como PREFERÊNCIA registrada para a visita — anote brevemente (ex.: "Anotado, vou separar opções com Transitions 😉") e reafirme o agendamento. ${explicitPriceAsk ? "EXCEÇÃO: o cliente pediu preço/orçamento explicitamente AGORA — pode rodar consultar_lentes para informar o valor, mas SEM perguntar região/bairro/loja." : "Só rode consultar_lentes/consultar_lentes_contato se o cliente pedir EXPLICITAMENTE preço/orçamento/quanto custa."}
+⛔ PROIBIDO chamar consultar_lentes/consultar_lentes_contato apenas porque o cliente mencionou um tratamento, material, cor, marca ou estilo de PASSAGEM (anotando preferência, ex.: "queria armação tartaruga", "gosto de filtro azul"). Trate como PREFERÊNCIA registrada para a visita — anote brevemente e reafirme o agendamento. ${(explicitPriceAsk || askTreatBrand) ? `EXCEÇÃO: ${askTreatBrand ? "o cliente está PERGUNTANDO se temos um tratamento/marca específico (transitions, varilux, zeiss etc.)" : "o cliente pediu preço/orçamento explicitamente AGORA"} — DEVE rodar consultar_lentes ${askTreatBrand ? "com filtro_photo/filtro_blue/preferencia_marca conforme o que ele perguntou" : ""} para responder com valor/disponibilidade real, SEM perguntar região/bairro/loja (já tem agendamento). PROIBIDO responder 'preciso confirmar na loja' — o catálogo é a fonte da verdade.` : "Só rode consultar_lentes/consultar_lentes_contato se o cliente pedir EXPLICITAMENTE preço/orçamento/quanto custa."}
 
 ⛔ PROIBIDO perguntar "em qual região/bairro você está?", "qual a loja mais próxima?", "onde você fica?" — a loja JÁ ESTÁ DEFINIDA no agendamento (${_lojaAg || "ver AGENDAMENTOS"}). PROIBIDO encerrar mensagem com "posso te indicar a loja mais próxima?" ou variantes. Sempre fechar reafirmando a visita já marcada.`
         });
@@ -3930,8 +3969,29 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       }
     } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita" || forcedIntent.tool === "responder_pedindo_receita")) {
       const isRegionTrigger = /respondeu regi[aã]o/i.test(forcedIntent.reason || "");
+      const brandRefMatch = (forcedIntent.reason || "").match(/^brand_refinement:([a-z]+):(.*)$/i);
+      const brandHint: string | null = brandRefMatch ? (() => {
+        const tok = brandRefMatch[1];
+        const raw = brandRefMatch[2];
+        if (tok === "kodak") {
+          return `[SISTEMA: REFINAMENTO MARCA — KODAK] Cliente perguntou sobre KODAK. Trabalhamos sim (linha Precise multifocal), mas o catálogo da Kodak NÃO está na nossa tabela de preços online. AÇÃO: confirme "Trabalhamos com Kodak sim 😊" e ESCALE para humano com mensagem curta tipo "vou chamar a equipe pra te passar os valores certinhos". NÃO invente preço. NÃO chame consultar_lentes pra Kodak.`;
+        }
+        const params: string[] = [];
+        let label = raw;
+        if (tok === "photo") { params.push("filtro_photo:true"); label = "fotossensível/Transitions"; }
+        else if (tok === "blue") { params.push("filtro_blue:true"); label = "filtro azul/antirreflexo"; }
+        else if (tok === "polar") { params.push('preferencia_marca:"HOYA"'); label = "polarizado"; }
+        else if (tok === "essilor") { params.push('preferencia_marca:"ESSILOR"'); label = `${raw} (família ESSILOR)`; }
+        else if (tok === "zeiss") { params.push('preferencia_marca:"ZEISS"'); label = "ZEISS"; }
+        else if (tok === "hoya") { params.push('preferencia_marca:"HOYA"'); label = "HOYA"; }
+        else if (tok === "dnz") { params.push('preferencia_marca:"DNZ"'); label = "DNZ"; }
+        else if (tok === "dmax") { params.push('preferencia_marca:"DMAX"'); label = "DMAX"; }
+        return `[SISTEMA: REFINAMENTO POR TRATAMENTO/MARCA] Cliente perguntou se temos ${label}. Há receita salva e o catálogo é a fonte da verdade. AÇÃO OBRIGATÓRIA AGORA: chame consultar_lentes com {${params.join(", ")}} e a receita mais recente. Apresente 2-3 opções compatíveis com nome da família e preço (ex.: "Hoya Sensity Original — R$ X", "DMAX Foto — R$ Y"). Se nenhuma opção compatível, diga isso explicitamente e ofereça alternativa equivalente em outra marca/tratamento. ⛔ PROIBIDO responder "preciso confirmar na loja", "preciso verificar disponibilidade", "vou checar com um especialista" — o catálogo já responde. ⛔ PROIBIDO escalar para humano. ⛔ PROIBIDO perguntar região antes de mostrar as opções.`;
+      })() : null;
       const hint = forcedIntent.tool === "consultar_lentes"
-        ? (isRegionTrigger
+        ? (brandHint
+            ? brandHint
+            : isRegionTrigger
             ? "[SISTEMA: REGIÃO RECEBIDA APÓS ORÇAMENTO PROMETIDO] Cliente acabou de responder a região/bairro que VOCÊ pediu na mensagem anterior, e há receita salva. AÇÃO OBRIGATÓRIA AGORA (NÃO ADIE): chame consultar_lentes IMEDIATAMENTE com a receita mais recente. PROIBIDO mandar 'obrigado pela região, já vou separar', 'preciso confirmar na loja', 'vou verificar com um especialista' ou qualquer mensagem de espera — o orçamento sai NESTE turno, junto com a indicação da loja mais próxima da região informada. PROIBIDO escalar pra humano."
             : "[SISTEMA: INTENT CLARO] Cliente pediu orçamento e há receita salva. Use consultar_lentes — NÃO pergunte de novo o que ele prefere.")
         : forcedIntent.tool === "consultar_lentes_contato"
