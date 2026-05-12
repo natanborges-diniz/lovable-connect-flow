@@ -175,12 +175,148 @@ serve(async (req) => {
       }
     }
 
+    // ── PASSO 2: "analisando" órfão (última outbound da IA é "Recebi sua receita... analisando")
+    // sem follow-up. Caso Emerson (12/05/2026): forced retry inline falhou e nada chamou
+    // o cliente pra digitar valores. Aqui detectamos e enviamos MSG_PEDIR_RECEITA_TEXTO.
+    const ANALISANDO_RE = /recebi sua receita|peguei a imagem|t[oôó]\s*lendo|estou analisando|analisando aqui/i;
+    let pedidosTexto = 0;
+    let escalouHumano = 0;
+    try {
+      // Carrega MSG_PEDIR_RECEITA_TEXTO de ia_mensagens_fixas (com fallback)
+      let MSG_PEDIR_RECEITA_TEXTO =
+        "Tô com dificuldade de ler sua receita 😅 Pode me passar por texto? OD esférico/cilíndrico/eixo e OE esférico/cilíndrico/eixo. Se não tiver os valores, é só me avisar que eu chamo alguém da equipe pra te ajudar.";
+      try {
+        const { data: fixas } = await supabase
+          .from("ia_mensagens_fixas").select("texto, ativo").eq("chave", "pedir_receita_texto").maybeSingle();
+        if (fixas?.ativo !== false && typeof fixas?.texto === "string" && fixas.texto.length > 0) {
+          MSG_PEDIR_RECEITA_TEXTO = fixas.texto;
+        }
+      } catch (_) { /* noop */ }
+
+      // Index última outbound por atendimento
+      const lastOutByAt = new Map<string, any>();
+      for (const m of msgs || []) {
+        if (m.direcao !== "outbound") continue;
+        if (!lastOutByAt.has(m.atendimento_id)) lastOutByAt.set(m.atendimento_id, m);
+      }
+
+      // Indexa última inbound por atendimento (já temos em lastByAt mas só se for a mais recente)
+      const lastInByAt = new Map<string, any>();
+      for (const m of msgs || []) {
+        if (m.direcao !== "inbound") continue;
+        if (!lastInByAt.has(m.atendimento_id)) lastInByAt.set(m.atendimento_id, m);
+      }
+
+      const candidatos: any[] = [];
+      for (const a of ats as any[]) {
+        const last = lastByAt.get(a.id);
+        if (!last || last.direcao !== "outbound") continue;
+        if (!ANALISANDO_RE.test(String(last.conteudo || ""))) continue;
+
+        const ageMs = now - new Date(last.created_at).getTime();
+        const ageMin = Math.floor(ageMs / 60_000);
+        if (ageMin < 2 || ageMin > 30) continue;
+
+        // anti-duplo
+        const meta = (a.metadata as any) || {};
+        const lastTrig = meta?.analisando_orfao_last_at
+          ? new Date(meta.analisando_orfao_last_at).getTime() : 0;
+        if (now - lastTrig < ANTIDUPLO_MS * 5) continue; // 7.5min
+
+        candidatos.push({ atendimento_id: a.id, contato_id: a.contato_id, ageMin, sentAt: last.created_at, meta });
+      }
+
+      for (const c of candidatos) {
+        try {
+          // Verifica eventos posteriores que indiquem que receita foi resolvida
+          const { data: ev } = await supabase
+            .from("eventos_crm")
+            .select("tipo, created_at")
+            .eq("contato_id", c.contato_id)
+            .gte("created_at", c.sentAt)
+            .in("tipo", [
+              "receita_interpretada",
+              "receita_confirmacao_solicitada",
+              "receita_ocr_failsafe_pedido_texto",
+              "receita_texto_recusada_escalado_humano",
+              "receita_pending_invalidada",
+            ])
+            .limit(1);
+          if (ev && ev.length > 0) continue; // já houve follow-up
+
+          // Marca trigger antes
+          await supabase.from("atendimentos").update({
+            metadata: { ...(c.meta || {}), analisando_orfao_last_at: new Date().toISOString() },
+          }).eq("id", c.atendimento_id);
+
+          // Conta falha de OCR
+          const { data: cData } = await supabase.from("contatos").select("metadata, nome").eq("id", c.contato_id).maybeSingle();
+          const cMeta = (cData?.metadata as any) || {};
+          const novasFalhas = Number(cMeta.ocr_falhas_count || 0) + 1;
+          await supabase.from("contatos").update({
+            metadata: { ...cMeta, ocr_falhas_count: novasFalhas, ocr_falhas_last_at: new Date().toISOString() },
+          }).eq("id", c.contato_id);
+
+          if (novasFalhas >= 2) {
+            // Escala humano direto
+            const np = String(cData?.nome || "").split(/\s+/)[0] || "";
+            const msgEscala = `Tô com dificuldade de ler sua receita aqui mesmo nas tentativas, ${np || "amigo(a)"}. Vou chamar alguém da equipe pra te ajudar com isso, tá? 🙌`;
+            await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+              body: JSON.stringify({ atendimento_id: c.atendimento_id, mensagem: msgEscala }),
+            });
+            await supabase.from("atendimentos").update({
+              modo: "humano",
+              status: "aguardando",
+              updated_at: new Date().toISOString(),
+              metadata: {
+                ...(c.meta || {}),
+                analisando_orfao_last_at: new Date().toISOString(),
+                revisao_humana_pendente: true,
+                revisao_humana_motivo: "ocr_orfao_2_falhas",
+                escalado_humano_at: new Date().toISOString(),
+              },
+            }).eq("id", c.atendimento_id);
+            await supabase.from("eventos_crm").insert({
+              contato_id: c.contato_id,
+              tipo: "ocr_orfao_escalado_humano",
+              descricao: `2 falhas consecutivas de OCR sem follow-up — escalando para humano`,
+              referencia_id: c.atendimento_id,
+              referencia_tipo: "atendimento",
+              metadata: { ocr_falhas_count: novasFalhas, idade_min: c.ageMin },
+            });
+            escalouHumano++;
+          } else {
+            await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+              body: JSON.stringify({ atendimento_id: c.atendimento_id, mensagem: MSG_PEDIR_RECEITA_TEXTO }),
+            });
+            await supabase.from("eventos_crm").insert({
+              contato_id: c.contato_id,
+              tipo: "receita_ocr_orfao_pedido_texto",
+              descricao: `Watchdog detectou 'analisando' órfão há ${c.ageMin}min — pedindo valores por texto`,
+              referencia_id: c.atendimento_id,
+              referencia_tipo: "atendimento",
+              metadata: { ocr_falhas_count: novasFalhas, idade_min: c.ageMin },
+            });
+            pedidosTexto++;
+          }
+        } catch (e) {
+          console.error(`[ORFAO-WATCHDOG][ANALISANDO] erro at=${c.atendimento_id}:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("[ORFAO-WATCHDOG][ANALISANDO] erro fatal:", e);
+    }
+
     const elapsed = Date.now() - startedAt;
     console.log(
-      `[ORFAO-WATCHDOG] checked=${ats.length} detectados=${orfaos.length} recovered=${recovered} elapsed=${elapsed}ms`
+      `[ORFAO-WATCHDOG] checked=${ats.length} detectados=${orfaos.length} recovered=${recovered} analisando_pedidos=${pedidosTexto} analisando_escalou=${escalouHumano} elapsed=${elapsed}ms`
     );
     await supabase.from("cron_jobs").update({ ultimo_disparo: new Date().toISOString() }).eq("funcao_alvo", "watchdog-inbound-orfao");
-    return jsonOk({ checked: ats.length, detectados: orfaos.length, recovered });
+    return jsonOk({ checked: ats.length, detectados: orfaos.length, recovered, analisando_pedidos: pedidosTexto, analisando_escalou: escalouHumano });
   } catch (e) {
     console.error("[ORFAO-WATCHDOG] erro fatal:", e);
     return new Response(
