@@ -695,6 +695,7 @@ function detectForcedToolIntent(
   isLCContext = false,
   hasLCQuotePresented = false,
   lastOutboundText = "",
+  recentInboundText = "",
 ): { tool: string; reason: string } | null {
   const t = norm(lastInboundText);
   if (!t) return null;
