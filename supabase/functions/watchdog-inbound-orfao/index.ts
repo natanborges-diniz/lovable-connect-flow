@@ -101,12 +101,9 @@ serve(async (req) => {
       orfaos.push({ atendimento_id: a.id, contato_id: a.contato_id, idade_min: ageMin });
     }
 
-    if (!orfaos.length) {
-      console.log(`[ORFAO-WATCHDOG] checked=${ats.length} orfaos=0`);
-      return jsonOk({ checked: ats.length, recovered: 0 });
+    if (orfaos.length) {
+      console.log(`[ORFAO-WATCHDOG] detectados=${orfaos.length} (de ${ats.length} ativos)`);
     }
-
-    console.log(`[ORFAO-WATCHDOG] detectados=${orfaos.length} (de ${ats.length} ativos)`);
 
     let recovered = 0;
     for (const o of orfaos) {
