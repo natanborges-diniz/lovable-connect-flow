@@ -2499,6 +2499,48 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       console.log(`[RX-NEW-PENDING] Nova imagem de receita detectada (imageAt=${lastInboundImageAt} > rxAt=${lastReceitaAt}, declaredNew=${declaredNewRx}) — força OCR`);
     }
 
+    // ── Cliente recusou digitar valores após pedido (MSG_PEDIR_RECEITA_TEXTO) → escala humano ──
+    // Caso Emerson (12/05/2026): se IA pediu pra digitar OD/OE e cliente responde que
+    // não consegue/não sabe/precisa de ajuda, não adianta insistir — chama humano.
+    try {
+      const _lastOutForRx = String((recentOutbound || []).slice(-1)[0] || "");
+      const _iaJustAskedForRxText = !!MSG_PEDIR_RECEITA_TEXTO && !!_lastOutForRx
+        && norm(_lastOutForRx).slice(0, 60) === norm(MSG_PEDIR_RECEITA_TEXTO).slice(0, 60);
+      const _clienteRecusouDigitar = /n[aã]o (consigo|sei|tenho como|d[aá] pra|da pra) (digitar|passar|ler|enviar|mandar)|t[oôó] sem (a )?receita aqui|n[aã]o entendo (de|nada)|me ajuda|me ajudem|n[aã]o sei (mexer|fazer|como)/i;
+      if (_iaJustAskedForRxText && !lastIsImage && _clienteRecusouDigitar.test(lastInboundText)) {
+        const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+        const _msgEscala = isHorarioHumano()
+          ? `Sem problema${_np ? ", " + _np : ""}! Vou chamar alguém da equipe pra te ajudar com isso 🙌`
+          : mensagemEscaladaForaHorario(_np);
+
+        await supabase.from("atendimentos").update({
+          modo: "humano",
+          status: "aguardando",
+          updated_at: new Date().toISOString(),
+          metadata: {
+            ...(atendimento.metadata || {}),
+            revisao_humana_pendente: true,
+            revisao_humana_motivo: "receita_texto_recusada",
+            escalado_humano_at: new Date().toISOString(),
+          },
+        }).eq("id", atendimento_id);
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "receita_texto_recusada_escalado_humano",
+          descricao: "Cliente disse que não consegue digitar valores da receita — escalando para humano",
+          metadata: { last_inbound: lastInboundText.slice(0, 200) },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).then(() => undefined, () => undefined);
+
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, _msgEscala);
+        console.log("[RX-TEXT-RECUSADA] Cliente recusou digitar receita — escalado para humano");
+        return jsonResponse({ status: "ok", tools_used: ["escalar_humano_receita_texto"], intencao: "receita_oftalmologica", precisa_humano: true, pipeline_coluna_sugerida: "Aguardando Humano", modo: "humano" });
+      }
+    } catch (e) {
+      console.warn("[RX-TEXT-RECUSADA] erro no detector:", (e as Error)?.message);
+    }
+
     // ── 4.4. GATE DE CONFIRMAÇÃO DE RECEITA (Mai/2026) ──
     // Toda receita lida via OCR fica com metadata.receita_confirmacao.pending=true
     // até o cliente confirmar ("sim", "confere"...) ou corrigir. Enquanto pending,
