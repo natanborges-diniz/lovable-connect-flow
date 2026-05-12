@@ -2422,7 +2422,7 @@ serve(async (req) => {
         || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
       const _greetingEligible =
         !_isImageFP &&
-        !isHomologacao &&
+        
         contatoTipo === "cliente" &&
         (inboundCount === 1 || (precisaConfirmarNome && !nomeConfirmado));
 
