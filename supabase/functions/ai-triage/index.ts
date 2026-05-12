@@ -2287,7 +2287,6 @@ serve(async (req) => {
       return await handleNonClientEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, fornecedorMsg, "fornecedor_b2b");
     }
 
-
     if (matchesSubjectChange(currentMsg)) {
       console.log("[ROUTER] Subject change detected — deterministic response");
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE);
@@ -2498,6 +2497,48 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     }
     if (hasPendingNewPrescriptionImage) {
       console.log(`[RX-NEW-PENDING] Nova imagem de receita detectada (imageAt=${lastInboundImageAt} > rxAt=${lastReceitaAt}, declaredNew=${declaredNewRx}) — força OCR`);
+    }
+
+    // ── Cliente recusou digitar valores após pedido (MSG_PEDIR_RECEITA_TEXTO) → escala humano ──
+    // Caso Emerson (12/05/2026): se IA pediu pra digitar OD/OE e cliente responde que
+    // não consegue/não sabe/precisa de ajuda, não adianta insistir — chama humano.
+    try {
+      const _lastOutForRx = String((recentOutbound || []).slice(-1)[0] || "");
+      const _iaJustAskedForRxText = !!MSG_PEDIR_RECEITA_TEXTO && !!_lastOutForRx
+        && norm(_lastOutForRx).slice(0, 60) === norm(MSG_PEDIR_RECEITA_TEXTO).slice(0, 60);
+      const _clienteRecusouDigitar = /n[aã]o (consigo|sei|tenho como|d[aá] pra|da pra) (digitar|passar|ler|enviar|mandar)|t[oôó] sem (a )?receita aqui|n[aã]o entendo (de|nada)|me ajuda|me ajudem|n[aã]o sei (mexer|fazer|como)/i;
+      if (_iaJustAskedForRxText && !lastIsImage && _clienteRecusouDigitar.test(lastInboundText)) {
+        const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+        const _msgEscala = isHorarioHumano()
+          ? `Sem problema${_np ? ", " + _np : ""}! Vou chamar alguém da equipe pra te ajudar com isso 🙌`
+          : mensagemEscaladaForaHorario(_np);
+
+        await supabase.from("atendimentos").update({
+          modo: "humano",
+          status: "aguardando",
+          updated_at: new Date().toISOString(),
+          metadata: {
+            ...(atendimento.metadata || {}),
+            revisao_humana_pendente: true,
+            revisao_humana_motivo: "receita_texto_recusada",
+            escalado_humano_at: new Date().toISOString(),
+          },
+        }).eq("id", atendimento_id);
+
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "receita_texto_recusada_escalado_humano",
+          descricao: "Cliente disse que não consegue digitar valores da receita — escalando para humano",
+          metadata: { last_inbound: lastInboundText.slice(0, 200) },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).then(() => undefined, () => undefined);
+
+        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, _msgEscala);
+        console.log("[RX-TEXT-RECUSADA] Cliente recusou digitar receita — escalado para humano");
+        return jsonResponse({ status: "ok", tools_used: ["escalar_humano_receita_texto"], intencao: "receita_oftalmologica", precisa_humano: true, pipeline_coluna_sugerida: "Aguardando Humano", modo: "humano" });
+      }
+    } catch (e) {
+      console.warn("[RX-TEXT-RECUSADA] erro no detector:", (e as Error)?.message);
     }
 
     // ── 4.4. GATE DE CONFIRMAÇÃO DE RECEITA (Mai/2026) ──
@@ -5372,6 +5413,49 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         }
       } catch (e) {
         console.error("[FORCE-INTERPRETAR] Exception no retry:", e);
+      }
+
+      // ── FAILSAFE: se mesmo após o retry forçado a resposta continua sendo
+      // "Recebi sua receita... analisando", troca por MSG_PEDIR_RECEITA_TEXTO.
+      // Caso Emerson (12/05/2026): forced retry não retornou tool_call e o
+      // cliente ficou esperando indefinidamente. Sem este failsafe, watchdog
+      // só dispara retomada_contexto_1 horas depois.
+      try {
+        if (typeof resposta === "string" && MSG_ANALISANDO_RE.test(resposta)) {
+          console.log("[FORCE-INTERPRETAR][FAILSAFE] Retry não salvou receita — substituindo 'analisando' por MSG_PEDIR_RECEITA_TEXTO");
+          resposta = MSG_PEDIR_RECEITA_TEXTO;
+          intencao = "receita_oftalmologica";
+          pipeline_coluna = "Orçamento";
+          precisa_humano = false;
+          validatorFlags.push("force_interpretar_failed_pedindo_texto");
+          // Conta como falha de OCR pra escalar se acontecer 2x
+          try {
+            const { data: _cFail3 } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+            const _failMeta3 = (_cFail3?.metadata as Record<string, any>) || {};
+            const _falhasAtual3 = Number(_failMeta3.ocr_falhas_count || 0) + 1;
+            await supabase.from("contatos").update({
+              metadata: { ..._failMeta3, ocr_falhas_count: _falhasAtual3, ocr_falhas_last_at: new Date().toISOString() },
+            }).eq("id", contatoId);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "receita_ocr_failsafe_pedido_texto",
+              descricao: `Forced retry sem sucesso (tentativa ${_falhasAtual3}) — pedindo valores por texto`,
+              metadata: { ocr_falhas_count: _falhasAtual3, source: "force_interpretar_failsafe" },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            });
+            if (_falhasAtual3 >= 2) {
+              const _np3 = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+              resposta = isHorarioHumano()
+                ? `Tô com dificuldade de ler sua receita aqui mesmo nas tentativas, ${_np3 || "amigo(a)"}. Vou chamar alguém da equipe pra te ajudar com isso, tá? 🙌`
+                : mensagemEscaladaForaHorario(_np3);
+              precisa_humano = true;
+              pipeline_coluna = "Novo Contato";
+              validatorFlags.push("force_interpretar_failsafe_escalado_humano");
+            }
+          } catch (_) { /* noop */ }
+        }
+      } catch (failsafeErr) {
+        console.error("[FORCE-INTERPRETAR][FAILSAFE] erro:", failsafeErr);
       }
     }
 

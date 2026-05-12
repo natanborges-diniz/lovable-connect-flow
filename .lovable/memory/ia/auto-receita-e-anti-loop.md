@@ -179,3 +179,15 @@ Regra atual:
 **Bug:** branches `_ocrInutil` (eyes vazios / rxType=unknown) e `forced_interpretar_receita_low_confidence` (retry forçado com confidence<0.6) sempre devolviam `MSG_PEDIR_RECEITA_TEXTO` — sem contar tentativas. Cliente reenviando fotos ruins ficava em loop infinito de "manda por texto".
 
 **Fix:** `contatos.metadata.ocr_falhas_count` é incrementado nas duas branches; ao chegar em **2 falhas consecutivas**, IA escala pra humano (mensagem respeita `isHorarioHumano()`), com evento `ocr_falhas_escalado`. Sucesso de OCR (caminho normal e forced retry) reseta o contador para 0. Evita repetição da mesma frase em loop quando a foto está ruim/cliente insiste.
+
+## 🆕 Mai/2026 — Failsafe pós forced retry + watchdog "analisando órfão" + escalada por recusa de digitar (caso Emerson 12/05)
+
+**Caso Emerson (12/05/2026):** cliente mandou foto de receita, IA respondeu "Recebi sua receita 👀 Já estou analisando…" e nunca mais voltou. `interpretar_receita` não foi chamado, forced retry inline (`bloco 9.4`) também não retornou tool_call. Conversa morreu até `vendas-recuperacao-cron` disparar `retomada_contexto_1` 1h depois.
+
+**3 correções:**
+
+1. **`ai-triage` failsafe pós forced retry** (após bloco 9.4): se `resposta` ainda casa `MSG_ANALISANDO_RE` depois do retry, substitui por `MSG_PEDIR_RECEITA_TEXTO`, incrementa `ocr_falhas_count` e grava `receita_ocr_failsafe_pedido_texto`. Em 2 falhas, escala humano com flag `force_interpretar_failsafe_escalado_humano`.
+
+2. **`watchdog-inbound-orfao` passo 2 — "analisando" órfão**: além do passo legado (re-disparar ai-triage em silent drop de inbound), agora varre atendimentos `modo=ia` cuja **última** mensagem é OUTBOUND batendo `MSG_ANALISANDO_RE`, idade 2-30min, sem evento posterior de `receita_interpretada` / `receita_confirmacao_solicitada` / `receita_ocr_failsafe_pedido_texto` / `receita_texto_recusada_escalado_humano`. Anti-duplo via `metadata.analisando_orfao_last_at` (~7.5min). Envia `MSG_PEDIR_RECEITA_TEXTO` direto via `send-whatsapp` e incrementa `ocr_falhas_count`. Em ≥2 falhas, escala humano com motivo `ocr_orfao_2_falhas`. Eventos `receita_ocr_orfao_pedido_texto` / `ocr_orfao_escalado_humano`.
+
+3. **`ai-triage` detector "não consigo digitar"** (gate ~2502, antes do gate 4.4): quando última outbound foi `MSG_PEDIR_RECEITA_TEXTO` e cliente responde regex tipo `não consigo/sei digitar|tô sem receita aqui|não entendo|me ajuda` (e não é nova imagem), escala direto pra humano com mensagem amigável (ou `mensagemEscaladaForaHorario` fora do expediente). Marca `revisao_humana_motivo=receita_texto_recusada` e grava `receita_texto_recusada_escalado_humano`. Early return — não passa pelo LLM.
