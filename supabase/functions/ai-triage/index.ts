@@ -874,7 +874,14 @@ function detectPrescriptionCorrection(text: string): {
   // ── Validação anti-hallucination: todo número persistido tem que existir no texto-fonte ──
   // Constrói "haystack" de números absolutos vistos no texto original normalizado.
   const sourceNumbers = new Set<string>();
-  const rawNorm = text.toLowerCase().replace(/([+\-])\s+(\d)/g, "$1$2").replace(/\*/g, " ");
+  // Aplica as MESMAS normalizações de keyword óptica → 0 que o parser usa em `t`,
+  // pra não descartar sphere=0 legítimo vindo de "Plano/pl/neutro/zerado/zero".
+  const rawNorm = text.toLowerCase()
+    .replace(/([+\-])\s+(\d)/g, "$1$2")
+    .replace(/\*/g, " ")
+    .replace(/-\s*(pl|plano|neutro|zerado|zero)\b/g, "0")
+    .replace(/\b(pl|plano|neutro|zerado|zero)\b/g, "0")
+    .replace(/\bsc\b/g, "");
   for (const tok of (rawNorm.match(/[+-]?\d+[.,]?\d*/g) || [])) {
     const parsed = parseDiopter(tok);
     if (parsed != null) sourceNumbers.add(Math.abs(parsed).toFixed(2));
