@@ -6571,6 +6571,12 @@ function sanitizeLeakedInstructions(texto: string): string {
     /^\s*-\s+(envie|regra|se\s+o\s+cliente|s[óo]\s+depois|n[ãa]o\s+mencione)[^\n]*/gim,
     /##?\s+(mensagem\s+a\s+enviar|regras\s+internas)[^\n]*/gi,
     /#\s+primeira\s+intera[çc][ãa]o[^\n]*/gi,
+    // proximo_passo descritivo vazado (campo de metadado interno)
+    /confirmar\s+o\s+nome\s+do\s+cliente[^\n]*/gi,
+    /dar\s+sequ[êe]ncia\s+(no|ao)\s+atendimento[^\n]*/gi,
+    /\bpara\s+(prosseguir|continuar|seguir|dar\s+sequ[êe]ncia)\b[^\n]*/gi,
+    /aguardar\s+(resposta|retorno|confirma[çc][ãa]o)\s+do\s+cliente[^\n]*/gi,
+    /verificar\s+(se|com)\s+o\s+cliente[^\n]*/gi,
   ];
   let cleaned = texto;
   let hadLeak = false;
