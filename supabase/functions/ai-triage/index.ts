@@ -745,6 +745,31 @@ function detectForcedToolIntent(
     }
   }
 
+  // ── REFINAMENTO POR TRATAMENTO/MARCA APÓS RECEITA (ÓCULOS) ──
+  // Cliente já tem receita salva e pergunta sobre tratamento/marca específico
+  // ("teria transitions?", "tem varilux?", "trabalham com zeiss?", "tem antirreflexo?").
+  // É pedido implícito de cotação — força consultar_lentes com filtro adequado.
+  // O token vai no `reason` para o hint downstream montar os parâmetros corretos.
+  if (hasReceitas && !isLCContext) {
+    const TREAT_BRAND_RE = /\b(transitions?|fotossens[ií]ve[il]|fotocrom[áa]?tic[ao]?|antirreflex(?:o|ivo)?|antiriscos?|filtro\s+azul|luz\s+azul|polariz[ao]?d[ao]?|varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax)\b/i;
+    const ASK_RE = /\?|\b(tem|teria|trabalh(am|a)|consegue|consegu[ei]m|voc[eê]s?\s+t[eê]m|t[eê]m\s+op(?:ç|c)[aã]o|disp[oõ]e[m]?|disponibilidade|trabalham?\s+com|fazem|fa[zç]em)\b/i;
+    const m = lastInboundText.match(TREAT_BRAND_RE);
+    if (m && ASK_RE.test(lastInboundText)) {
+      const raw = m[1].toLowerCase();
+      let token = "marca";
+      if (/transition|fotossens|fotocrom/.test(raw)) token = "photo";
+      else if (/blue|azul|antirreflex|antirisco/.test(raw)) token = "blue";
+      else if (/polariz/.test(raw)) token = "polar";
+      else if (/varilux|essilor|eyezen|crizal|stellest/.test(raw)) token = "essilor";
+      else if (/zeiss/.test(raw)) token = "zeiss";
+      else if (/hoya/.test(raw)) token = "hoya";
+      else if (/kodak/.test(raw)) token = "kodak";
+      else if (/dnz/.test(raw)) token = "dnz";
+      else if (/dmax/.test(raw)) token = "dmax";
+      return { tool: "consultar_lentes", reason: `brand_refinement:${token}:${raw}` };
+    }
+  }
+
   // Quote / pricing keywords (aceita variações: quanto/quantos/qto/qnto, custa/sai/fica)
   if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quantos?|qto|qnto|custa|sai\s+por|fica\s+por|tabela|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
     const isLC = isLCContext || /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
