@@ -5286,17 +5286,20 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           ...messages,
           { role: "system" as const, content: "[SISTEMA: TOOL FORÇADA] Você DEVE chamar interpretar_receita AGORA com a imagem da receita do cliente que está no histórico. Não responda em texto. Não escale. Apenas execute a tool com os valores que conseguir ler da imagem." },
         ];
+        const _t_forced = Date.now();
         const forcedResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "openai/gpt-5",
+            // PERF: gpt-5-mini para retry de OCR — mais rápido e suficiente p/ visão+tool call
+            model: "openai/gpt-5-mini",
             messages: forcedMessages,
             tools: TOOLS,
             tool_choice: { type: "function", function: { name: "interpretar_receita" } },
             max_completion_tokens: 1500,
           }),
         });
+        console.log(`[PERF] ai_gateway_forced_ocr=${Date.now() - _t_forced}ms status=${forcedResp.status}`);
         if (forcedResp.ok) {
           const forcedData = await forcedResp.json();
           const forcedToolCalls = forcedData?.choices?.[0]?.message?.tool_calls || [];
