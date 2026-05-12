@@ -2485,7 +2485,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           descricao: "Pending corrompida (receita sem valores) — limpando e pedindo valores por texto",
           metadata: { rx_label: rxLabel, last_rx_rxtype: lastRx?.rx_type ?? null },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
-        }).catch(() => {});
+        }).then(() => undefined, () => undefined);
         await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_PEDIR_RECEITA_TEXTO);
         console.log("[RX-CONFIRMACAO] Pending corrompida — limpa e pede texto");
         return jsonResponse({ status: "ok", tools_used: ["receita_pending_invalidada"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
@@ -2746,7 +2746,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             descricao: `Cliente escolheu ${escolha.how} (idx=${escolha.idx}) — pedindo confirmação dos valores`,
             metadata: { rx_label: rxLabelEsc, rx_index: escolha.idx, how: escolha.how },
             referencia_tipo: "atendimento", referencia_id: atendimento_id,
-          }).catch(() => {});
+          }).then(() => undefined, () => undefined);
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(rxEscolhida, false));
           console.log(`[RX-ESCOLHA] Cliente escolheu receita idx=${escolha.idx} ainda não confirmada — pedindo confirmação`);
           return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
@@ -2776,7 +2776,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               contato_id: contatoId, tipo: "cta_visita_aceito",
               descricao: "Cliente aceitou visita após orçamento — listando cidades",
               referencia_tipo: "atendimento", referencia_id: atendimento_id,
-            }).catch(() => {});
+            }).then(() => undefined, () => undefined);
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
           if (detectRecusaVisita(lastInboundText)) {
@@ -2786,7 +2786,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               contato_id: contatoId, tipo: "cta_visita_recusado",
               descricao: "Cliente recusou visita após orçamento",
               referencia_tipo: "atendimento", referencia_id: atendimento_id,
-            }).catch(() => {});
+            }).then(() => undefined, () => undefined);
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_recusa"], intencao: "orcamento", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
           }
           await _setPosOrc(null);
@@ -2794,7 +2794,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             contato_id: contatoId, tipo: "pos_orcamento_fallback_llm",
             descricao: `Cliente desviou de aguardando_cta_visita: "${lastInboundText.substring(0,120)}"`,
             referencia_tipo: "atendimento", referencia_id: atendimento_id,
-          }).catch(() => {});
+          }).then(() => undefined, () => undefined);
         } else if (posOrc.etapa === "aguardando_cidade") {
           const cidade = detectCidadeEscolhida(lastInboundText);
           if (cidade) {
@@ -2806,7 +2806,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               descricao: `Cliente escolheu cidade ${CIDADE_LABEL[cidade]}`,
               metadata: { cidade },
               referencia_tipo: "atendimento", referencia_id: atendimento_id,
-            }).catch(() => {});
+            }).then(() => undefined, () => undefined);
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
           const tries = Number(posOrc.tries_cidade || 0) + 1;
@@ -2825,7 +2825,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               descricao: `Cliente escolheu loja ${loja.nome_loja}`,
               metadata: { loja_nome: loja.nome_loja, cidade: posOrc.cidade },
               referencia_tipo: "atendimento", referencia_id: atendimento_id,
-            }).catch(() => {});
+            }).then(() => undefined, () => undefined);
             const ask = `Boa! Vamos marcar na *${loja.nome_loja}* então 😊 Qual dia e horário ficam melhor pra você? Pode ser hoje, amanhã ou outro dia da semana.`;
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, ask);
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_loja_definida"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
@@ -2909,7 +2909,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
           metadata: { trigger: recentPaymentLink ? "recent_template" : "open_solicitation" },
-        }).catch(() => { /* noop */ });
+        }).then(() => undefined, () => undefined);
         // Limpa lock de IA e retorna
         try {
           const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
@@ -4864,7 +4864,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           descricao: `LLM ia cotar com receita idx=${idxNaoConfirmada} sem confirmação — sobrescrevendo com pedido de confirmação`,
           metadata: { rx_label: rxLabelAlvo, rx_index: idxNaoConfirmada },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
-        }).catch(() => {});
+        }).then(() => undefined, () => undefined);
         resposta = buildMsgConfirmarReceita(rxAlvo, false);
         intencao = "receita_oftalmologica";
         pipeline_coluna = "Orçamento";
@@ -5566,7 +5566,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               referencia_tipo: "atendimento",
               referencia_id: atendimento_id,
               metadata: { loja_nome: lojaMatch.nome_loja, data_horario: dataIso, source: "post_llm_detector" },
-            }).catch(() => { /* noop */ });
+            }).then(() => undefined, () => undefined);
           } else {
             console.log("[POS-LLM-AGENDA] Já existe agendamento para essa data/loja — skip");
           }
