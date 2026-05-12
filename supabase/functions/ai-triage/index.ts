@@ -3822,6 +3822,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       isLCContextGlobal,
       hasLCQuotePresented,
       lastOutboundForIntent,
+      recentInboundText,
     );
 
     // ── REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR ──
