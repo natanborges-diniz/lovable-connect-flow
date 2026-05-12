@@ -1,55 +1,40 @@
-## Contexto
+## Diagnóstico
 
-Atendimento da Thais Santiago: receita confirmada (OD 0/-2,50 / OE 0/-2,75), IA enviou orçamento DNZ. Cliente perguntou "Eu queria uma lente transition. Teria?" — pergunta de **disponibilidade/preço implícita**, com receita compatível e catálogo Hoya/DMAX fotossensível disponível em `pricing_table_lentes` (várias opções entre R$ 471 e R$ 2.000+ cobrindo cil até -4).
+A regra `brand_refinement` (transitions/fotossensível/varilux/etc.) já existe em `ai-triage` (linhas 751–773 e 3936–3981). Catálogo `pricing_table_lentes` tem **>10 opções fotossensíveis** compatíveis com o grau da Thais (OD 0/-2,50, OE 0/-2,75) entre R$ 471 (DMAX 1.56 Foto) e R$ 1.599 (Hoya Hilux Sensity), incluindo Sensity Original/2 e Foto Filtro Azul.
 
-A IA respondeu "Pra esses graus específicos preciso confirmar a disponibilidade direto na loja antes de te passar o valor exato. Em qual região/bairro você está?" e foi escalada. Causa raiz:
+Mesmo assim, no atendimento `4689bd82-ffb4-438b-bb79-9360e7294e67`, após o deploy, a IA respondeu:
+- "Encontro as opções fotossensíveis certinhas pra seu grau direto na loja, pode ser?"
+- "Encontro as opções fotossensíveis compatíveis com seu grau agora e te aviso na sequência."
 
-1. `detectForcedToolIntent` só dispara `consultar_lentes` quando o regex de preço (`preço|valor|quanto|orçamento|custa…`) bate. "Teria?" não casa.
-2. O bloco `BRAND_REFINEMENT_RE` (que cobre transitions/varilux/zeiss/etc.) só é avaliado **dentro** do branch de loop detectado (`loopCheck.detected && !forcedIntent`). Sem loop, nunca roda.
-3. Sem intent forçado nem refinamento, o LLM caiu em fallback conservador (a regra "PROIBIDO chamar consultar_lentes só porque mencionou tratamento" do bloco `[AGENDAMENTO ATIVO]` reforça esse comportamento — mas a Thais ainda nem agendou).
-
-Resultado: cliente com receita pronta, orçamento prévio e produto compatível foi tratada como ambíguo e empurrada pra fila humana.
+Ou seja: o **hint de brand_refinement chegou, mas o modelo gerou frase-aguarde em vez de chamar `consultar_lentes`**. É exatamente o mesmo anti-pattern já tratado para receita ("Já estou analisando…" sem follow-up). Aqui não há fallback que force a tool — o forced-retry de receita (bloco 9.4) só dispara para `interpretar_receita` em `isImageContext`.
 
 ## Mudanças
 
-### 1. Novo gatilho em `detectForcedToolIntent` (ai-triage)
+### 1. Forced retry para `consultar_lentes` em brand_refinement
+Em `supabase/functions/ai-triage/index.ts`, espelhar o bloco 9.4 (forced retry de `interpretar_receita`) com um novo bloco logo antes do guardrail "dois caminhos":
 
-Adicionar, **antes** do regex de preço atual, uma regra:
+- Disparo: `forcedIntent?.tool === "consultar_lentes"` AND `forcedIntent.reason?.startsWith("brand_refinement:")` AND **a 1ª resposta do modelo NÃO chamou `consultar_lentes`** (nenhum tool_call do nome no turno).
+- Ação: 2ª chamada ao gateway com `tool_choice: { type: "function", function: { name: "consultar_lentes" } }`, passando os parâmetros derivados do token (`filtro_photo:true` para photo, `filtro_blue:true` para blue, `preferencia_marca:"…"` para varilux/zeiss/hoya/dnz/dmax/kodak).
+- Processa o tool_call inline, formata 2–3 opções (família + índice + tratamento + preço) e devolve resposta amigável.
+- Se a tool retornar 0 opções compatíveis, devolve mensagem específica ("para o seu grau não tenho fotossensível em estoque na faixa X, mas posso oferecer Y") em vez de empurrar para loja.
+- Flags de log: `forced_consultar_lentes_retry_ok` / `forced_consultar_lentes_zero_results`.
 
-> Se `hasReceitas && !isLCContext` E o inbound contém **tratamento/marca específicos** (`transitions|fotossensiv|fotocrom|antirreflex|filtro azul|blue|polariz|varilux|essilor|eyezen|zeiss|hoya|kodak|dnz|dmax|stellest|crizal`) E o cliente está **perguntando** (frase contém `?`, "tem", "teria", "trabalha", "tem opção", "consegue", "vocês têm" etc.) → retorna `{ tool: "consultar_lentes", reason: "cliente perguntou tratamento/marca específico após receita" }` **com hint estendido** indicando filtro/marca detectado.
+### 2. Bloquear frases-aguarde sem follow-up
+No guardrail logo após o forced retry, descartar a resposta se contiver `(encontro|busco|procuro|verifico|confirmo) .*(opções|fotossens|lentes).*(agora|sequência|já|um instante|pode ser)` E `forcedIntent` for brand_refinement E nenhuma tool foi chamada. Substituir pelas opções formatadas (mesmo caminho do retry).
 
-Para passar o filtro detectado adiante sem mudar a assinatura pública, retornar via `reason` o token (`reason: "brand_refinement:photo"` / `"brand_refinement:varilux"` etc.) e ler isso no hint.
-
-### 2. Hint dedicado quando `forcedIntent.reason` começa com `brand_refinement:`
-
-No bloco `else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" …))` (linha ~3931), adicionar branch que injeta:
-
-> `[SISTEMA: REFINAMENTO POR TRATAMENTO/MARCA] Cliente já recebeu orçamento e agora pergunta sobre <X>. Há receita salva. AÇÃO OBRIGATÓRIA: chame consultar_lentes AGORA com {filtro_photo:true|filtro_blue:true|preferencia_marca:"…"}. Se houver opções compatíveis, apresente 2–3 com nome de família e preço. Se não houver para esse grau, diga isso explicitamente e ofereça alternativa equivalente. PROIBIDO responder "preciso confirmar na loja" / "preciso verificar disponibilidade" — o catálogo é a fonte da verdade. PROIBIDO escalar.`
-
-Mapeamento token → parâmetro:
-- `transitions|fotossensiv|fotocrom` → `filtro_photo:true`
-- `blue|filtro azul|antirreflex` → `filtro_blue:true`
-- `varilux|essilor|eyezen|crizal|stellest` → `preferencia_marca:"ESSILOR"`
-- `zeiss|hoya|kodak|dnz|dmax` → `preferencia_marca` correspondente
-
-### 3. Reaproveitar mesmo guard no bloco `[AGENDAMENTO ATIVO]`
-
-Hoje, quando há agendamento ativo, o prompt manda "trate como preferência registrada e NÃO rode consultar_lentes". Isso é correto para "quero plaquetas douradas", mas não para perguntas diretas de **disponibilidade de tratamento/marca** ("teria transitions?"). Adicionar exceção paralela ao `explicitPriceAsk`: se a inbound for uma **pergunta de disponibilidade** sobre tratamento/marca conhecido, libera rodar `consultar_lentes` com o filtro adequado (sem perguntar região, pois agendamento já existe).
-
-### 4. Reabrir Thais
-
-Após deploy, invocar `ai-triage` com `force_resume:true` para o atendimento `4689bd82-ffb4-438b-bb79-9360e7294e67` para que ela receba o orçamento de fotossensíveis e o atendimento volte ao modo IA (continua em fila humana hoje).
+### 3. Reabrir Thais
+Após deploy, invocar `ai-triage` com `force_resume:true` em `4689bd82-ffb4-438b-bb79-9360e7294e67` para que ela receba a lista de fotossensíveis e o atendimento volte a `modo='ia'`.
 
 ## Arquivos
 
-- `supabase/functions/ai-triage/index.ts` — `detectForcedToolIntent` (~linha 691) + branches de hint (~linhas 3853 e 3931). Sem migration, sem novo secret.
+- `supabase/functions/ai-triage/index.ts` — novo bloco de forced retry (~próximo ao bloco 9.4 existente) + guardrail anti-stall. Sem migration, sem secret.
 
 ## Memória
 
-Atualizar `mem://ia/regras-negocio-e-proibicoes-criticas` (ou criar `mem://ia/refinamento-tratamento-marca`) registrando: pergunta de disponibilidade de tratamento/marca com receita salva = sempre rodar `consultar_lentes` com filtro correspondente; nunca responder "preciso confirmar na loja" quando o catálogo cobre o grau.
+Atualizar `mem://ia/auto-receita-e-anti-loop` (ou criar nó irmão) registrando: padrão "frase-aguarde sem follow-up" também se aplica a `consultar_lentes` em brand_refinement — se prometeu opções, tem que listar no mesmo turno.
 
 ## Validação
 
-1. `read_query` em `mensagens` da Thais antes/depois pra confirmar que a IA enviou opções fotossensíveis (Hoya Sensity / DMAX Foto) com preço e voltou para `modo='ia'`.
-2. `edge_function_logs ai-triage` filtrando `brand_refinement` para confirmar o trigger.
-3. Caso a tool não retorne nenhuma fotossensível compatível com -2,75 cyl (improvável: Hilux Pronta cobre até -2.0, mas Maxxee/Hilux full e DMAX cobrem -4), a resposta deve dizer isso e oferecer alternativa premium em vez de empurrar pra loja.
+1. `read_query` em `mensagens` da Thais para confirmar que a próxima outbound traz 2–3 fotossensíveis com preço.
+2. `edge_function_logs ai-triage` filtrando `forced_consultar_lentes_retry_ok`.
+3. Confirmar `atendimentos.modo='ia'` após o force_resume.
