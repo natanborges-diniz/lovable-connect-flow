@@ -2298,17 +2298,20 @@ serve(async (req) => {
     //         para que possa consultar o agendamento ativo e variar a resposta. ──
 
     // ── 4. LOAD ALL DATA IN PARALLEL ──
+    const _t_load = Date.now();
     const [promptRes, compiledRes, kbRes, exRes, antiRes, regrasRes, msgsRes, colRes, setRes, lojasRes, agendRes, contatoMetaRes] = await Promise.all([
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_atendimento").single(),
       supabase.from("configuracoes_ia").select("valor").eq("chave", "prompt_compilado").single(),
       supabase.from("conhecimento_ia").select("categoria, titulo, conteudo").eq("ativo", true),
-      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(30),
-      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").in("avaliacao", ["negativo", "corrigido"]).order("created_at", { ascending: false }).limit(10),
+      // PERF: 30→12 exemplos (priorização por sinais já filtra os relevantes)
+      supabase.from("ia_exemplos").select("categoria, pergunta, resposta_ideal").eq("ativo", true).limit(12),
+      supabase.from("ia_feedbacks").select("motivo, resposta_corrigida").in("avaliacao", ["negativo", "corrigido"]).order("created_at", { ascending: false }).limit(8),
       supabase.from("ia_regras_proibidas").select("regra, categoria").eq("ativo", true),
+      // PERF: 60→30 mensagens (janela suficiente p/ contexto, prompt encolhe ~40%)
       supabase.from("mensagens").select("direcao, conteudo, remetente_nome, created_at, tipo_conteudo, metadata")
         .eq("atendimento_id", atendimento_id)
         .order("created_at", { ascending: false })
-        .limit(60),
+        .limit(30),
       supabase.from("pipeline_colunas").select("id, nome, setor_id").eq("ativo", true).order("ordem"),
       supabase.from("setores").select("id, nome").eq("ativo", true),
       supabase.from("telefones_lojas").select("id, nome_loja, telefone, endereco, horario_abertura, horario_fechamento, horarios_semana, departamento, google_profile_url").eq("ativo", true),
