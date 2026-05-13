@@ -1,24 +1,30 @@
 ## Resposta proposta para o cliente
 
-Entre as **freeform monofocais** (longe ou perto, lente única) do nosso catálogo, **fora a HOYA**, temos:
+Pesquisei a combinação **freeform + monofocal (só pra perto) + fotossensível** em todas as marcas do nosso catálogo, e tenho uma resposta honesta:
 
-**🟢 DNZ Free Form 1.67 + AR Verde** — R$ 690/lente → **R$ 1.380 o par**
-Lente fina nacional, freeform digital, antirreflexo verde. Excelente custo-benefício pra quem quer freeform sem pagar premium.
+**Essa combinação específica só existe na HOYA hoje.** DNZ, ZEISS e Essilor têm freeform monofocal, mas nenhuma trabalha a versão fotossensível pra visão simples — fotossensível dessas marcas só vem em multifocal/progressiva.
 
-**💎 ZEISS SmartLife Individual 3 BlueGuard 1.50** (freeform alemã, com filtro de luz azul integrado):
-- DuraVision **Chrome** UV — R$ 1.490/lente → **R$ 2.980 o par**
-- DuraVision **Silver** UV — R$ 1.949/lente → **R$ 3.898 o par**
-- DuraVision **Platinum** UV (top tratamento) — R$ 2.190/lente → **R$ 4.380 o par**
+As **opções HOYA freeform monofocal fotossensível** pra sua receita (OD +2,25 -0,25 / OE +2,00 -0,25):
 
-**⚠️ Sobre fotossensível freeform monofocal:** no nosso catálogo, só a **HOYA** trabalha com essa combinação (Sensity em freeform single vision). DNZ e ZEISS freeform não têm versão fotossensível pra essa receita.
+🟢 **Essencial** — HOYA Nulux TrueForm 1.53 + Sensity 2 + Hi-Vision Hard
+R$ 1.699/lente → **R$ 3.398 o par**
 
-Quer seguir com alguma dessas, ou prefere voltar pras opções HOYA fotossensíveis?
+🔵 **Custo-benefício (mais fina)** — HOYA Nulux TrueForm 1.59 + Sensity 2 + Hi-Vision Hard
+R$ 2.049/lente → **R$ 4.098 o par**
+
+💎 **Premium com filtro azul** — HOYA Nulux TrueForm 1.53 + Sensity 2 + No-Risk BlueControl
+R$ 2.449/lente → **R$ 4.898 o par**
+
+**Se quiser variar marca, dois caminhos:**
+1. Freeform monofocal de **outra marca SEM fotossensível** (DNZ Free Form 1.67 R$ 1.380/par ou ZEISS SmartLife Individual 3 a partir de R$ 2.980/par) + um **segundo par solar com grau** ou clip-on — geralmente sai mais em conta que a foto.
+2. Posso te mostrar versões **stock (não-freeform) fotossensíveis** de outras marcas, que custam bem menos — só não têm a precisão óptica do freeform.
+
+Qual caminho prefere seguir?
 
 ---
 
-## Observações
+## Observações (uso interno)
 
-- Receita: OD +2,25 -0,25 90° / OE +2,00 -0,25 90°, perto, single vision.
-- Filtros aplicados: `category in ('single_vision','monofocal')`, family freeform/trueform/identity/individual, cobre esfera +2,25 e cilindro -0,25.
-- Catálogo único freeform single vision não-Hoya: DNZ Free Form 1.67 e ZEISS SmartLife Individual 3 BlueGuard.
-- Nenhuma com `photo=true` — só HOYA Nulux TrueForm Sensity tem freeform monofocal fotossensível.
+- Query: `category in ('single_vision','single_vision_digital','visao_simples','digital','single') AND photo=true AND brand != HOYA` cobrindo +2,25 -0,25 → **0 resultados**.
+- Confirmado: `pricing_table_lentes` só tem freeform monofocal foto na linha HOYA Nulux TrueForm (índices 1.53 e 1.59) + Sensity 2.
+- Sem alteração de código.
