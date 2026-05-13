@@ -2426,7 +2426,6 @@ serve(async (req) => {
     // Só dispara para texto puro — imagens (receita) seguem o fluxo normal.
     // Quando cliente já respondeu o nome em texto: persiste direto e segue para o LLM (não repete a pergunta).
     // Após 3 tentativas sem reconhecer nome: escala para humano (anti-loop).
-    let contatoNomeAtualRuntime = contatoNomeAtual;
     {
       const _lastInboundFP = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
       const _isImageFP = (_lastInboundFP?.tipo_conteudo || "text") === "image"
