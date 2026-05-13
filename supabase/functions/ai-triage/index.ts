@@ -2421,16 +2421,18 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
-    // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA (1ª interação ou confirmação de nome pendente) ──
+    // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA + AUTO-PERSISTÊNCIA DE NOME ──
     // Elimina vazamento de prompt (proximo_passo, instruções internas) e reduz latência.
     // Só dispara para texto puro — imagens (receita) seguem o fluxo normal.
+    // Quando cliente já respondeu o nome em texto: persiste direto e segue para o LLM (não repete a pergunta).
+    // Após 3 tentativas sem reconhecer nome: escala para humano (anti-loop).
+    let contatoNomeAtualRuntime = contatoNomeAtual;
     {
       const _lastInboundFP = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
       const _isImageFP = (_lastInboundFP?.tipo_conteudo || "text") === "image"
         || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
       const _greetingEligible =
         !_isImageFP &&
-        
         contatoTipo === "cliente" &&
         (inboundCount === 1 || (precisaConfirmarNome && !nomeConfirmado));
 
@@ -2439,21 +2441,108 @@ serve(async (req) => {
         const looksReal = !!candidato
           && /[A-Za-zÀ-ÿ]{2,}/.test(candidato)
           && !/^\+?\d[\d\s()+-]*$/.test(candidato);
-        let greetingMsg: string;
-        if (looksReal && !nomeConfirmado) {
-          const primeiroNome = candidato.split(/\s+/)[0];
-          greetingMsg = inboundCount > 1
-            ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
-            : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
-        } else {
-          greetingMsg = inboundCount > 1
-            ? `Antes de seguir, posso saber seu nome, por favor? 😊`
-            : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+
+        // Heurística: tenta extrair nome do último inbound em texto (apenas quando não é a 1ª interação)
+        function extrairNomeDoInbound(raw: string): string | null {
+          let t = String(raw || "").trim();
+          if (!t || t.length < 2 || t.length > 60) return null;
+          if (/[?]\s*$/.test(t)) return null;
+          // Remove prefixos comuns
+          t = t.replace(/^[.,!\-\s]+/, "");
+          t = t.replace(/^(meu\s+nome\s+(é|eh|e)\s+|me\s+chamo\s+|chamo[-\s]me\s+|sou\s+(o|a)\s+|sou\s+|é\s+(o|a)\s+|é\s+|eh\s+)/i, "");
+          t = t.replace(/[.!,;:].*$/, "").trim();
+          if (!t || t.length < 2 || t.length > 40) return null;
+          // Saudações puras / negações / perguntas → não é nome
+          if (/^(oi|ol[aá]|opa|hey|hi|hello|bom\s*dia|boa\s*tarde|boa\s*noite|tudo\s*bem|tudo\s*bom|blz|beleza|ok|sim|n[aã]o|nao|claro|isso|certo|valeu|obrigad[oa]|por\s*favor|prefiro\s*n[aã]o)$/i.test(t)) return null;
+          if (/(http|www\.|@|\.com|\.br)/i.test(t)) return null;
+          // Precisa ter token alfabético de 2+
+          const tokens = t.split(/\s+/).filter(Boolean);
+          if (tokens.length === 0 || tokens.length > 4) return null;
+          const allAlpha = tokens.every((tk) => /^[A-Za-zÀ-ÿ'’-]{2,}$/.test(tk));
+          if (!allAlpha) return null;
+          // Capitaliza
+          const cap = tokens.map((tk) => tk.charAt(0).toUpperCase() + tk.slice(1).toLowerCase()).join(" ");
+          return cap;
         }
-        console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} nomeWa="${nomePerfilWhatsapp}"`);
-        await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, greetingMsg);
-        await logEvent(supabase, contatoId, atendimento_id, "saudacao_deterministica", greetingMsg);
-        return jsonResponse({ status: "ok", tools_used: ["greeting_deterministic"], intencao: "saudacao", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+
+        const _ultimoInbound = String(_lastInboundFP?.conteudo || currentMsg || "").trim();
+        const _nomeExtraido = (precisaConfirmarNome || inboundCount > 1) ? extrairNomeDoInbound(_ultimoInbound) : null;
+
+        if (_nomeExtraido) {
+          // Persiste e segue
+          try {
+            await supabase
+              .from("contatos")
+              .update({
+                nome: _nomeExtraido,
+                metadata: {
+                  ...contatoMeta,
+                  nome_confirmado: true,
+                  precisa_confirmar_nome: false,
+                  nome_origem: "ia_fast_path",
+                  nome_atualizado_at: new Date().toISOString(),
+                  tentativas_pedido_nome: 0,
+                },
+              })
+              .eq("id", contatoId);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "nome_registrado_fast_path",
+              descricao: `Nome registrado pelo fast-path: "${_nomeExtraido}"`,
+              metadata: { nome: _nomeExtraido, raw: _ultimoInbound },
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+            });
+            contatoNomeAtualRuntime = _nomeExtraido;
+            contatoMeta = { ...contatoMeta, nome_confirmado: true, precisa_confirmar_nome: false, tentativas_pedido_nome: 0 };
+            console.log(`[FAST-PATH] nome_persistido_auto="${_nomeExtraido}" — seguindo para LLM`);
+          } catch (e) {
+            console.error("[FAST-PATH] persist_nome failed:", e);
+          }
+          // NÃO retorna — deixa o fluxo normal seguir
+        } else {
+          // Não conseguiu extrair nome
+          let greetingMsg: string;
+          let escalou = false;
+          const tentativas = Number(contatoMeta.tentativas_pedido_nome || 0);
+
+          if (inboundCount > 1 && tentativas >= 2) {
+            // Já pedimos 2x e não conseguimos — escala para humano
+            console.log(`[FAST-PATH] anti-loop nome: ${tentativas} tentativas — escalando para humano`);
+            const _np = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+            try {
+              await supabase
+                .from("contatos")
+                .update({ metadata: { ...contatoMeta, tentativas_pedido_nome: tentativas + 1 } })
+                .eq("id", contatoId);
+            } catch (_) { /* noop */ }
+            return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, currentMsg, "loop_pedido_nome", _np);
+          }
+
+          if (looksReal && !nomeConfirmado) {
+            const primeiroNome = candidato.split(/\s+/)[0];
+            greetingMsg = inboundCount > 1
+              ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
+              : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
+          } else {
+            greetingMsg = inboundCount > 1
+              ? `Antes de seguir, posso saber seu nome, por favor? 😊`
+              : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+          }
+
+          // Incrementa contador apenas quando estamos pedindo nome (não 1ª interação tipo "Falo com X?")
+          try {
+            await supabase
+              .from("contatos")
+              .update({ metadata: { ...contatoMeta, tentativas_pedido_nome: tentativas + 1 } })
+              .eq("id", contatoId);
+          } catch (_) { /* noop */ }
+
+          console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} nomeWa="${nomePerfilWhatsapp}" tentativas=${tentativas + 1}`);
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, greetingMsg);
+          await logEvent(supabase, contatoId, atendimento_id, "saudacao_deterministica", greetingMsg);
+          return jsonResponse({ status: "ok", tools_used: ["greeting_deterministic"], intencao: "saudacao", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
+        }
       }
     }
 
