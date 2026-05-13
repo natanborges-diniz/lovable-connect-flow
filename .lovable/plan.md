@@ -1,86 +1,46 @@
-# Diversificar marcas no orçamento de lentes
 
 ## Diagnóstico
 
-**1) "Por que não continuou após a confirmação?"**
-A IA continuou normalmente. Olhando o `atendimento_id=661a27c7…`, depois do "Isso" do Rogerio:
-- 13:39 – mandou as 3 faixas de orçamento + CTA de visita
-- 13:40 – Rogerio: "Não tem como fazer tudo por aqui, estou em Trancoso e moro no Guarujá"
-- 13:41 – IA: "Entendo… atendemos presencialmente em Osasco… qual unidade prefere?"
-- 13:41 – Rogerio: "Venho uma vez por mês em Osasco"
-- 13:41/42 – IA: "Já te mandei as opções acima 😊 quer detalhar ou agendar?" + "Quer apenas retirar na loja ou entregar em Trancoso?"
-- 13:43 – Rogerio: "Como assim as armações?" → fluxo segue ativo.
+No `ai-triage/index.ts` (~linha 2424), o **fast-path determinístico de saudação** dispara sempre que `inboundCount === 1 OU (precisaConfirmarNome && !nomeConfirmado)`.
 
-Conclusão: **não há gap de continuidade**. O que provavelmente passou despercebido é que a UI do CRM mostrou só até "Isso" no momento da consulta. Vou apenas registrar isto no resumo final, sem mexer em código.
+Quando o contato entra com `metadata.precisa_confirmar_nome = true` (caso da Beatriz, cujo nome no WhatsApp era "."), a condição `precisaConfirmarNome` permanece `true` a cada novo inbound. O fast-path **retorna antes do LLM**, então `registrar_nome_cliente` nunca é chamada — mesmo quando o cliente responde "Beatriz", "Me chamo Beatriz", "Bia", etc. Resultado: a IA repete "Antes de seguir, posso saber seu nome, por favor? 😊" indefinidamente.
 
-**2) "Está enviando apenas lentes Hoya, enviar também outras marcas." — bug real.**
+Logs confirmam: `[FAST-PATH] greeting_deterministic_sent` dispara em cada turno e o fluxo nunca chega à tool.
 
-Para a receita do Rogerio (single_vision, esf máx -0,50, cil máx -0,25), o catálogo cobre **20 lentes** (log: `[QUOTE] Found 20 lenses…`). A query atual em `runConsultarLentes` (`ai-triage/index.ts` ~6096):
+## Correção
 
-```ts
-.in("category", categories)
-.order("priority", { ascending: true })
-.order("price_brl", { ascending: true })
-.limit(20)
-```
+Quando o fast-path detecta que o **último inbound do cliente parece conter um nome** (texto curto com letras, sem ser pergunta/saudação genérica), ele deve:
 
-Como a Hoya tem MUITAS entradas baratas (Maxxee Pronta R$ 99, Hilux R$ 198, Hilux Pronta R$ 199, Nulux R$ 390, etc.), o top-20 ordenado por preço fica dominado por Hoya. O LLM então sintetiza 2 picks Hoya + uma frase genérica "premium a partir de R$ 2.679 (ZEISS/ESSILOR)".
+1. **Persistir o nome direto via SQL** (mesmo update que `registrar_nome_cliente` faz: `contatos.nome = X`, `metadata.nome_confirmado=true`, `precisa_confirmar_nome=false`, `nome_origem='ia_fast_path'`).
+2. **Não enviar "Antes de seguir..." de novo** — em vez disso, sair do fast-path e **deixar o LLM seguir** o atendimento normal (cliente já respondeu o que precisava; próximo passo é responder à intenção real, que no caso é "Acessei o site... gostaria de mais informações").
 
-DNZ HDI 1.67 R$ 520 e DMAX, embora cubram a receita, ficam fora da janela top-20 ou não viram pick por estarem entre Hoyas mais baratas.
+### Heurística "parece nome" (determinística, sem LLM)
 
-## Solução
+Aplica quando `precisaConfirmarNome && inboundCount > 1` e o último inbound:
+- Tem entre 2 e 40 caracteres após trim
+- Contém ≥1 token de letras com 2+ chars (`/[A-Za-zÀ-ÿ]{2,}/`)
+- Não termina com `?`
+- Após remover prefixos comuns ("me chamo ", "meu nome é ", "sou a ", "sou o ", "é "), o que sobra é só nome (sem dígitos longos, sem URLs, sem `@`)
+- Não é saudação pura ("oi", "olá", "bom dia", "tudo bem", etc.)
 
-Adicionar **diversificação por marca** dentro de `runConsultarLentes` antes de devolver à LLM, garantindo pelo menos 1 representante de cada marca disponível para a faixa.
+Extrai o primeiro token capitalizado como nome (ou usa o texto limpo inteiro se ≤2 palavras).
 
-### Mudanças (apenas em `supabase/functions/ai-triage/index.ts`)
+### Fluxo após persistir
 
-1. **Aumentar limite e re-ranquear por marca** dentro de `runConsultarLentes`:
-   - Subir `.limit(20)` para `.limit(60)` (continua barato — receita é uma só por chamada).
-   - Após o fetch, agrupar por `brand` (case-insensitive — note que existem `Hoya` e `HOYA` como duplicatas; normalizar `toUpperCase`).
-   - Para cada marca, pegar **a mais barata** + **a melhor custo-benefício** (segunda faixa).
-   - Montar o array final intercalando marcas: 1 entrada-de-cada-marca primeiro (ordenadas por preço asc), depois preenche o resto com as próximas mais baratas globais.
+- Chama `logEvent(..., "nome_registrado_fast_path", nome)`.
+- **Não retorna** — segue o restante do `ai-triage` para que o LLM responda à intenção real do cliente já tratando-o pelo nome.
+- Recarrega `contatoNomeAtual = nome` em memória para o prompt.
 
-2. **Passar até 6 lentes para a LLM** (em vez do top-2 que ela escolhe hoje), com tag explícita de marca + faixa (econômica / intermediária / premium) já calculada deterministicamente, para reduzir alucinação ("a partir de R$ 2.679") quando o catálogo realmente tem opções mais baixas em outras marcas.
+### Salvaguarda extra
 
-3. **Atualizar o template de resposta** que `runConsultarLentes` devolve hoje (formato `🟢 Mais em conta / 🟡 Um passo acima / 📌 premium`) para suportar **3 faixas com 1–2 marcas cada**, no padrão:
+Se a heurística NÃO reconhecer o texto como nome após 3 turnos consecutivos pedindo nome, **escala para humano** com motivo "loop_pedido_nome" em vez de seguir repetindo a mesma frase.
 
-   ```
-   🔍 Opções pra OD <rx> | OE <rx>:
+## Arquivos afetados
 
-   🟢 Econômica:
-     • HOYA Hilux 1.50 AR — R$ 198
-     • DNZ HDI 1.67 AR Verde — R$ 520
+- `supabase/functions/ai-triage/index.ts` (~linha 2424–2458): refatora o bloco fast-path conforme acima.
+- `.lovable/memory/ia/saudacao-confirma-nome.md`: atualiza descrevendo a auto-persistência + escalada anti-loop.
 
-   🟡 Intermediária:
-     • HOYA Nulux 1.60 Blue — R$ 390
-     • ESSILOR <família> — R$ <preço>
+## Validação
 
-   💎 Premium:
-     • ZEISS SmartLife BlueGuard 1.50 — R$ 1.490
-     • HOYA Nulux iDentity V+ — R$ 890
-
-   Quer que eu detalhe alguma ou prefere ver pessoalmente na loja?
-   ```
-
-   Faixas calculadas por percentil dos preços do conjunto retornado (≤33% = econômica, 34–66% = intermediária, >66% = premium).
-
-4. **Corrigir inconsistência de marca** (`Hoya` vs `HOYA` na tabela): aplicar `brand.toUpperCase()` no agrupamento e normalizar o display para Title Case ao montar a resposta. Não vou tocar nos dados — só normalizar em runtime.
-
-5. **Sanidade — bypass para `preferencia_marca`**: se o cliente pediu uma marca específica, manter o comportamento atual (não diversificar).
-
-### Arquivos
-
-- `supabase/functions/ai-triage/index.ts`
-  - `runConsultarLentes` (~linha 6080–6180): nova lógica de diversificação + nova montagem da resposta.
-  - **Não** mexer em `runConsultarLentesEstimativa`, `interpretar_receita`, anti-loop nem fluxo pós-confirmação — a continuidade já funciona.
-
-### Validação
-
-- Caso Rogerio (esf -0,50 / cil -0,25): esperar Hoya + DNZ no econômico, Hoya + Essilor no intermediário, Zeiss + Hoya iDentity no premium.
-- Caso multifocal cyl alto (já coberto por `consultar_lentes_estimativa`) — não regride.
-- Caso `preferencia_marca='hoya'` — só Hoya (mantém).
-- Rodar a EF via `supabase--test_edge_functions` simulando o `tool_call` `consultar_lentes` com a Rx do Rogerio e conferir o output formatado.
-
-### Memória
-
-Criar `mem://ia/orcamento-diversificacao-marcas` registrando: orçamento sempre intercala marcas (Hoya / DNZ / Essilor / Zeiss) por faixa econômica/intermediária/premium; bypass quando `preferencia_marca` definida.
+- Curl em `ai-triage` simulando o atendimento da Beatriz (3 inbounds: ".", "Beatriz", "Me chamo Beatriz") — esperado: 1ª pede nome, 2ª persiste "Beatriz" + responde sobre o site, 3ª e seguintes não repetem a pergunta.
+- Verificar `contatos.nome` atualizado e `metadata.precisa_confirmar_nome=false` no banco após o teste.
