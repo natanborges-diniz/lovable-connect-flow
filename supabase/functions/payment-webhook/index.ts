@@ -81,12 +81,15 @@ serve(async (req) => {
       brand, brandName, cardBin, kind, dateTime, date, time,
     } = payload;
 
-    const bandeira: string | null = brand || brandName || null;
+    const brandFromPayload: string | null = brand || brandName || null;
+    const brandDerived: string | null = brandFromPayload ? null : resolveBrandFromBin(cardBin);
+    const bandeira: string | null = brandFromPayload || brandDerived;
+    const brandOrigem: string | null = brandFromPayload ? "webhook" : (brandDerived ? "derivado_bin" : null);
     const redeDateTime: string | null = dateTime || null;
     const redeDate: string | null = date || (redeDateTime ? redeDateTime.slice(0, 10) : null);
     const redeTime: string | null = time || (redeDateTime ? redeDateTime.slice(11, 19) : null);
 
-    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref, brand: bandeira, kind, cardBin });
+    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref, brand: bandeira, brand_origem: brandOrigem, kind, cardBin });
     if (!payment_link_id) throw new Error("payment_link_id é obrigatório");
 
     const { data: solicitacoes } = await supabase
