@@ -6110,7 +6110,8 @@ async function runConsultarLentes(
   if (args?.filtro_photo === true) query = query.eq("photo", true);
   if (args?.preferencia_marca) query = query.ilike("brand", `%${args.preferencia_marca}%`);
 
-  const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(20);
+  const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(60);
+  if (lenses && lenses.length > 0) console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd ?? "null"}`);
 
   if (!lenses || lenses.length === 0) {
     const filtrosAplicados = {
