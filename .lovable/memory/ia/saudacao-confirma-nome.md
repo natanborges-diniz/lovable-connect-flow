@@ -1,25 +1,33 @@
 ---
-name: Saudação inicial confirma/registra nome
-description: 1ª interação é DETERMINÍSTICA (sem LLM) — ai-triage envia "Falo com X?" ou "Posso saber seu nome?" direto via send-whatsapp. Tool registrar_nome_cliente persiste no próximo turno. proximo_passo só é mesclado na resposta se for pergunta (terminar em ?).
+name: Saudação inicial confirma/registra nome + auto-persistência anti-loop
+description: 1ª interação determinística. Quando cliente responde nome em texto, fast-path persiste direto e segue (sem repetir pergunta). Após 3 tentativas sem reconhecer nome, escala para humano.
 type: feature
 ---
 
 ## Fluxo
 - Webhook captura `senderName` do WhatsApp e grava `metadata.nome_perfil_whatsapp` + `nome_confirmado=false`.
-- `ai-triage` carrega `contatos.nome`, `metadata.nome_perfil_whatsapp`, `metadata.nome_confirmado`, `precisa_confirmar_nome`.
-- **FAST-PATH determinístico (`ai-triage` ~linha 2415):** quando `inboundCount===1` OU `precisaConfirmarNome===true`, e a última mensagem do cliente NÃO é imagem, e contato é `cliente`:
-  - Com `senderName` real → `"Olá! Falo com {primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco."`
-  - Sem nome → `"Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?"`
-  - **Pula completamente o LLM** (zero latência de gateway, zero risco de vazamento de prompt). Loga `[FAST-PATH] greeting_deterministic_sent` e `eventos_crm.tipo='saudacao_deterministica'`.
-- Quando o cliente confirma/corrige no próximo turno, IA chama `registrar_nome_cliente` que faz UPDATE em `contatos.nome` + `metadata.nome_confirmado=true`.
+- `ai-triage` carrega `contatos.nome`, `metadata.nome_perfil_whatsapp`, `metadata.nome_confirmado`, `precisa_confirmar_nome`, `tentativas_pedido_nome`.
+- **FAST-PATH determinístico (`ai-triage` ~linha 2424):** quando `inboundCount===1` OU `precisaConfirmarNome===true`, contato cliente, último inbound não é imagem:
+  1. **Tenta extrair nome do último inbound em texto** via `extrairNomeDoInbound()` — aceita "Beatriz", "Me chamo Beatriz", "Sou a Bia", etc. Rejeita saudações, perguntas, URLs, dígitos longos, >4 tokens.
+  2. Se extraiu → UPDATE `contatos.nome` + `metadata.nome_confirmado=true`, `precisa_confirmar_nome=false`, `nome_origem='ia_fast_path'`, `tentativas_pedido_nome=0` + evento `nome_registrado_fast_path`. **NÃO retorna** — segue para o LLM responder a intenção real do cliente já tratando-o pelo nome (`contatoNomeAtual` reatribuído em runtime).
+  3. Se não extraiu:
+     - `tentativas_pedido_nome >= 2` (3ª tentativa fracassada) e `inboundCount > 1` → **escala para humano** com motivo `loop_pedido_nome` via `handleEscalation`.
+     - Senão → envia saudação determinística e incrementa `tentativas_pedido_nome`. Pula completamente o LLM.
+- Quando o cliente confirma/corrige no próximo turno via LLM, IA chama `registrar_nome_cliente` que faz mesmo UPDATE.
+
+## Heurística `extrairNomeDoInbound`
+- Trim + remove pontuação inicial.
+- Strip de prefixos: `meu nome é/eh/e`, `me chamo`, `chamo-me`, `sou o/a`, `sou`, `é o/a`, `é`, `eh`.
+- Corta tudo após `.,;:!`.
+- Rejeita: vazio, <2 ou >40 chars, saudações puras (oi/olá/bom dia/etc), `?` no fim, URLs, `@`, `.com`, `.br`.
+- Aceita 1–4 tokens, todos alfabéticos `/^[A-Za-zÀ-ÿ'’-]{2,}$/`. Capitaliza.
 
 ## Guardrail proximo_passo (defesa em profundidade)
-- `responder.proximo_passo` é **metadado interno** (define a próxima ação). Antes era concatenado na `resposta` enviada ao cliente sempre que não fosse pergunta repetida.
-- **Regra atual** (linhas 4225 e 5188 em `ai-triage/index.ts`): só mescla `proximo_passo` na resposta se ele **terminar em `?`** (for pergunta). Caso contrário, descarta e loga `[GUARDRAIL] proximo_passo descritivo descartado`.
-- `sanitizeLeakedInstructions` cobre frases típicas vazadas: "confirmar o nome do cliente", "dar sequência ao atendimento", "para prosseguir", "aguardar resposta do cliente", "verificar com o cliente".
+- `responder.proximo_passo` é metadado interno. Só mesclado na resposta se terminar em `?`. Senão descartado e logado `[GUARDRAIL] proximo_passo descritivo descartado`.
+- `sanitizeLeakedInstructions` cobre frases típicas vazadas.
 
-## Caso de regressão (12-mai-2026 — Mary/Gi)
-WhatsApp entregou `senderName="Gi"`. Modelo gerou `resposta="Olá! Falo com Gi? 😊 Aqui é o Gael das Óticas Diniz Osasco"` + `proximo_passo="Confirmar o nome do cliente para dar sequência no atendimento."` — código antigo concatenava qualquer `proximo_passo` que não fosse pergunta repetida, então o cliente recebeu a frase descritiva como se fosse parte da saudação. Correção: short-circuit determinístico + filtro `proximo_passo` só pergunta + sanitizer ampliado.
+## Caso de regressão (13-mai-2026 — Beatriz)
+Cliente entrou via site (`metadata.precisa_confirmar_nome=true`, `nome_perfil_whatsapp="."`). Respondeu "Beatriz", "Me chamo Beatriz", "Bia" 5x. Fast-path antigo só verificava elegibilidade e re-enviava "Antes de seguir, posso saber seu nome, por favor? 😊" eternamente — nunca chegava ao LLM, então `registrar_nome_cliente` jamais era chamada. Correção: heurística determinística + auto-persist + escalada após 3 tentativas.
 
-## Helper
-`looksLikeRealName(senderName, phone)` no whatsapp-webhook (linha ~896): exige letras (não só dígitos), descarta nomes corporativos.
+## Helper webhook
+`looksLikeRealName(senderName, phone)` no whatsapp-webhook (~linha 896): exige letras, descarta nomes corporativos e telefones.
