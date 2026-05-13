@@ -1,46 +1,50 @@
+## Receita interpretada
 
-## Diagnóstico
+- **ADD calculada:** +2,50 (perto − longe, OD e OE)
+- **Esférico:** OD −0,25 / OE −0,50
+- **Cilíndrico:** −0,25 em ambos (eixo 90°)
+- **Tipo:** multifocal (progressiva) freeform com fotossensível
 
-No `ai-triage/index.ts` (~linha 2424), o **fast-path determinístico de saudação** dispara sempre que `inboundCount === 1 OU (precisaConfirmarNome && !nomeConfirmado)`.
+Grau baixo, dentro do range de qualquer índice (1.50 / 1.53). Sem necessidade de alto índice.
 
-Quando o contato entra com `metadata.precisa_confirmar_nome = true` (caso da Beatriz, cujo nome no WhatsApp era "."), a condição `precisaConfirmarNome` permanece `true` a cada novo inbound. O fast-path **retorna antes do LLM**, então `registrar_nome_cliente` nunca é chamada — mesmo quando o cliente responde "Beatriz", "Me chamo Beatriz", "Bia", etc. Resultado: a IA repete "Antes de seguir, posso saber seu nome, por favor? 😊" indefinidamente.
+## 3 opções de orçamento — Multifocal Freeform Fotossensível
 
-Logs confirmam: `[FAST-PATH] greeting_deterministic_sent` dispara em cada turno e o fluxo nunca chega à tool.
+Valores extraídos de `pricing_table_lentes` (catálogos unitários por lente, multiplicados ×2 para o par, conforme padrão de mercado Hoya/Zeiss).
 
-## Correção
+| Faixa | Lente | Por lente | Par |
+|---|---|---|---|
+| 🟢 Freeform Essencial | HOYA Argos Freeform 1.50 + Sensity Original + Hi-Vision Hard | R$ 2.039 | **R$ 4.078** |
+| 🟡 Freeform Intermediária | HOYA Argos Freeform 1.53 (Trivex, mais leve e resistente) + Sensity Original + Hi-Vision Hard | R$ 2.389 | **R$ 4.778** |
+| 💎 Premium Alemã | ZEISS Light 2 3Dv PhotoFusion X 1.50 Chrome UV (freeform digital + fotossensível ZEISS) | R$ 4.150 | **R$ 8.300** |
 
-Quando o fast-path detecta que o **último inbound do cliente parece conter um nome** (texto curto com letras, sem ser pergunta/saudação genérica), ele deve:
+## Mensagem proposta para o cliente (Óticas Diniz)
 
-1. **Persistir o nome direto via SQL** (mesmo update que `registrar_nome_cliente` faz: `contatos.nome = X`, `metadata.nome_confirmado=true`, `precisa_confirmar_nome=false`, `nome_origem='ia_fast_path'`).
-2. **Não enviar "Antes de seguir..." de novo** — em vez disso, sair do fast-path e **deixar o LLM seguir** o atendimento normal (cliente já respondeu o que precisava; próximo passo é responder à intenção real, que no caso é "Acessei o site... gostaria de mais informações").
+```
+Recebi sua receita 👀 É multifocal com adição +2,50 — separei 3 opções
+freeform já com fotossensível (escurecem no sol e clareiam na sombra):
 
-### Heurística "parece nome" (determinística, sem LLM)
+🟢 *Essencial — HOYA Argos Freeform 1.50*
+Lente progressiva digital (freeform) + Sensity (fotossensível) + antirreflexo
+👉 R$ 4.078 o par
 
-Aplica quando `precisaConfirmarNome && inboundCount > 1` e o último inbound:
-- Tem entre 2 e 40 caracteres após trim
-- Contém ≥1 token de letras com 2+ chars (`/[A-Za-zÀ-ÿ]{2,}/`)
-- Não termina com `?`
-- Após remover prefixos comuns ("me chamo ", "meu nome é ", "sou a ", "sou o ", "é "), o que sobra é só nome (sem dígitos longos, sem URLs, sem `@`)
-- Não é saudação pura ("oi", "olá", "bom dia", "tudo bem", etc.)
+🟡 *Intermediária — HOYA Argos Freeform 1.53 Trivex*
+Mesma tecnologia freeform, em material mais leve e resistente a impacto
+👉 R$ 4.778 o par
 
-Extrai o primeiro token capitalizado como nome (ou usa o texto limpo inteiro se ≤2 palavras).
+💎 *Premium — ZEISS Light 2 3Dv PhotoFusion X*
+Tecnologia alemã ZEISS, freeform digital de alta definição + PhotoFusion
+(fotossensível ZEISS, transição rápida)
+👉 R$ 8.300 o par
 
-### Fluxo após persistir
+Posso te passar mais detalhes ou já agendar uma visita pra você
+escolher a armação e a equipe te ajudar a definir a melhor opção?
+Em qual região você está?
 
-- Chama `logEvent(..., "nome_registrado_fast_path", nome)`.
-- **Não retorna** — segue o restante do `ai-triage` para que o LLM responda à intenção real do cliente já tratando-o pelo nome.
-- Recarrega `contatoNomeAtual = nome` em memória para o prompt.
+— Equipe Óticas Diniz
+```
 
-### Salvaguarda extra
+## Observações importantes
 
-Se a heurística NÃO reconhecer o texto como nome após 3 turnos consecutivos pedindo nome, **escala para humano** com motivo "loop_pedido_nome" em vez de seguir repetindo a mesma frase.
-
-## Arquivos afetados
-
-- `supabase/functions/ai-triage/index.ts` (~linha 2424–2458): refatora o bloco fast-path conforme acima.
-- `.lovable/memory/ia/saudacao-confirma-nome.md`: atualiza descrevendo a auto-persistência + escalada anti-loop.
-
-## Validação
-
-- Curl em `ai-triage` simulando o atendimento da Beatriz (3 inbounds: ".", "Beatriz", "Me chamo Beatriz") — esperado: 1ª pede nome, 2ª persiste "Beatriz" + responde sobre o site, 3ª e seguintes não repetem a pergunta.
-- Verificar `contatos.nome` atualizado e `metadata.precisa_confirmar_nome=false` no banco após o teste.
+1. **Valores são "o par" (2 lentes)** — explicitamente rotulado para evitar a ambiguidade discutida nos turnos anteriores.
+2. **Catálogo limitado em premium freeform foto** — Essilor Varilux fotossensível e ZEISS SmartLife/Individual fotossensível **não constam** em `pricing_table_lentes` para esse range; a única ZEISS freeform foto cadastrada é a *Light 2 3Dv PhotoFusion X*. Se quiser oferecer Varilux Sensity ou ZEISS Individual fotossensível, precisamos cadastrar esses SKUs.
+3. **Sem alterações de código nesta resposta** — só a mensagem pronta para o cliente. A regra "multiplicar ×2 e rotular como par" continua **não automatizada na IA** (ajuste foi declinado anteriormente). Se quiser, posso retomar essa proposta em separado.
