@@ -6299,39 +6299,92 @@ async function runConsultarLentes(
 
   }
 
-  const economy = lenses[0];
-  const premium = lenses[lenses.length - 1];
-  const midIndex = Math.floor(lenses.length / 2);
-  const mid = lenses.length >= 3 ? lenses[midIndex] : null;
-
-  // Gap-aware: se a "premium" é >2× o preço da econômica, esconde faixa cara
-  // (evita o efeito DNZ R$520 + ZEISS R$1.949 lado a lado, que parece esquisito).
-  // Mostra só as econômicas próximas e oferece detalhamento sob demanda.
-  const economyPrice = Number(economy.price_brl);
-  const premiumPrice = Number(premium.price_brl);
-  const hasBigGap = premiumPrice > economyPrice * 2 && lenses.length >= 2;
+  // Display da marca (Title Case) — banco tem "Hoya" e "HOYA" duplicados.
+  const brandDisplay = (b: string) => {
+    const up = String(b || "").trim().toUpperCase();
+    if (["HOYA", "DNZ", "DMAX", "ZEISS"].includes(up)) return up;
+    return up.charAt(0) + up.slice(1).toLowerCase();
+  };
+  const brandKey = (b: string) => String(b || "").trim().toUpperCase();
 
   const formatLens = (l: any, label: string) =>
-    `${label}: *${l.brand} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
+    `${label}: *${brandDisplay(l.brand)} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
 
   let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
 
-  if (hasBigGap) {
-    // Pega até 2 lentes na faixa de entrada (até 2× o preço da econômica).
-    const entryBand = lenses.filter((l: any) => Number(l.price_brl) <= economyPrice * 2).slice(0, 2);
-    quoteMsg += formatLens(entryBand[0], "🟢 Mais em conta");
-    if (entryBand.length > 1) {
-      quoteMsg += "\n" + formatLens(entryBand[1], "🟡 Um passo acima");
-    }
-    quoteMsg += `\n\n📌 Temos opções premium a partir de R$ ${premiumPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (filtro azul, marcas top como ZEISS/ESSILOR) — quer que eu detalhe alguma ou prefere ver pessoalmente na loja?`;
-  } else {
+  // ---- Diversificação por marca + 3 faixas ----
+  // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar).
+  if (args?.preferencia_marca) {
+    const economy = lenses[0];
+    const premium = lenses[lenses.length - 1];
+    const midIndex = Math.floor(lenses.length / 2);
+    const mid = lenses.length >= 3 ? lenses[midIndex] : null;
     quoteMsg += formatLens(economy, "💚 Econômica");
-    if (mid && mid.id !== economy.id && mid.id !== premium.id) {
-      quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
+    if (mid && mid.id !== economy.id && mid.id !== premium.id) quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
+    if (premium.id !== economy.id) quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+  } else {
+    // 1) Agrupa por marca (case-insensitive) e pega a mais barata de cada.
+    const cheapestByBrand = new Map<string, any>();
+    for (const l of lenses) {
+      const k = brandKey(l.brand);
+      if (!cheapestByBrand.has(k)) cheapestByBrand.set(k, l);
     }
-    if (premium.id !== economy.id) {
-      quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+    // 2) Particiona o catálogo em 3 faixas por percentil (econômica / intermediária / premium).
+    const sorted = [...lenses].sort((a, b) => Number(a.price_brl) - Number(b.price_brl));
+    const p1 = Number(sorted[Math.floor(sorted.length / 3)]?.price_brl ?? 0);
+    const p2 = Number(sorted[Math.floor((2 * sorted.length) / 3)]?.price_brl ?? 0);
+    const faixaDe = (preco: number): "eco" | "inter" | "prem" => preco <= p1 ? "eco" : preco <= p2 ? "inter" : "prem";
+
+    // 3) Para cada faixa, pega até 2 entradas com marcas distintas.
+    const pickPorFaixa = (faixa: "eco" | "inter" | "prem"): any[] => {
+      const pool = sorted.filter((l) => faixaDe(Number(l.price_brl)) === faixa);
+      const seen = new Set<string>();
+      const out: any[] = [];
+      for (const l of pool) {
+        const k = brandKey(l.brand);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(l);
+        if (out.length >= 2) break;
+      }
+      // Se a faixa só tem uma marca, completa com a 2ª lente da mesma marca (próximo upgrade).
+      if (out.length === 1 && pool.length > 1) {
+        const next = pool.find((l) => l.id !== out[0].id);
+        if (next) out.push(next);
+      }
+      return out;
+    };
+
+    const eco = pickPorFaixa("eco");
+    const inter = pickPorFaixa("inter");
+    const prem = pickPorFaixa("prem");
+
+    // 4) Garante que marcas presentes no catálogo mas que não entraram em nenhuma faixa
+    //    apareçam pelo menos uma vez (priorizando faixa equivalente à mais barata delas).
+    const usados = new Set<number>([...eco, ...inter, ...prem].map((l) => l.id));
+    for (const [_k, l] of cheapestByBrand.entries()) {
+      if (usados.has(l.id)) continue;
+      const f = faixaDe(Number(l.price_brl));
+      const target = f === "eco" ? eco : f === "inter" ? inter : prem;
+      if (target.length < 2) {
+        target.push(l);
+        usados.add(l.id);
+      }
     }
+
+    const renderFaixa = (label: string, itens: any[]) => {
+      if (itens.length === 0) return "";
+      const linhas = itens
+        .sort((a, b) => Number(a.price_brl) - Number(b.price_brl))
+        .map((l) => `  • *${brandDisplay(l.brand)} ${l.family}* ${l.index_name} ${l.treatment}${l.blue ? " + Azul" : ""}${l.photo ? " + Foto" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`)
+        .join("\n");
+      return `${label}\n${linhas}\n\n`;
+    };
+
+    quoteMsg += renderFaixa("🟢 *Econômica:*", eco);
+    quoteMsg += renderFaixa("🟡 *Intermediária:*", inter);
+    quoteMsg += renderFaixa("💎 *Premium:*", prem);
+    quoteMsg = quoteMsg.replace(/\n{3,}$/, "\n\n").trimEnd();
   }
   quoteMsg += "\n\n" + MSG_CTA_AGENDAMENTO;
 
