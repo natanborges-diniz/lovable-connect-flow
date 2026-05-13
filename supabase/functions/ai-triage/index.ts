@@ -2341,7 +2341,7 @@ serve(async (req) => {
     const agendamentosAtivos = agendRes.data || [];
     let contatoMeta = (contatoMetaRes.data?.metadata as Record<string, any>) || {};
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
-    const contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
+    let contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
     console.log(`[PERF] load_all_data=${Date.now() - _t_load}ms`);
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
     const precisaConfirmarNome = contatoMeta.precisa_confirmar_nome === true && !nomeConfirmado;
