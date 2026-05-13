@@ -143,6 +143,7 @@ serve(async (req) => {
       descricao: descricao || null,
       nome_cliente: nome_cliente || null,
       brand: bandeira,
+      brand_origem: brandOrigem,
       card_bin: cardBin || null,
       kind: kind || null,
       rede_datetime: redeDateTime,
