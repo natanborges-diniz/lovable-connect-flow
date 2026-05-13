@@ -2492,7 +2492,7 @@ serve(async (req) => {
               referencia_tipo: "atendimento",
               referencia_id: atendimento_id,
             });
-            contatoNomeAtualRuntime = _nomeExtraido;
+            contatoNomeAtual = _nomeExtraido;
             contatoMeta = { ...contatoMeta, nome_confirmado: true, precisa_confirmar_nome: false, tentativas_pedido_nome: 0 };
             console.log(`[FAST-PATH] nome_persistido_auto="${_nomeExtraido}" — seguindo para LLM`);
           } catch (e) {
