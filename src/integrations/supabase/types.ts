@@ -2713,6 +2713,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      infer_brand_from_bin: { Args: { bin_raw: string }; Returns: string }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_group_member: {
         Args: { _grupo_id: string; _user_id: string }

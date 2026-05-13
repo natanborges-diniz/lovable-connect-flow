@@ -6,6 +6,57 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-service-key",
 };
 
+// Resolve a bandeira do cartão a partir do BIN (6 primeiros dígitos).
+// Cobre os principais emissores BR; retorna null se não bater.
+function resolveBrandFromBin(binRaw: string | null | undefined): string | null {
+  if (!binRaw) return null;
+  const digits = String(binRaw).replace(/\D/g, "");
+  if (digits.length < 4) return null;
+  const bin6 = Number(digits.slice(0, 6));
+  const bin4 = Number(digits.slice(0, 4));
+  const bin2 = Number(digits.slice(0, 2));
+  const bin1 = Number(digits.slice(0, 1));
+
+  // Elo (faixas oficiais)
+  const eloRanges: Array<[number, number]> = [
+    [401178, 401179], [438935, 438935], [451416, 451416], [457393, 457393],
+    [457631, 457632], [504175, 504175], [506699, 506778], [509000, 509999],
+    [627780, 627780], [636297, 636297], [636368, 636368],
+    [650031, 650033], [650035, 650051], [650405, 650439], [650485, 650538],
+    [650541, 650598], [650700, 650718], [650720, 650727], [650901, 650920],
+    [651652, 651679], [655000, 655019], [655021, 655058],
+  ];
+  if (eloRanges.some(([a, b]) => bin6 >= a && bin6 <= b)) return "Elo";
+
+  // Hipercard
+  if (bin6 === 606282 || bin6 === 637095 || (bin6 >= 637568 && bin6 <= 637599)) return "Hipercard";
+
+  // Mastercard (51-55, 2221-2720)
+  if (bin2 >= 51 && bin2 <= 55) return "Mastercard";
+  if (bin4 >= 2221 && bin4 <= 2720) return "Mastercard";
+
+  // Visa
+  if (bin1 === 4) return "Visa";
+
+  // Amex
+  if (bin2 === 34 || bin2 === 37) return "Amex";
+
+  // Diners
+  if (bin2 === 36 || bin2 === 38) return "Diners";
+  if (bin4 >= 3000 && bin4 <= 3059) return "Diners";
+
+  // Discover
+  if (bin4 === 6011 || bin2 === 65) return "Discover";
+
+  // JCB
+  if (bin2 === 35) return "JCB";
+
+  // Aura (5067, 4576, 4011)
+  if (bin4 === 5067 || bin4 === 4576 || bin4 === 4011) return "Aura";
+
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -30,12 +81,15 @@ serve(async (req) => {
       brand, brandName, cardBin, kind, dateTime, date, time,
     } = payload;
 
-    const bandeira: string | null = brand || brandName || null;
+    const brandFromPayload: string | null = brand || brandName || null;
+    const brandDerived: string | null = brandFromPayload ? null : resolveBrandFromBin(cardBin);
+    const bandeira: string | null = brandFromPayload || brandDerived;
+    const brandOrigem: string | null = brandFromPayload ? "webhook" : (brandDerived ? "derivado_bin" : null);
     const redeDateTime: string | null = dateTime || null;
     const redeDate: string | null = date || (redeDateTime ? redeDateTime.slice(0, 10) : null);
     const redeTime: string | null = time || (redeDateTime ? redeDateTime.slice(11, 19) : null);
 
-    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref, brand: bandeira, kind, cardBin });
+    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref, brand: bandeira, brand_origem: brandOrigem, kind, cardBin });
     if (!payment_link_id) throw new Error("payment_link_id é obrigatório");
 
     const { data: solicitacoes } = await supabase
@@ -89,6 +143,7 @@ serve(async (req) => {
       descricao: descricao || null,
       nome_cliente: nome_cliente || null,
       brand: bandeira,
+      brand_origem: brandOrigem,
       card_bin: cardBin || null,
       kind: kind || null,
       rede_datetime: redeDateTime,

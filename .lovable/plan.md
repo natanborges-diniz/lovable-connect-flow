@@ -1,71 +1,75 @@
-## Problema
+## Diagnóstico
 
-Duas dores reais aparecendo nas conversas dos clientes:
+Consultei `pagamentos_link` (últimos 9 pagamentos confirmados):
 
-1. **Vazamento de instruções internas** colando no texto enviado (ex.: "Confirmar o nome do cliente para dar sequência no atendimento", "Aguardar resposta", "Para prosseguir…"). Já corrigi a saudação inicial com fast-path determinístico, mas o vazamento pode acontecer em **qualquer turno** — não só no 1º.
-2. **Tom robotizado** em vários momentos (frases longas, formais, cheias de "prezado", "informo que", "favor aguardar"), denunciando que é IA.
+- **0/9 transações** chegam com `brand` no payload do webhook do Infoco Optical Business.
+- Só a transação de **hoje** (Luciene — DINIZ PRIMITIVA II, NSU 253990233) começou a trazer `cardBin: 650507` — sinal de que o OB passou a enviar o BIN, mas ainda **não envia a bandeira**.
+- Resultado: a linha do comprovante "picote" sai como `**** 3723 — 4x` (sem "Visa"/"Mastercard"/"Elo" antes), e `metadata.brand` fica `null` em CRM, eventos e na tela `/financeiro/pagamentos`.
 
-Hoje só temos o `sanitizeLeakedInstructions` cobrindo ~12 padrões e o filtro `proximo_passo` só pergunta. Falta:
-- **Guardrail estrutural** (não só regex) que rejeite QUALQUER texto que pareça meta-instrução, em qualquer turno.
-- **Camada de "humanização"** que padronize o tom Gael (curto, natural, sem jargão corporativo) antes do envio.
-- **Auditoria visível** — hoje vazamento vira log, mas a operadora não vê. Precisa aparecer no painel de auditoria pra corrigir o prompt na origem.
+O `payment-webhook` confia 100% no campo `brand`/`brandName` vindo do OB. Como o OB não manda, todo registro fica sem bandeira — independente do template/cron/IA.
 
-## O que vou implementar
+## O que vou fazer
 
-### 1. Guardrail anti-vazamento universal (todos os turnos)
+Resolver a bandeira **localmente** dentro do `payment-webhook`, a partir do `cardBin` (com fallback para `last4` quando o BIN não vier). Sem depender de mudança no Infoco Optical Business.
 
-Em `sanitizeLeakedInstructions` (`ai-triage/index.ts` ~linha 6560), expandir para detectar:
+### 1. Adicionar resolver de bandeira por BIN em `supabase/functions/payment-webhook/index.ts`
 
-- **Verbos de meta-ação no infinitivo no fim da frase**: "Confirmar X", "Aguardar Y", "Verificar Z", "Validar…", "Identificar…", "Solicitar…", "Encaminhar…", "Registrar…", "Prosseguir…", "Seguir com…", "Dar sequência…" — quando aparecem como frase isolada (não dentro de uma fala natural).
-- **Marcadores de bloco de prompt vazados**: linhas começando com `[`, `##`, `**REGRA**`, `**INSTRUÇÃO**`, `IMPORTANTE:`, `OBS:` no meio do texto enviado.
-- **Nomes de tools/campos internos**: `agendar_visita`, `interpretar_receita`, `consultar_lentes`, `proximo_passo`, `intencao`, `coluna_pipeline`, `setor_destino`.
-- **Frases "de robô"**: "como assistente virtual", "sou uma IA", "modelo de linguagem", "fui treinado", "minha base de dados".
+Função pequena `resolveBrandFromBin(bin: string)` com tabela curada para o mercado brasileiro:
 
-Quando detectar vazamento crítico (tool name, campo interno, marcador de bloco), **bloqueia o envio** e dispara fallback humanizado contextual em vez de só remover trecho — hoje remove e pode mandar mensagem mutilada.
+- **Visa** — `4xxxxx`
+- **Mastercard** — `51-55`, `2221-2720`
+- **Elo** — faixas oficiais (`401178-401179`, `438935`, `451416`, `457393`, `457631-457632`, `504175`, `506699-506778`, `509000-509999`, `627780`, `636297`, `636368`, `650031-650033`, `650035-650051`, `650405-650439`, `650485-650538`, `650541-650598`, `650700-650718`, `650720-650727`, `650901-650920`, `651652-651679`, `655000-655019`, `655021-655058`) — cobre o BIN `650507` da transação de hoje.
+- **Hipercard** — `606282`, `637095`, `637568-637599`
+- **Amex** — `34`, `37`
+- **Diners** — `300-305`, `36`, `38`
+- **Discover** — `6011`, `65`
+- **JCB** — `35`
+- **Aura** — `50`
 
-### 2. Validador estrutural pré-envio (defesa em profundidade)
+Ordem: tabela de prefixos longos primeiro (Elo/Hipercard), depois prefixos curtos (Visa/Master/Amex). Retorna `null` se nada bater.
 
-Antes de `sendWhatsApp`, novo passo `validarTomHumano(texto)`:
-- Rejeita se `texto.split(' ').length < 3` (muito curto pós-sanitização).
-- Rejeita se >40% das palavras forem caixa-alta ou houver `**`/`__`/`###` (markdown vazado).
-- Rejeita se terminar com infinitivo solto ("…confirmar.", "…verificar.", "…aguardar.").
-- Em caso de rejeição: loga `[GUARDRAIL-TOM]`, registra em `eventos_crm` (`tipo='resposta_bloqueada_tom'` com payload do texto original) e envia fallback genérico humano ("Só um instante, já te respondo 😊" + agenda re-disparo via watchdog).
+### 2. Aplicar a bandeira derivada quando o OB não enviar
 
-### 3. Reforço de tom Gael no prompt
-
-Em `buildSystemPrompt`/`configuracoes_ia.regras_globais` (carregado no `ai-triage`), adicionar bloco fixo no topo:
-
-```
-TOM OBRIGATÓRIO (não-negociável):
-- Fale como humano: curto, direto, caloroso. Máx 2 frases por mensagem (salvo cotação).
-- PROIBIDO: "prezado", "informo que", "favor", "aguardar", "verificar", "prosseguir", "dar sequência", "conforme solicitado", "estou à disposição", "atenciosamente".
-- PROIBIDO descrever o que VOCÊ vai fazer ("Vou verificar…", "Estou analisando…"). Faça e responda o resultado.
-- PROIBIDO mencionar "IA", "assistente virtual", "sistema", "base de dados".
-- proximo_passo é METADADO INTERNO. NUNCA escreva nele texto que possa ser lido pelo cliente como instrução.
+```text
+const bandeiraResolvida = brand || brandName || resolveBrandFromBin(cardBin);
 ```
 
-### 4. Auditoria visível
+E usar `bandeiraResolvida` em:
+- `updatedMeta.brand`
+- `pagamentos_link.metadata.brand` (espelho)
+- `eventos_crm.metadata.brand`
+- `cartaoLinha` do comprovante "picote" enviado via Atrium
 
-Quando guardrail dispara (vazamento ou tom), além de log:
-- Insere registro em `ia_feedbacks` com `tipo='vazamento_guardrail'`, `resposta_original`, `resposta_corrigida`, `motivo`.
-- Aparece no `AuditoriaIaCard` em Configurações para a operadora revisar e ajustar prompt/exemplo na origem.
+Carimbar também `metadata.brand_origem` = `"webhook"` ou `"derivado_bin"` para auditoria.
 
-### 5. Memória
+### 3. Backfill leve dos 9 pagamentos sem bandeira
 
-Atualizar `mem://ia/saudacao-confirma-nome` e criar `mem://ia/guardrail-tom-humano` documentando os 4 níveis de defesa: prompt → fast-path → sanitizer → validador estrutural → auditoria.
+Migration única que percorre `pagamentos_link` onde `metadata->>'brand' IS NULL` e `metadata->>'card_bin' IS NOT NULL`, aplica a mesma tabela de BIN via função SQL `infer_brand_from_bin(text)` e atualiza `metadata`. As 8 transações antigas (sem BIN) ficam como estão — não temos como inferir sem dado.
 
-## Arquivos afetados
+### 4. Atualizar memória `mem://financeiro/rastreabilidade-pagamentos-link`
 
-- `supabase/functions/ai-triage/index.ts` — expandir `sanitizeLeakedInstructions`, novo `validarTomHumano`, hooks de auditoria.
-- `configuracoes_ia.regras_globais` (linha de DB, via migration) — bloco TOM OBRIGATÓRIO no topo.
-- `src/components/configuracoes/AuditoriaIaCard.tsx` — novo filtro/badge para `vazamento_guardrail`.
-- Memórias novas/atualizadas.
+Anotar que a bandeira é derivada do BIN dentro do webhook quando o OB não envia, e que o comprovante "picote" usa esse valor derivado.
 
-Sem mudança de UI no CRM. Sem mudança de schema relevante (só seed em `configuracoes_ia` e novo `tipo` em `ia_feedbacks`, que já é texto livre).
+## Detalhes técnicos
 
-## Validação
+```text
+supabase/functions/payment-webhook/index.ts
+├── + resolveBrandFromBin(bin)            // tabela de prefixos BR
+├── ~ const bandeira = brand || brandName || resolveBrandFromBin(cardBin)
+├── ~ updatedMeta.brand_origem            // "webhook" | "derivado_bin" | null
+└── ~ cartaoLinha = [bandeira, kindLabel] // já existe, passa a ter valor
 
-- Reproduzir o caso Mary/Gi → mensagem sai limpa.
-- Forçar modelo a retornar `proximo_passo="Aguardar resposta"` num turno qualquer (não só 1º) → bloqueado e auditado.
-- Forçar resposta com "Prezado cliente, informo que estarei verificando" → bloqueado por tom.
-- Conferir `AuditoriaIaCard` mostrando os bloqueios para a operadora corrigir.
+supabase/migrations/<ts>_backfill_brand_pagamentos_link.sql
+└── função SQL infer_brand_from_bin(text) + UPDATE pontual
+
+mem://financeiro/rastreabilidade-pagamentos-link.md
+└── nota sobre derivação por BIN
+```
+
+Sem mexer em frontend, IA, prompts, ou no OB. Risco baixo: a função só preenche um campo hoje sempre vazio.
+
+## Validação após deploy
+
+1. Reenvio o último payload confirmado via `supabase--curl_edge_functions` para o `payment-webhook` (idempotente — mesmo `payment_link_id`) e confirmo que `pagamentos_link.metadata.brand = 'Elo'` e `brand_origem = 'derivado_bin'`.
+2. Confiro o comprovante gerado em `solicitacao_comentarios` da Luciene — deve aparecer `Elo Crédito **** 3723 — 4x`.
+3. Conto quantos registros foram corrigidos pelo backfill (esperado: 1 — só o da Luciene tem BIN).
