@@ -958,6 +958,70 @@ function detectPrescriptionCorrection(text: string): {
   return { od, oe, has_addition, rx_type, raw: text.slice(0, 400) };
 }
 
+/**
+ * Classificador de intenção LLM-based (chamada leve ao gateway).
+ * Recebe a última mensagem do cliente + últimas 3 do histórico e devolve
+ * { intent, confidence, subtype }. Categorias fechadas. Em caso de erro
+ * ou confidence < 0.7, o caller deve usar deterministicIntentFallback().
+ */
+async function classifyIntent(
+  lastMessage: string,
+  recentHistory: string[],
+): Promise<{ intent: string; confidence: number; subtype: string | null }> {
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) {
+    return { intent: "outro", confidence: 0, subtype: null };
+  }
+
+  const systemPrompt =
+    "Classifique a intenção desta mensagem em uma das categorias abaixo e retorne SOMENTE um JSON válido com os campos intent, confidence (0 a 1) e subtype. Categorias: orcamento, orcamento_lc, agendamento, status_pedido, reclamacao, duvida_produto, localizacao, pos_venda, saudacao, outro.";
+
+  const histStr = (recentHistory || [])
+    .slice(-3)
+    .map((m, i) => `(${i + 1}) ${String(m || "").slice(0, 300)}`)
+    .join("\n");
+
+  const userContent =
+    `HISTÓRICO RECENTE:\n${histStr || "(vazio)"}\n\nÚLTIMA MENSAGEM DO CLIENTE:\n${String(lastMessage || "").slice(0, 500)}`;
+
+  try {
+    const t0 = Date.now();
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-5",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+        response_format: { type: "json_object" },
+        max_completion_tokens: 120,
+      }),
+    });
+    console.log(`[CLASSIFY-INTENT] gateway=${Date.now() - t0}ms status=${resp.status}`);
+
+    if (!resp.ok) {
+      return { intent: "outro", confidence: 0, subtype: null };
+    }
+    const data = await resp.json();
+    const raw = data?.choices?.[0]?.message?.content || "{}";
+    const parsed = JSON.parse(raw);
+    const intent = typeof parsed.intent === "string" ? parsed.intent : "outro";
+    const confidence = typeof parsed.confidence === "number"
+      ? Math.max(0, Math.min(1, parsed.confidence))
+      : 0;
+    const subtype = parsed.subtype != null ? String(parsed.subtype) : null;
+    return { intent, confidence, subtype };
+  } catch (err) {
+    console.warn("[CLASSIFY-INTENT] erro:", err instanceof Error ? err.message : err);
+    return { intent: "outro", confidence: 0, subtype: null };
+  }
+}
+
 function deterministicIntentFallback(msg: string, inboundCount: number, isHibrido: boolean, recentOutbound?: string[], isImageContext?: boolean, hasReceitas?: boolean, isLCContext?: boolean): {
   resposta: string;
   intencao: string;
@@ -3646,8 +3710,37 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     }
 
 
+    // ── Classificador LLM de intenção (leve, antes do array de messages) ──
+    const _t_intent = Date.now();
+    const recentHistoryForIntent = (contextWindow || [])
+      .slice(-3)
+      .map((m: any) => String(m?.conteudo || ""));
+    let detectedIntent = await classifyIntent(currentMsg, recentHistoryForIntent);
+    if (!detectedIntent || detectedIntent.confidence < 0.7) {
+      const fb = deterministicIntentFallback(
+        currentMsg,
+        inboundCount,
+        isHibrido,
+        recentOutbound,
+        isImageContext,
+        receitas.length > 0,
+        isLCContextGlobal,
+      );
+      detectedIntent = {
+        intent: fb.intencao || "outro",
+        confidence: detectedIntent?.confidence ?? 0,
+        subtype: null,
+      };
+      console.log(`[CLASSIFY-INTENT] fallback=${detectedIntent.intent} (LLM conf=${(detectedIntent.confidence ?? 0).toFixed(2)}) total=${Date.now() - _t_intent}ms`);
+    } else {
+      console.log(`[CLASSIFY-INTENT] llm=${detectedIntent.intent} conf=${detectedIntent.confidence.toFixed(2)} sub=${detectedIntent.subtype ?? "—"} total=${Date.now() - _t_intent}ms`);
+    }
+
+    const intentBlock = `INTENÇÃO DETECTADA: ${detectedIntent.intent} (confiança: ${detectedIntent.confidence.toFixed(2)}). Trate esta conversa exclusivamente sob essa ótica até nova mensagem do cliente.`;
+    const systemPromptWithIntent = `${intentBlock}\n\n${systemPrompt}`;
+
     const messages: any[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPromptWithIntent },
       {
         role: "system",
         content:
