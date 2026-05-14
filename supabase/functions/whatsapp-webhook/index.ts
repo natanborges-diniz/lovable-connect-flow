@@ -137,8 +137,8 @@ serve(async (req) => {
       } else {
         contato = newContato;
       }
-    } else if (realName && contato.nome === phone) {
-      // Upgrade placeholder phone-name to a better real person/store name when available.
+    } else if (realName && (contato.nome === phone || /^Cliente\s*#?\s*\d+/i.test(String(contato.nome || "")))) {
+      // Upgrade placeholder phone/anônimo-name to a better real person/store name when available.
       const meta = (contato.metadata as Record<string, unknown>) || {};
       await supabase.from("contatos").update({
         nome: realName,
