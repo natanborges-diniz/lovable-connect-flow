@@ -109,22 +109,93 @@ let MSG_PEDIR_RECEITA_TEXTO = _msgFixaDefaults.pedir_receita_texto;
 // CONFIRMAÇÃO PÓS-OCR + CTA AGENDAMENTO + ESCOLHA CIDADE → LOJA (Mai/2026)
 // ═══════════════════════════════════════════
 const MSG_CTA_AGENDAMENTO = "Posso agendar uma visita pra você ver pessoalmente e fechar o pedido? 😊";
-const MSG_LISTA_CIDADES = "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n\n🏙️ Osasco\n🏙️ Carapicuíba\n🏙️ Itapevi\n🏙️ Barueri";
 
-// Mapeamento cidade → lojas (nomes exatos em telefones_lojas.nome_loja).
-const CIDADE_TO_LOJAS: Record<string, string[]> = {
+// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
+const _FALLBACK_MSG_LISTA_CIDADES = "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n\n🏙️ Osasco\n🏙️ Carapicuíba\n🏙️ Itapevi\n🏙️ Barueri";
+// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
+const _FALLBACK_CIDADE_TO_LOJAS: Record<string, string[]> = {
   osasco: ["DINIZ ANTONIO AGU","DINIZ PRIMITIVA I","DINIZ PRIMITIVA II","DINIZ STO ANTONIO","DINIZ SUPER SHOPPING","DINIZ UNIÃO"],
   carapicuiba: ["DINIZ CARAPICUIBA"],
   itapevi: ["DINIZ ITAPEVI"],
   barueri: ["DINIZ BARUERI"],
 };
-
-const CIDADE_LABEL: Record<string, string> = {
+// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
+const _FALLBACK_CIDADE_LABEL: Record<string, string> = {
   osasco: "Osasco",
   carapicuiba: "Carapicuíba",
   itapevi: "Itapevi",
   barueri: "Barueri",
 };
+
+// ── Cache de lojas_cidades (TTL 5 min) ─────────────────────────────
+type CidadesSnapshot = {
+  cidadeToLojas: Record<string, string[]>;
+  cidadeLabel: Record<string, string>;
+  cidadesOrdenadas: string[]; // chaves normalizadas (osasco, carapicuiba, ...)
+};
+let cidadesCache: { data: CidadesSnapshot, loadedAt: number } | null = null;
+const CIDADES_TTL_MS = 5 * 60 * 1000;
+
+function _cidadeKeyToLabel(key: string): string {
+  return _FALLBACK_CIDADE_LABEL[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+async function loadCidadesLojas(): Promise<CidadesSnapshot> {
+  const now = Date.now();
+  if (cidadesCache && (now - cidadesCache.loadedAt) < CIDADES_TTL_MS) {
+    return cidadesCache.data;
+  }
+  try {
+    const url = Deno.env.get("SUPABASE_URL") || "";
+    const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!url || !key) throw new Error("missing supabase env");
+    const client = createClient(url, key);
+    const { data, error } = await client
+      .from("lojas_cidades")
+      .select("cidade, loja_nome, regiao, ativo")
+      .eq("ativo", true);
+    if (error) throw error;
+    if (!Array.isArray(data) || data.length === 0) throw new Error("empty lojas_cidades");
+
+    const cidadeToLojas: Record<string, string[]> = {};
+    const cidadeLabel: Record<string, string> = {};
+    for (const r of data) {
+      const cidade = String((r as any).cidade || "").toLowerCase();
+      const nome = String((r as any).loja_nome || "");
+      if (!cidade || !nome) continue;
+      if (!cidadeToLojas[cidade]) cidadeToLojas[cidade] = [];
+      cidadeToLojas[cidade].push(nome);
+      if (!cidadeLabel[cidade]) cidadeLabel[cidade] = _cidadeKeyToLabel(cidade);
+    }
+    const cidadesOrdenadas = Object.keys(cidadeToLojas).sort();
+    const snapshot: CidadesSnapshot = { cidadeToLojas, cidadeLabel, cidadesOrdenadas };
+    cidadesCache = { data: snapshot, loadedAt: now };
+    return snapshot;
+  } catch (e) {
+    console.warn("[loadCidadesLojas] usando FALLBACK:", (e as Error)?.message);
+    const snapshot: CidadesSnapshot = {
+      cidadeToLojas: _FALLBACK_CIDADE_TO_LOJAS,
+      cidadeLabel: _FALLBACK_CIDADE_LABEL,
+      cidadesOrdenadas: ["osasco", "carapicuiba", "itapevi", "barueri"],
+    };
+    // não persiste cache no fallback — tenta de novo na próxima chamada
+    return snapshot;
+  }
+}
+
+async function getMsgListaCidades(): Promise<string> {
+  try {
+    const snap = await loadCidadesLojas();
+    if (!snap.cidadesOrdenadas.length) return _FALLBACK_MSG_LISTA_CIDADES;
+    let out = "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n";
+    for (const k of snap.cidadesOrdenadas) {
+      out += `\n🏙️ ${snap.cidadeLabel[k] || _cidadeKeyToLabel(k)}`;
+    }
+    return out;
+  } catch {
+    return _FALLBACK_MSG_LISTA_CIDADES;
+  }
+}
 
 function _normTxt(s: string): string {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
