@@ -88,9 +88,30 @@ serve(async (req) => {
     // Detect if pushName looks like a real person name (vs a phone number, brand, etc.)
     const realName = looksLikeRealName(senderName, phone) ? senderName : null;
     // Para corporativo, nome inicial = nome_loja cadastrado (nunca senderName).
+    // Para cliente sem nome real, gera "Cliente #NNNN" sequencial (nunca o telefone como nome exibido).
+    let anonimoNomeInicial: string | null = null;
+    if (!isLojaEarly && !realName) {
+      try {
+        const { data: seqRow } = await supabase.rpc("nextval" as any, { sequence_name: "contatos_anonimo_seq" } as any);
+        // Fallback se rpc não estiver disponível: usa raw query via from
+        let seqVal: number | null = typeof seqRow === "number" ? seqRow : null;
+        if (seqVal === null) {
+          const { data: seqQuery } = await supabase
+            .from("contatos_anonimo_seq_view" as any)
+            .select("nextval")
+            .maybeSingle();
+          seqVal = (seqQuery as any)?.nextval ?? null;
+        }
+        if (seqVal !== null) {
+          anonimoNomeInicial = `Cliente #${String(seqVal).padStart(4, "0")}`;
+        }
+      } catch (_e) {
+        // Se sequência indisponível, segue para fallback (telefone) abaixo
+      }
+    }
     const initialNome = isLojaEarly
       ? (lojaMatch.nome_colaborador || lojaMatch.nome_loja)
-      : (realName || phone);
+      : (realName || anonimoNomeInicial || phone);
     // Telefone canônico salvo: se é loja, usa o cadastrado em telefones_lojas (mantém formato consistente).
     const canonicalPhone = isLojaEarly ? lojaMatch.telefone : phone;
 
