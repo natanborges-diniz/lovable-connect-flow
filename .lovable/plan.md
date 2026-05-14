@@ -1,63 +1,54 @@
-# Mover card de cliente para a coluna do ciclo de agendamento na Loja
+## Contexto
 
-## Causa raiz (verificada no banco)
+Cliente **Luzinete Oliveira** (`c41f3607-d92e-4a81-8b3f-f0e278eaea34`, tel `5511953720093`) está em atendimento `86b71001…` modo `humano/aguardando`. Operador transcreveu a receita da foto manualmente. Receita NÃO existe ainda em `contatos.metadata.receitas`.
 
-Caso da Cláudia (`contato 594b3664…`, agendamento `413a681a…`):
-- Agendamento existe na **DINIZ UNIÃO**, status já chegou em `compareceu`, `cliente_confirmou_at` preenchido.
-- Contato continua com `pipeline_coluna_id = cad20aaf…` ("**Informações Gerais**", coluna órfã sem setor).
-- `pipeline_card_eventos` para esse contato: **0 linhas** — nunca foi movido.
-- Setor destino do contato já é "Loja" (`277307f3…`), e o setor Loja tem o pipeline correto:
-  `Agendado → Confirmado → Atendido → No-Show → Recuperação → Reagendado → Abandonado → Cancelado`.
+Receita interpretada como **bifocal/multifocal** (tem grau de longe e perto distintos). Os "eixos" enviados (29/30/27/28) parecem DNP (distância naso-pupilar), não eixo de astigmatismo — não há cilindro. Vou salvar como **multifocal** com `add` calculada (perto − longe = +2,25) e registrar os "eixos" como `dnp` em observação para o consultor revisar.
 
-Por que não moveu:
-1. **`agendar-cliente`** insere em `agendamentos` e chama `notificar-loja-agendamento`, mas **não toca `contatos.pipeline_coluna_id`**.
-2. O trigger `trg_agendamento_status_change` dispara `pipeline-automations` **só em UPDATE** (não em INSERT). E mesmo quando dispara, **não existe nenhuma automação `mover_coluna`** cadastrada para nenhum status (`pipeline_automacoes` para entidade `agendamento` só tem `enviar_mensagem`, `enviar_template`, `criar_tarefa`).
+## Ações (3 passos)
 
-Resultado: o card nunca entra no kanban da Loja em nenhuma fase.
+### 1. Persistir receita em `contatos.metadata.receitas`
 
-## Plano
+`jsonb_set` no contato `c41f3607…` adicionando entry:
+```
+{
+  rx_type: 'progressive',
+  eyes: {
+    od: { sphere: 0.25, cylinder: null, axis: null, add: 2.25 },
+    oe: { sphere: 0.25, cylinder: null, axis: null, add: 2.25 }
+  },
+  confidence: 1.0,
+  label: 'Receita transcrita pelo operador',
+  source: 'humano_transcricao',
+  data_leitura: now(),
+  confirmed_by_client_at: null,
+  observacao: 'Transcrita a partir da foto. Valores DNP recebidos: OD longe 29 / perto 27, OE longe 30 / perto 28 (não confundir com eixo de astigmatismo).'
+}
+```
 
-### 1. Cadastrar automações `mover_coluna` para os status do agendamento
+### 2. Devolver atendimento à IA
 
-Inserir em `pipeline_automacoes` (entidade=`agendamento`, ativo=true), uma por status, apontando para as colunas do setor Loja:
+`UPDATE atendimentos SET modo='ia', status='aguardando', updated_at=now() WHERE id='86b71001…'` + INSERT em `eventos_crm` (`tipo='humano_devolveu_para_ia'`).
 
-| status_alvo     | pipeline_coluna_id (destino)            |
-|-----------------|-----------------------------------------|
-| `agendado`      | `2865b9f1…` (Agendado)                  |
-| `confirmado`    | `d4f84dce…` (Confirmado)                |
-| `compareceu`    | `f3fe0424…` (Atendido)                  |
-| `no_show`       | `a2dcd5c5…` (No-Show)                   |
-| `recuperacao`   | `e58657e8…` (Recuperação)               |
-| `reagendado`    | `3eb2154b…` (Reagendado)                |
-| `cancelado`     | `36f09b5d…` (Cancelado)                 |
+### 3. Enviar WhatsApp pedindo confirmação
 
-`config = { "pipeline_coluna_id": "<id>" }` e `tipo_acao = 'mover_coluna'`.
+Chamar `send-whatsapp` (atendimento_id, telefone, remetente_nome='Assistente IA') com mensagem:
 
-> O loader `pipeline-automations` já lê automações por `status_alvo` do agendamento e move `contatos.pipeline_coluna_id` (mesma mecânica que envia template/mensagem). Não precisa novo código de execução — só registro de dados.
+> Oi Luzinete! Consegui transcrever a receita aqui pelos dados que você me passou 😊
+>
+> *Para longe:*
+> • OD: +0,25 esf
+> • OE: +0,25 esf
+>
+> *Para perto (adição +2,25):*
+> • OD: +2,50 esf
+> • OE: +2,50 esf
+>
+> Tipo: *multifocal/progressiva*
+>
+> Os valores estão certinhos? Confirma pra eu já te mostrar as opções de lente compatíveis com sua armação 🙌
 
-### 2. Disparar automações também no INSERT (primeiro `agendado`)
+Após confirmação da cliente, IA segue fluxo padrão (`consultar_lentes` multifocal só-lente).
 
-Hoje o trigger só roda em `UPDATE`. Duas opções, escolho **(a)** por ser mínima:
+## Observação
 
-(a) **Criar trigger AFTER INSERT** em `agendamentos` que chame `pipeline-automations` com `status_novo=NEW.status`, `status_anterior=NULL` — reaproveitando exatamente a mesma função `on_agendamento_status_change` adaptada (ou nova `on_agendamento_inserted`). Idempotente porque a coluna alvo é fixa por status.
-
-(b) Editar `agendar-cliente` pra chamar `pipeline-automations` direto após insert. Mais código, sem ganho.
-
-### 3. One-shot retroativo para Cláudia
-
-Atualizar `contatos.pipeline_coluna_id` do contato `594b3664…` para `f3fe0424…` (Atendido — status `compareceu`) e registrar evento em `pipeline_card_eventos` (`tipo='movido_retroativo'`, descrição "Backfill ciclo agendamento Loja").
-
-## Não muda
-
-- Texto/comportamento das automações de mensagem/template já existentes.
-- Regras de skip por `cliente_confirmou_at` e ordem regressiva.
-- Outros setores ou pipelines.
-- Frontend (kanban Loja já lista por `pipeline_coluna_id` do setor).
-
-## Riscos / mitigação
-
-- **Cards antigos sem agendamento ativo**: a migração só altera o card via gatilho — agendamentos novos seguem o fluxo, agendamentos antigos não são reprocessados (exceto Cláudia, manual).
-- **Múltiplos agendamentos por contato**: ao mudar status, o último update vence — coerente com o que CRM já faz.
-- **Lojas que ainda não usam o pipeline Loja**: as colunas são compartilhadas no setor Loja; basta o usuário filtrar por `loja_nome` (já é como o front opera hoje).
-
-Confirma que aplico (1) migration de automações, (2) trigger AFTER INSERT, (3) backfill da Cláudia?
+Não há código a alterar — operação puramente de dados + chamada de Edge Function existente.
