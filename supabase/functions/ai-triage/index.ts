@@ -2811,7 +2811,33 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           .map((m: any) => String(m.conteudo || ""))
           .join(" | ")
           .toLowerCase();
-        const _isLCCtx = /\b(lente[s]?\s+de\s+contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?)\b/i.test(_recentInboundForLC);
+        const _isLCCtx = /\b(lente[s]?\s+de\s+contato|\blc\b|pronta\s+entrega|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?)\b/i.test(_recentInboundForLC);
+
+        if (_isLCCtx && lastRx) {
+          try {
+            const lcResult = await runConsultarLentesContato(supabase, contatoId, {});
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lcResult.resposta);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "cotacao_lc_pos_confirmacao_forcada",
+              descricao: "Cotação LC disparada deterministicamente após cliente confirmar a receita",
+              metadata: { rx_label: rxLabel, source: "post_rx_confirmation_gate", usou_catalogo: lcResult.usou_catalogo, needs_toric: lcResult.needs_toric_sob_encomenda },
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+            });
+            console.log("[RX-CONFIRMACAO-LC] Cotação LC determinística enviada após confirmação");
+            return jsonResponse({
+              status: "ok",
+              tools_used: ["consultar_lentes_contato_pos_confirmacao"],
+              intencao: "orcamento_lentes_contato",
+              precisa_humano: false,
+              pipeline_coluna_sugerida: "Orçamento",
+              modo: atendimento.modo,
+            });
+          } catch (e) {
+            console.warn("[RX-CONFIRMACAO-LC] runConsultarLentesContato pós-confirmação falhou — caindo para LLM:", e);
+          }
+        }
 
         if (!_isLCCtx && lastRx) {
           try {
