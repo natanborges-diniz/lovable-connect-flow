@@ -109,22 +109,93 @@ let MSG_PEDIR_RECEITA_TEXTO = _msgFixaDefaults.pedir_receita_texto;
 // CONFIRMAÇÃO PÓS-OCR + CTA AGENDAMENTO + ESCOLHA CIDADE → LOJA (Mai/2026)
 // ═══════════════════════════════════════════
 const MSG_CTA_AGENDAMENTO = "Posso agendar uma visita pra você ver pessoalmente e fechar o pedido? 😊";
-const MSG_LISTA_CIDADES = "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n\n🏙️ Osasco\n🏙️ Carapicuíba\n🏙️ Itapevi\n🏙️ Barueri";
 
-// Mapeamento cidade → lojas (nomes exatos em telefones_lojas.nome_loja).
-const CIDADE_TO_LOJAS: Record<string, string[]> = {
+// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
+const _FALLBACK_MSG_LISTA_CIDADES = "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n\n🏙️ Osasco\n🏙️ Carapicuíba\n🏙️ Itapevi\n🏙️ Barueri";
+// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
+const _FALLBACK_CIDADE_TO_LOJAS: Record<string, string[]> = {
   osasco: ["DINIZ ANTONIO AGU","DINIZ PRIMITIVA I","DINIZ PRIMITIVA II","DINIZ STO ANTONIO","DINIZ SUPER SHOPPING","DINIZ UNIÃO"],
   carapicuiba: ["DINIZ CARAPICUIBA"],
   itapevi: ["DINIZ ITAPEVI"],
   barueri: ["DINIZ BARUERI"],
 };
-
-const CIDADE_LABEL: Record<string, string> = {
+// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
+const _FALLBACK_CIDADE_LABEL: Record<string, string> = {
   osasco: "Osasco",
   carapicuiba: "Carapicuíba",
   itapevi: "Itapevi",
   barueri: "Barueri",
 };
+
+// ── Cache de lojas_cidades (TTL 5 min) ─────────────────────────────
+type CidadesSnapshot = {
+  cidadeToLojas: Record<string, string[]>;
+  cidadeLabel: Record<string, string>;
+  cidadesOrdenadas: string[]; // chaves normalizadas (osasco, carapicuiba, ...)
+};
+let cidadesCache: { data: CidadesSnapshot, loadedAt: number } | null = null;
+const CIDADES_TTL_MS = 5 * 60 * 1000;
+
+function _cidadeKeyToLabel(key: string): string {
+  return _FALLBACK_CIDADE_LABEL[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+async function loadCidadesLojas(): Promise<CidadesSnapshot> {
+  const now = Date.now();
+  if (cidadesCache && (now - cidadesCache.loadedAt) < CIDADES_TTL_MS) {
+    return cidadesCache.data;
+  }
+  try {
+    const url = Deno.env.get("SUPABASE_URL") || "";
+    const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!url || !key) throw new Error("missing supabase env");
+    const client = createClient(url, key);
+    const { data, error } = await client
+      .from("lojas_cidades")
+      .select("cidade, loja_nome, regiao, ativo")
+      .eq("ativo", true);
+    if (error) throw error;
+    if (!Array.isArray(data) || data.length === 0) throw new Error("empty lojas_cidades");
+
+    const cidadeToLojas: Record<string, string[]> = {};
+    const cidadeLabel: Record<string, string> = {};
+    for (const r of data) {
+      const cidade = String((r as any).cidade || "").toLowerCase();
+      const nome = String((r as any).loja_nome || "");
+      if (!cidade || !nome) continue;
+      if (!cidadeToLojas[cidade]) cidadeToLojas[cidade] = [];
+      cidadeToLojas[cidade].push(nome);
+      if (!cidadeLabel[cidade]) cidadeLabel[cidade] = _cidadeKeyToLabel(cidade);
+    }
+    const cidadesOrdenadas = Object.keys(cidadeToLojas).sort();
+    const snapshot: CidadesSnapshot = { cidadeToLojas, cidadeLabel, cidadesOrdenadas };
+    cidadesCache = { data: snapshot, loadedAt: now };
+    return snapshot;
+  } catch (e) {
+    console.warn("[loadCidadesLojas] usando FALLBACK:", (e as Error)?.message);
+    const snapshot: CidadesSnapshot = {
+      cidadeToLojas: _FALLBACK_CIDADE_TO_LOJAS,
+      cidadeLabel: _FALLBACK_CIDADE_LABEL,
+      cidadesOrdenadas: ["osasco", "carapicuiba", "itapevi", "barueri"],
+    };
+    // não persiste cache no fallback — tenta de novo na próxima chamada
+    return snapshot;
+  }
+}
+
+async function getMsgListaCidades(): Promise<string> {
+  try {
+    const snap = await loadCidadesLojas();
+    if (!snap.cidadesOrdenadas.length) return _FALLBACK_MSG_LISTA_CIDADES;
+    let out = "Boa! Atendemos nessas cidades, qual fica melhor pra você visitar?\n";
+    for (const k of snap.cidadesOrdenadas) {
+      out += `\n🏙️ ${snap.cidadeLabel[k] || _cidadeKeyToLabel(k)}`;
+    }
+    return out;
+  } catch {
+    return _FALLBACK_MSG_LISTA_CIDADES;
+  }
+}
 
 function _normTxt(s: string): string {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -159,16 +230,18 @@ function detectCidadeEscolhida(text: string): string | null {
   return null;
 }
 
-function formatLojasPorCidade(cidade: string, lojas: any[]): string {
-  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+async function formatLojasPorCidade(cidade: string, lojas: any[]): Promise<string> {
+  const snap = await loadCidadesLojas();
+  const nomes = snap.cidadeToLojas[cidade] || [];
+  const label = snap.cidadeLabel[cidade] || _cidadeKeyToLabel(cidade);
   const filtradas = (lojas || []).filter((l: any) =>
     nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
   );
   if (filtradas.length === 0) {
-    return `Boa! Pra ${CIDADE_LABEL[cidade] || cidade}, posso te indicar a loja mais próxima — me passa o seu bairro? 😊`;
+    return `Boa! Pra ${label}, posso te indicar a loja mais próxima — me passa o seu bairro? 😊`;
   }
   const numEmojis = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"];
-  let out = `Aqui são as lojas em *${CIDADE_LABEL[cidade] || cidade}* — qual fica melhor pra você? 😊\n`;
+  let out = `Aqui são as lojas em *${label}* — qual fica melhor pra você? 😊\n`;
   filtradas.forEach((l: any, i: number) => {
     const end = l.endereco ? ` — ${l.endereco}` : "";
     out += `\n${numEmojis[i] || `${i+1}.`} *${l.nome_loja}*${end}`;
@@ -176,8 +249,9 @@ function formatLojasPorCidade(cidade: string, lojas: any[]): string {
   return out;
 }
 
-function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): any | null {
-  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+async function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): Promise<any | null> {
+  const snap = await loadCidadesLojas();
+  const nomes = snap.cidadeToLojas[cidade] || [];
   const filtradas = (lojas || []).filter((l: any) =>
     nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
   );
@@ -1726,17 +1800,21 @@ function buildSystemPromptFromCompiled(opts: {
 }): string {
   const s: string[] = [];
 
+  // ── HIERARQUIA DE INSTRUÇÕES (sempre primeiro bloco) ──
+  s.push("HIERARQUIA DE INSTRUÇÕES — Em caso de conflito entre os blocos abaixo, siga rigorosamente esta ordem de prioridade: (1) RECEITA PENDENTE — se presente, chame interpretar_receita imediatamente e ignore tudo mais. (2) PÓS-RECEITA OBRIGATÓRIO — se presente, chame consultar_lentes ou consultar_lentes_contato antes de qualquer resposta. (3) DESPEDIDA OU DISPENSA — se o cliente se despediu, encerre com cortesia sem oferecer nada novo. (4) INTENÇÃO DETECTADA — siga o contexto de intenção classificado. (5) PROMPT COMPILADO PRINCIPAL — regras gerais de atendimento. (6) DEMAIS BLOCOS — contexto complementar. Nunca misture instruções de níveis diferentes na mesma resposta.");
+
   s.push(buildDateContext());
 
+  const ativos: string[] = [];
   const firstContactBlock = buildFirstContactBlock(opts.inboundCount, {
     nomeWhatsapp: opts.nomeWhatsapp,
     nomeAtual: opts.nomeAtual,
     nomeConfirmado: opts.nomeConfirmado,
     precisaConfirmar: opts.precisaConfirmar,
   });
-  if (firstContactBlock) s.push(firstContactBlock);
+  if (firstContactBlock) { s.push(firstContactBlock); ativos.push("firstContact"); }
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
-  if (continuityBlock) s.push(continuityBlock);
+  if (continuityBlock) { s.push(continuityBlock); ativos.push("continuity"); }
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
   s.push(buildLentesContatoKnowledgeBlock());
@@ -1759,17 +1837,20 @@ function buildSystemPromptFromCompiled(opts: {
   // Inject location context (CEP/região do cliente) — alta prioridade contra repetição de pergunta
   if ((opts as any).locationCtx) {
     s.push((opts as any).locationCtx);
+    ativos.push("locationCtx");
   }
 
   // Inject prescription context
   if (opts.receitaCtx) {
     s.push(opts.receitaCtx);
+    ativos.push("receitaCtx");
   }
 
   if (opts.sentTopics.length > 0) {
     s.push(`# TÓPICOS JÁ COBERTOS (NÃO REPITA)
 ${opts.sentTopics.map((t) => `- ❌ ${t}`).join("\n")}
 Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assunto novo.`);
+    ativos.push("sentTopics");
   }
 
   s.push(`# CLASSIFICAÇÃO
@@ -1789,11 +1870,25 @@ NUNCA responda com CTA genérico de visita.`;
 Este assunto foi encaminhado para Consultor especializado. NÃO faça perguntas sobre este tema.
 Se o cliente perguntar sobre "${opts.escalatedSubject}", responda APENAS: "Seu Consultor já foi acionado e vai te chamar em breve! 🤝"
 Se o cliente iniciar um assunto DIFERENTE, responda normalmente.`;
+      ativos.push("escalatedSubject");
     }
     s.push(hibridoBlock);
+    ativos.push("hibrido");
+  }
+
+  if (opts.hasKnowledge) ativos.push("knowledge");
+  if (opts.agendamentoCtx) ativos.push("agendamentoCtx");
+
+  const { count, ativos: lista } = countActiveBlocks(ativos);
+  if (count > 3) {
+    console.warn(`[ai-triage] system prompt com ${count} blocos opcionais ativos:`, lista);
   }
 
   return s.join("\n\n");
+}
+
+function countActiveBlocks(ativos: string[]): { count: number; ativos: string[] } {
+  return { count: ativos.length, ativos };
 }
 
 function buildSystemPrompt(opts: {
@@ -3087,7 +3182,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       if (posOrc?.etapa && !lastIsImage) {
         if (posOrc.etapa === "aguardando_cta_visita") {
           if (detectAceiteVisita(lastInboundText)) {
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, await getMsgListaCidades());
             await _setPosOrc({ ...posOrc, etapa: "aguardando_cidade", atualizado_at: new Date().toISOString() });
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId, tipo: "cta_visita_aceito",
@@ -3115,12 +3210,12 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         } else if (posOrc.etapa === "aguardando_cidade") {
           const cidade = detectCidadeEscolhida(lastInboundText);
           if (cidade) {
-            const lojasMsg = formatLojasPorCidade(cidade, lojas);
+            const lojasMsg = await formatLojasPorCidade(cidade, lojas);
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
             await _setPosOrc({ ...posOrc, etapa: "aguardando_loja", cidade, atualizado_at: new Date().toISOString() });
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId, tipo: "cidade_escolhida",
-              descricao: `Cliente escolheu cidade ${CIDADE_LABEL[cidade]}`,
+              descricao: `Cliente escolheu cidade ${(await loadCidadesLojas()).cidadeLabel[cidade] || cidade}`,
               metadata: { cidade },
               referencia_tipo: "atendimento", referencia_id: atendimento_id,
             }).then(() => undefined, () => undefined);
@@ -3128,13 +3223,13 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           }
           const tries = Number(posOrc.tries_cidade || 0) + 1;
           if (tries < 2) {
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, await getMsgListaCidades());
             await _setPosOrc({ ...posOrc, tries_cidade: tries });
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
           await _setPosOrc(null);
         } else if (posOrc.etapa === "aguardando_loja") {
-          const loja = matchLojaEscolhida(lastInboundText, posOrc.cidade || "", lojas);
+          const loja = await matchLojaEscolhida(lastInboundText, posOrc.cidade || "", lojas);
           if (loja) {
             await _setPosOrc({ ...posOrc, etapa: "agendando", loja_nome: loja.nome_loja, atualizado_at: new Date().toISOString() });
             await supabase.from("eventos_crm").insert({
@@ -3149,7 +3244,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           }
           const tries = Number(posOrc.tries_loja || 0) + 1;
           if (tries < 2) {
-            const lojasMsg = formatLojasPorCidade(posOrc.cidade || "osasco", lojas);
+            const lojasMsg = await formatLojasPorCidade(posOrc.cidade || "osasco", lojas);
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
             await _setPosOrc({ ...posOrc, tries_loja: tries });
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });

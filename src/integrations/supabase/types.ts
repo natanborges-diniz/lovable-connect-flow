@@ -1516,6 +1516,36 @@ export type Database = {
           },
         ]
       }
+      lojas_cidades: {
+        Row: {
+          ativo: boolean
+          cidade: string
+          created_at: string
+          id: string
+          loja_id: string
+          loja_nome: string
+          regiao: string | null
+        }
+        Insert: {
+          ativo?: boolean
+          cidade: string
+          created_at?: string
+          id?: string
+          loja_id: string
+          loja_nome: string
+          regiao?: string | null
+        }
+        Update: {
+          ativo?: boolean
+          cidade?: string
+          created_at?: string
+          id?: string
+          loja_id?: string
+          loja_nome?: string
+          regiao?: string | null
+        }
+        Relationships: []
+      }
       mensagens: {
         Row: {
           atendimento_id: string

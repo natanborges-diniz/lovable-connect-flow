@@ -1,67 +1,79 @@
-# Plano — Opção 1: Ponte cross-project via INTERNAL_SERVICE_SECRET
+# Plano
 
-## Objetivo
-Fazer os botões "Compareceu / No-show / Venda fechada" do app **InFoco Messenger** voltarem a funcionar, chamando a edge function `loja-acao-agendamento` que vive **só no Atrium** — sem duplicar dados, sem mover telas.
+## 1. Bloco de Hierarquia em `buildSystemPromptFromCompiled()`
 
-## Arquitetura
+Em `supabase/functions/ai-triage/index.ts` (linha 1727), inserir como **primeiro `s.push(...)`** — antes de `buildDateContext()` — o bloco fixo:
+
+> "HIERARQUIA DE INSTRUÇÕES — Em caso de conflito entre os blocos abaixo, siga rigorosamente esta ordem de prioridade: (1) RECEITA PENDENTE… (2) PÓS-RECEITA OBRIGATÓRIO… (3) DESPEDIDA OU DISPENSA… (4) INTENÇÃO DETECTADA… (5) PROMPT COMPILADO PRINCIPAL… (6) DEMAIS BLOCOS… Nunca misture instruções de níveis diferentes na mesma resposta."
+
+> **Nota / clarificação:** o pedido fala em "primeiro item do array `callMessages`", mas `buildSystemPromptFromCompiled()` retorna uma **string única** (concatenação de `s[]`); o array `callMessages` propriamente dito vive em `runIA()` (linha 4329) e é o array que vai ao LLM. Vou interpretar a ordem como "primeiro bloco do system prompt construído por essa função" — i.e. primeira posição de `s[]`. Se a intenção era prepend no `callMessages` em si (ou seja, mais externo, vivendo fora do prompt compilado), me avisa que ajusto antes de aplicar.
+
+## 2. Watchdog `countActiveBlocks()`
+
+Adicionar função utilitária no mesmo arquivo que recebe os flags/strings opcionais já passados a `buildSystemPromptFromCompiled` (firstContact, continuity, locationCtx, receitaCtx, sentTopics, isHibrido, escalatedSubject, hasKnowledge, agendamentoCtx) e devolve `{ count: number, ativos: string[] }`. Chamar dentro de `buildSystemPromptFromCompiled()` no final; se `count > 3`, `console.warn("[ai-triage] system prompt com N blocos ativos:", ativos)`.
+
+## 3. Migration `lojas_cidades`
+
+`supabase/migrations/<timestamp>_lojas_cidades.sql`:
 
 ```text
-[InFoco Messenger UI]
-    hook useAcaoAgendamento
-        |
-        |  fetch POST {ATRIUM_URL}/functions/v1/loja-acao-agendamento
-        |  headers: x-service-key: INTERNAL_SERVICE_SECRET
-        |  body: { agendamento_id, acao, ..., user_email }
-        v
-[Atrium Edge Function loja-acao-agendamento]
-    - valida x-service-key
-    - resolve user_id pelo email (profiles)
-    - mantém checagem de permissão (resolver_destinatarios_loja / is_admin)
-    - executa update + evento_crm + marca notificacoes lidas
+create table public.lojas_cidades (
+  id uuid primary key default gen_random_uuid(),
+  cidade text not null,
+  loja_id text not null,
+  loja_nome text not null,
+  regiao text,
+  ativo boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table public.lojas_cidades enable row level security;
+create policy "Leitura autenticada" on public.lojas_cidades
+  for select to authenticated using (true);
+create policy "Admin gerencia" on public.lojas_cidades
+  for all to authenticated
+  using (public.is_admin(auth.uid()))
+  with check (public.is_admin(auth.uid()));
+create index idx_lojas_cidades_cidade_ativo on public.lojas_cidades(cidade) where ativo;
 ```
 
-Mesmo padrão já usado entre Atrium ↔ Infoco Optical Business para pagamentos (`mem://integracao/pagamentos-cross-project`).
+Seed (a partir de `CIDADE_TO_LOJAS`, linhas 115–120). `loja_id` = slug (ex.: `diniz-uniao`), `loja_nome` = nome exato em `telefones_lojas.nome_loja`, `regiao` = `osasco`/`carapicuiba`/`itapevi`/`barueri` (zona oeste/SP) — preencho `regiao = cidade` por enquanto, podendo evoluir.
 
-## Mudanças
+| cidade | loja_nome |
+|---|---|
+| osasco | DINIZ ANTONIO AGU, DINIZ PRIMITIVA I, DINIZ PRIMITIVA II, DINIZ STO ANTONIO, DINIZ SUPER SHOPPING, DINIZ UNIÃO |
+| carapicuiba | DINIZ CARAPICUIBA |
+| itapevi | DINIZ ITAPEVI |
+| barueri | DINIZ BARUERI |
 
-### 1. Atrium — `supabase/functions/loja-acao-agendamento/index.ts`
-- Adicionar **modo de autenticação alternativo**: além do JWT atual, aceitar header `x-service-key` igual a `INTERNAL_SERVICE_SECRET`.
-- Quando vier por service key, ler `user_email` (ou `user_id`) do body para resolver `userId` via `profiles` e seguir o mesmo fluxo de permissão (`resolver_destinatarios_loja` / `is_admin`).
-- Rejeita 401 se nem JWT nem service key válidos.
-- CORS continua liberando `x-service-key` (já consta no `Access-Control-Allow-Headers` em outras funções; ajustar aqui).
-- `verify_jwt` permanece `true` no config (a função já valida internamente; service key é checada antes do `getClaims`).
+## 4. `loadCidadesLojas()` com cache de 5 min em `ai-triage/index.ts`
 
-### 2. Atrium — `supabase/config.toml`
-- Garantir bloco `[functions.loja-acao-agendamento]` com `verify_jwt = false` para permitir requisições sem JWT (a validação é feita no código). Sem isso o gateway bloqueia antes do código rodar.
+- Adicionar no topo do módulo:
+  ```text
+  let cidadesCache: { data: any[], loadedAt: number } | null = null;
+  const CIDADES_TTL_MS = 5 * 60 * 1000;
+  ```
+- Função `async loadCidadesLojas()` que retorna `{ cidadeToLojas, cidadeLabel, lista }`. Se cache válido, devolve do cache; senão `supabase.from('lojas_cidades').select('*').eq('ativo', true)`.
+- Substituir referências a `CIDADE_TO_LOJAS` (linhas 163, 180) e `MSG_LISTA_CIDADES` (linhas 3090, 3131) — funções `formatLojasPorCidade` e `matchLojaEscolhida` viram `async` e recebem o snapshot já carregado, ou fazem `await loadCidadesLojas()` internamente. Os call-sites já são `async`, então o `await` é seguro.
+- `MSG_LISTA_CIDADES` passa a ser construída dinamicamente da lista distinta de `cidade` ordenada (mantendo emoji 🏙️ por linha).
 
-### 3. InFoco Messenger — hook `useAcaoAgendamento`
-(arquivo no projeto cross — a editar via cross_project no segundo turno, depois da aprovação)
-- Trocar `supabase.functions.invoke("loja-acao-agendamento", ...)` por `fetch` direto:
-  - URL: `https://kvggebtnqmxydtwaumqz.supabase.co/functions/v1/loja-acao-agendamento`
-  - Headers: `Content-Type: application/json`, `x-service-key: <INTERNAL_SERVICE_SECRET>` (precisa estar nos secrets do InFoco Messenger; o usuário já tem `INTERNAL_SERVICE_SECRET` configurado lá pelo flow de pagamentos).
-  - Body: inclui `user_email` do usuário logado para o Atrium resolver permissão.
-- Tratamento de erro/toast permanece igual.
+## 5. Fallback comentado
 
-### 4. Backfill manual
-- Reprocessar a ação da Cláudia (DEM-2026-00012 / DINIZ UNIÃO) que falhou: marcar `compareceu` direto via SQL ou nova chamada após o deploy.
+Manter `MSG_LISTA_CIDADES`, `CIDADE_TO_LOJAS` e `CIDADE_LABEL` no arquivo, **comentados em bloco** com:
 
-## Pontos de atenção
+```text
+// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
+```
 
-- `INTERNAL_SERVICE_SECRET` é segredo compartilhado — nunca deve aparecer no bundle do front. Por isso a chamada do InFoco Messenger precisa sair de uma **edge function intermediária** lá no projeto InFoco Messenger (não direto do React). Vou criar uma função `proxy-loja-acao-agendamento` no InFoco Messenger que valida o JWT do usuário, lê o email do `auth.getUser()`, e faz o fetch para o Atrium com a service key. O hook chama essa função local via `supabase.functions.invoke` — sem segredo no front.
+E em `loadCidadesLojas()`, no `catch`, devolver esse fallback (descomentando-o como const interna `_FALLBACK_*` que mantemos viva no código mas não usada no caminho feliz).
 
-- Permissões continuam aplicadas no Atrium: o usuário só age se aparecer em `resolver_destinatarios_loja(loja_nome)` ou for admin. Service key não bypassa isso.
+## Detalhes técnicos
 
-- Auditoria: `eventos_crm` registra `autor_nome` resolvido via `profiles.nome` no Atrium.
+- `buildSystemPromptFromCompiled` continua síncrona: o bloco de hierarquia é estático, então não exige IO.
+- `loadCidadesLojas()` usa o client Supabase service-role já existente em `ai-triage` (não precisa de novo import).
+- Migration roda antes do deploy do EF; deploy do `ai-triage` automático.
+- Sem mudanças em UI / componentes React.
 
-## Entregáveis após aprovação
+## Validação
 
-1. Editar `supabase/functions/loja-acao-agendamento/index.ts` no Atrium (suporte a service key + resolução por email).
-2. Editar `supabase/config.toml` no Atrium (`verify_jwt = false` para essa função).
-3. No projeto InFoco Messenger:
-   - Criar edge function `proxy-loja-acao-agendamento` (proxy autenticado).
-   - Ajustar `useAcaoAgendamento` para chamar o proxy.
-4. Reprocessar a demanda da Cláudia.
-5. Atualizar memória `mem://agendamentos/loja-acao-agendamento` documentando o canal cross-project.
-
-## Tempo estimado
-1–2 horas de implementação, incluindo deploy e backfill.
+1. `supabase--read_query` em `lojas_cidades` para conferir o seed.
+2. `supabase--curl_edge_functions` em `ai-triage` com payload de teste para garantir que a string de hierarquia aparece como primeiro bloco do prompt (via log) e que a lista de cidades renderiza igual à versão hardcoded.
