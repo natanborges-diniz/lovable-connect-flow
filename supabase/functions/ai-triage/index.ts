@@ -3710,8 +3710,37 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     }
 
 
+    // ── Classificador LLM de intenção (leve, antes do array de messages) ──
+    const _t_intent = Date.now();
+    const recentHistoryForIntent = (contextWindow || [])
+      .slice(-3)
+      .map((m: any) => String(m?.conteudo || ""));
+    let detectedIntent = await classifyIntent(currentMsg, recentHistoryForIntent);
+    if (!detectedIntent || detectedIntent.confidence < 0.7) {
+      const fb = deterministicIntentFallback(
+        currentMsg,
+        inboundCount,
+        isHibrido,
+        recentOutbound,
+        isImageContext,
+        receitas.length > 0,
+        isLCContextGlobal,
+      );
+      detectedIntent = {
+        intent: fb.intencao || "outro",
+        confidence: detectedIntent?.confidence ?? 0,
+        subtype: null,
+      };
+      console.log(`[CLASSIFY-INTENT] fallback=${detectedIntent.intent} (LLM conf=${(detectedIntent.confidence ?? 0).toFixed(2)}) total=${Date.now() - _t_intent}ms`);
+    } else {
+      console.log(`[CLASSIFY-INTENT] llm=${detectedIntent.intent} conf=${detectedIntent.confidence.toFixed(2)} sub=${detectedIntent.subtype ?? "—"} total=${Date.now() - _t_intent}ms`);
+    }
+
+    const intentBlock = `INTENÇÃO DETECTADA: ${detectedIntent.intent} (confiança: ${detectedIntent.confidence.toFixed(2)}). Trate esta conversa exclusivamente sob essa ótica até nova mensagem do cliente.`;
+    const systemPromptWithIntent = `${intentBlock}\n\n${systemPrompt}`;
+
     const messages: any[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPromptWithIntent },
       {
         role: "system",
         content:
