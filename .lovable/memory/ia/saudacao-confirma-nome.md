@@ -1,33 +1,39 @@
 ---
-name: Saudação inicial confirma/registra nome + auto-persistência anti-loop
-description: 1ª interação determinística. Quando cliente responde nome em texto, fast-path persiste direto e segue (sem repetir pergunta). Após 3 tentativas sem reconhecer nome, escala para humano.
+name: Saudação inicial confirma/registra nome + vocativo seguro + sequencial anônimo
+description: Cascata de display name. Cliente nunca é chamado por telefone ou placeholder. Webhook gera "Cliente #NNNN" interno via sequência; ai-triage tem guardrail vocativo + fast-path + escalada após 3 tentativas.
 type: feature
 ---
 
-## Fluxo
-- Webhook captura `senderName` do WhatsApp e grava `metadata.nome_perfil_whatsapp` + `nome_confirmado=false`.
-- `ai-triage` carrega `contatos.nome`, `metadata.nome_perfil_whatsapp`, `metadata.nome_confirmado`, `precisa_confirmar_nome`, `tentativas_pedido_nome`.
-- **FAST-PATH determinístico (`ai-triage` ~linha 2424):** quando `inboundCount===1` OU `precisaConfirmarNome===true`, contato cliente, último inbound não é imagem:
-  1. **Tenta extrair nome do último inbound em texto** via `extrairNomeDoInbound()` — aceita "Beatriz", "Me chamo Beatriz", "Sou a Bia", etc. Rejeita saudações, perguntas, URLs, dígitos longos, >4 tokens.
-  2. Se extraiu → UPDATE `contatos.nome` + `metadata.nome_confirmado=true`, `precisa_confirmar_nome=false`, `nome_origem='ia_fast_path'`, `tentativas_pedido_nome=0` + evento `nome_registrado_fast_path`. **NÃO retorna** — segue para o LLM responder a intenção real do cliente já tratando-o pelo nome (`contatoNomeAtual` reatribuído em runtime).
-  3. Se não extraiu:
-     - `tentativas_pedido_nome >= 2` (3ª tentativa fracassada) e `inboundCount > 1` → **escala para humano** com motivo `loop_pedido_nome` via `handleEscalation`.
-     - Senão → envia saudação determinística e incrementa `tentativas_pedido_nome`. Pula completamente o LLM.
-- Quando o cliente confirma/corrige no próximo turno via LLM, IA chama `registrar_nome_cliente` que faz mesmo UPDATE.
+## Cascata de display name (3 camadas)
 
-## Heurística `extrairNomeDoInbound`
-- Trim + remove pontuação inicial.
-- Strip de prefixos: `meu nome é/eh/e`, `me chamo`, `chamo-me`, `sou o/a`, `sou`, `é o/a`, `é`, `eh`.
-- Corta tudo após `.,;:!`.
-- Rejeita: vazio, <2 ou >40 chars, saudações puras (oi/olá/bom dia/etc), `?` no fim, URLs, `@`, `.com`, `.br`.
-- Aceita 1–4 tokens, todos alfabéticos `/^[A-Za-zÀ-ÿ'’-]{2,}$/`. Capitaliza.
+### 1. Webhook (`whatsapp-webhook`) — primeira ingestão
+Para contato cliente novo:
+- `looksLikeRealName(senderName, phone)` → grava `contatos.nome = senderName` direto.
+- Senão → `select public.next_contato_anonimo()` → grava `contatos.nome = 'Cliente #' || lpad(seq, 4, '0')`. Telefone fica em `contatos.telefone` apenas.
+- Fallback (sequência indisponível) → grava o telefone como nome (legado).
+- Quando `senderName` válido chega depois e `contato.nome` é placeholder (telefone OU `Cliente #NNNN`) → upgrade automático para `senderName`.
 
-## Guardrail proximo_passo (defesa em profundidade)
-- `responder.proximo_passo` é metadado interno. Só mesclado na resposta se terminar em `?`. Senão descartado e logado `[GUARDRAIL] proximo_passo descritivo descartado`.
-- `sanitizeLeakedInstructions` cobre frases típicas vazadas.
+### 2. ai-triage — guardrail de vocativo
+Helper `nomeEhPlaceholder(s)` reconhece: vazio, ≥7 dígitos, `cliente #NNNN`, "WhatsApp User", "Contato", "Cliente", "Usuário", strings sem letras.
 
-## Caso de regressão (13-mai-2026 — Beatriz)
-Cliente entrou via site (`metadata.precisa_confirmar_nome=true`, `nome_perfil_whatsapp="."`). Respondeu "Beatriz", "Me chamo Beatriz", "Bia" 5x. Fast-path antigo só verificava elegibilidade e re-enviava "Antes de seguir, posso saber seu nome, por favor? 😊" eternamente — nunca chegava ao LLM, então `registrar_nome_cliente` jamais era chamada. Correção: heurística determinística + auto-persist + escalada após 3 tentativas.
+Logo após carregar `contatoNomeAtual`:
+- `_nomeInternoSafe` = nome original (para logs, eventos, prompt como "REFERÊNCIA INTERNA").
+- Se `contatoNomeAtual` é placeholder mas `nomePerfilWhatsapp` é nome real → usa o WhatsApp como vocativo.
+- Senão → `contatoNomeAtual = ""` (todos os templates `${nomeAtual ? ', ' + nomeAtual : ''}` colapsam, evitando saudação tipo "Tô com dificuldade…, 5511949841973").
 
-## Helper webhook
-`looksLikeRealName(senderName, phone)` no whatsapp-webhook (~linha 896): exige letras, descarta nomes corporativos e telefones.
+### 3. Fast-path determinístico (mantido)
+- Quando `inboundCount===1` OU `precisaConfirmarNome===true`: extrai nome de inbound texto via `extrairNomeDoInbound()`. Se extraído → persiste com `nome_confirmado=true` e segue para LLM já tratando pelo nome.
+- Após 3 tentativas sem reconhecer nome → escala humano com motivo `loop_pedido_nome`.
+- Se cliente nunca responder → IA segue ajudando **sem vocativo** (graças ao guardrail).
+
+## Pontos críticos
+- `nomeAtual` no objeto passado a `buildSystemPromptFromCompiled` / `buildSystemPrompt` usa `_nomeInternoSafe` (não o sanitizado), para o LLM saber o nome interno como referência sem misturar com vocativo.
+- `Cliente #NNNN` é uso EXCLUSIVAMENTE INTERNO (CRM, Kanban, listas). Nunca aparece em mensagens ao cliente — `nomeEhPlaceholder` filtra.
+- Telefone como nome (legado em ~147 contatos antigos) também filtrado em runtime — não precisa backfill.
+
+## DB
+- Sequência: `public.contatos_anonimo_seq`.
+- Função: `public.next_contato_anonimo()` retorna `nextval` (security definer).
+
+## Caso de regressão (14-mai-2026 — telefone como vocativo)
+Cliente legado com `nome="5511949841973"` recebeu IA dizendo "Tô com dificuldade de ler sua receita aqui mesmo nas tentativas, 5511949841973". Causa: webhook antigo gravou telefone como nome; templates usavam `contatoNomeAtual.split(" ")[0]` direto. Correção: guardrail `nomeEhPlaceholder` zera vocativo + sequencial `Cliente #NNNN` para novos contatos.
