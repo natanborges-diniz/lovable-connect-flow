@@ -3545,7 +3545,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
         escalatedSubject,
         nomeWhatsapp: nomePerfilWhatsapp,
-        nomeAtual: contatoNomeAtual,
+        nomeAtual: _nomeInternoSafe,
         nomeConfirmado,
         precisaConfirmar: precisaConfirmarNome,
         locationCtx,
