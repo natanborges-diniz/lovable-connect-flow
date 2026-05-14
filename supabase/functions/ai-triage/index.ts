@@ -1800,17 +1800,21 @@ function buildSystemPromptFromCompiled(opts: {
 }): string {
   const s: string[] = [];
 
+  // ── HIERARQUIA DE INSTRUÇÕES (sempre primeiro bloco) ──
+  s.push("HIERARQUIA DE INSTRUÇÕES — Em caso de conflito entre os blocos abaixo, siga rigorosamente esta ordem de prioridade: (1) RECEITA PENDENTE — se presente, chame interpretar_receita imediatamente e ignore tudo mais. (2) PÓS-RECEITA OBRIGATÓRIO — se presente, chame consultar_lentes ou consultar_lentes_contato antes de qualquer resposta. (3) DESPEDIDA OU DISPENSA — se o cliente se despediu, encerre com cortesia sem oferecer nada novo. (4) INTENÇÃO DETECTADA — siga o contexto de intenção classificado. (5) PROMPT COMPILADO PRINCIPAL — regras gerais de atendimento. (6) DEMAIS BLOCOS — contexto complementar. Nunca misture instruções de níveis diferentes na mesma resposta.");
+
   s.push(buildDateContext());
 
+  const ativos: string[] = [];
   const firstContactBlock = buildFirstContactBlock(opts.inboundCount, {
     nomeWhatsapp: opts.nomeWhatsapp,
     nomeAtual: opts.nomeAtual,
     nomeConfirmado: opts.nomeConfirmado,
     precisaConfirmar: opts.precisaConfirmar,
   });
-  if (firstContactBlock) s.push(firstContactBlock);
+  if (firstContactBlock) { s.push(firstContactBlock); ativos.push("firstContact"); }
   const continuityBlock = buildContinuityBlock(opts.inboundCount);
-  if (continuityBlock) s.push(continuityBlock);
+  if (continuityBlock) { s.push(continuityBlock); ativos.push("continuity"); }
   s.push(buildRegionalCoverageBlock());
   s.push(buildNonClientBlock());
   s.push(buildLentesContatoKnowledgeBlock());
