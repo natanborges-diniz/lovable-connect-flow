@@ -230,16 +230,18 @@ function detectCidadeEscolhida(text: string): string | null {
   return null;
 }
 
-function formatLojasPorCidade(cidade: string, lojas: any[]): string {
-  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+async function formatLojasPorCidade(cidade: string, lojas: any[]): Promise<string> {
+  const snap = await loadCidadesLojas();
+  const nomes = snap.cidadeToLojas[cidade] || [];
+  const label = snap.cidadeLabel[cidade] || _cidadeKeyToLabel(cidade);
   const filtradas = (lojas || []).filter((l: any) =>
     nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
   );
   if (filtradas.length === 0) {
-    return `Boa! Pra ${CIDADE_LABEL[cidade] || cidade}, posso te indicar a loja mais próxima — me passa o seu bairro? 😊`;
+    return `Boa! Pra ${label}, posso te indicar a loja mais próxima — me passa o seu bairro? 😊`;
   }
   const numEmojis = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"];
-  let out = `Aqui são as lojas em *${CIDADE_LABEL[cidade] || cidade}* — qual fica melhor pra você? 😊\n`;
+  let out = `Aqui são as lojas em *${label}* — qual fica melhor pra você? 😊\n`;
   filtradas.forEach((l: any, i: number) => {
     const end = l.endereco ? ` — ${l.endereco}` : "";
     out += `\n${numEmojis[i] || `${i+1}.`} *${l.nome_loja}*${end}`;
@@ -247,8 +249,9 @@ function formatLojasPorCidade(cidade: string, lojas: any[]): string {
   return out;
 }
 
-function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): any | null {
-  const nomes = CIDADE_TO_LOJAS[cidade] || [];
+async function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): Promise<any | null> {
+  const snap = await loadCidadesLojas();
+  const nomes = snap.cidadeToLojas[cidade] || [];
   const filtradas = (lojas || []).filter((l: any) =>
     nomes.some((n) => _normTxt(l.nome_loja) === _normTxt(n))
   );
