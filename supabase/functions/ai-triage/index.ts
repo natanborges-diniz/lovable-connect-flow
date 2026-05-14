@@ -1837,17 +1837,20 @@ function buildSystemPromptFromCompiled(opts: {
   // Inject location context (CEP/região do cliente) — alta prioridade contra repetição de pergunta
   if ((opts as any).locationCtx) {
     s.push((opts as any).locationCtx);
+    ativos.push("locationCtx");
   }
 
   // Inject prescription context
   if (opts.receitaCtx) {
     s.push(opts.receitaCtx);
+    ativos.push("receitaCtx");
   }
 
   if (opts.sentTopics.length > 0) {
     s.push(`# TÓPICOS JÁ COBERTOS (NÃO REPITA)
 ${opts.sentTopics.map((t) => `- ❌ ${t}`).join("\n")}
 Se cliente perguntar algo já coberto: "Como já mencionei..." + mude para assunto novo.`);
+    ativos.push("sentTopics");
   }
 
   s.push(`# CLASSIFICAÇÃO
@@ -1867,11 +1870,25 @@ NUNCA responda com CTA genérico de visita.`;
 Este assunto foi encaminhado para Consultor especializado. NÃO faça perguntas sobre este tema.
 Se o cliente perguntar sobre "${opts.escalatedSubject}", responda APENAS: "Seu Consultor já foi acionado e vai te chamar em breve! 🤝"
 Se o cliente iniciar um assunto DIFERENTE, responda normalmente.`;
+      ativos.push("escalatedSubject");
     }
     s.push(hibridoBlock);
+    ativos.push("hibrido");
+  }
+
+  if (opts.hasKnowledge) ativos.push("knowledge");
+  if (opts.agendamentoCtx) ativos.push("agendamentoCtx");
+
+  const { count, ativos: lista } = countActiveBlocks(ativos);
+  if (count > 3) {
+    console.warn(`[ai-triage] system prompt com ${count} blocos opcionais ativos:`, lista);
   }
 
   return s.join("\n\n");
+}
+
+function countActiveBlocks(ativos: string[]): { count: number; ativos: string[] } {
+  return { count: ativos.length, ativos };
 }
 
 function buildSystemPrompt(opts: {
