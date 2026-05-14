@@ -92,21 +92,12 @@ serve(async (req) => {
     let anonimoNomeInicial: string | null = null;
     if (!isLojaEarly && !realName) {
       try {
-        const { data: seqRow } = await supabase.rpc("nextval" as any, { sequence_name: "contatos_anonimo_seq" } as any);
-        // Fallback se rpc não estiver disponível: usa raw query via from
-        let seqVal: number | null = typeof seqRow === "number" ? seqRow : null;
-        if (seqVal === null) {
-          const { data: seqQuery } = await supabase
-            .from("contatos_anonimo_seq_view" as any)
-            .select("nextval")
-            .maybeSingle();
-          seqVal = (seqQuery as any)?.nextval ?? null;
-        }
-        if (seqVal !== null) {
+        const { data: seqVal, error: seqErr } = await supabase.rpc("next_contato_anonimo");
+        if (!seqErr && seqVal !== null && seqVal !== undefined) {
           anonimoNomeInicial = `Cliente #${String(seqVal).padStart(4, "0")}`;
         }
       } catch (_e) {
-        // Se sequência indisponível, segue para fallback (telefone) abaixo
+        // Sequência indisponível: cai no fallback (telefone) abaixo.
       }
     }
     const initialNome = isLojaEarly
