@@ -1,52 +1,67 @@
-# Fluxo LC pós-confirmação determinístico
+# Plano — Opção 1: Ponte cross-project via INTERNAL_SERVICE_SECRET
 
-## Problema
-Marcelo confirmou receita ("Certo") e pediu "Lentes de contato a pronta entrega", mas o gate pós-confirmação em `ai-triage` exclui contextos LC (`if (!_isLCCtx && lastRx)`), delegando ao LLM. O LLM não chamou `consultar_lentes_contato`, o validador rejeitou a saída e caiu no pool genérico ("Conta pra mim com mais detalhes…"). Na repetição, o gate disparou de novo o ciclo de confirmação.
+## Objetivo
+Fazer os botões "Compareceu / No-show / Venda fechada" do app **InFoco Messenger** voltarem a funcionar, chamando a edge function `loja-acao-agendamento` que vive **só no Atrium** — sem duplicar dados, sem mover telas.
+
+## Arquitetura
+
+```text
+[InFoco Messenger UI]
+    hook useAcaoAgendamento
+        |
+        |  fetch POST {ATRIUM_URL}/functions/v1/loja-acao-agendamento
+        |  headers: x-service-key: INTERNAL_SERVICE_SECRET
+        |  body: { agendamento_id, acao, ..., user_email }
+        v
+[Atrium Edge Function loja-acao-agendamento]
+    - valida x-service-key
+    - resolve user_id pelo email (profiles)
+    - mantém checagem de permissão (resolver_destinatarios_loja / is_admin)
+    - executa update + evento_crm + marca notificacoes lidas
+```
+
+Mesmo padrão já usado entre Atrium ↔ Infoco Optical Business para pagamentos (`mem://integracao/pagamentos-cross-project`).
 
 ## Mudanças
 
-### 1. Refatorar `runConsultarLentesContato` em helper reutilizável
-Em `supabase/functions/ai-triage/index.ts` (~linhas 4887-5068), extrair a lógica inline da tool LC para uma função pura no escopo do módulo:
+### 1. Atrium — `supabase/functions/loja-acao-agendamento/index.ts`
+- Adicionar **modo de autenticação alternativo**: além do JWT atual, aceitar header `x-service-key` igual a `INTERNAL_SERVICE_SECRET`.
+- Quando vier por service key, ler `user_email` (ou `user_id`) do body para resolver `userId` via `profiles` e seguir o mesmo fluxo de permissão (`resolver_destinatarios_loja` / `is_admin`).
+- Rejeita 401 se nem JWT nem service key válidos.
+- CORS continua liberando `x-service-key` (já consta no `Access-Control-Allow-Headers` em outras funções; ajustar aqui).
+- `verify_jwt` permanece `true` no config (a função já valida internamente; service key é checada antes do `getClaims`).
 
-```ts
-async function runConsultarLentesContato(
-  supabase, contatoId, atendimentoId, args?
-): Promise<{ resposta: string; usou_catalogo: boolean; needs_toric_sob_encomenda: boolean }>
-```
+### 2. Atrium — `supabase/config.toml`
+- Garantir bloco `[functions.loja-acao-agendamento]` com `verify_jwt = false` para permitir requisições sem JWT (a validação é feita no código). Sem isso o gateway bloqueia antes do código rodar.
 
-Mantém: leitura da última receita salva, cálculo de combo 3+1, regra tórica obrigatória se cyl≥0.75 (sob encomenda), formatação da resposta.
+### 3. InFoco Messenger — hook `useAcaoAgendamento`
+(arquivo no projeto cross — a editar via cross_project no segundo turno, depois da aprovação)
+- Trocar `supabase.functions.invoke("loja-acao-agendamento", ...)` por `fetch` direto:
+  - URL: `https://kvggebtnqmxydtwaumqz.supabase.co/functions/v1/loja-acao-agendamento`
+  - Headers: `Content-Type: application/json`, `x-service-key: <INTERNAL_SERVICE_SECRET>` (precisa estar nos secrets do InFoco Messenger; o usuário já tem `INTERNAL_SERVICE_SECRET` configurado lá pelo flow de pagamentos).
+  - Body: inclui `user_email` do usuário logado para o Atrium resolver permissão.
+- Tratamento de erro/toast permanece igual.
 
-### 2. Dispatch determinístico no gate pós-confirmação
-Em `ai-triage/index.ts` (~linha 2816), remover a exclusão `_isLCCtx` e adicionar branch:
+### 4. Backfill manual
+- Reprocessar a ação da Cláudia (DEM-2026-00012 / DINIZ UNIÃO) que falhou: marcar `compareceu` direto via SQL ou nova chamada após o deploy.
 
-```
-if (lastRx && receita_confirmada_agora) {
-  if (_isLCCtx || regex_lc_pronta_entrega.test(contexto)) {
-    const r = await runConsultarLentesContato(...)
-    await sendWhatsApp(r.resposta)
-    await registrarEvento('cotacao_lc_pos_confirmacao_forcada')
-    return
-  }
-  // fluxo de óculos existente
-}
-```
+## Pontos de atenção
 
-Reforçar regex de detecção LC para incluir "pronta entrega", "lentes de contato", "LC".
+- `INTERNAL_SERVICE_SECRET` é segredo compartilhado — nunca deve aparecer no bundle do front. Por isso a chamada do InFoco Messenger precisa sair de uma **edge function intermediária** lá no projeto InFoco Messenger (não direto do React). Vou criar uma função `proxy-loja-acao-agendamento` no InFoco Messenger que valida o JWT do usuário, lê o email do `auth.getUser()`, e faz o fetch para o Atrium com a service key. O hook chama essa função local via `supabase.functions.invoke` — sem segredo no front.
 
-### 3. Backfill manual — Marcelo
-- Devolver atendimento `86b71001-…` para `modo=ia, status=aguardando`
-- Disparar `runConsultarLentesContato` manualmente com a receita já confirmada (OD -1.75 CIL -0.25 EIXO 70°, OE -1.50 CIL -0.75 EIXO 10°)
-- Enviar cotação via `send-whatsapp`
-- Registrar evento `cotacao_lc_pos_confirmacao_backfill`
+- Permissões continuam aplicadas no Atrium: o usuário só age se aparecer em `resolver_destinatarios_loja(loja_nome)` ou for admin. Service key não bypassa isso.
 
-## Detalhes técnicos
-- Sem migração de banco
-- Sem mudanças em RLS ou edge functions além de `ai-triage`
-- Helper preserva guardrails existentes (tom humano, validador estrutural)
-- Idempotência: gate verifica se já existe `cotacao_lc_*` recente no atendimento antes de re-disparar
+- Auditoria: `eventos_crm` registra `autor_nome` resolvido via `profiles.nome` no Atrium.
 
-## Arquivos afetados
-- `supabase/functions/ai-triage/index.ts` (refator + novo branch no gate)
+## Entregáveis após aprovação
 
-## Memória
-Adicionar memória `mem://ia/lc-pos-confirmacao-deterministica` documentando que LC pós-confirmação não passa mais pelo LLM.
+1. Editar `supabase/functions/loja-acao-agendamento/index.ts` no Atrium (suporte a service key + resolução por email).
+2. Editar `supabase/config.toml` no Atrium (`verify_jwt = false` para essa função).
+3. No projeto InFoco Messenger:
+   - Criar edge function `proxy-loja-acao-agendamento` (proxy autenticado).
+   - Ajustar `useAcaoAgendamento` para chamar o proxy.
+4. Reprocessar a demanda da Cláudia.
+5. Atualizar memória `mem://agendamentos/loja-acao-agendamento` documentando o canal cross-project.
+
+## Tempo estimado
+1–2 horas de implementação, incluindo deploy e backfill.

@@ -70,7 +70,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.loja-acao-agendamento]
-verify_jwt = true
+verify_jwt = false
 
 [functions.notificar-loja-agendamento]
 verify_jwt = false

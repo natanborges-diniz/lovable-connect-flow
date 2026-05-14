@@ -1,14 +1,21 @@
 // loja-acao-agendamento
-// Endpoint autenticado chamado pelo InFoco Messenger quando a loja toca em
+// Endpoint chamado pelo InFoco Messenger quando a loja toca em
 // um dos botões do card de cobrança: "compareceu" | "noshow" | "venda_fechada".
-// Atualiza o agendamento, registra evento no CRM e dispara automações.
+//
+// Suporta DOIS modos de autenticação:
+//   1) JWT do Atrium (Authorization: Bearer ...) — uso interno
+//   2) x-service-key: INTERNAL_SERVICE_SECRET + body.user_email — usado pelo
+//      proxy do InFoco Messenger (que não compartilha auth.users com o Atrium)
+//
+// Em ambos os casos a permissão é checada via resolver_destinatarios_loja /
+// is_admin antes de qualquer alteração.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-service-key",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -21,21 +28,7 @@ serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    // Autenticação via JWT do app
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return json({ error: "Unauthorized" }, 401);
-    }
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claims, error: claimsErr } = await userClient.auth.getClaims(token);
-    if (claimsErr || !claims?.claims) return json({ error: "Unauthorized" }, 401);
-    const userId = claims.claims.sub as string;
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const INTERNAL_SERVICE_SECRET = Deno.env.get("INTERNAL_SERVICE_SECRET");
 
     const body = await req.json().catch(() => ({}));
     const agendamento_id: string | undefined = body.agendamento_id;
@@ -44,10 +37,49 @@ serve(async (req) => {
     const numero_venda: string | undefined = body.numero_venda;
     const numeros_os: string[] | undefined = body.numeros_os;
     const observacao: string | undefined = body.observacao;
+    const user_email: string | undefined = body.user_email;
+    const user_id_body: string | undefined = body.user_id;
 
     if (!agendamento_id || !acao) return json({ error: "agendamento_id e acao são obrigatórios" }, 400);
     if (!["compareceu", "noshow", "venda_fechada", "reverter_noshow"].includes(acao)) {
       return json({ error: "acao inválida" }, 400);
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // ====== Autenticação ======
+    const serviceKey = req.headers.get("x-service-key");
+    const authHeader = req.headers.get("Authorization");
+    let userId: string | null = null;
+    let viaServiceKey = false;
+
+    if (serviceKey && INTERNAL_SERVICE_SECRET && serviceKey === INTERNAL_SERVICE_SECRET) {
+      // Modo cross-project: resolve usuário via email (ou user_id direto) no Atrium
+      viaServiceKey = true;
+      if (user_id_body) {
+        userId = user_id_body;
+      } else if (user_email) {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("id")
+          .ilike("email", user_email)
+          .maybeSingle();
+        userId = prof?.id ?? null;
+      }
+      if (!userId) {
+        return json({ error: "Usuário não encontrado no Atrium (verifique user_email/user_id)" }, 401);
+      }
+    } else if (authHeader?.startsWith("Bearer ")) {
+      // Modo JWT: valida claims
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const token = authHeader.replace("Bearer ", "");
+      const { data: claims, error: claimsErr } = await userClient.auth.getClaims(token);
+      if (claimsErr || !claims?.claims) return json({ error: "Unauthorized" }, 401);
+      userId = claims.claims.sub as string;
+    } else {
+      return json({ error: "Unauthorized" }, 401);
     }
 
     // Carrega agendamento
@@ -65,7 +97,6 @@ serve(async (req) => {
     const list = (pode || []) as Array<{ user_id: string }>;
     const podeAgir = list.some((d) => d.user_id === userId);
     if (!podeAgir) {
-      // Não bloqueamos admin; tentamos checar role admin
       const { data: isAdmin } = await supabase.rpc("is_admin", { _user_id: userId });
       if (!isAdmin) return json({ error: "Sem permissão para esta loja" }, 403);
     }
@@ -90,14 +121,14 @@ serve(async (req) => {
       }
       updates.status = "compareceu";
       updates.loja_confirmou_presenca = true;
-      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "compareceu" };
+      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "compareceu", via_service_key: viaServiceKey };
       eventoTipo = "loja_confirmou_comparecimento";
       eventoDesc = `${autorNome} confirmou comparecimento (${ag.loja_nome})`;
     } else if (acao === "noshow") {
       if (ag.status === "no_show") return json({ ok: true, skipped: true, reason: "ja_noshow" });
       updates.status = "no_show";
       updates.loja_confirmou_presenca = false;
-      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "noshow", noshow_motivo: observacao || null };
+      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "noshow", noshow_motivo: observacao || null, via_service_key: viaServiceKey };
       eventoTipo = "loja_marcou_noshow";
       eventoDesc = `${autorNome} marcou no-show (${ag.loja_nome})${observacao ? ` — ${observacao}` : ""}`;
     } else if (acao === "reverter_noshow") {
@@ -107,7 +138,7 @@ serve(async (req) => {
       updates.status = "compareceu";
       updates.loja_confirmou_presenca = true;
       updates.tentativas_recuperacao = 0;
-      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "reverter_noshow" };
+      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "reverter_noshow", via_service_key: viaServiceKey };
       eventoTipo = "loja_reverteu_noshow";
       eventoDesc = `${autorNome} reverteu no-show para compareceu (${ag.loja_nome})`;
     } else if (acao === "venda_fechada") {
@@ -119,7 +150,7 @@ serve(async (req) => {
       updates.valor_venda = valor_venda;
       if (numero_venda) updates.numero_venda = numero_venda;
       if (Array.isArray(numeros_os) && numeros_os.length) updates.numeros_os = numeros_os;
-      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "venda_fechada" };
+      updates.metadata = { ...md, loja_acao_at: stamp, loja_acao_por: userId, loja_acao: "venda_fechada", via_service_key: viaServiceKey };
       eventoTipo = "venda_fechada";
       eventoDesc = `${autorNome} registrou venda fechada R$ ${valor_venda.toFixed(2)}${numero_venda ? ` (#${numero_venda})` : ""}`;
     }
@@ -136,10 +167,9 @@ serve(async (req) => {
       descricao: eventoDesc,
       referencia_id: ag.id,
       referencia_tipo: "agendamento",
-      metadata: { loja_nome: ag.loja_nome, autor_id: userId, autor_nome: autorNome, valor_venda, numero_venda, numeros_os },
+      metadata: { loja_nome: ag.loja_nome, autor_id: userId, autor_nome: autorNome, valor_venda, numero_venda, numeros_os, via_service_key: viaServiceKey },
     });
 
-    // Marca como lidas notificações relacionadas a este agendamento
     await supabase
       .from("notificacoes")
       .update({ lida: true })
