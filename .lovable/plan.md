@@ -1,54 +1,52 @@
-## Contexto
+# Fluxo LC pós-confirmação determinístico
 
-Cliente **Luzinete Oliveira** (`c41f3607-d92e-4a81-8b3f-f0e278eaea34`, tel `5511953720093`) está em atendimento `86b71001…` modo `humano/aguardando`. Operador transcreveu a receita da foto manualmente. Receita NÃO existe ainda em `contatos.metadata.receitas`.
+## Problema
+Marcelo confirmou receita ("Certo") e pediu "Lentes de contato a pronta entrega", mas o gate pós-confirmação em `ai-triage` exclui contextos LC (`if (!_isLCCtx && lastRx)`), delegando ao LLM. O LLM não chamou `consultar_lentes_contato`, o validador rejeitou a saída e caiu no pool genérico ("Conta pra mim com mais detalhes…"). Na repetição, o gate disparou de novo o ciclo de confirmação.
 
-Receita interpretada como **bifocal/multifocal** (tem grau de longe e perto distintos). Os "eixos" enviados (29/30/27/28) parecem DNP (distância naso-pupilar), não eixo de astigmatismo — não há cilindro. Vou salvar como **multifocal** com `add` calculada (perto − longe = +2,25) e registrar os "eixos" como `dnp` em observação para o consultor revisar.
+## Mudanças
 
-## Ações (3 passos)
+### 1. Refatorar `runConsultarLentesContato` em helper reutilizável
+Em `supabase/functions/ai-triage/index.ts` (~linhas 4887-5068), extrair a lógica inline da tool LC para uma função pura no escopo do módulo:
 
-### 1. Persistir receita em `contatos.metadata.receitas`
-
-`jsonb_set` no contato `c41f3607…` adicionando entry:
+```ts
+async function runConsultarLentesContato(
+  supabase, contatoId, atendimentoId, args?
+): Promise<{ resposta: string; usou_catalogo: boolean; needs_toric_sob_encomenda: boolean }>
 ```
-{
-  rx_type: 'progressive',
-  eyes: {
-    od: { sphere: 0.25, cylinder: null, axis: null, add: 2.25 },
-    oe: { sphere: 0.25, cylinder: null, axis: null, add: 2.25 }
-  },
-  confidence: 1.0,
-  label: 'Receita transcrita pelo operador',
-  source: 'humano_transcricao',
-  data_leitura: now(),
-  confirmed_by_client_at: null,
-  observacao: 'Transcrita a partir da foto. Valores DNP recebidos: OD longe 29 / perto 27, OE longe 30 / perto 28 (não confundir com eixo de astigmatismo).'
+
+Mantém: leitura da última receita salva, cálculo de combo 3+1, regra tórica obrigatória se cyl≥0.75 (sob encomenda), formatação da resposta.
+
+### 2. Dispatch determinístico no gate pós-confirmação
+Em `ai-triage/index.ts` (~linha 2816), remover a exclusão `_isLCCtx` e adicionar branch:
+
+```
+if (lastRx && receita_confirmada_agora) {
+  if (_isLCCtx || regex_lc_pronta_entrega.test(contexto)) {
+    const r = await runConsultarLentesContato(...)
+    await sendWhatsApp(r.resposta)
+    await registrarEvento('cotacao_lc_pos_confirmacao_forcada')
+    return
+  }
+  // fluxo de óculos existente
 }
 ```
 
-### 2. Devolver atendimento à IA
+Reforçar regex de detecção LC para incluir "pronta entrega", "lentes de contato", "LC".
 
-`UPDATE atendimentos SET modo='ia', status='aguardando', updated_at=now() WHERE id='86b71001…'` + INSERT em `eventos_crm` (`tipo='humano_devolveu_para_ia'`).
+### 3. Backfill manual — Marcelo
+- Devolver atendimento `86b71001-…` para `modo=ia, status=aguardando`
+- Disparar `runConsultarLentesContato` manualmente com a receita já confirmada (OD -1.75 CIL -0.25 EIXO 70°, OE -1.50 CIL -0.75 EIXO 10°)
+- Enviar cotação via `send-whatsapp`
+- Registrar evento `cotacao_lc_pos_confirmacao_backfill`
 
-### 3. Enviar WhatsApp pedindo confirmação
+## Detalhes técnicos
+- Sem migração de banco
+- Sem mudanças em RLS ou edge functions além de `ai-triage`
+- Helper preserva guardrails existentes (tom humano, validador estrutural)
+- Idempotência: gate verifica se já existe `cotacao_lc_*` recente no atendimento antes de re-disparar
 
-Chamar `send-whatsapp` (atendimento_id, telefone, remetente_nome='Assistente IA') com mensagem:
+## Arquivos afetados
+- `supabase/functions/ai-triage/index.ts` (refator + novo branch no gate)
 
-> Oi Luzinete! Consegui transcrever a receita aqui pelos dados que você me passou 😊
->
-> *Para longe:*
-> • OD: +0,25 esf
-> • OE: +0,25 esf
->
-> *Para perto (adição +2,25):*
-> • OD: +2,50 esf
-> • OE: +2,50 esf
->
-> Tipo: *multifocal/progressiva*
->
-> Os valores estão certinhos? Confirma pra eu já te mostrar as opções de lente compatíveis com sua armação 🙌
-
-Após confirmação da cliente, IA segue fluxo padrão (`consultar_lentes` multifocal só-lente).
-
-## Observação
-
-Não há código a alterar — operação puramente de dados + chamada de Edge Function existente.
+## Memória
+Adicionar memória `mem://ia/lc-pos-confirmacao-deterministica` documentando que LC pós-confirmação não passa mais pelo LLM.
