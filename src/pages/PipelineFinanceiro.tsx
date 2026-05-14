@@ -40,6 +40,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { CpfApprovalDialog, EntryPercentageBadge } from "@/components/financeiro/CpfApprovalDialog";
+import { ConfirmarPixDialog } from "@/components/financeiro/ConfirmarPixDialog";
 import { useAutomacoes } from "@/hooks/useAutomacoes";
 import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
 import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
@@ -488,10 +489,20 @@ export default function PipelineFinanceiro() {
         />
       )}
 
-      {/* Generic detail dialog (non-CPF) */}
-      <Dialog open={!!selectedSolicitacao && selectedSolicitacao?.tipo !== "consulta_cpf"} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
+      {/* Confirmação PIX Dialog */}
+      {selectedSolicitacao?.tipo === "confirmacao_pix" && (
+        <ConfirmarPixDialog
+          solicitacao={selectedSolicitacao}
+          open={!!selectedSolicitacao}
+          onOpenChange={(open) => !open && setSelectedSolicitacao(null)}
+          colunas={colunas ?? []}
+        />
+      )}
+
+      {/* Generic detail dialog (non-CPF, non-PIX) */}
+      <Dialog open={!!selectedSolicitacao && selectedSolicitacao?.tipo !== "consulta_cpf" && selectedSolicitacao?.tipo !== "confirmacao_pix"} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
         <DialogContent className="max-w-lg">
-          {selectedSolicitacao && selectedSolicitacao.tipo !== "consulta_cpf" && (
+          {selectedSolicitacao && selectedSolicitacao.tipo !== "consulta_cpf" && selectedSolicitacao.tipo !== "confirmacao_pix" && (
             <div className="space-y-4">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
