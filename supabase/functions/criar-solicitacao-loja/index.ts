@@ -501,8 +501,9 @@ serve(async (req) => {
     }
 
     // ── Notificações in-app para o setor destino (canal único = app) ──
+    // Pula notificações para link_pagamento: fluxo 100% automático (gerar → aguardando → pago).
     const setorId = (fluxo as any).setor_destino_id;
-    if (setorId) {
+    if (setorId && tipoSolicitacao !== "link_pagamento") {
       const { data: prof } = await supabase
         .from("profiles").select("id").eq("setor_id", setorId).eq("ativo", true);
       const titulo = `Nova solicitação: ${(fluxo as any).nome}`;

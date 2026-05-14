@@ -166,7 +166,7 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
               )}
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-80 p-0" align="end">
+          <PopoverContent className="w-96 p-0" align="end">
             <div className="flex items-center justify-between px-4 py-2 border-b">
               <span className="text-sm font-semibold">Notificações</span>
               {naoLidas > 0 && (
@@ -175,7 +175,7 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
                 </Button>
               )}
             </div>
-            <ScrollArea className="max-h-80">
+            <ScrollArea className="h-96">
               {!notificacoes?.length ? (
                 <p className="text-sm text-muted-foreground text-center py-6">Nenhuma notificação</p>
               ) : (
