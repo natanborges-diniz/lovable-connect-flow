@@ -1,66 +1,58 @@
-# Ajustes Financeiro: notificações, sininho e Confirmação PIX
+# Retomar atendimento da Magali Bueno com receita transcrita
 
-Três correções no setor Financeiro. Tratativas com lojas via app InFoco Messenger continuam como estão.
+## Contexto verificado
 
-## 1. Silenciar notificações do fluxo de link de pagamento
+- Atendimento `0fbdc84c-7b9d-47ee-a53f-a25593d19d9c`, contato `5817e8e9…`, telefone `5511967653099`.
+- Estado atual: `modo=humano`, `status=aguardando`, **sem receita salva** em `contatos.metadata.receitas` (foto ficou ilegível).
+- Última msg da IA já encerrou pedindo equipe; cliente respondeu "Pode deixar então, obrigada".
 
-O fluxo `link_pagamento` é 100% automático: card aparece, muda de coluna sozinho via `payment-webhook`, picote vai pra loja pelo Messenger. Notificações no sininho só geram ruído.
+## Ações (one-shot, sem alterar código)
 
-**O que muda:**
-- `criar-solicitacao-loja/index.ts` — quando `tipoSolicitacao === "link_pagamento"`, **não** insere em `notificacoes`. Card continua sendo criado.
-- `payment-webhook/index.ts` — quando status vira `PAGO`, **não** insere notificação `comprovante_pagamento`. Movimentação automática do card, comentário "picote" no ticket e evento em `eventos_crm` continuam.
+### 1. Persistir a receita lida manualmente
 
-**Não muda:** boleto, consulta CPF, estorno, reembolso e demais fluxos seguem notificando.
+`update contatos set metadata = jsonb_set(coalesce(metadata,'{}'::jsonb), '{receitas}', '[{...}]'::jsonb, true)` adicionando uma entrada:
 
-## 2. Sininho de notificações sem scroll
+```json
+{
+  "id": "<uuid novo>",
+  "tipo": "progressiva",
+  "fonte": "humano_transcricao",
+  "criado_em": "<now>",
+  "od": { "esf":  1.75, "cil": -0.75, "eixo": 95,  "add": 2.75 },
+  "oe": { "esf":  1.25, "cil": -0.50, "eixo": 115, "add": 2.75 },
+  "observacao": "Transcrita manualmente pelo operador a partir da foto"
+}
+```
 
-Hoje o `ScrollArea` em `TopNavigation.tsx` usa `max-h-80` sem altura efetiva no viewport — operador só lê o que aparece na tela.
+(Adição única +2,75 aplicada nos dois olhos — padrão de receita progressiva.)
 
-**O que muda:**
-- `src/components/layout/TopNavigation.tsx` — trocar `max-h-80` por `h-96` no `ScrollArea` (ativa o scroll do Radix); alargar popover de `w-80` → `w-96`.
-- `src/hooks/useNotificacoes.ts` — subir `limit(50)` → `limit(200)` para o backlog atual ficar acessível.
+### 2. Voltar atendimento para IA
 
-## 3. Fluxo Confirmação PIX completo
+`update atendimentos set modo='ia', status='aguardando', updated_at=now() where id='0fbdc84c…';`
 
-Hoje o card cai em "Confirmação PIX" e o dialog genérico não tem ação.
+Registrar `eventos_crm` tipo `humano_devolveu_para_ia` com descrição "Receita transcrita manualmente — IA reassume".
 
-### Novas colunas (migração)
+### 3. Mensagem proativa ao cliente (via `send-whatsapp`)
 
-Duas colunas no setor Financeiro, logo após "Confirmação PIX":
+Texto a enviar (curto, valida a leitura antes de orçar):
 
-- **PIX Confirmado** — terminal feliz; card encerra.
-- **PIX Não Confirmado** — terminal de pendência; card encerra, mas continua disponível para a loja reabrir.
+```
+Magali, a equipe conseguiu ler sua receita 🙌 Confere se tá certinho:
 
-### Ações no card (operador financeiro)
+📋 *Longe / Progressiva*
+• *OD:* +1,75 esf | -0,75 cil | eixo 95
+• *OE:* +1,25 esf | -0,50 cil | eixo 115
+• *Adição:* +2,75
 
-Novo `src/components/financeiro/ConfirmarPixDialog.tsx`. Aberto quando o card está em "Confirmação PIX" **ou** "PIX Não Confirmado":
+Tá correto? Se sim, já te mostro 3 opções de lentes (econômica, intermediária e premium) 😉
+```
 
-- **Confirmar PIX** — move para "PIX Confirmado", grava `metadata.pix_confirmado_at` + `pix_confirmado_por`, marca `solicitacoes.status = 'concluida'`. Envia retorno automático à loja no app (via `solicitacao_comentarios` `tipo='retorno_setor'` + `notificacoes` resolvidas por `resolver_destinatarios_loja(loja_nome)` — mesmo trilho do retorno CPF). Mensagem: *"PIX confirmado e compensado. Pode liberar a venda."*
-- **Não confirmar PIX** — sem campo de motivo. Move para "PIX Não Confirmado", grava `metadata.pix_nao_confirmado_at`, marca `status = 'concluida'`, envia ao app: *"A confirmação de PIX solicitada ainda não foi compensada no banco. Peça nova conferência em alguns instantes."*
+Quando ela confirmar (sim/correto/ok), o `ai-triage` segue o fluxo normal de orçamento usando a receita salva (`consultar_lentes_estimativa` ou `consultar_lentes`), porque agora há receita válida em `contatos.metadata.receitas`.
 
-Em "PIX Confirmado", botão **Reverter para Não Confirmado** para correção manual.
+## Não muda
 
-### Reabertura pela loja
+- Código das edge functions (sem deploy).
+- Outros atendimentos / pipeline / configurações.
+- Nada da loja / Atrium.
 
-Quando o card está em **PIX Não Confirmado**, a loja vê na thread da demanda no app Messenger o botão **"Pedir nova conferência"**. Ao clicar:
-
-- O **mesmo card** volta para "Confirmação PIX".
-- `solicitacoes.status` volta para `em_atendimento`.
-- Comentário automático na thread: *"Loja pediu nova conferência em {timestamp}."*
-- Linha em `pipeline_card_eventos` (tipo `reabertura_loja`).
-- Notifica o setor Financeiro (notificação útil aqui — é reabertura manual).
-
-**Implementação:** novo edge function `reabrir-confirmacao-pix` (`{ solicitacao_id }`), valida tipo `confirmacao_pix` e coluna "PIX Não Confirmado", então move e registra evento. O botão na UI da loja vive no app Messenger (projeto cross `2d68a67b-…`) — entrego o EF pronto e marco em nota o que falta no app consumir.
-
-### Roteamento no `PipelineFinanceiro.tsx`
-
-Quando `selectedSolicitacao.tipo === "confirmacao_pix"` ou `pipeline_coluna_id` ∈ {Confirmação PIX, PIX Confirmado, PIX Não Confirmado}, abrir `ConfirmarPixDialog` em vez do dialog genérico. Mostra anexos do comprovante, valor, loja e botões contextuais por estágio.
-
-## Detalhes técnicos
-
-- Migração: 2 inserts em `pipeline_colunas` (setor Financeiro) reorganizando `ordem` para encaixar logo após "Confirmação PIX".
-- Retorno à loja usa o trilho de `mem://financeiro/retorno-setor-via-app` — sem WhatsApp Meta.
-- Push do app dispara automaticamente pelo trigger `trg_push_nova_notificacao` existente.
-- Sem mudanças em `dispatch-push` nem nos demais pipelines.
-
-Confirma para eu começar?
+Confirma que executo as 3 ações?
