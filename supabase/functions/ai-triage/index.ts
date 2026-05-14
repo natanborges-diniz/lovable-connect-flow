@@ -3161,7 +3161,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       if (posOrc?.etapa && !lastIsImage) {
         if (posOrc.etapa === "aguardando_cta_visita") {
           if (detectAceiteVisita(lastInboundText)) {
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, await getMsgListaCidades());
             await _setPosOrc({ ...posOrc, etapa: "aguardando_cidade", atualizado_at: new Date().toISOString() });
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId, tipo: "cta_visita_aceito",
@@ -3189,12 +3189,12 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         } else if (posOrc.etapa === "aguardando_cidade") {
           const cidade = detectCidadeEscolhida(lastInboundText);
           if (cidade) {
-            const lojasMsg = formatLojasPorCidade(cidade, lojas);
+            const lojasMsg = await formatLojasPorCidade(cidade, lojas);
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
             await _setPosOrc({ ...posOrc, etapa: "aguardando_loja", cidade, atualizado_at: new Date().toISOString() });
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId, tipo: "cidade_escolhida",
-              descricao: `Cliente escolheu cidade ${CIDADE_LABEL[cidade]}`,
+              descricao: `Cliente escolheu cidade ${(await loadCidadesLojas()).cidadeLabel[cidade] || cidade}`,
               metadata: { cidade },
               referencia_tipo: "atendimento", referencia_id: atendimento_id,
             }).then(() => undefined, () => undefined);
@@ -3202,13 +3202,13 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           }
           const tries = Number(posOrc.tries_cidade || 0) + 1;
           if (tries < 2) {
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, MSG_LISTA_CIDADES);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, await getMsgListaCidades());
             await _setPosOrc({ ...posOrc, tries_cidade: tries });
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
           await _setPosOrc(null);
         } else if (posOrc.etapa === "aguardando_loja") {
-          const loja = matchLojaEscolhida(lastInboundText, posOrc.cidade || "", lojas);
+          const loja = await matchLojaEscolhida(lastInboundText, posOrc.cidade || "", lojas);
           if (loja) {
             await _setPosOrc({ ...posOrc, etapa: "agendando", loja_nome: loja.nome_loja, atualizado_at: new Date().toISOString() });
             await supabase.from("eventos_crm").insert({
@@ -3223,7 +3223,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           }
           const tries = Number(posOrc.tries_loja || 0) + 1;
           if (tries < 2) {
-            const lojasMsg = formatLojasPorCidade(posOrc.cidade || "osasco", lojas);
+            const lojasMsg = await formatLojasPorCidade(posOrc.cidade || "osasco", lojas);
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
             await _setPosOrc({ ...posOrc, tries_loja: tries });
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
