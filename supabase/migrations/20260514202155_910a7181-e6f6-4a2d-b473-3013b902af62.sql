@@ -1,0 +1,1 @@
+create sequence if not exists public.contatos_anonimo_seq;

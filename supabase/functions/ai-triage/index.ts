@@ -2506,6 +2506,33 @@ serve(async (req) => {
     const precisaConfirmarNome = contatoMeta.precisa_confirmar_nome === true && !nomeConfirmado;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
 
+    // ── Display-name guardrail ─────────────────────────────────────────────
+    // Nunca chamar o cliente por telefone, "Cliente #NNNN" sequencial, "WhatsApp User",
+    // ou outros placeholders. `_nomeInternoSafe` preserva o valor original para uso
+    // INTERNO (logs, prompt como referência); `contatoNomeAtual` passa a ser o nome
+    // SEGURO PARA VOCATIVO — vazio quando não temos um nome real confirmado.
+    function nomeEhPlaceholder(s: string | null | undefined): boolean {
+      const t = String(s || "").trim();
+      if (!t) return true;
+      const digits = t.replace(/\D/g, "");
+      if (digits.length >= 7) return true;                      // telefone (com ou sem máscara)
+      if (/^\+?\d[\d\s()+-]*$/.test(t)) return true;            // só dígitos/separadores
+      if (/^cliente\s*#?\s*\d+/i.test(t)) return true;          // Cliente #NNNN
+      if (/^(whats?app\s*user|contato|cliente|usu[áa]rio)$/i.test(t)) return true;
+      if (!/[A-Za-zÀ-ÿ]{2,}/.test(t)) return true;              // sem letras
+      return false;
+    }
+    const _nomeInternoSafe = contatoNomeAtual || nomePerfilWhatsapp || "";
+    if (nomeEhPlaceholder(contatoNomeAtual)) {
+      // Se o que está em `contatos.nome` é placeholder, mas há um senderName
+      // do WhatsApp que parece nome real, usa-o como vocativo (origem legítima).
+      if (!nomeEhPlaceholder(nomePerfilWhatsapp)) {
+        contatoNomeAtual = nomePerfilWhatsapp;
+      } else {
+        contatoNomeAtual = ""; // sem vocativo — templates colapsam ", ${nome}" para ""
+      }
+    }
+
     // ── 3.5b. POST-DATA ROUTER: "modelos / armações" → presencial ──
     // Movido pra cá (depois das queries) pra que possa consultar agendamento ativo.
     {
@@ -3518,7 +3545,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
         escalatedSubject,
         nomeWhatsapp: nomePerfilWhatsapp,
-        nomeAtual: contatoNomeAtual,
+        nomeAtual: _nomeInternoSafe,
         nomeConfirmado,
         precisaConfirmar: precisaConfirmarNome,
         locationCtx,
@@ -3564,7 +3591,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         hasKnowledge: conhecimentos.length > 0 || lojas.length > 0,
         escalatedSubject,
         nomeWhatsapp: nomePerfilWhatsapp,
-        nomeAtual: contatoNomeAtual,
+        nomeAtual: _nomeInternoSafe,
         nomeConfirmado,
         precisaConfirmar: precisaConfirmarNome,
       });

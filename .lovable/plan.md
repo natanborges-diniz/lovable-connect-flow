@@ -1,79 +1,57 @@
-# Plano
+## Problema
 
-## 1. Bloco de Hierarquia em `buildSystemPromptFromCompiled()`
+Quando `contatos.nome` contém telefone, placeholder ("Cliente", "WhatsApp User") ou foi gerado sequencialmente, o código atual usa esse valor em saudações, gerando coisas como _"Tô com dificuldade…, **5511949841973**"_. O fast-path de extração de nome cobre só parte dos casos — se cliente nunca confirmou e o `senderName` do WhatsApp é inválido, ainda caímos no telefone.
 
-Em `supabase/functions/ai-triage/index.ts` (linha 1727), inserir como **primeiro `s.push(...)`** — antes de `buildDateContext()` — o bloco fixo:
+## Plano em 4 camadas
 
-> "HIERARQUIA DE INSTRUÇÕES — Em caso de conflito entre os blocos abaixo, siga rigorosamente esta ordem de prioridade: (1) RECEITA PENDENTE… (2) PÓS-RECEITA OBRIGATÓRIO… (3) DESPEDIDA OU DISPENSA… (4) INTENÇÃO DETECTADA… (5) PROMPT COMPILADO PRINCIPAL… (6) DEMAIS BLOCOS… Nunca misture instruções de níveis diferentes na mesma resposta."
+### 1. Cascata de display name (helper único `resolverNomeExibicao`)
 
-> **Nota / clarificação:** o pedido fala em "primeiro item do array `callMessages`", mas `buildSystemPromptFromCompiled()` retorna uma **string única** (concatenação de `s[]`); o array `callMessages` propriamente dito vive em `runIA()` (linha 4329) e é o array que vai ao LLM. Vou interpretar a ordem como "primeiro bloco do system prompt construído por essa função" — i.e. primeira posição de `s[]`. Se a intenção era prepend no `callMessages` em si (ou seja, mais externo, vivendo fora do prompt compilado), me avisa que ajusto antes de aplicar.
+Em `ai-triage/index.ts`, criar helper puro que recebe `{ contatoNome, nomePerfilWhatsapp, telefone, nomeConfirmado, precisaConfirmarNome }` e devolve `{ nomeInterno, nomeParaChamar }`:
 
-## 2. Watchdog `countActiveBlocks()`
+- **`nomeInterno`** (uso em logs, eventos, prompt como "REFERÊNCIA INTERNA"): sempre preenchido — cascata `contatoNome válido → nomePerfilWhatsapp válido → "Cliente #XXXX"` (sequencial, ver §3).
+- **`nomeParaChamar`** (uso em mensagens ao cliente): só preenchido se **`nomeConfirmado === true`** OU se o nome veio do `senderName` do WhatsApp e passou em `looksLikeRealName()`. Senão devolve **`null`** → templates renderizam **sem vocativo** (ex.: `"Tô com dificuldade…"` em vez de `"Tô com dificuldade…, 5511949841973"`).
 
-Adicionar função utilitária no mesmo arquivo que recebe os flags/strings opcionais já passados a `buildSystemPromptFromCompiled` (firstContact, continuity, locationCtx, receitaCtx, sentTopics, isHibrido, escalatedSubject, hasKnowledge, agendamentoCtx) e devolve `{ count: number, ativos: string[] }`. Chamar dentro de `buildSystemPromptFromCompiled()` no final; se `count > 3`, `console.warn("[ai-triage] system prompt com N blocos ativos:", ativos)`.
+Validador `nomeEhPlaceholder(s)`: dígitos puros, ≥7 dígitos contidos, regex `/cliente\s*#?\d+/i`, "WhatsApp User", "Contato", vazio.
 
-## 3. Migration `lojas_cidades`
+### 2. Substituir todos os 30+ usos de `contatoNomeAtual.split(" ")[0]`
 
-`supabase/migrations/<timestamp>_lojas_cidades.sql`:
+Trocar por `nomeParaChamar` nas templates de mensagem ao cliente (linhas 2366, 2548, 2670, 2806, 2914, 3064, 3732, 3914–3917, 3923, 4118, 4350, 4704, 5377, 5531–5575, 5741, 5808, 5978, 6054). Cada template já forma `, ${nome}` — quando `nomeParaChamar` é null, o trecho `, ${nome}` colapsa para string vazia.
 
-```text
-create table public.lojas_cidades (
-  id uuid primary key default gen_random_uuid(),
-  cidade text not null,
-  loja_id text not null,
-  loja_nome text not null,
-  regiao text,
-  ativo boolean not null default true,
-  created_at timestamptz not null default now()
-);
-alter table public.lojas_cidades enable row level security;
-create policy "Leitura autenticada" on public.lojas_cidades
-  for select to authenticated using (true);
-create policy "Admin gerencia" on public.lojas_cidades
-  for all to authenticated
-  using (public.is_admin(auth.uid()))
-  with check (public.is_admin(auth.uid()));
-create index idx_lojas_cidades_cidade_ativo on public.lojas_cidades(cidade) where ativo;
+`contatoNomeAtual` continua sendo usado **internamente** (logs, prompt como "Nome interno do contato: X"), mas nunca mais vaza para o cliente sem confirmação.
+
+### 3. Geração de "Cliente #NNNN" sequencial (interno)
+
+Migration nova:
+```sql
+create sequence if not exists public.contatos_anonimo_seq;
 ```
 
-Seed (a partir de `CIDADE_TO_LOJAS`, linhas 115–120). `loja_id` = slug (ex.: `diniz-uniao`), `loja_nome` = nome exato em `telefones_lojas.nome_loja`, `regiao` = `osasco`/`carapicuiba`/`itapevi`/`barueri` (zona oeste/SP) — preencho `regiao = cidade` por enquanto, podendo evoluir.
+No webhook (`whatsapp-webhook`) e no fast-path de `ai-triage`, quando `contatos.nome` é placeholder/telefone E `senderName` também inválido:
+- `select nextval('contatos_anonimo_seq')` → grava `contatos.nome = 'Cliente #' || lpad(seq, 4, '0')` e `metadata.nome_origem='anonimo_sequencial'`, `nome_confirmado=false`, `precisa_confirmar_nome=true`.
+- Esse nome **nunca** é usado em mensagens ao cliente (filtrado por `nomeEhPlaceholder` no helper §1) — serve só para listas internas (CRM, Kanban, atendimentos).
 
-| cidade | loja_nome |
-|---|---|
-| osasco | DINIZ ANTONIO AGU, DINIZ PRIMITIVA I, DINIZ PRIMITIVA II, DINIZ STO ANTONIO, DINIZ SUPER SHOPPING, DINIZ UNIÃO |
-| carapicuiba | DINIZ CARAPICUIBA |
-| itapevi | DINIZ ITAPEVI |
-| barueri | DINIZ BARUERI |
+### 4. Sistema prompt: separar nome interno vs vocativo
 
-## 4. `loadCidadesLojas()` com cache de 5 min em `ai-triage/index.ts`
+Hoje o prompt diz coisas como "Cliente: {contatoNome}". Trocar por dois blocos:
+- `REFERÊNCIA INTERNA (não chamar): {nomeInterno}` — sempre presente.
+- `COMO CHAMAR O CLIENTE: {nomeParaChamar || "ainda desconhecido — não use vocativo nem invente nome; siga o fluxo de confirmação de nome se aplicável"}`.
 
-- Adicionar no topo do módulo:
-  ```text
-  let cidadesCache: { data: any[], loadedAt: number } | null = null;
-  const CIDADES_TTL_MS = 5 * 60 * 1000;
-  ```
-- Função `async loadCidadesLojas()` que retorna `{ cidadeToLojas, cidadeLabel, lista }`. Se cache válido, devolve do cache; senão `supabase.from('lojas_cidades').select('*').eq('ativo', true)`.
-- Substituir referências a `CIDADE_TO_LOJAS` (linhas 163, 180) e `MSG_LISTA_CIDADES` (linhas 3090, 3131) — funções `formatLojasPorCidade` e `matchLojaEscolhida` viram `async` e recebem o snapshot já carregado, ou fazem `await loadCidadesLojas()` internamente. Os call-sites já são `async`, então o `await` é seguro.
-- `MSG_LISTA_CIDADES` passa a ser construída dinamicamente da lista distinta de `cidade` ordenada (mantendo emoji 🏙️ por linha).
+Combinado com a memória `saudacao-confirma-nome.md`, isso garante:
+- 1ª/2ª tentativa → IA pergunta o nome (já existe).
+- Se cliente nunca responder → IA segue ajudando **sem vocativo**.
+- Após 3 tentativas → escala humano (já existe).
 
-## 5. Fallback comentado
+## Arquivos tocados
 
-Manter `MSG_LISTA_CIDADES`, `CIDADE_TO_LOJAS` e `CIDADE_LABEL` no arquivo, **comentados em bloco** com:
-
-```text
-// FALLBACK — usar apenas se a tabela lojas_cidades estiver inacessível
-```
-
-E em `loadCidadesLojas()`, no `catch`, devolver esse fallback (descomentando-o como const interna `_FALLBACK_*` que mantemos viva no código mas não usada no caminho feliz).
-
-## Detalhes técnicos
-
-- `buildSystemPromptFromCompiled` continua síncrona: o bloco de hierarquia é estático, então não exige IO.
-- `loadCidadesLojas()` usa o client Supabase service-role já existente em `ai-triage` (não precisa de novo import).
-- Migration roda antes do deploy do EF; deploy do `ai-triage` automático.
-- Sem mudanças em UI / componentes React.
+- `supabase/functions/ai-triage/index.ts` — helper + substituições.
+- `supabase/functions/whatsapp-webhook/index.ts` — cascata de placeholder + sequencial.
+- 1 migration: `create sequence contatos_anonimo_seq`.
+- Atualizar memória `mem://ia/saudacao-confirma-nome.md` com a regra "nunca chamar pelo telefone/placeholder".
 
 ## Validação
 
-1. `supabase--read_query` em `lojas_cidades` para conferir o seed.
-2. `supabase--curl_edge_functions` em `ai-triage` com payload de teste para garantir que a string de hierarquia aparece como primeiro bloco do prompt (via log) e que a lista de cidades renderiza igual à versão hardcoded.
+1. Testar 3 cenários via `curl_edge_functions`/replay:
+   - Contato com `nome="5511949841973"` → resposta sem vocativo.
+   - Contato com `nome_perfil_whatsapp="Beatriz"` válido + nome ainda não confirmado → vocativo "Beatriz" liberado (origem WhatsApp legítima).
+   - Contato 100% anônimo novo → recebe `Cliente #0042` interno, mensagens sem vocativo, IA pergunta nome.
+2. `read_query` em `contatos` para conferir que nenhum `nome` legado com telefone está sendo "promovido" indevidamente — o helper opera em runtime, não reescreve o banco.
