@@ -2753,6 +2753,7 @@ export type Database = {
         Args: { _data: string; _loja_id: string }
         Returns: Json
       }
+      next_contato_anonimo: { Args: never; Returns: number }
       nextval_protocolo: { Args: never; Returns: number }
       pode_conversar_1a1: {
         Args: { _destinatario: string; _remetente: string }
