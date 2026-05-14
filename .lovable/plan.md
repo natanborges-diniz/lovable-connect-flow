@@ -1,58 +1,63 @@
-# Retomar atendimento da Magali Bueno com receita transcrita
+# Mover card de cliente para a coluna do ciclo de agendamento na Loja
 
-## Contexto verificado
+## Causa raiz (verificada no banco)
 
-- Atendimento `0fbdc84c-7b9d-47ee-a53f-a25593d19d9c`, contato `5817e8e9…`, telefone `5511967653099`.
-- Estado atual: `modo=humano`, `status=aguardando`, **sem receita salva** em `contatos.metadata.receitas` (foto ficou ilegível).
-- Última msg da IA já encerrou pedindo equipe; cliente respondeu "Pode deixar então, obrigada".
+Caso da Cláudia (`contato 594b3664…`, agendamento `413a681a…`):
+- Agendamento existe na **DINIZ UNIÃO**, status já chegou em `compareceu`, `cliente_confirmou_at` preenchido.
+- Contato continua com `pipeline_coluna_id = cad20aaf…` ("**Informações Gerais**", coluna órfã sem setor).
+- `pipeline_card_eventos` para esse contato: **0 linhas** — nunca foi movido.
+- Setor destino do contato já é "Loja" (`277307f3…`), e o setor Loja tem o pipeline correto:
+  `Agendado → Confirmado → Atendido → No-Show → Recuperação → Reagendado → Abandonado → Cancelado`.
 
-## Ações (one-shot, sem alterar código)
+Por que não moveu:
+1. **`agendar-cliente`** insere em `agendamentos` e chama `notificar-loja-agendamento`, mas **não toca `contatos.pipeline_coluna_id`**.
+2. O trigger `trg_agendamento_status_change` dispara `pipeline-automations` **só em UPDATE** (não em INSERT). E mesmo quando dispara, **não existe nenhuma automação `mover_coluna`** cadastrada para nenhum status (`pipeline_automacoes` para entidade `agendamento` só tem `enviar_mensagem`, `enviar_template`, `criar_tarefa`).
 
-### 1. Persistir a receita lida manualmente
+Resultado: o card nunca entra no kanban da Loja em nenhuma fase.
 
-`update contatos set metadata = jsonb_set(coalesce(metadata,'{}'::jsonb), '{receitas}', '[{...}]'::jsonb, true)` adicionando uma entrada:
+## Plano
 
-```json
-{
-  "id": "<uuid novo>",
-  "tipo": "progressiva",
-  "fonte": "humano_transcricao",
-  "criado_em": "<now>",
-  "od": { "esf":  1.75, "cil": -0.75, "eixo": 95,  "add": 2.75 },
-  "oe": { "esf":  1.25, "cil": -0.50, "eixo": 115, "add": 2.75 },
-  "observacao": "Transcrita manualmente pelo operador a partir da foto"
-}
-```
+### 1. Cadastrar automações `mover_coluna` para os status do agendamento
 
-(Adição única +2,75 aplicada nos dois olhos — padrão de receita progressiva.)
+Inserir em `pipeline_automacoes` (entidade=`agendamento`, ativo=true), uma por status, apontando para as colunas do setor Loja:
 
-### 2. Voltar atendimento para IA
+| status_alvo     | pipeline_coluna_id (destino)            |
+|-----------------|-----------------------------------------|
+| `agendado`      | `2865b9f1…` (Agendado)                  |
+| `confirmado`    | `d4f84dce…` (Confirmado)                |
+| `compareceu`    | `f3fe0424…` (Atendido)                  |
+| `no_show`       | `a2dcd5c5…` (No-Show)                   |
+| `recuperacao`   | `e58657e8…` (Recuperação)               |
+| `reagendado`    | `3eb2154b…` (Reagendado)                |
+| `cancelado`     | `36f09b5d…` (Cancelado)                 |
 
-`update atendimentos set modo='ia', status='aguardando', updated_at=now() where id='0fbdc84c…';`
+`config = { "pipeline_coluna_id": "<id>" }` e `tipo_acao = 'mover_coluna'`.
 
-Registrar `eventos_crm` tipo `humano_devolveu_para_ia` com descrição "Receita transcrita manualmente — IA reassume".
+> O loader `pipeline-automations` já lê automações por `status_alvo` do agendamento e move `contatos.pipeline_coluna_id` (mesma mecânica que envia template/mensagem). Não precisa novo código de execução — só registro de dados.
 
-### 3. Mensagem proativa ao cliente (via `send-whatsapp`)
+### 2. Disparar automações também no INSERT (primeiro `agendado`)
 
-Texto a enviar (curto, valida a leitura antes de orçar):
+Hoje o trigger só roda em `UPDATE`. Duas opções, escolho **(a)** por ser mínima:
 
-```
-Magali, a equipe conseguiu ler sua receita 🙌 Confere se tá certinho:
+(a) **Criar trigger AFTER INSERT** em `agendamentos` que chame `pipeline-automations` com `status_novo=NEW.status`, `status_anterior=NULL` — reaproveitando exatamente a mesma função `on_agendamento_status_change` adaptada (ou nova `on_agendamento_inserted`). Idempotente porque a coluna alvo é fixa por status.
 
-📋 *Longe / Progressiva*
-• *OD:* +1,75 esf | -0,75 cil | eixo 95
-• *OE:* +1,25 esf | -0,50 cil | eixo 115
-• *Adição:* +2,75
+(b) Editar `agendar-cliente` pra chamar `pipeline-automations` direto após insert. Mais código, sem ganho.
 
-Tá correto? Se sim, já te mostro 3 opções de lentes (econômica, intermediária e premium) 😉
-```
+### 3. One-shot retroativo para Cláudia
 
-Quando ela confirmar (sim/correto/ok), o `ai-triage` segue o fluxo normal de orçamento usando a receita salva (`consultar_lentes_estimativa` ou `consultar_lentes`), porque agora há receita válida em `contatos.metadata.receitas`.
+Atualizar `contatos.pipeline_coluna_id` do contato `594b3664…` para `f3fe0424…` (Atendido — status `compareceu`) e registrar evento em `pipeline_card_eventos` (`tipo='movido_retroativo'`, descrição "Backfill ciclo agendamento Loja").
 
 ## Não muda
 
-- Código das edge functions (sem deploy).
-- Outros atendimentos / pipeline / configurações.
-- Nada da loja / Atrium.
+- Texto/comportamento das automações de mensagem/template já existentes.
+- Regras de skip por `cliente_confirmou_at` e ordem regressiva.
+- Outros setores ou pipelines.
+- Frontend (kanban Loja já lista por `pipeline_coluna_id` do setor).
 
-Confirma que executo as 3 ações?
+## Riscos / mitigação
+
+- **Cards antigos sem agendamento ativo**: a migração só altera o card via gatilho — agendamentos novos seguem o fluxo, agendamentos antigos não são reprocessados (exceto Cláudia, manual).
+- **Múltiplos agendamentos por contato**: ao mudar status, o último update vence — coerente com o que CRM já faz.
+- **Lojas que ainda não usam o pipeline Loja**: as colunas são compartilhadas no setor Loja; basta o usuário filtrar por `loja_nome` (já é como o front opera hoje).
+
+Confirma que aplico (1) migration de automações, (2) trigger AFTER INSERT, (3) backfill da Cláudia?
