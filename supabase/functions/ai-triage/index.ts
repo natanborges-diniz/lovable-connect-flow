@@ -3870,6 +3870,27 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     const isShortNoToHelp = (askedHelpMore && SHORT_NO_RE.test(msgTrim2))
       || (hasAgendamentoAtivo && isThanksOnly && !pendingComparativoOffer);
 
+    // ── NEGATIVA PÓS-RETOMADA ──
+    // Se a última outbound foi um template/mensagem de retomada (recuperacao_vendas ou
+    // recuperacao_humano nas últimas 48h, OU assinatura textual da retomada) e o cliente
+    // responde negativamente ("não", "não quero", "depois eu vejo", "deixa pra lá",
+    // "sem interesse", "agora não", etc), encerramos imediatamente — sem 2ª retomada.
+    const NEGATIVA_POS_RETOMADA_RE = /^(n[aã]o( quero| preciso| tenho interesse| obrigad[oa])?|n|nn|sem interesse|depois( eu)? vejo|deixa (pra|para) (depois|l[aá])|fica (pra|para) depois|agora n[aã]o|talvez depois|por enquanto n[aã]o|obrigad[ao],?\s*n[aã]o|n[aã]o, obrigad[oa])\b.*$/i;
+    const _recV = (contatoMeta as any)?.recuperacao_vendas || {};
+    const _recH = ((atendimento.metadata as Record<string, any>) || {})?.recuperacao_humano || {};
+    const _lastTryAt = Math.max(
+      _recV?.ultima_tentativa_at ? Date.parse(_recV.ultima_tentativa_at) : 0,
+      _recH?.ultima_tentativa_at ? Date.parse(_recH.ultima_tentativa_at) : 0,
+    );
+    const _retomadaJanelaMs = 48 * 60 * 60 * 1000;
+    const _retomadaRecente = _lastTryAt > 0 && (Date.now() - _lastTryAt) < _retomadaJanelaMs;
+    const _retomadaTextual = /est[aá]vamos conversando|ficou com alguma d[uú]vida|retomada_contexto|posso te ajudar com mais alguma|continuamos (a |o )?conversa/i.test(lastOutboundTxt);
+    const _eligibleRetomada = (_retomadaRecente || _retomadaTextual) && !hasAgendamentoAtivo;
+    const isNegativaPosRetomada = _eligibleRetomada && NEGATIVA_POS_RETOMADA_RE.test(msgTrim2);
+    if (isNegativaPosRetomada) {
+      console.log(`[CLOSE-NEGATIVA-RETOMADA] lastTryAt=${_lastTryAt ? new Date(_lastTryAt).toISOString() : "n/a"} textual=${_retomadaTextual} msg="${msgTrim2.substring(0, 60)}"`);
+    }
+
     // Agradecimento direto ao final, sem "não" antes (ex: cliente diz "Obg" depois do agendamento)
     const isThanksClose = hasAgendamentoAtivo && isThanksOnly && !askedHelpMore;
 
