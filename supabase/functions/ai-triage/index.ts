@@ -2945,7 +2945,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       || /\[image\]|\[document\]/.test(currentMsg)
       || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
     // Receita salva mas vazia/`unknown` (caso Jardel) NÃO conta — força nova OCR.
-    const hasValidReceitas = hasReceitasValidas(receitas);
+    let hasValidReceitas = hasReceitasValidas(receitas);
 
     // ── Nova receita pendente: imagem inbound mais recente que a última receita salva ──
     // Caso Tati (Mai/2026): cliente já tem receita confirmada, manda foto de receita NOVA;
@@ -4297,6 +4297,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // receita prévia salva. Agora basta a IA ter pedido (MSG_PEDIR_RECEITA_TEXTO)
     // nas últimas 2 outbound para que o parser entre em modo "first".
     let correctionApplied = false;
+    let correctionIsFirst = false;
     const correction = detectPrescriptionCorrection(lastInboundText);
     if (correction) {
       const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
@@ -4466,6 +4467,10 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           : `\n⚠️ A última receita foi CORRIGIDA pelo cliente nesta mensagem. Use estes valores como verdade — NÃO mencione os valores antigos.`;
 
         correctionApplied = true;
+        correctionIsFirst = isFirst;
+        // Atualiza flag para que forcedIntent (calculado logo abaixo) use o estado correto
+        // e não force pedido de foto mesmo com receita recém-salva.
+        if (isFirst) hasValidReceitas = true;
         console.log(`[RX-${isFirst ? "FIRST-TYPED" : "CORRECTION"}] rx_type=${correction.rx_type}, OD.sph=${correction.od.sphere}, OE.sph=${correction.oe.sphere}`);
       }
     }
@@ -4526,9 +4531,11 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     if (correctionApplied) {
       messages.push({
         role: "system",
-        content: "[SISTEMA: RECEITA CORRIGIDA PELO CLIENTE] O cliente acabou de corrigir os valores da receita por texto. Os novos valores estão na seção RECEITAS (marcada como ⚠️ CORRIGIDA PELO CLIENTE). AÇÃO OBRIGATÓRIA: 1) reconheça brevemente a correção (ex: 'Perfeito, anotado!'); 2) chame consultar_lentes AGORA com os valores novos para refazer o orçamento. NÃO repita valores antigos. NÃO peça nova foto. NÃO peça confirmação adicional — confie no que ele digitou.",
+        content: correctionIsFirst
+          ? "[SISTEMA: RECEITA DIGITADA PELO CLIENTE] O cliente digitou os valores da receita em texto. Os valores estão na seção RECEITAS (marcada como ⚠️ DIGITADA PELO CLIENTE). AÇÃO OBRIGATÓRIA: 1) confirme os valores brevemente (ex: 'Perfeito, anotei!'); 2) chame consultar_lentes AGORA. NÃO peça foto da receita. NÃO peça confirmação adicional — confie no que ele digitou."
+          : "[SISTEMA: RECEITA CORRIGIDA PELO CLIENTE] O cliente acabou de corrigir os valores da receita por texto. Os novos valores estão na seção RECEITAS (marcada como ⚠️ CORRIGIDA PELO CLIENTE). AÇÃO OBRIGATÓRIA: 1) reconheça brevemente a correção (ex: 'Perfeito, anotado!'); 2) chame consultar_lentes AGORA com os valores novos para refazer o orçamento. NÃO repita valores antigos. NÃO peça nova foto. NÃO peça confirmação adicional — confie no que ele digitou.",
       });
-      console.log(`[RX-CORRECTION] Forcing consultar_lentes with corrected prescription`);
+      console.log(`[RX-${correctionIsFirst ? "FIRST-TYPED" : "CORRECTION"}] Forcing consultar_lentes`);
     }
 
     // ── REGRA ANTI-ALUCINAÇÃO DE DATA + TOOL OBRIGATÓRIA (universal) ──
