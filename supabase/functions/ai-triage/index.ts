@@ -3960,6 +3960,29 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, despedidaMsg);
       await logEvent(supabase, contatoId, atendimento_id, "despedida_deterministica", `${isExplicitClose ? "explicit" : isThanksClose ? "thanks" : "shortNoToHelp"}; agFmt=${agendamentoFmt || "vazio"}`);
+
+      // ── BLOQUEIO DE RETOMADA AUTOMÁTICA ──
+      // Cliente pediu para encerrar OU dispensou ajuda após despedida.
+      // Marca atendimento p/ vendas-recuperacao-cron NÃO disparar retomada_contexto_*.
+      // Encerramento explícito também fecha o atendimento.
+      try {
+        const _atMd = (atendimento.metadata as Record<string, any>) || {};
+        const _patchMeta: Record<string, any> = {
+          ..._atMd,
+          nao_retornar_automaticamente: true,
+          encerrado_pelo_cliente_at: new Date().toISOString(),
+          encerrado_motivo: isExplicitClose ? "encerramento_explicito" : (isThanksClose ? "agradecimento_pos_agendamento" : "dispensou_ajuda"),
+        };
+        const _update: Record<string, any> = { metadata: _patchMeta, updated_at: new Date().toISOString() };
+        if (isExplicitClose) {
+          _update.status = "encerrado";
+          _update.fim_at = new Date().toISOString();
+        }
+        await supabase.from("atendimentos").update(_update).eq("id", atendimento_id);
+      } catch (e) {
+        console.warn("[CLOSE] falha ao gravar nao_retornar_automaticamente:", (e as Error)?.message);
+      }
+
       return jsonResponse({ status: "ok", tools_used: ["despedida_deterministica"], intencao: "despedida", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
     }
 
@@ -5294,6 +5317,23 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             console.log(`[TOOL] cancelar_visita: agendamento ${_alvo.id} marcado como cancelado`);
           } catch (e) {
             console.error("[TOOL] cancelar_visita update failed:", e);
+          }
+          // ── BLOQUEIO DE RETOMADA AUTOMÁTICA PÓS-CANCELAMENTO ──
+          // Cliente desmarcou — não dispara retomada_contexto_* enquanto ele não voltar a falar.
+          // Evita template "Estávamos conversando sobre as lentes..." horas depois do cancelamento.
+          try {
+            const _atMdC = (atendimento.metadata as Record<string, any>) || {};
+            await supabase.from("atendimentos").update({
+              metadata: {
+                ..._atMdC,
+                nao_retornar_automaticamente: true,
+                encerrado_pelo_cliente_at: new Date().toISOString(),
+                encerrado_motivo: "cancelamento_cliente",
+              },
+              updated_at: new Date().toISOString(),
+            }).eq("id", atendimento_id);
+          } catch (e) {
+            console.warn("[CANCEL] falha ao gravar nao_retornar_automaticamente:", (e as Error)?.message);
           }
           resposta = args.resposta || `Prontinho${_firstNm ? ", " + _firstNm : ""} — cancelei seu horário. Quando quiser remarcar é só me chamar 👋`;
         }
