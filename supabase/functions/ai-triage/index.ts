@@ -7248,9 +7248,50 @@ async function runConsultarLentesEstimativa(
   const sorted = Array.from(uniqMap.values()).sort(
     (a, b) => Number(a.price_brl) - Number(b.price_brl),
   );
-  const economy = sorted[0];
-  const premium = sorted[sorted.length - 1];
-  const mid = sorted.length >= 3 ? sorted[Math.floor(sorted.length / 2)] : null;
+  // ── Seleção das 3 faixas com hierarquia de marcas ──
+  const brandMatch = (b: string, names: string[]) =>
+    names.some((n) => b.toLowerCase() === n.toLowerCase());
+  const isBasicBrand = (b: string) => brandMatch(b, ["dmax", "dnz"]);
+  const isMidBrand = (b: string) => brandMatch(b, ["hoya", "essilor"]);
+  const isZeiss = (b: string) => b.toLowerCase() === "zeiss";
+  const isKodak = (b: string) => b.toLowerCase() === "kodak";
+
+  // BÁSICA: mais barato entre DMax/DNZ; fallback = mais barato excluindo ZEISS e Kodak
+  let economy: any = sorted.find((p) => isBasicBrand(p.brand)) ?? null;
+  if (!economy) {
+    economy = sorted.find((p) => !isZeiss(p.brand) && !isKodak(p.brand)) ?? sorted[0];
+    if (economy) console.warn(`[QUOTE-EST] básica fallback para ${economy.brand} (sem DMax/DNZ disponível)`);
+  }
+
+  // INTERMEDIÁRIA: mais barato entre Hoya/Essilor que não seja o mesmo produto da básica.
+  // Para progressivas, prioriza family contendo "Hoyalux D+" se disponível.
+  let mid: any = null;
+  const midCandidates = sorted.filter((p) => isMidBrand(p.brand) && p !== economy);
+  if (midCandidates.length > 0) {
+    if (rxType === "progressive") {
+      const hoyaluxDPlus = midCandidates.find((p) =>
+        p.family?.toLowerCase().includes("hoyalux d+"),
+      );
+      mid = hoyaluxDPlus ?? midCandidates[0];
+    } else {
+      mid = midCandidates[0];
+    }
+  }
+  if (!mid && sorted.length >= 3) {
+    mid = sorted[Math.floor(sorted.length / 2)];
+    if (mid === economy) mid = null;
+    if (mid) console.warn(`[QUOTE-EST] intermediária fallback para ${mid.brand} (sem Hoya/Essilor disponível)`);
+  }
+
+  // PREMIUM: mais caro da lista; substitui ZEISS pelo segundo mais caro se houver alternativa.
+  let premium: any = sorted[sorted.length - 1];
+  if (isZeiss(premium.brand) && sorted.length >= 2) {
+    const alt = [...sorted].reverse().find((p) => !isZeiss(p.brand));
+    if (alt) {
+      console.warn(`[QUOTE-EST] premium ZEISS substituído por ${alt.brand} (proativo bloqueado)`);
+      premium = alt;
+    }
+  }
 
   const fmt = (v: number) =>
     `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
