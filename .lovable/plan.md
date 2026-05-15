@@ -1,57 +1,93 @@
 ## Problema
 
-Quando `contatos.nome` contém telefone, placeholder ("Cliente", "WhatsApp User") ou foi gerado sequencialmente, o código atual usa esse valor em saudações, gerando coisas como _"Tô com dificuldade…, **5511949841973**"_. O fast-path de extração de nome cobre só parte dos casos — se cliente nunca confirmou e o `senderName` do WhatsApp é inválido, ainda caímos no telefone.
+Quando a IA não consegue ler a receita (OCR falhou, ou cliente rejeitou 2x) ela escala para humano (`modo=humano`, motivo `receita_escalada_apos_2_rejeicoes` / `receita_texto_recusada`). O guard logo no início de `ai-triage` (`if (atendimento.modo === "humano") return skipped`) então silencia a IA para sempre — mesmo quando, minutos depois, **o próprio cliente** digita a receita por texto ("Esférico od -0,50 / Esférico OE -2,50"). Hoje isso fica parado aguardando consultor humano abrir, embora a IA já tenha tudo para retomar.
 
-## Plano em 4 camadas
+Caso Flávia (15/05): IA escalou às 09:36; cliente digitou OD -0,50 / OE -2,50 às 09:39 e nada mais aconteceu.
 
-### 1. Cascata de display name (helper único `resolverNomeExibicao`)
+## Plano
 
-Em `ai-triage/index.ts`, criar helper puro que recebe `{ contatoNome, nomePerfilWhatsapp, telefone, nomeConfirmado, precisaConfirmarNome }` e devolve `{ nomeInterno, nomeParaChamar }`:
+Adicionar um **pre-router de retomada** em `supabase/functions/ai-triage/index.ts`, posicionado **antes** do `if (atendimento.modo === "humano")` (linha 2275) e depois do parsing básico de `lastInboundText` / `recentOutbound`. Comportamento:
 
-- **`nomeInterno`** (uso em logs, eventos, prompt como "REFERÊNCIA INTERNA"): sempre preenchido — cascata `contatoNome válido → nomePerfilWhatsapp válido → "Cliente #XXXX"` (sequencial, ver §3).
-- **`nomeParaChamar`** (uso em mensagens ao cliente): só preenchido se **`nomeConfirmado === true`** OU se o nome veio do `senderName` do WhatsApp e passou em `looksLikeRealName()`. Senão devolve **`null`** → templates renderizam **sem vocativo** (ex.: `"Tô com dificuldade…"` em vez de `"Tô com dificuldade…, 5511949841973"`).
+### 1. Gatilho
 
-Validador `nomeEhPlaceholder(s)`: dígitos puros, ≥7 dígitos contidos, regex `/cliente\s*#?\d+/i`, "WhatsApp User", "Contato", vazio.
+Detecta TODAS as condições:
 
-### 2. Substituir todos os 30+ usos de `contatoNomeAtual.split(" ")[0]`
+- `atendimento.modo === "humano"`
+- `metadata.revisao_humana_motivo` ∈ `{ "receita_escalada_apos_2_rejeicoes", "receita_texto_recusada", "rx_ocr_falhou", "rx_invalida" }` (lista whitelist — outros motivos como "consulta_os" continuam intocados)
+- `!lastIsImage`
+- inbound de texto roda no parser existente `detectPrescriptionCorrection(lastInboundText, /*allowFirst*/true)` e devolve uma receita **válida** (passa em `isReceitaValida`: ao menos um olho com `sphere` ou `cylinder` numérico, `rx_type` ≠ unknown).
+- janela máxima desde `escalado_humano_at`: 24h (evita "ressuscitar" atendimento antigo).
 
-Trocar por `nomeParaChamar` nas templates de mensagem ao cliente (linhas 2366, 2548, 2670, 2806, 2914, 3064, 3732, 3914–3917, 3923, 4118, 4350, 4704, 5377, 5531–5575, 5741, 5808, 5978, 6054). Cada template já forma `, ${nome}` — quando `nomeParaChamar` é null, o trecho `, ${nome}` colapsa para string vazia.
+### 2. Ação (idempotente, transacional do ponto de vista lógico)
 
-`contatoNomeAtual` continua sendo usado **internamente** (logs, prompt como "Nome interno do contato: X"), mas nunca mais vaza para o cliente sem confirmação.
+a. **Persistir receita** em `contatos.metadata.receitas[]` como nova entrada `{ source: "client_typed_first_pos_escalada", confirmed_by_client_at: null, ... }` reutilizando o helper de merge já usado no ramo `client_typed_first`. Aplicar mesmo guard anti-hallucination (validação contra `sourceNumbers`).
 
-### 3. Geração de "Cliente #NNNN" sequencial (interno)
+b. **Marcar `metadata.receita_confirmacao = { pending: true, rx_index, reason: "retomada_pos_escalada", fora_da_faixa }`** (computa fora_da_faixa pelos thresholds atuais).
 
-Migration nova:
-```sql
-create sequence if not exists public.contatos_anonimo_seq;
+c. **Devolver atendimento para IA**:
+```
+atendimentos.update({
+  modo: "ia",
+  status: "em_andamento",
+  metadata: {
+    ...meta,
+    revisao_humana_pendente: false,
+    revisao_humana_motivo: null,
+    retomada_ia_pos_escalada_at: now,
+    retomada_motivo: "cliente_digitou_receita",
+  }
+})
 ```
 
-No webhook (`whatsapp-webhook`) e no fast-path de `ai-triage`, quando `contatos.nome` é placeholder/telefone E `senderName` também inválido:
-- `select nextval('contatos_anonimo_seq')` → grava `contatos.nome = 'Cliente #' || lpad(seq, 4, '0')` e `metadata.nome_origem='anonimo_sequencial'`, `nome_confirmado=false`, `precisa_confirmar_nome=true`.
-- Esse nome **nunca** é usado em mensagens ao cliente (filtrado por `nomeEhPlaceholder` no helper §1) — serve só para listas internas (CRM, Kanban, atendimentos).
+d. **Mensagem determinística** (sem LLM, anti-alucinação) construída via `buildMsgConfirmarReceita(rx, /*highImpact=*/false)` já existente — pede "A receita é: OD ... / OE ... Confere?". Usa `nomeParaChamar` (já implementado em `resolverNomeExibicao`); se ausente, sem vocativo.
 
-### 4. Sistema prompt: separar nome interno vs vocativo
+e. Mover card para coluna `Orçamento` (ou manter atual se já estiver lá) — usa o mesmo helper de pipeline_coluna_sugerida.
 
-Hoje o prompt diz coisas como "Cliente: {contatoNome}". Trocar por dois blocos:
-- `REFERÊNCIA INTERNA (não chamar): {nomeInterno}` — sempre presente.
-- `COMO CHAMAR O CLIENTE: {nomeParaChamar || "ainda desconhecido — não use vocativo nem invente nome; siga o fluxo de confirmação de nome se aplicável"}`.
+f. **Eventos**:
+- `eventos_crm.tipo = "ia_retomada_pos_escalada_receita_texto"` com `metadata.receita_parsed`, `previous_motivo`, `previous_modo`.
+- `audit_log` ou tabela equivalente já usada em escaladas.
 
-Combinado com a memória `saudacao-confirma-nome.md`, isso garante:
-- 1ª/2ª tentativa → IA pergunta o nome (já existe).
-- Se cliente nunca responder → IA segue ajudando **sem vocativo**.
-- Após 3 tentativas → escala humano (já existe).
+g. **Notificar humano** (se já havia atendente atribuído): inserir `notificacoes` "Cliente digitou receita — IA retomou e está aguardando confirmação. Você pode reassumir a qualquer momento" para o `atendente_id` atual. Não escalou a um humano específico = pula.
+
+h. Retorna `jsonResponse({ status:"ok", tools_used:["ia_retomada_pos_escalada_receita"], intencao:"receita_oftalmologica", precisa_humano:false, pipeline_coluna_sugerida:"Orçamento", modo:"ia" })`.
+
+### 3. Fluxo subsequente (já funciona, sem alteração)
+
+- Próximo inbound do cliente ("Sim", "Confere", "Isso") cai no gate `isReceitaPending` (linha 2872), confirma `confirmed_by_client_at`, libera cotação normal via LLM com tool `consultar_lentes`.
+- Se cliente corrige ("Na verdade é -0,75…"), entra no ramo `detectPrescriptionCorrection` em modo `client_correction`, com proteção de alto impacto já vigente.
+- Se cliente fica em silêncio, o `watchdog-loop-ia` cuida normalmente.
+
+### 4. Guardrails
+
+- **Não retomar** se `metadata.retomada_ia_pos_escalada_at` foi setada nos últimos 10min (evita loop se cliente mandar mais 1 receita logo depois — segunda mensagem já cai no gate).
+- **Não retomar** se humano enviou outbound entre `escalado_humano_at` e o inbound atual (consultor já assumiu). Cheque via `atendimentos.outbound_humano_count` ou último `mensagens.author_type === "humano"` posterior à escalada.
+- **Não retomar** se `modo === "ponte"` (mensageria interna em curso).
+- Mantém compatibilidade com `Modo Homologação Global` (se ativo, ainda persiste receita + evento, mas não envia WhatsApp — já é regra do `sendWhatsApp`).
+
+### 5. Memória
+
+Atualizar/criar `mem://ia/retomada-ia-pos-receita-texto.md` documentando:
+- Whitelist de motivos
+- Janela 24h
+- Idempotência 10min
+- Fluxo: persist → pending=true → modo=ia → msg confirmação determinística
+
+Adicionar uma linha em `mem://index.md` (Memories) referenciando o arquivo novo.
+
+### 6. Validação
+
+1. `supabase--curl_edge_functions` POST `/ai-triage` simulando o atendimento da Flávia (modo=humano, motivo=receita_escalada_apos_2_rejeicoes, inbound="Esférico od -0,50 / OE -2,50") → confirmar:
+   - `contatos.metadata.receitas[-1].source === "client_typed_first_pos_escalada"`
+   - `atendimentos.modo === "ia"`, `revisao_humana_motivo === null`
+   - última outbound = "A receita é: OD -0,50 / OE -2,50. Confere?"
+2. Re-disparar com inbound "Sim" → cai no gate de confirmação e dispara `consultar_lentes`.
+3. Re-disparar inbound de texto banal ("oi tudo bem?") em atendimento humano → continua skipped (parser não devolve receita válida).
+4. Re-disparar com motivo `consulta_os` em modo humano → continua skipped (whitelist não inclui).
 
 ## Arquivos tocados
 
-- `supabase/functions/ai-triage/index.ts` — helper + substituições.
-- `supabase/functions/whatsapp-webhook/index.ts` — cascata de placeholder + sequencial.
-- 1 migration: `create sequence contatos_anonimo_seq`.
-- Atualizar memória `mem://ia/saudacao-confirma-nome.md` com a regra "nunca chamar pelo telefone/placeholder".
+- `supabase/functions/ai-triage/index.ts` — novo pre-router antes da linha 2275 (~80 linhas, reutiliza helpers existentes `detectPrescriptionCorrection`, `isReceitaValida`, `buildMsgConfirmarReceita`).
+- `.lovable/memory/ia/retomada-ia-pos-receita-texto.md` — novo.
+- `.lovable/memory/index.md` — uma linha de referência.
 
-## Validação
-
-1. Testar 3 cenários via `curl_edge_functions`/replay:
-   - Contato com `nome="5511949841973"` → resposta sem vocativo.
-   - Contato com `nome_perfil_whatsapp="Beatriz"` válido + nome ainda não confirmado → vocativo "Beatriz" liberado (origem WhatsApp legítima).
-   - Contato 100% anônimo novo → recebe `Cliente #0042` interno, mensagens sem vocativo, IA pergunta nome.
-2. `read_query` em `contatos` para conferir que nenhum `nome` legado com telefone está sendo "promovido" indevidamente — o helper opera em runtime, não reescreve o banco.
+Sem migration. Sem alteração em `whatsapp-webhook` (inbound já dispara `ai-triage` em qualquer modo). Sem alteração de UI.
