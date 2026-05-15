@@ -3870,6 +3870,27 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     const isShortNoToHelp = (askedHelpMore && SHORT_NO_RE.test(msgTrim2))
       || (hasAgendamentoAtivo && isThanksOnly && !pendingComparativoOffer);
 
+    // ── NEGATIVA PÓS-RETOMADA ──
+    // Se a última outbound foi um template/mensagem de retomada (recuperacao_vendas ou
+    // recuperacao_humano nas últimas 48h, OU assinatura textual da retomada) e o cliente
+    // responde negativamente ("não", "não quero", "depois eu vejo", "deixa pra lá",
+    // "sem interesse", "agora não", etc), encerramos imediatamente — sem 2ª retomada.
+    const NEGATIVA_POS_RETOMADA_RE = /^(n[aã]o( quero| preciso| tenho interesse| obrigad[oa])?|n|nn|sem interesse|depois( eu)? vejo|deixa (pra|para) (depois|l[aá])|fica (pra|para) depois|agora n[aã]o|talvez depois|por enquanto n[aã]o|obrigad[ao],?\s*n[aã]o|n[aã]o, obrigad[oa])\b.*$/i;
+    const _recV = (contatoMeta as any)?.recuperacao_vendas || {};
+    const _recH = ((atendimento.metadata as Record<string, any>) || {})?.recuperacao_humano || {};
+    const _lastTryAt = Math.max(
+      _recV?.ultima_tentativa_at ? Date.parse(_recV.ultima_tentativa_at) : 0,
+      _recH?.ultima_tentativa_at ? Date.parse(_recH.ultima_tentativa_at) : 0,
+    );
+    const _retomadaJanelaMs = 48 * 60 * 60 * 1000;
+    const _retomadaRecente = _lastTryAt > 0 && (Date.now() - _lastTryAt) < _retomadaJanelaMs;
+    const _retomadaTextual = /est[aá]vamos conversando|ficou com alguma d[uú]vida|retomada_contexto|posso te ajudar com mais alguma|continuamos (a |o )?conversa/i.test(lastOutboundTxt);
+    const _eligibleRetomada = (_retomadaRecente || _retomadaTextual) && !hasAgendamentoAtivo;
+    const isNegativaPosRetomada = _eligibleRetomada && NEGATIVA_POS_RETOMADA_RE.test(msgTrim2);
+    if (isNegativaPosRetomada) {
+      console.log(`[CLOSE-NEGATIVA-RETOMADA] lastTryAt=${_lastTryAt ? new Date(_lastTryAt).toISOString() : "n/a"} textual=${_retomadaTextual} msg="${msgTrim2.substring(0, 60)}"`);
+    }
+
     // Agradecimento direto ao final, sem "não" antes (ex: cliente diz "Obg" depois do agendamento)
     const isThanksClose = hasAgendamentoAtivo && isThanksOnly && !askedHelpMore;
 
@@ -3919,8 +3940,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
     } catch { /* ignore */ }
 
-    if (isThanksClose || isShortNoToHelp || isExplicitClose) {
-      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} → DESPEDIDA determinística`);
+    if (isThanksClose || isShortNoToHelp || isExplicitClose || isNegativaPosRetomada) {
+      console.log(`[CLOSE] thanksClose=${isThanksClose} shortNoToHelp=${isShortNoToHelp} explicitClose=${isExplicitClose} negativaPosRetomada=${isNegativaPosRetomada} → DESPEDIDA determinística`);
 
       // ── DESPEDIDA DETERMINÍSTICA (não passa pelo LLM, evita alucinação de data/loja) ──
       const _firstName = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
@@ -3932,6 +3953,9 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       } else if (isThanksClose) {
         const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
         despedidaMsg = renderMsgFixa("despedida_thanks", { nome_comma: _commaName, tail: _tail });
+      } else if (isNegativaPosRetomada) {
+        // Despedida curta, sem oferta de ajuda, para evitar incomodar.
+        despedidaMsg = `Tudo bem${_commaName}! Qualquer coisa é só me chamar 👋`;
       } else {
         // isShortNoToHelp
         const _tail = agendamentoFmt ? `Te espero ${agendamentoFmt}` : "Qualquer coisa estou por aqui";
@@ -3959,26 +3983,47 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
 
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, despedidaMsg);
-      await logEvent(supabase, contatoId, atendimento_id, "despedida_deterministica", `${isExplicitClose ? "explicit" : isThanksClose ? "thanks" : "shortNoToHelp"}; agFmt=${agendamentoFmt || "vazio"}`);
+      await logEvent(supabase, contatoId, atendimento_id, "despedida_deterministica", `${isExplicitClose ? "explicit" : isThanksClose ? "thanks" : isNegativaPosRetomada ? "negativa_pos_retomada" : "shortNoToHelp"}; agFmt=${agendamentoFmt || "vazio"}`);
 
       // ── BLOQUEIO DE RETOMADA AUTOMÁTICA ──
-      // Cliente pediu para encerrar OU dispensou ajuda após despedida.
+      // Cliente pediu para encerrar OU dispensou ajuda após despedida OU recusou retomada.
       // Marca atendimento p/ vendas-recuperacao-cron NÃO disparar retomada_contexto_*.
-      // Encerramento explícito também fecha o atendimento.
+      // Encerramento explícito e negativa pós-retomada também fecham o atendimento.
       try {
         const _atMd = (atendimento.metadata as Record<string, any>) || {};
+        const _motivo = isExplicitClose
+          ? "encerramento_explicito"
+          : isThanksClose
+            ? "agradecimento_pos_agendamento"
+            : isNegativaPosRetomada
+              ? "negativa_pos_retomada"
+              : "dispensou_ajuda";
         const _patchMeta: Record<string, any> = {
           ..._atMd,
           nao_retornar_automaticamente: true,
           encerrado_pelo_cliente_at: new Date().toISOString(),
-          encerrado_motivo: isExplicitClose ? "encerramento_explicito" : (isThanksClose ? "agradecimento_pos_agendamento" : "dispensou_ajuda"),
+          encerrado_motivo: _motivo,
         };
         const _update: Record<string, any> = { metadata: _patchMeta, updated_at: new Date().toISOString() };
-        if (isExplicitClose) {
+        if (isExplicitClose || isNegativaPosRetomada) {
           _update.status = "encerrado";
           _update.fim_at = new Date().toISOString();
         }
         await supabase.from("atendimentos").update(_update).eq("id", atendimento_id);
+
+        // Também marca recuperacao_vendas.status = "perdido" no contato p/ cron pular de vez
+        if (isNegativaPosRetomada) {
+          try {
+            const _cm = { ...(contatoMeta as any) };
+            _cm.recuperacao_vendas = {
+              ...(_cm.recuperacao_vendas || {}),
+              status: "perdido",
+              encerrado_motivo: "negativa_pos_retomada",
+              encerrado_at: new Date().toISOString(),
+            };
+            await supabase.from("contatos").update({ metadata: _cm }).eq("id", contatoId);
+          } catch { /* ignore */ }
+        }
       } catch (e) {
         console.warn("[CLOSE] falha ao gravar nao_retornar_automaticamente:", (e as Error)?.message);
       }
