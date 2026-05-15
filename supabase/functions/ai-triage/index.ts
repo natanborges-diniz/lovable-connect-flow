@@ -1486,6 +1486,22 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "cancelar_visita",
+      description: "Cancela DEFINITIVAMENTE o agendamento ativo do cliente. OBRIGATÓRIO usar SEMPRE que for confirmar um cancelamento ao cliente — nunca escreva 'cancelei seu horário' ou 'desmarquei' sem chamar esta tool. Use quando o cliente pedir para desmarcar/cancelar SEM já ter escolhido nova data (se ele já deu nova data, use reagendar_visita).",
+      parameters: {
+        type: "object",
+        properties: {
+          motivo: { type: "string", description: "Motivo informado pelo cliente (opcional). Ex: 'imprevisto', 'não vou conseguir ir'." },
+          resposta: { type: "string", description: "Mensagem confirmando o cancelamento ao cliente. Mantenha curta e calorosa, e ofereça remarcar quando ele quiser. Ex: 'Prontinho, cancelei seu horário. Quando quiser remarcar é só me chamar 👋'." },
+        },
+        required: ["resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "consultar_lentes",
       description: "Busca lentes compatíveis com a receita do cliente. Use SOMENTE quando o cliente demonstrar interesse em orçamento/preço/opções de lentes APÓS a receita já ter sido interpretada. NÃO use logo após interpretar_receita — espere o cliente pedir. Se o contexto indicar que a receita JÁ FOI INTERPRETADA (seção RECEITAS JÁ INTERPRETADAS), use esta tool diretamente — NÃO peça a receita novamente.",
       parameters: {
@@ -3823,13 +3839,22 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     const _NOW_MS_AG = Date.now();
     const _TOLERANCIA_AG_MS = 6 * 3600 * 1000; // 6h: ainda válido se foi hoje cedo
     const _ATIVOS_STATUS = ["agendado", "confirmado", "lembrete_enviado"];
+    // Salvaguarda: ignora agendamentos que já foram marcados como cancelados (metadata.cancelado_em)
+    // OU cujo último outbound do assistant nos últimos 30 min indicou cancelamento textual.
+    const _lastOutForCancelGuard = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+    const _assistantSaidCanceled = /\bcancelei (seu |o |teu )?(hor[aá]rio|agendamento|atendimento)\b|\bdesmarquei (seu |o )?(hor[aá]rio|agendamento)\b/i.test(_lastOutForCancelGuard);
     const _agendamentosFuturos = (agendamentosAtivos || [])
       .filter((a: any) => _ATIVOS_STATUS.includes(a.status) && a.data_horario)
+      .filter((a: any) => !a?.metadata?.cancelado_em)
       .filter((a: any) => new Date(a.data_horario).getTime() >= (_NOW_MS_AG - _TOLERANCIA_AG_MS))
       .sort((x: any, y: any) => new Date(x.data_horario).getTime() - new Date(y.data_horario).getTime());
-    const agAtivoRecentEarly = _agendamentosFuturos[0]
-      || (agendamentosAtivos || []).find((a: any) => _ATIVOS_STATUS.includes(a.status))
+    let agAtivoRecentEarly = _agendamentosFuturos[0]
+      || (agendamentosAtivos || []).find((a: any) => _ATIVOS_STATUS.includes(a.status) && !a?.metadata?.cancelado_em)
       || (agendamentosAtivos || [])[0];
+    if (agAtivoRecentEarly && _assistantSaidCanceled && !agAtivoRecentEarly?.metadata?.cancelado_em) {
+      console.log("[FAREWELL] agendamento descartado por evidência textual de cancelamento no último outbound");
+      agAtivoRecentEarly = null;
+    }
     const hasAgendamentoAtivo = !!agAtivoRecentEarly?.data_horario;
 
     // Detecta segunda negativa consecutiva à pergunta canônica "posso ajudar em mais alguma coisa"
@@ -4438,8 +4463,22 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // ── HINT ANTI-DUPLICAÇÃO: agendamento ativo + sem pedido explícito de mudança ──
     {
       const lastInLow = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
-      const explicitChange = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInLow);
-      if (hasAgendamentoAtivo && !explicitChange) {
+      const explicitChange = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|desmarcar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInLow);
+      // Detecta intenção de cancelar (sem nova data já proposta) — força tool cancelar_visita
+      const wantsCancel = /\b(cancelar|desmarcar|n[aã]o (vou|consigo|posso) (ir|comparecer)|n[aã]o (poderei|vou poder) ir)\b/i.test(lastInLow)
+        && !/\b(remarcar|reagendar|outro dia|outro hor[aá]rio|amanh[aã]|segunda|ter[çc]a|quarta|quinta|sexta|s[aá]bado)\b/i.test(lastInLow);
+      // Última oferta do assistant sugeriu cancelamento? ("posso cancelar", "deixar para remarcar depois")
+      const _lastOutTxtForCancel = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+      const offeredCancel = /\b(cancelar (agora )?seu (hor[aá]rio|agendamento)|posso cancelar|deixar(mos)? para remarcar (depois|mais tarde)|deixamos para remarcar)\b/i.test(_lastOutTxtForCancel);
+      const shortYesToCancel = /^(pode|pode sim|sim|isso|ok|tudo bem|por favor|cancela|cancelar|pode cancelar|sim, pode|pode pode)\.?$/i.test(lastInLow.trim());
+      if (hasAgendamentoAtivo && (wantsCancel || (offeredCancel && shortYesToCancel))) {
+        const _lojaAg = agAtivoRecentEarly?.loja_nome || "";
+        messages.push({
+          role: "system",
+          content: `[CANCELAR AGENDAMENTO] O cliente está ${wantsCancel ? "pedindo para cancelar/desmarcar" : "confirmando o cancelamento que você ofereceu"} o agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS"}${_lojaAg ? " na " + _lojaAg : ""}). AÇÃO OBRIGATÓRIA: chame a tool *cancelar_visita* AGORA — não responda só com texto. PROIBIDO escrever "cancelei seu horário" sem chamar a tool. Após o cancelamento, ofereça brevemente registrar lembrete pra remarcar (use agendar_lembrete se ele pedir uma data específica) ou deixe em aberto. PROIBIDO assinar mensagens futuras com "Te espero ${agendamentoFmt || "..."}" — esse horário acabou de ser cancelado.`,
+        });
+        console.log(`[GUARDRAIL-HINT] Cancelamento detectado — forçando tool cancelar_visita (wantsCancel=${wantsCancel}, offeredCancel+shortYes=${offeredCancel && shortYesToCancel})`);
+      } else if (hasAgendamentoAtivo && !explicitChange) {
         const _lojaAg = agAtivoRecentEarly?.loja_nome || "";
         // Detecta pedido EXPLÍCITO de preço/orçamento na mensagem atual.
         // Só nesse caso permitimos rodar consultar_lentes/consultar_lentes_contato de novo.
@@ -4451,7 +4490,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           && /\b(transitions?|fotossens[ií]ve[il]|fotocrom[áa]?tic[ao]?|antirreflex(?:o|ivo)?|filtro\s+azul|luz\s+azul|polariz[ao]?d[ao]?|varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax)\b/i.test(lastInLow);
         messages.push({
           role: "system",
-          content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}${_lojaAg ? " na " + _lojaAg : ""}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja ou cancelar.
+          content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}${_lojaAg ? " na " + _lojaAg : ""}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja, ou cancelar_visita se ele pedir para cancelar.
 
 ⛔ PROIBIDO chamar consultar_lentes/consultar_lentes_contato apenas porque o cliente mencionou um tratamento, material, cor, marca ou estilo de PASSAGEM (anotando preferência, ex.: "queria armação tartaruga", "gosto de filtro azul"). Trate como PREFERÊNCIA registrada para a visita — anote brevemente e reafirme o agendamento. ${(explicitPriceAsk || askTreatBrand) ? `EXCEÇÃO: ${askTreatBrand ? "o cliente está PERGUNTANDO se temos um tratamento/marca específico (transitions, varilux, zeiss etc.)" : "o cliente pediu preço/orçamento explicitamente AGORA"} — DEVE rodar consultar_lentes ${askTreatBrand ? "com filtro_photo/filtro_blue/preferencia_marca conforme o que ele perguntou" : ""} para responder com valor/disponibilidade real, SEM perguntar região/bairro/loja (já tem agendamento). PROIBIDO responder 'preciso confirmar na loja' — o catálogo é a fonte da verdade.` : "Só rode consultar_lentes/consultar_lentes_contato se o cliente pedir EXPLICITAMENTE preço/orçamento/quanto custa."}
 
@@ -5209,6 +5248,55 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           referencia_id: atendimento_id,
         });
         } // end if (!agendamentoBloqueado)
+      } else if (fn === "cancelar_visita") {
+        // ── CANCELAR VISITA: marca agendamento ativo como cancelado ──
+        intencao = "cancelamento_agendamento";
+        pipeline_coluna = "Qualificado";
+        const _firstNm = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+        const _alvo = (agendamentosAtivos || []).find((a: any) =>
+          ["agendado", "lembrete_enviado", "confirmado"].includes(a.status)
+        ) || agAtivoRecentEarly;
+
+        if (!_alvo?.id) {
+          // Não há agendamento ativo — apenas confirma sem persistência
+          resposta = args.resposta || `Tudo certo${_firstNm ? ", " + _firstNm : ""}! Quando quiser marcar é só me chamar 👋`;
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "cancelar_visita_sem_alvo",
+            descricao: "IA chamou cancelar_visita mas não havia agendamento ativo",
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+            metadata: { args },
+          });
+        } else if (_alvo.status === "cancelado") {
+          // Idempotente
+          resposta = args.resposta || `Tudo certo${_firstNm ? ", " + _firstNm : ""}! Seu horário já estava cancelado. Quando quiser remarcar é só me chamar 👋`;
+        } else {
+          try {
+            const novaMeta = {
+              ...(_alvo.metadata || {}),
+              cancelado_em: new Date().toISOString(),
+              cancelado_por: "cliente_via_ia",
+              cancelado_motivo: args.motivo || null,
+            };
+            await supabase
+              .from("agendamentos")
+              .update({ status: "cancelado", metadata: novaMeta, updated_at: new Date().toISOString() })
+              .eq("id", _alvo.id);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "agendamento_cancelado_cliente",
+              descricao: `Agendamento ${_alvo.loja_nome} em ${_alvo.data_horario} cancelado via IA${args.motivo ? ` — motivo: ${args.motivo}` : ""}`,
+              referencia_tipo: "agendamento",
+              referencia_id: _alvo.id,
+              metadata: { agendamento_id: _alvo.id, motivo: args.motivo || null },
+            });
+            console.log(`[TOOL] cancelar_visita: agendamento ${_alvo.id} marcado como cancelado`);
+          } catch (e) {
+            console.error("[TOOL] cancelar_visita update failed:", e);
+          }
+          resposta = args.resposta || `Prontinho${_firstNm ? ", " + _firstNm : ""} — cancelei seu horário. Quando quiser remarcar é só me chamar 👋`;
+        }
       } else if (fn === "agendar_lembrete") {
         resposta = args.resposta;
         intencao = "lembrete";
