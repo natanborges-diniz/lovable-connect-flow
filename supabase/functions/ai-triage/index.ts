@@ -373,6 +373,7 @@ function requerRevisaoHumanaPosOrcamento(rx: any): { precisa: boolean; motivos: 
   if (cylMax > 4) motivos.push(`cilindrico_alto:${cylMax}`);
   if (addMax > 3.5) motivos.push(`adicao_alta:${addMax}`);
   if (sphereMax > 8 && sphereMax <= 10) motivos.push(`esferico_faixa_cinza:${sphereMax}`);
+  if (sphereMax > 10 && sphereMax <= 16) motivos.push(`esferico_faixa_revisao:${sphereMax}`);
   return { precisa: motivos.length > 0, motivos };
 }
 
