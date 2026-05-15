@@ -2301,15 +2301,15 @@ serve(async (req) => {
           const _parsed = detectPrescriptionCorrection(_msgPre);
           if (_parsed) {
             // Verifica se humano enviou outbound após a escalada (consultor já assumiu)
-            const { data: _humanoMsgs } = await supabase
+            const { data: _outMsgs } = await supabase
               .from("mensagens")
-              .select("id, criado_em")
+              .select("id, remetente_nome, created_at")
               .eq("atendimento_id", atendimento_id)
               .eq("direcao", "outbound")
-              .eq("autor_tipo", "humano")
-              .gte("criado_em", new Date(_escAt).toISOString())
-              .limit(1);
-            const _humanoAssumiu = Array.isArray(_humanoMsgs) && _humanoMsgs.length > 0;
+              .gte("created_at", new Date(_escAt).toISOString())
+              .limit(20);
+            const _bots = new Set(["Assistente IA", "Gael", "Sistema", "Bot Lojas", "Recuperação"]);
+            const _humanoAssumiu = Array.isArray(_outMsgs) && _outMsgs.some((m: any) => m.remetente_nome && !_bots.has(String(m.remetente_nome)));
 
             if (!_humanoAssumiu) {
               // Carrega contato + receitas
