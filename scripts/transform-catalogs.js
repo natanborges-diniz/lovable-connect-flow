@@ -175,7 +175,7 @@ function buildUpsertSQL(rows) {
   const updateCols = [
     "sphere_min","sphere_max","cylinder_min","cylinder_max",
     "add_min","add_max","diameter","min_fitting_height",
-    "price_brl","priority","active","source_catalog","updated_at",
+    "price_brl","priority","active","source_catalog",
   ].map(c => `${c} = EXCLUDED.${c}`).join(", ") + ", updated_at = now()";
 
   const chunks = [];
@@ -196,12 +196,59 @@ function buildUpsertSQL(rows) {
   return chunks.join("\n\n");
 }
 
+// ─── Deduplicação ────────────────────────────────────────────────────────────
+
+function deduplicateRows(rows, keyFn, label) {
+  const seen = new Set();
+  const deduped = [];
+  let dupes = 0;
+  for (const row of rows) {
+    const key = keyFn(row);
+    if (seen.has(key)) {
+      dupes++;
+    } else {
+      seen.add(key);
+      deduped.push(row);
+    }
+  }
+  if (dupes > 0) {
+    console.log(`   🔁 ${label}: ${dupes} duplicata(s) removida(s) → ${deduped.length} registros únicos`);
+  } else {
+    console.log(`   ✔️  ${label}: sem duplicatas`);
+  }
+  return { rows: deduped, dupes };
+}
+
 // ─── Contact lens helpers ─────────────────────────────────────────────────────
 
 const DESCARTE_DIAS = {
   diario: 1, quinzenal: 15, mensal: 30,
   mensal_ou_semanal: 30, trimestral: 90, anual: 365,
 };
+
+function sanitizeDk(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "number") return isNaN(val) ? null : val;
+  if (typeof val === "string") {
+    // Troca vírgula decimal por ponto, depois usa Number() estrito
+    // (Number() rejeita datas, intervalos "21-24", textos parciais)
+    const n = Number(val.replace(",", ".").trim());
+    return isNaN(n) ? null : n;
+  }
+  return null;
+}
+
+function parseSphere(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "number") return val;
+  if (typeof val === "string") {
+    const t = val.trim().toLowerCase();
+    if (t === "plana" || t === "plano" || t === "pl" || t === "piano") return 0;
+    const n = parseFloat(t.replace(",", "."));
+    return isNaN(n) ? null : n;
+  }
+  return null;
+}
 
 function parseCilindricos(str) {
   if (!str) return { min: null, max: null };
@@ -210,33 +257,51 @@ function parseCilindricos(str) {
   return { min: Math.min(...vals), max: Math.max(...vals) };
 }
 
-function transformLC(produto, catalogMeta) {
-  const p   = produto.parametros || {};
-  const uso = produto.uso || {};
-  const cyl = parseCilindricos(p.cilindrico_disponivel);
+function transformLC(produto, catalogMeta, sanitizeLog) {
+  const p    = produto.parametros || {};
+  const uso  = produto.uso || {};
+  const cyl  = parseCilindricos(p.cilindrico_disponivel);
   const tags = produto.tags || [];
 
+  const rawDk        = produto.tecnologia_material?.dk_permeabilidade_o2 ?? null;
+  const rawSphereMin = p.esferico_min ?? null;
+  const rawSphereMax = p.esferico_max ?? null;
+
+  const dk        = sanitizeDk(rawDk);
+  const sphereMin = parseSphere(rawSphereMin);
+  const sphereMax = parseSphere(rawSphereMax);
+
+  if (dk !== rawDk && rawDk !== null) {
+    sanitizeLog.push(`dk sanitizado: produto="${produto.nome}" raw="${rawDk}" → ${dk}`);
+  }
+  if (sphereMin !== rawSphereMin && rawSphereMin !== null) {
+    sanitizeLog.push(`sphere_min sanitizado: produto="${produto.nome}" raw="${rawSphereMin}" → ${sphereMin}`);
+  }
+  if (sphereMax !== rawSphereMax && rawSphereMax !== null) {
+    sanitizeLog.push(`sphere_max sanitizado: produto="${produto.nome}" raw="${rawSphereMax}" → ${sphereMax}`);
+  }
+
   return {
-    fornecedor:             produto.fornecedor ?? produto.marca,
-    produto:                produto.nome,
-    material:               produto.tecnologia_material?.nome ?? null,
-    dk:                     produto.tecnologia_material?.dk_permeabilidade_o2 ?? null,
-    sphere_min:             p.esferico_min ?? null,
-    sphere_max:             p.esferico_max ?? null,
-    cylinder_min:           cyl.min,
-    cylinder_max:           cyl.max,
+    fornecedor:                produto.fornecedor ?? produto.marca,
+    produto:                   produto.nome,
+    material:                  produto.tecnologia_material?.nome ?? null,
+    dk,
+    sphere_min:                sphereMin,
+    sphere_max:                sphereMax,
+    cylinder_min:              cyl.min,
+    cylinder_max:              cyl.max,
     cylinder_axes_disponiveis: p.cilindrico_disponivel ?? null,
-    descarte:               uso.descarte ?? "mensal",
-    dias_por_unidade:       DESCARTE_DIAS[uso.descarte] ?? 30,
-    unidades_por_caixa:     uso.numero_lentes_caixa ?? 6,
-    price_brl:              produto.preco?.valor ?? null,
-    is_toric:               !!p.cilindrico_disponivel,
-    is_color:               tags.includes("colorida") || tags.includes("cor"),
-    is_dnz:                 produto.nome.toLowerCase().includes("dnz"),
-    priority:               10,
-    combo_3mais1:           tags.includes("3mais1") || tags.includes("3_mais_1"),
-    active:                 true,
-    observacoes:            produto.informativo?.descricao ?? null,
+    descarte:                  uso.descarte ?? "mensal",
+    dias_por_unidade:          DESCARTE_DIAS[uso.descarte] ?? 30,
+    unidades_por_caixa:        uso.numero_lentes_caixa ?? 6,
+    price_brl:                 produto.preco?.valor ?? null,
+    is_toric:                  !!p.cilindrico_disponivel,
+    is_color:                  tags.includes("colorida") || tags.includes("cor"),
+    is_dnz:                    produto.nome.toLowerCase().includes("dnz"),
+    priority:                  10,
+    combo_3mais1:              tags.includes("3mais1") || tags.includes("3_mais_1"),
+    active:                    true,
+    observacoes:               produto.informativo?.descricao ?? null,
   };
 }
 
@@ -328,6 +393,17 @@ for (const filename of CATALOG_FILES) {
   console.log(`   ✅ ${ok} importados | ⚠️  ${skip} ignorados`);
 }
 
+// ─── Deduplicação pricing_table_lentes ───────────────────────────────────────
+
+console.log("\n🔎 Deduplicando pricing_table_lentes...");
+const ptlDedup = deduplicateRows(
+  allRows,
+  r => `${r.brand}|${r.family}|${r.category}|${r.index_name}|${r.treatment}|${r.blue}|${r.photo}`,
+  "pricing_table_lentes",
+);
+allRows.length = 0;
+allRows.push(...ptlDedup.rows);
+report.duplicatas_removidas = ptlDedup.dupes;
 report.total = allRows.length;
 
 // ─── Contact lens processing ─────────────────────────────────────────────────
@@ -344,16 +420,37 @@ if (!lcFilepath) {
   const lcCatalogo = lcRaw.catalogo;
   const produtos = lcCatalogo.produtos || [];
   let lcOk = 0, lcSkip = 0;
+  const lcSanitizeLog = [];
 
   for (const produto of produtos) {
     if (!produto.preco?.valor || produto.preco.valor <= 0) { lcSkip++; continue; }
     if (!produto.nome) { lcSkip++; continue; }
-    lcRows.push(transformLC(produto, lcCatalogo));
+    lcRows.push(transformLC(produto, lcCatalogo, lcSanitizeLog));
     lcOk++;
   }
 
-  lcReport = { arquivo: LC_FILE, total_json: produtos.length, importados: lcOk, ignorados: lcSkip };
   console.log(`   ✅ ${lcOk} importados | ⚠️  ${lcSkip} ignorados`);
+  if (lcSanitizeLog.length > 0) {
+    console.log(`   🔧 ${lcSanitizeLog.length} campo(s) sanitizado(s):`);
+    for (const msg of lcSanitizeLog) console.log(`      • ${msg}`);
+  } else {
+    console.log(`   ✔️  Nenhum campo precisou de sanitização`);
+  }
+
+  // Deduplicação por (fornecedor, produto, descarte)
+  const lcDedup = deduplicateRows(lcRows, r => `${r.fornecedor}|${r.produto}|${r.descarte}`, "LC");
+  lcRows.length = 0;
+  lcRows.push(...lcDedup.rows);
+
+  lcReport = {
+    arquivo: LC_FILE,
+    total_json: produtos.length,
+    importados: lcOk,
+    ignorados: lcSkip,
+    duplicatas_removidas: lcDedup.dupes,
+    campos_sanitizados: lcSanitizeLog.length,
+    sanitize_log: lcSanitizeLog,
+  };
 }
 
 // ─── Gera SQL pricing_table_lentes ───────────────────────────────────────────
@@ -434,10 +531,13 @@ for (const f of report.por_fornecedor) {
   console.log(`  Importados:  ${f.importados}`);
   console.log(`  Ignorados:   ${f.ignorados}`);
 }
-console.log(`\nTOTAL GERAL: ${report.total} registros`);
+console.log(`\nTOTAL GERAL: ${report.total} registros únicos (${report.duplicatas_removidas ?? 0} duplicatas removidas)`);
 if (lcReport) {
   console.log(`\nLentes de contato (${lcReport.arquivo}):`);
-  console.log(`  Importados: ${lcReport.importados} | Ignorados: ${lcReport.ignorados}`);
+  console.log(`  Importados:           ${lcReport.importados}`);
+  console.log(`  Ignorados:            ${lcReport.ignorados}`);
+  console.log(`  Duplicatas removidas: ${lcReport.duplicatas_removidas}`);
+  console.log(`  Campos sanitizados:   ${lcReport.campos_sanitizados}`);
 }
 if (report.erros.length > 0) {
   console.log(`\n⚠️  ${report.erros.length} erros — veja transform-report.json`);

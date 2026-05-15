@@ -30,11 +30,28 @@
     }
   ],
   "erros": [],
-  "total": 2642,
+  "total": 2275,
+  "duplicatas_removidas": 367,
   "lentes_contato": {
     "arquivo": "lentes_contato_abr2026.json",
     "total_json": 51,
     "importados": 51,
-    "ignorados": 0
+    "ignorados": 0,
+    "duplicatas_removidas": 0,
+    "campos_sanitizados": 12,
+    "sanitize_log": [
+      "dk sanitizado: produto=\"Acuvue 2\" raw=\"25,5\" → 25.5",
+      "dk sanitizado: produto=\"1-Day Acuvue Moist\" raw=\"25,5\" → 25.5",
+      "dk sanitizado: produto=\"1-Day Acuvue Mois para Astigmatismo\" raw=\"23,8\" → 23.8",
+      "dk sanitizado: produto=\"Hidrosol Filtrante\" raw=\"2026-08-09 00:00:00\" → null",
+      "dk sanitizado: produto=\"Hidrosol Daltonismo\" raw=\"2026-08-09 00:00:00\" → null",
+      "dk sanitizado: produto=\"Solflex Natural Colors\" raw=\"11,25\" → 11.25",
+      "dk sanitizado: produto=\"Hidrocor Mensal\" raw=\"2026-11-12 00:00:00\" → null",
+      "dk sanitizado: produto=\"Solflex Color Hype\" raw=\"11,25\" → 11.25",
+      "sphere_min sanitizado: produto=\"Solflex Color Hype\" raw=\"Plana\" → 0",
+      "sphere_max sanitizado: produto=\"Solflex Color Hype\" raw=\"Plana\" → 0",
+      "dk sanitizado: produto=\"Solflex CL\" raw=\"26,9\" → 26.9",
+      "dk sanitizado: produto=\"Solflex Toric\" raw=\"21-24\" → null"
+    ]
   }
 }
