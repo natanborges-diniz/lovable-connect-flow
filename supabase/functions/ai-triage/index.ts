@@ -2374,7 +2374,7 @@ serve(async (req) => {
                   };
                   await supabase.from("atendimentos").update({
                     modo: "ia",
-                    status: "em_andamento",
+                    status: "em_atendimento",
                     updated_at: new Date().toISOString(),
                     metadata: _newAtMeta,
                   }).eq("id", atendimento_id);
