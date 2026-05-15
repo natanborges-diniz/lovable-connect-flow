@@ -5225,7 +5225,56 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           referencia_id: atendimento_id,
         });
         } // end if (!agendamentoBloqueado)
-      } else if (fn === "agendar_lembrete") {
+      } else if (fn === "cancelar_visita") {
+        // ── CANCELAR VISITA: marca agendamento ativo como cancelado ──
+        intencao = "cancelamento_agendamento";
+        pipeline_coluna = "Qualificado";
+        const _firstNm = contatoNomeAtual ? contatoNomeAtual.split(" ")[0] : "";
+        const _alvo = (agendamentosAtivos || []).find((a: any) =>
+          ["agendado", "lembrete_enviado", "confirmado"].includes(a.status)
+        ) || agAtivoRecentEarly;
+
+        if (!_alvo?.id) {
+          // Não há agendamento ativo — apenas confirma sem persistência
+          resposta = args.resposta || `Tudo certo${_firstNm ? ", " + _firstNm : ""}! Quando quiser marcar é só me chamar 👋`;
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "cancelar_visita_sem_alvo",
+            descricao: "IA chamou cancelar_visita mas não havia agendamento ativo",
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+            metadata: { args },
+          });
+        } else if (_alvo.status === "cancelado") {
+          // Idempotente
+          resposta = args.resposta || `Tudo certo${_firstNm ? ", " + _firstNm : ""}! Seu horário já estava cancelado. Quando quiser remarcar é só me chamar 👋`;
+        } else {
+          try {
+            const novaMeta = {
+              ...(_alvo.metadata || {}),
+              cancelado_em: new Date().toISOString(),
+              cancelado_por: "cliente_via_ia",
+              cancelado_motivo: args.motivo || null,
+            };
+            await supabase
+              .from("agendamentos")
+              .update({ status: "cancelado", metadata: novaMeta, updated_at: new Date().toISOString() })
+              .eq("id", _alvo.id);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "agendamento_cancelado_cliente",
+              descricao: `Agendamento ${_alvo.loja_nome} em ${_alvo.data_horario} cancelado via IA${args.motivo ? ` — motivo: ${args.motivo}` : ""}`,
+              referencia_tipo: "agendamento",
+              referencia_id: _alvo.id,
+              metadata: { agendamento_id: _alvo.id, motivo: args.motivo || null },
+            });
+            console.log(`[TOOL] cancelar_visita: agendamento ${_alvo.id} marcado como cancelado`);
+          } catch (e) {
+            console.error("[TOOL] cancelar_visita update failed:", e);
+          }
+          resposta = args.resposta || `Prontinho${_firstNm ? ", " + _firstNm : ""} — cancelei seu horário. Quando quiser remarcar é só me chamar 👋`;
+        }
+
         resposta = args.resposta;
         intencao = "lembrete";
 
