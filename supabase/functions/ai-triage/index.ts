@@ -3839,13 +3839,22 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     const _NOW_MS_AG = Date.now();
     const _TOLERANCIA_AG_MS = 6 * 3600 * 1000; // 6h: ainda válido se foi hoje cedo
     const _ATIVOS_STATUS = ["agendado", "confirmado", "lembrete_enviado"];
+    // Salvaguarda: ignora agendamentos que já foram marcados como cancelados (metadata.cancelado_em)
+    // OU cujo último outbound do assistant nos últimos 30 min indicou cancelamento textual.
+    const _lastOutForCancelGuard = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+    const _assistantSaidCanceled = /\bcancelei (seu |o |teu )?(hor[aá]rio|agendamento|atendimento)\b|\bdesmarquei (seu |o )?(hor[aá]rio|agendamento)\b/i.test(_lastOutForCancelGuard);
     const _agendamentosFuturos = (agendamentosAtivos || [])
       .filter((a: any) => _ATIVOS_STATUS.includes(a.status) && a.data_horario)
+      .filter((a: any) => !a?.metadata?.cancelado_em)
       .filter((a: any) => new Date(a.data_horario).getTime() >= (_NOW_MS_AG - _TOLERANCIA_AG_MS))
       .sort((x: any, y: any) => new Date(x.data_horario).getTime() - new Date(y.data_horario).getTime());
-    const agAtivoRecentEarly = _agendamentosFuturos[0]
-      || (agendamentosAtivos || []).find((a: any) => _ATIVOS_STATUS.includes(a.status))
+    let agAtivoRecentEarly = _agendamentosFuturos[0]
+      || (agendamentosAtivos || []).find((a: any) => _ATIVOS_STATUS.includes(a.status) && !a?.metadata?.cancelado_em)
       || (agendamentosAtivos || [])[0];
+    if (agAtivoRecentEarly && _assistantSaidCanceled && !agAtivoRecentEarly?.metadata?.cancelado_em) {
+      console.log("[FAREWELL] agendamento descartado por evidência textual de cancelamento no último outbound");
+      agAtivoRecentEarly = null;
+    }
     const hasAgendamentoAtivo = !!agAtivoRecentEarly?.data_horario;
 
     // Detecta segunda negativa consecutiva à pergunta canônica "posso ajudar em mais alguma coisa"
