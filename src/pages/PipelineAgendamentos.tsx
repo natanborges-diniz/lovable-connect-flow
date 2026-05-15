@@ -226,6 +226,11 @@ export default function PipelineAgendamentos() {
                                           ← Veio do CRM
                                         </Badge>
                                       )}
+                                      {(ag.metadata as any)?.pedido_cancelamento_detectado_at && (
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 w-fit border-amber-500 text-amber-700 dark:text-amber-400">
+                                          ⚠ Pedido de cancelamento
+                                        </Badge>
+                                      )}
                                       <div className="flex items-center gap-2">
                                         <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                         <span className="text-xs text-muted-foreground truncate">{ag.loja_nome}</span>

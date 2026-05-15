@@ -1,63 +1,57 @@
-# Bug: Gael disse "cancelei" mas o agendamento ficou ativo
+## Por que a Franciana ainda aparece em "Lembrete Enviado" no Pipeline Lojas
 
-## O que aconteceu na conversa da Franciana (5584994244323)
+`/lojas` (`PipelineAgendamentos.tsx`) é alimentado por `useAgendamentos`, que lista **todos** os registros de `agendamentos` agrupados por `status`. O card só some da coluna ativa quando o registro vai para `cancelado` (ou outro status terminal).
 
-1. 16:31 — Cliente: "Não. Vou ter que desmarcar."
-2. 16:33 — Gael: "Posso cancelar agora seu horário…?"
-3. 16:35 — Cliente: "Pode."
-4. 16:36 — Gael: "Prontinho, Fran — cancelei seu horário…" **← apenas texto. Nenhuma tool foi chamada.**
-5. 17:46 — Cliente: "Não. Obg." → dispara **despedida determinística**, que lê o `agAtivoRecent` (status `lembrete_enviado`) e assina "Te espero sexta-feira, 15/05 às 17:30 na DINIZ PRIMITIVA I 👋".
+No banco, o registro da Fran está assim:
 
-## Causa raiz
-
-Verifiquei `supabase/functions/ai-triage/index.ts` e o registro `agendamentos.id=e595e7dd-4881-4816-97d6-7b75d8d9b4e7` (contato 90ddecb2 = "Fran"):
-
-- Tools disponíveis: `responder, escalar_consultor, interpretar_receita, agendar_visita, reagendar_visita, consultar_lentes, consultar_lentes_estimativa, consultar_lentes_contato, registrar_nome_cliente, agendar_lembrete`.
-- **Não existe `cancelar_visita`/`cancelar_agendamento`.**
-- O agendamento permanece `status=lembrete_enviado`, sem `metadata.cancelado_em`.
-- A despedida determinística (linhas 3866–3937) só ignora agendamento "passado quando há outro futuro" — agendamento ainda ativo do mesmo dia continua sendo assinado.
-- Pior: o template `retomada_contexto_1` foi disparado às 17:45 pelo `vendas-recuperacao-cron` porque a conversa ficou aberta sem cliente_confirmou_at e sem cancelamento.
-
-## Correção proposta
-
-### 1. Nova tool `cancelar_visita` em `ai-triage/index.ts`
-
-Schema (similar a `reagendar_visita`):
-```
-{ name: "cancelar_visita",
-  description: "Cancela o agendamento ativo do cliente quando ele pede explicitamente para cancelar/desmarcar sem remarcar agora.",
-  parameters: { motivo?: string } }
+```text
+id:           e595e7dd-4881-4816-97d6-7b75d8d9b4e7
+status:       lembrete_enviado          ← deveria ser "cancelado"
+data_horario: 2026-05-15 20:30 UTC (17:30 SP — hoje)
+loja_nome:    DINIZ PRIMITIVA I
+metadata:     { lembrete_ok, aviso_loja_novo_at, ... }   ← sem "cancelado_em"
 ```
 
-Executor:
-- Busca `agAtivoRecent` (mesma lógica já existente).
-- `UPDATE agendamentos SET status='cancelado', updated_at=now(), metadata = metadata || jsonb_build_object('cancelado_em', now(), 'cancelado_por','cliente_via_ia','cancelado_motivo', motivo)`.
-- Loga `eventos_crm.tipo='agendamento_cancelado_cliente'`.
-- Resposta padrão: "Prontinho, {nome} — cancelei seu horário de {dataFmt} na {loja}. Quando quiser remarcar é só me chamar 👋".
+A Gael respondeu "cancelei seu horário" no chat, mas **não chamou nenhuma tool** que altere `agendamentos`. A tool `cancelar_visita` só foi adicionada ao `ai-triage` no deploy de hoje à noite — a conversa da Fran aconteceu antes. Então o card continua vivo na coluna "Lembrete Enviado".
 
-Idempotência: se já está cancelado, retorna sucesso sem reescrever.
+A varredura no banco confirma que **ela é o único caso ativo** com pedido de cancelamento na conversa (`desmarc/cancel/não vou`). Ou seja: não há histórico antigo a limpar, só esse registro.
 
-### 2. Hint pré-LLM: forçar `cancelar_visita`
+## O que vou fazer
 
-Na seção `explicitChange` (linha ~4441) que já detecta `cancelar`, adicionar branch:
+### 1. Corrigir o registro da Franciana
+Atualizar o agendamento `e595e7dd-…` para refletir o cancelamento real:
+- `status = 'cancelado'`
+- `metadata` recebe `cancelado_em`, `cancelado_por: 'cliente'`, `cancelado_motivo: 'Cliente informou que desmarcou e não poderá comparecer'`, `cancelado_origem: 'correcao_manual_admin'`
+- Inserir evento em `eventos_crm` (`tipo='agendamento_cancelado_cliente'`, referenciando o agendamento)
 
-- Se há `agAtivoRecent` E última mensagem do cliente é confirmação curta (`pode|pode sim|sim|ok|confirmo|cancela|pode cancelar`) E o último outbound do assistant ofereceu cancelamento (regex `cancelar (agora|seu (hor[áa]rio|agendamento))|deixar para remarcar depois`), injetar `tool_choice` forçado para `cancelar_visita` em vez de deixar o LLM responder em texto livre.
+Efeito: o card sai imediatamente das colunas "Lembrete Enviado" e cai em "Cancelado" no Pipeline Lojas.
 
-- Se cliente diz `desmarcar|cancelar|não vou conseguir ir` sem pedir remarcação imediata (e sem mencionar nova data), injetar hint orientando a usar `cancelar_visita` e perguntar depois se quer remarcar.
+### 2. Varredura recorrente (cron leve)
+A nova tool `cancelar_visita` só pega cancelamentos a partir de agora. Para casos onde a IA falha em chamar a tool (falha de rede, regressão de prompt, conversa via humano sem mexer no card), proponho um cron diário **detector-cancelamento-orfao** (executa 1x/h):
 
-### 3. Salvaguarda na despedida determinística
+- Varre `agendamentos` com `status IN ('agendado','lembrete_enviado','confirmado')` e `data_horario` entre `now()-12h` e `now()+24h`.
+- Para cada um, olha últimas 10 mensagens do atendimento. Se houver inbound recente (`<24h`) com regex de cancelamento (`desmarc|cancel|n[ãa]o (vou|poderei|consigo|posso) ir|n[ãa]o vai dar`) **e** outbound posterior do bot reconhecendo o cancelamento (regex `cancelei|cancelado|tudo certo.*desmarc`), marca como `cancelado` com `metadata.cancelado_origem='watchdog_cancelamento'` + evento em `eventos_crm`.
+- Se houver só inbound de cancelamento sem reconhecimento do bot, **não cancela sozinho** — cria notificação para o setor da loja revisar (evita falso positivo tipo "não vou conseguir antes das 17h, prefiro 18h").
 
-Em `agAtivoRecent` (linha ~3822–3872), excluir agendamentos cujo último outbound do assistant nos últimos 30 min contenha `cancelei seu (hor[áa]rio|agendamento)` — evita reincidência caso a tool falhe. Loggar `[FAREWELL] agendamento descartado por evidência textual de cancelamento`.
+Isso usa a infraestrutura existente (`cron_jobs` + edge function), igual aos outros watchdogs (`watchdog-inbound-orfao`, `watchdog-loop-ia`).
 
-### 4. Memória do projeto
+### 3. Indicador visual no card (opcional, mas recomendado)
+No `PipelineAgendamentos.tsx`, exibir um badge âmbar `⚠ Pedido de cancelamento` quando `metadata.pedido_cancelamento_detectado_at` estiver setado (preenchido pelo watchdog quando ele detecta intent mas não fecha sozinho). Permite a loja agir antes do cliente faltar.
 
-Adicionar `mem://ia/cancelar-visita-tool.md` documentando: tool nova, regras de disparo (cliente confirma cancelamento explícito), interação com `vendas-recuperacao-cron` (agendamento cancelado não dispara mais retomada via lembrete dia-D nem assinatura na despedida).
+## Detalhes técnicos
 
-### 5. Recompilar prompt
+**Arquivos novos:**
+- `supabase/functions/watchdog-cancelamento-orfao/index.ts`
+- `mem://watchdog/cancelamento-orfao.md`
 
-Após editar a tool list, rodar `compile-prompt` para que `prompt_atendimento` reflita a nova capacidade nos exemplos/instruções.
+**Arquivos editados:**
+- `src/pages/PipelineAgendamentos.tsx` (badge no card)
+- `mem://index.md` (referência ao novo watchdog)
 
-## Fora de escopo
+**SQL via insert tool (não migração):**
+- UPDATE no agendamento da Fran
+- INSERT em `eventos_crm`
+- INSERT em `cron_jobs` (registrar o novo watchdog, expressao `*/15 * * * *` — verifica a cada 15min só na janela próxima do atendimento)
+- `cron.schedule` via `net.http_post` para o novo watchdog
 
-- Não vou mexer em `agendamentos-cron` nem em `vendas-recuperacao-cron` agora — assim que o `status=cancelado` for gravado corretamente, ambos já filtram fora (já validei nos arquivos das memórias `agendamentos/janela-comunicacao-e-d-day` e `crm/recuperacao-ia-anti-abandono`).
-- Não corrigir o registro da Franciana retroativamente — fora do escopo do bug. (Posso fazer separadamente se você pedir: `UPDATE agendamentos SET status='cancelado'` no id `e595e7dd-…`.)
+**Fora do escopo:** não mexer em `vendas-recuperacao-cron`, `agendamentos-cron`, `pipeline-automations`, nem na nova tool `cancelar_visita` já existente.
