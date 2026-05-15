@@ -1,0 +1,338 @@
+{
+  "gerado_em": "2026-05-14T23:07:27.774Z",
+  "supabase_url": "https://kvggebtnqmxydtwaumqz.supabase.co",
+  "usando_service_key": true,
+  "total_linhas": {
+    "total": 1053,
+    "active": 1053,
+    "inativas": 0
+  },
+  "por_brand": {
+    "total": [
+      [
+        "Hoya",
+        898
+      ],
+      [
+        "HOYA",
+        82
+      ],
+      [
+        "ESSILOR",
+        34
+      ],
+      [
+        "DMAX",
+        20
+      ],
+      [
+        "DNZ",
+        11
+      ],
+      [
+        "ZEISS",
+        8
+      ]
+    ],
+    "active": [
+      [
+        "Hoya",
+        898
+      ],
+      [
+        "HOYA",
+        82
+      ],
+      [
+        "ESSILOR",
+        34
+      ],
+      [
+        "DMAX",
+        20
+      ],
+      [
+        "DNZ",
+        11
+      ],
+      [
+        "ZEISS",
+        8
+      ]
+    ]
+  },
+  "por_category": {
+    "total": [
+      [
+        "progressiva",
+        553
+      ],
+      [
+        "visao_simples",
+        247
+      ],
+      [
+        "progressive",
+        156
+      ],
+      [
+        "ocupacional",
+        33
+      ],
+      [
+        "especial",
+        24
+      ],
+      [
+        "occupational",
+        14
+      ],
+      [
+        "single_vision",
+        5
+      ],
+      [
+        "single",
+        4
+      ],
+      [
+        "single_vision_digital",
+        4
+      ],
+      [
+        "single_vision_stock",
+        3
+      ],
+      [
+        "special_myopia",
+        2
+      ],
+      [
+        "special",
+        2
+      ],
+      [
+        "myopia_control",
+        2
+      ],
+      [
+        "digital",
+        1
+      ],
+      [
+        "special_drive",
+        1
+      ],
+      [
+        "special_sport",
+        1
+      ],
+      [
+        "single_vision_digital_kids",
+        1
+      ]
+    ],
+    "active": [
+      [
+        "progressiva",
+        553
+      ],
+      [
+        "visao_simples",
+        247
+      ],
+      [
+        "progressive",
+        156
+      ],
+      [
+        "ocupacional",
+        33
+      ],
+      [
+        "especial",
+        24
+      ],
+      [
+        "occupational",
+        14
+      ],
+      [
+        "single_vision",
+        5
+      ],
+      [
+        "single",
+        4
+      ],
+      [
+        "single_vision_digital",
+        4
+      ],
+      [
+        "single_vision_stock",
+        3
+      ],
+      [
+        "special_myopia",
+        2
+      ],
+      [
+        "special",
+        2
+      ],
+      [
+        "myopia_control",
+        2
+      ],
+      [
+        "digital",
+        1
+      ],
+      [
+        "special_drive",
+        1
+      ],
+      [
+        "special_sport",
+        1
+      ],
+      [
+        "single_vision_digital_kids",
+        1
+      ]
+    ]
+  },
+  "cylinder_min_positivo": {
+    "total": 0,
+    "exemplos": []
+  },
+  "sphere_null": {
+    "sphere_min_null": 0,
+    "sphere_max_null": 0,
+    "registros_unicos_afetados": 0,
+    "exemplos_sphere_min_null": []
+  },
+  "price_invalido": {
+    "price_zero": 0,
+    "price_null": 0,
+    "total": 0,
+    "exemplos": []
+  },
+  "categories": {
+    "distintos_total": [
+      "digital",
+      "especial",
+      "myopia_control",
+      "occupational",
+      "ocupacional",
+      "progressiva",
+      "progressive",
+      "single",
+      "single_vision",
+      "single_vision_digital",
+      "single_vision_digital_kids",
+      "single_vision_stock",
+      "special",
+      "special_drive",
+      "special_myopia",
+      "special_sport",
+      "visao_simples"
+    ],
+    "distintos_active": [
+      "digital",
+      "especial",
+      "myopia_control",
+      "occupational",
+      "ocupacional",
+      "progressiva",
+      "progressive",
+      "single",
+      "single_vision",
+      "single_vision_digital",
+      "single_vision_digital_kids",
+      "single_vision_stock",
+      "special",
+      "special_drive",
+      "special_myopia",
+      "special_sport",
+      "visao_simples"
+    ],
+    "nao_mapeados_no_ai_triage": []
+  },
+  "gaps_orcamento": {
+    "total_eventos_analisados": 35,
+    "por_rx_type": [
+      [
+        "single_vision",
+        35
+      ]
+    ],
+    "por_sphere_mais_frequente": [
+      [
+        "-1.00",
+        14
+      ],
+      [
+        "0.00",
+        10
+      ],
+      [
+        "-20.50",
+        10
+      ],
+      [
+        "-0.25",
+        1
+      ]
+    ],
+    "por_cylinder_mais_frequente": [
+      [
+        "-5.50",
+        14
+      ],
+      [
+        "-0.75",
+        10
+      ],
+      [
+        "-2.75",
+        5
+      ],
+      [
+        "-1.50",
+        5
+      ],
+      [
+        "-6.00",
+        1
+      ]
+    ],
+    "combos_mais_problematicos": [
+      [
+        "single_vision | sph -1.00 cyl -5.50",
+        14
+      ],
+      [
+        "single_vision | sph 0.00 cyl -0.75",
+        5
+      ],
+      [
+        "single_vision | sph 0.00 cyl -2.75",
+        5
+      ],
+      [
+        "single_vision | sph -20.50 cyl -0.75",
+        5
+      ],
+      [
+        "single_vision | sph -20.50 cyl -1.50",
+        5
+      ],
+      [
+        "single_vision | sph -0.25 cyl -6.00",
+        1
+      ]
+    ]
+  }
+}

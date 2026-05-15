@@ -1,0 +1,40 @@
+{
+  "por_fornecedor": [
+    {
+      "arquivo": "hoya_abr2025_expandido.json",
+      "fornecedor": "HOYA Vision Care",
+      "total_json": 677,
+      "importados": 677,
+      "ignorados": 0
+    },
+    {
+      "arquivo": "zeiss_consumidor_2026_expandido.json",
+      "fornecedor": "Carl Zeiss Vision Brasil",
+      "total_json": 955,
+      "importados": 955,
+      "ignorados": 0
+    },
+    {
+      "arquivo": "essilor_pvc_abr2026_expandido.json",
+      "fornecedor": "Essilor / EssilorLuxottica",
+      "total_json": 360,
+      "importados": 360,
+      "ignorados": 0
+    },
+    {
+      "arquivo": "diniz_dmax_pvc_maio2025.json",
+      "fornecedor": "Óticas Diniz",
+      "total_json": 650,
+      "importados": 650,
+      "ignorados": 0
+    }
+  ],
+  "erros": [],
+  "total": 2642,
+  "lentes_contato": {
+    "arquivo": "lentes_contato_abr2026.json",
+    "total_json": 51,
+    "importados": 51,
+    "ignorados": 0
+  }
+}
