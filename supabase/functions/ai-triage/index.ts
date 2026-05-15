@@ -4454,8 +4454,22 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // ── HINT ANTI-DUPLICAÇÃO: agendamento ativo + sem pedido explícito de mudança ──
     {
       const lastInLow = String(lastInbound?.conteudo || currentMsg || "").toLowerCase();
-      const explicitChange = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInLow);
-      if (hasAgendamentoAtivo && !explicitChange) {
+      const explicitChange = /\b(remarcar|reagendar|mudar (a |o )?(hor[aá]rio|dia|data|loja)|trocar (a |o )?(hor[aá]rio|dia|data|loja)|cancelar|desmarcar|outro hor[aá]rio|outro dia|outra loja|antecipar|adiar)\b/.test(lastInLow);
+      // Detecta intenção de cancelar (sem nova data já proposta) — força tool cancelar_visita
+      const wantsCancel = /\b(cancelar|desmarcar|n[aã]o (vou|consigo|posso) (ir|comparecer)|n[aã]o (poderei|vou poder) ir)\b/i.test(lastInLow)
+        && !/\b(remarcar|reagendar|outro dia|outro hor[aá]rio|amanh[aã]|segunda|ter[çc]a|quarta|quinta|sexta|s[aá]bado)\b/i.test(lastInLow);
+      // Última oferta do assistant sugeriu cancelamento? ("posso cancelar", "deixar para remarcar depois")
+      const _lastOutTxtForCancel = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
+      const offeredCancel = /\b(cancelar (agora )?seu (hor[aá]rio|agendamento)|posso cancelar|deixar(mos)? para remarcar (depois|mais tarde)|deixamos para remarcar)\b/i.test(_lastOutTxtForCancel);
+      const shortYesToCancel = /^(pode|pode sim|sim|isso|ok|tudo bem|por favor|cancela|cancelar|pode cancelar|sim, pode|pode pode)\.?$/i.test(lastInLow.trim());
+      if (hasAgendamentoAtivo && (wantsCancel || (offeredCancel && shortYesToCancel))) {
+        const _lojaAg = agAtivoRecentEarly?.loja_nome || "";
+        messages.push({
+          role: "system",
+          content: `[CANCELAR AGENDAMENTO] O cliente está ${wantsCancel ? "pedindo para cancelar/desmarcar" : "confirmando o cancelamento que você ofereceu"} o agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS"}${_lojaAg ? " na " + _lojaAg : ""}). AÇÃO OBRIGATÓRIA: chame a tool *cancelar_visita* AGORA — não responda só com texto. PROIBIDO escrever "cancelei seu horário" sem chamar a tool. Após o cancelamento, ofereça brevemente registrar lembrete pra remarcar (use agendar_lembrete se ele pedir uma data específica) ou deixe em aberto. PROIBIDO assinar mensagens futuras com "Te espero ${agendamentoFmt || "..."}" — esse horário acabou de ser cancelado.`,
+        });
+        console.log(`[GUARDRAIL-HINT] Cancelamento detectado — forçando tool cancelar_visita (wantsCancel=${wantsCancel}, offeredCancel+shortYes=${offeredCancel && shortYesToCancel})`);
+      } else if (hasAgendamentoAtivo && !explicitChange) {
         const _lojaAg = agAtivoRecentEarly?.loja_nome || "";
         // Detecta pedido EXPLÍCITO de preço/orçamento na mensagem atual.
         // Só nesse caso permitimos rodar consultar_lentes/consultar_lentes_contato de novo.
@@ -4467,7 +4481,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           && /\b(transitions?|fotossens[ií]ve[il]|fotocrom[áa]?tic[ao]?|antirreflex(?:o|ivo)?|filtro\s+azul|luz\s+azul|polariz[ao]?d[ao]?|varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax)\b/i.test(lastInLow);
         messages.push({
           role: "system",
-          content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}${_lojaAg ? " na " + _lojaAg : ""}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja ou cancelar.
+          content: `[AGENDAMENTO ATIVO] O cliente JÁ TEM um agendamento ativo (${agendamentoFmt || "ver AGENDAMENTOS DESTE CLIENTE"}${_lojaAg ? " na " + _lojaAg : ""}). PROIBIDO chamar agendar_visita ou reagendar_visita — não há pedido explícito de mudança. PROIBIDO perguntar "mantemos ou prefere cancelar?". PROIBIDO oferecer/propor cancelamento. Se o cliente disser "agendar", "manter", "ok", "confirmado", "obg", trate como CONFIRMAÇÃO do existente: apenas reafirme com "Tudo certo, te espero ${agendamentoFmt || "no horário combinado"} 👋" e siga o fluxo de comparativo/encerramento. Só chame reagendar_visita se o cliente pedir EXPLICITAMENTE para remarcar/mudar horário/loja, ou cancelar_visita se ele pedir para cancelar.
 
 ⛔ PROIBIDO chamar consultar_lentes/consultar_lentes_contato apenas porque o cliente mencionou um tratamento, material, cor, marca ou estilo de PASSAGEM (anotando preferência, ex.: "queria armação tartaruga", "gosto de filtro azul"). Trate como PREFERÊNCIA registrada para a visita — anote brevemente e reafirme o agendamento. ${(explicitPriceAsk || askTreatBrand) ? `EXCEÇÃO: ${askTreatBrand ? "o cliente está PERGUNTANDO se temos um tratamento/marca específico (transitions, varilux, zeiss etc.)" : "o cliente pediu preço/orçamento explicitamente AGORA"} — DEVE rodar consultar_lentes ${askTreatBrand ? "com filtro_photo/filtro_blue/preferencia_marca conforme o que ele perguntou" : ""} para responder com valor/disponibilidade real, SEM perguntar região/bairro/loja (já tem agendamento). PROIBIDO responder 'preciso confirmar na loja' — o catálogo é a fonte da verdade.` : "Só rode consultar_lentes/consultar_lentes_contato se o cliente pedir EXPLICITAMENTE preço/orçamento/quanto custa."}
 
