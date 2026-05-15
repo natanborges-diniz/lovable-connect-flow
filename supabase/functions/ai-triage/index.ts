@@ -1486,6 +1486,22 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "cancelar_visita",
+      description: "Cancela DEFINITIVAMENTE o agendamento ativo do cliente. OBRIGATÓRIO usar SEMPRE que for confirmar um cancelamento ao cliente — nunca escreva 'cancelei seu horário' ou 'desmarquei' sem chamar esta tool. Use quando o cliente pedir para desmarcar/cancelar SEM já ter escolhido nova data (se ele já deu nova data, use reagendar_visita).",
+      parameters: {
+        type: "object",
+        properties: {
+          motivo: { type: "string", description: "Motivo informado pelo cliente (opcional). Ex: 'imprevisto', 'não vou conseguir ir'." },
+          resposta: { type: "string", description: "Mensagem confirmando o cancelamento ao cliente. Mantenha curta e calorosa, e ofereça remarcar quando ele quiser. Ex: 'Prontinho, cancelei seu horário. Quando quiser remarcar é só me chamar 👋'." },
+        },
+        required: ["resposta"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "consultar_lentes",
       description: "Busca lentes compatíveis com a receita do cliente. Use SOMENTE quando o cliente demonstrar interesse em orçamento/preço/opções de lentes APÓS a receita já ter sido interpretada. NÃO use logo após interpretar_receita — espere o cliente pedir. Se o contexto indicar que a receita JÁ FOI INTERPRETADA (seção RECEITAS JÁ INTERPRETADAS), use esta tool diretamente — NÃO peça a receita novamente.",
       parameters: {
