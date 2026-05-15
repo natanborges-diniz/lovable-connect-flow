@@ -2272,7 +2272,147 @@ serve(async (req) => {
       console.warn("[OS-PRESKIP] falhou:", (e as Error)?.message);
     }
 
+    // ── PRE-ROUTER: Retomar IA quando cliente digita receita após escalada ──
+    // Caso Flávia (15/05/2026): IA escalou por OCR ilegível; cliente depois digitou
+    // "Esférico OD -0,50 / OE -2,50". Antes, o gate `modo=humano` silenciava IA até
+    // consultor abrir. Agora detectamos a receita digitada e devolvemos o atendimento
+    // para a IA com pending=true para confirmar antes de cotar.
     if (atendimento.modo === "humano") {
+      try {
+        const _meta = (atendimento.metadata as Record<string, any>) || {};
+        const _motivo: string = String(_meta.revisao_humana_motivo || "");
+        const _motivosOk = new Set([
+          "receita_escalada_apos_2_rejeicoes",
+          "receita_texto_recusada",
+          "receita_confirmacao_falhou_2x",
+          "rx_ocr_falhou",
+          "rx_invalida",
+        ]);
+        const _motivosArr: string[] = Array.isArray(_meta.revisao_motivos) ? _meta.revisao_motivos : [];
+        const _motivoMatches = _motivosOk.has(_motivo) || _motivosArr.some((m) => _motivosOk.has(String(m)));
+        const _msgPre = String(mensagem_texto || "").trim();
+        const _isImg = !!(media && (media.image_url || media.mime_type?.startsWith?.("image/")));
+        const _escAt = _meta.escalado_humano_at ? Date.parse(_meta.escalado_humano_at) : 0;
+        const _withinWindow = _escAt > 0 && (Date.now() - _escAt) < 24 * 3600 * 1000;
+        const _retomadaAt = _meta.retomada_ia_pos_escalada_at ? Date.parse(_meta.retomada_ia_pos_escalada_at) : 0;
+        const _retomadaFresh = _retomadaAt > 0 && (Date.now() - _retomadaAt) < 10 * 60 * 1000;
+
+        if (_motivoMatches && !_isImg && _msgPre && _withinWindow && !_retomadaFresh) {
+          const _parsed = detectPrescriptionCorrection(_msgPre);
+          if (_parsed) {
+            // Verifica se humano enviou outbound após a escalada (consultor já assumiu)
+            const { data: _humanoMsgs } = await supabase
+              .from("mensagens")
+              .select("id, criado_em")
+              .eq("atendimento_id", atendimento_id)
+              .eq("direcao", "outbound")
+              .eq("autor_tipo", "humano")
+              .gte("criado_em", new Date(_escAt).toISOString())
+              .limit(1);
+            const _humanoAssumiu = Array.isArray(_humanoMsgs) && _humanoMsgs.length > 0;
+
+            if (!_humanoAssumiu) {
+              // Carrega contato + receitas
+              const { data: _cont } = await supabase
+                .from("contatos")
+                .select("id, metadata")
+                .eq("id", atendimento.contato_id)
+                .single();
+              if (_cont) {
+                const _cMeta: any = (_cont.metadata as Record<string, any>) || {};
+                const _receitas: any[] = Array.isArray(_cMeta.receitas) ? [..._cMeta.receitas] : [];
+
+                const _merged: any = {
+                  eyes: {
+                    od: { ...Object.fromEntries(Object.entries(_parsed.od).filter(([_, v]) => v != null)) },
+                    oe: { ...Object.fromEntries(Object.entries(_parsed.oe).filter(([_, v]) => v != null)) },
+                  },
+                  rx_type: _parsed.rx_type,
+                  summary: {
+                    has_addition: _parsed.has_addition,
+                    needs_progressive: _parsed.has_addition,
+                    suggested_category: _parsed.rx_type,
+                  },
+                  confidence: 0.99,
+                  data_leitura: new Date().toISOString(),
+                  source: "client_typed_first_pos_escalada",
+                  raw_correction: _parsed.raw,
+                  needs_human_review: false,
+                  label: "digitada após escalada",
+                  confirmed_by_client_at: null,
+                };
+
+                if (isReceitaValida(_merged)) {
+                  _receitas.push(_merged);
+                  const _idx = _receitas.length - 1;
+                  const _maxAbs = Math.max(
+                    Math.abs(_parsed.od?.sphere ?? 0),
+                    Math.abs(_parsed.oe?.sphere ?? 0),
+                  );
+
+                  const _newCMeta = {
+                    ..._cMeta,
+                    receitas: _receitas,
+                    receita_confirmacao: {
+                      pending: true,
+                      rx_index: _idx,
+                      rx_label: _merged.label,
+                      asked_at: new Date().toISOString(),
+                      correction_count: 0,
+                      reason: "retomada_pos_escalada",
+                      fora_da_faixa: _maxAbs > 10,
+                    },
+                  };
+                  await supabase.from("contatos").update({ metadata: _newCMeta }).eq("id", atendimento.contato_id);
+
+                  const _newAtMeta = {
+                    ..._meta,
+                    revisao_humana_pendente: false,
+                    revisao_humana_motivo: null,
+                    retomada_ia_pos_escalada_at: new Date().toISOString(),
+                    retomada_motivo: "cliente_digitou_receita",
+                  };
+                  await supabase.from("atendimentos").update({
+                    modo: "ia",
+                    status: "em_andamento",
+                    updated_at: new Date().toISOString(),
+                    metadata: _newAtMeta,
+                  }).eq("id", atendimento_id);
+
+                  await supabase.from("eventos_crm").insert({
+                    contato_id: atendimento.contato_id,
+                    tipo: "ia_retomada_pos_escalada_receita_texto",
+                    descricao: `Cliente digitou receita por texto após escalada (motivo anterior: ${_motivo || _motivosArr.join(",") || "n/a"}) — IA retomou pedindo confirmação`,
+                    metadata: {
+                      previous_motivo: _motivo,
+                      previous_motivos: _motivosArr,
+                      receita_parsed: { od: _parsed.od, oe: _parsed.oe, rx_type: _parsed.rx_type, raw: _parsed.raw },
+                      escalado_ha_minutos: Math.round((Date.now() - _escAt) / 60000),
+                    },
+                    referencia_tipo: "atendimento",
+                    referencia_id: atendimento_id,
+                  }).then(() => undefined, () => undefined);
+
+                  await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(_merged, false));
+                  console.log(`[RX-RETOMADA] Cliente digitou receita pós-escalada (motivo=${_motivo}) — IA retomou`);
+                  return jsonResponse({
+                    status: "ok",
+                    tools_used: ["ia_retomada_pos_escalada_receita"],
+                    intencao: "receita_oftalmologica",
+                    precisa_humano: false,
+                    pipeline_coluna_sugerida: "Orçamento",
+                    modo: "ia",
+                  });
+                }
+              }
+            } else {
+              console.log("[RX-RETOMADA] Humano já assumiu após escalada — não retomar");
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[RX-RETOMADA] erro no detector:", (e as Error)?.message);
+      }
       return jsonResponse({ status: "skipped", reason: "modo humano" });
     }
     if (atendimento.modo === "ponte") {
