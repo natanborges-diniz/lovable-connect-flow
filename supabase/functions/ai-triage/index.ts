@@ -5274,7 +5274,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           }
           resposta = args.resposta || `Prontinho${_firstNm ? ", " + _firstNm : ""} — cancelei seu horário. Quando quiser remarcar é só me chamar 👋`;
         }
-
+      } else if (fn === "agendar_lembrete") {
         resposta = args.resposta;
         intencao = "lembrete";
 
