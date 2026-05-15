@@ -348,14 +348,15 @@ function detectEscolhaReceita(text: string, receitas: any[]): { idx: number; how
 }
 
 function isReceitaForaDaFaixa(rx: any): boolean {
-  // Regra de negócio (Mai/2026): "lente especial" = SOMENTE esférico muito alto (>10D em qualquer
-  // olho). Cilindro alto e adição alta NÃO marcam como especial — essas receitas seguem o fluxo
-  // normal de cotação (consultar_lentes apresenta 3 opções a partir da tabela existente).
+  // Regra de negócio (Mai/2026, revisada): só marca como "lente especial" / fora-da-faixa quando
+  // o esférico passa de 16D em qualquer olho — aí escalamos direto pro consultor sem tentar cotar.
+  // Faixa 10 < |sph| <= 16 segue cotação normal e ganha flag de revisão humana via
+  // requerRevisaoHumanaPosOrcamento (motivo `esferico_faixa_revisao`).
   if (!rx?.eyes) return false;
   const od = rx.eyes.od || {};
   const oe = rx.eyes.oe || {};
   const sphereMax = Math.max(Math.abs(Number(od.sphere) || 0), Math.abs(Number(oe.sphere) || 0));
-  if (sphereMax > 10) return true;
+  if (sphereMax > 16) return true;
   return false;
 }
 
@@ -372,6 +373,7 @@ function requerRevisaoHumanaPosOrcamento(rx: any): { precisa: boolean; motivos: 
   if (cylMax > 4) motivos.push(`cilindrico_alto:${cylMax}`);
   if (addMax > 3.5) motivos.push(`adicao_alta:${addMax}`);
   if (sphereMax > 8 && sphereMax <= 10) motivos.push(`esferico_faixa_cinza:${sphereMax}`);
+  if (sphereMax > 10 && sphereMax <= 16) motivos.push(`esferico_faixa_revisao:${sphereMax}`);
   return { precisa: motivos.length > 0, motivos };
 }
 
