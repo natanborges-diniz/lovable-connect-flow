@@ -186,6 +186,16 @@ async function processContato(
 
   if (!atendimento) return result;
 
+  // ── BLOQUEIO PERSISTENTE: cliente pediu para encerrar OU cancelou visita ──
+  // ai-triage grava metadata.nao_retornar_automaticamente=true ao detectar
+  // encerramento explícito, despedida pós-agendamento ou cancelar_visita.
+  // Não dispara retomada_contexto_* enquanto o flag estiver presente.
+  const _atMeta = (atendimento.metadata as Record<string, any>) || {};
+  if (_atMeta.nao_retornar_automaticamente === true) {
+    console.log(`[BLOQUEIO-RETOMADA] ${contato.nome}: nao_retornar_automaticamente=true (motivo=${_atMeta.encerrado_motivo || "n/a"}) — pulando`);
+    return result;
+  }
+
   // ─────────────────────────────────────────────────────────────
   // MODO HUMANO/HÍBRIDO — cadência via templates Meta (>24h janela)
   // ─────────────────────────────────────────────────────────────
