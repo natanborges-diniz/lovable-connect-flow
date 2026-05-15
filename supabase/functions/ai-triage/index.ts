@@ -4661,7 +4661,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         const tok = brandRefMatch[1];
         const raw = brandRefMatch[2];
         if (tok === "kodak") {
-          return `[SISTEMA: REFINAMENTO MARCA — KODAK] Cliente perguntou sobre KODAK. Trabalhamos sim (linha Precise multifocal), mas o catálogo da Kodak NÃO está na nossa tabela de preços online. AÇÃO: confirme "Trabalhamos com Kodak sim 😊" e ESCALE para humano com mensagem curta tipo "vou chamar a equipe pra te passar os valores certinhos". NÃO invente preço. NÃO chame consultar_lentes pra Kodak.`;
+          return `[SISTEMA: REFINAMENTO MARCA — KODAK] Cliente perguntou sobre KODAK. A linha Kodak está disponível no catálogo (Intro, Blue, City em visão simples; Network UHD em progressiva; Precise UHD ocupacional). AÇÃO: chame consultar_lentes com preferencia_marca:"Kodak" para buscar opções compatíveis com a receita do cliente. NÃO escale para humano. NÃO invente preço.`;
         }
         const params: string[] = [];
         let label = raw;
