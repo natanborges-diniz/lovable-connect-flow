@@ -3162,6 +3162,11 @@ serve(async (req) => {
                 .from("contatos")
                 .update({ metadata: { ...contatoMeta, tentativas_pedido_nome: tentativas + 1, nome_candidato_botao: primeiroNome } })
                 .eq("id", contatoId);
+              const _atMetaCN = (atendimento.metadata as Record<string, any>) || {};
+              await supabase
+                .from("atendimentos")
+                .update({ metadata: { ..._atMetaCN, expected_reply: "confirmar_nome" } })
+                .eq("id", atendimento_id);
             } catch (_) { /* noop */ }
             console.log(`[FAST-PATH] greeting_buttons_sent candidato="${primeiroNome}" tentativas=${tentativas + 1}`);
             await logEvent(supabase, contatoId, atendimento_id, "saudacao_botoes_nome", introTxt);
