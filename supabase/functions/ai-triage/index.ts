@@ -2457,7 +2457,7 @@ serve(async (req) => {
                     referencia_id: atendimento_id,
                   }).then(() => undefined, () => undefined);
 
-                  await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(_merged, false));
+                  await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(_merged, false));
                   console.log(`[RX-RETOMADA] Cliente digitou receita pós-escalada (motivo=${_motivo}) — IA retomou`);
                   return jsonResponse({
                     status: "ok",
@@ -3496,7 +3496,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             metadata: { rx_label: rxLabelEsc, rx_index: escolha.idx, how: escolha.how },
             referencia_tipo: "atendimento", referencia_id: atendimento_id,
           }).then(() => undefined, () => undefined);
-          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(rxEscolhida, false));
+          await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(rxEscolhida, false));
           console.log(`[RX-ESCOLHA] Cliente escolheu receita idx=${escolha.idx} ainda não confirmada — pedindo confirmação`);
           return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
         }
@@ -4582,7 +4582,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             return jsonResponse({ status: "ok", tools_used: ["receita_escalada_humano"], intencao: "receita_oftalmologica", precisa_humano: true, pipeline_coluna_sugerida: "Aguardando Humano", modo: "humano" });
           }
 
-          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(merged, true));
+          await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(merged, true));
           try {
             const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
             delete m.ia_lock;
@@ -6610,7 +6610,11 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.warn("[PHASE4-LOOP] guardrail falhou — seguindo com envio normal", e);
     }
 
-    await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+    if (isReceitaConfirmText(resposta)) {
+      await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+    } else {
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+    }
 
     // ── 10.05. DETECTOR PÓS-LLM: agendamento prometido sem tool disparada ──
     // Se a resposta da IA contém promessa de agendamento (data + hora + loja) mas a tool
@@ -7806,6 +7810,45 @@ async function sendInteractive(supabaseUrl: string, serviceKey: string, atendime
     console.warn(`[INTERACTIVE] exception: ${e instanceof Error ? e.message : String(e)} — falling back to text`);
     await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, interactive.texto);
   }
+}
+
+// Detecta se um texto é uma confirmação de receita (saída de buildMsgConfirmarReceita)
+function isReceitaConfirmText(t: string): boolean {
+  const s = String(t || "");
+  return /li sua receita assim, confere|anotei! ficou assim/i.test(s);
+}
+
+// Envia confirmação de receita com botões OK / Corrigir e marca receita_pending
+async function sendReceitaConfirmInteractive(
+  supabaseClient: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+  texto: string,
+) {
+  // Marca pending antes de enviar para que o clique do botão receita_ok funcione
+  try {
+    const { data: atRow } = await supabaseClient
+      .from("atendimentos")
+      .select("metadata")
+      .eq("id", atendimentoId)
+      .maybeSingle();
+    const meta = (atRow?.metadata || {}) as Record<string, any>;
+    await supabaseClient
+      .from("atendimentos")
+      .update({ metadata: { ...meta, receita_pending: true, receita_pending_at: new Date().toISOString() } })
+      .eq("id", atendimentoId);
+  } catch (e) {
+    console.warn("[RX-CONFIRM-BTN] falha ao marcar receita_pending:", e);
+  }
+  await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
+    type: "button",
+    texto,
+    botoes: [
+      { id: "receita_ok", titulo: "✅ Tá certo" },
+      { id: "receita_corrigir", titulo: "✏️ Corrigir" },
+    ],
+  });
 }
 
 // ─── routeButtonClick: dispatcher determinístico ───
