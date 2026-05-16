@@ -989,8 +989,18 @@ async function triggerAiTriage(
   contatoId: string,
   phone: string,
   text: string,
-  mediaInfo?: { tipo_conteudo: string; media_url: string | null; mime_type?: string | null; inline_base64?: string | null; is_transcribed_audio?: boolean }
+  mediaInfo?: {
+    tipo_conteudo: string;
+    media_url: string | null;
+    mime_type?: string | null;
+    inline_base64?: string | null;
+    is_transcribed_audio?: boolean;
+    interactive_reply?: { id: string; title: string; source: "button" | "list" } | null;
+  }
 ) {
+  const interactivePart = mediaInfo?.interactive_reply
+    ? { button_id: mediaInfo.interactive_reply.id, interactive_reply: mediaInfo.interactive_reply }
+    : {};
   await fetch(`${supabaseUrl}/functions/v1/ai-triage`, {
     method: "POST",
     headers: {
@@ -1001,6 +1011,7 @@ async function triggerAiTriage(
       atendimento_id: atendimentoId,
       contato_id: contatoId,
       mensagem_texto: text,
+      ...interactivePart,
       ...(mediaInfo && { media: mediaInfo }),
     }),
   });
