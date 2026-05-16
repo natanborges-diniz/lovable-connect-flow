@@ -41,9 +41,9 @@ serve(async (req) => {
       });
     }
 
-    let { phone, senderName, text, messageId, mediaType, mediaId, mediaMimeType } = message;
+    let { phone, senderName, text, messageId, mediaType, mediaId, mediaMimeType, interactiveReply } = message;
     const source = "meta_official"; // CANAL ÚNICO: webhook só aceita Meta Official.
-    console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
+    console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${interactiveReply ? `[btn:${interactiveReply.id}]` : ''} ${text.substring(0, 50)}`);
 
     // ─── 0a. ECHO-SAUDAÇÃO FILTER ───
     // Defensivo: descarta se nosso próprio número devolver a saudação automática como inbound.
