@@ -1,80 +1,206 @@
-# Cotação de lentes — corrigir inversão de faixas e priorizar Varilux no Premium
+## Suporte completo a mensagens interativas WhatsApp (botões + listas)
 
-## Pontos divergentes encontrados na conversa
+Implementação nova em 3 camadas + cron. Tudo determinístico por `button_id`, eliminando regex e LLM nos pontos de decisão.
 
-**1. Premium da 1ª cotação sem Varilux** (orçamento livre, sem marca pedida)
-A IA listou como Premium: *DNZ Pro 1.50 Fast* e *Hoya MySelf 1.50*. Para multifocal, Premium tem que ser dominado por Varilux (Comfort / Physio / X). DNZ Pro em Premium descaracteriza o posicionamento comercial.
+---
 
-**2. Faixas com preço invertido após o cliente pedir Varilux** (3ª mensagem da IA)
-- 💚 Econômica: Varilux Liberty + Crizal Prevencia — **R$ 2.135,00**
-- 💛 Intermediária: Varilux Liberty 3.0 sem AR — **R$ 1.199,00**
-- 💎 Premium: Varilux Comfort Max sem AR — **R$ 1.699,00**
+### CAMADA 1 — `supabase/functions/send-whatsapp/index.ts`
 
-Econômica > Premium > Intermediária. Comercialmente desastroso, e quando o cliente apontou, a IA repetiu sem reconhecer.
+Adicionar campo opcional `interactive` no body:
 
-## Causa-raiz no código (`supabase/functions/ai-triage/index.ts`)
-
-### Bug A — branch `preferencia_marca` não ordena por preço (linhas 6981-6988)
 ```ts
-if (args?.preferencia_marca) {
-  const economy = lenses[0];
-  const premium = lenses[lenses.length - 1];
-  const midIndex = Math.floor(lenses.length / 2);
-  const mid = lenses.length >= 3 ? lenses[midIndex] : null;
-```
-A query (linha 6777) ordena por `priority ASC, price_brl ASC`. Quando o filtro de marca casa SKUs com `priority` diferente, `lenses[0]` e `lenses[last]` ficam ordenados por prioridade, não por preço. Resultado: econômica mais cara que premium.
-
-### Bug B — Premium genérico (sem marca) é por percentil de preço puro (linhas 7022-7037)
-`pickPorFaixa("prem")` pega as mais caras de marcas distintas, sem considerar a regra comercial: **em multifocal, Premium prioriza Essilor/Varilux**. DNZ Pro e Hoya MySelf entraram porque eram caras, mas Varilux Comfort/Physio deveria abrir a faixa.
-
-### Bug C — sem validador final
-Não há checagem `min(eco) ≤ min(inter) ≤ min(prem)` antes de devolver `quoteMsg`. Faixa inconsistente passa silenciosamente.
-
-### Bug D — IA ignora reclamação sobre inversão
-Quando cliente diz "a econômica está mais cara que a intermediária", não há router pre-LLM que detecte isso e force re-cotação. O LLM degrada para "já te mandei as opções acima".
-
-## Plano de correção
-
-### 1. Reordenar por preço no branch `preferencia_marca` (~linha 6981)
-```ts
-if (args?.preferencia_marca) {
-  const sortedByPrice = [...lenses].sort((a, b) => Number(a.price_brl) - Number(b.price_brl));
-  const economy = sortedByPrice[0];
-  const premium = sortedByPrice[sortedByPrice.length - 1];
-  const mid = sortedByPrice.length >= 3 ? sortedByPrice[Math.floor(sortedByPrice.length / 2)] : null;
-  // Se premium.price <= economy.price → faixa achatada, mostrar só 1 opção
+interactive?: {
+  type: "button" | "list";
+  texto: string;
+  botoes?: Array<{ id: string; titulo: string }>;            // máx 3, title ≤20 chars
+  lista?: {
+    label: string;                                            // ≤20 chars
+    secao: string;
+    itens: Array<{ id: string; titulo: string; descricao?: string }>; // máx 10
+  };
 }
 ```
 
-### 2. Priorizar Varilux em Premium quando `rxType === "progressive"` e sem marca pedida (~linha 7022)
-Dentro de `pickPorFaixa("prem")`, quando `rxType==="progressive"` e `!args?.preferencia_marca`, **ranquear o pool antes do loop** colocando primeiro itens cuja `brand` casa Essilor e `family` casa Varilux. Empate desfaz por preço. Garante que o representante da faixa Premium em multifocal seja Varilux sempre que existir no catálogo compatível com o grau.
+Nova função `sendInteractiveViaMeta(phone, interactive)` que monta o payload Meta `type:"interactive"` (button ou list). Truncar `title` em 20, `description` em 72, `body.text` em 1024 conforme limites Meta.
 
-### 3. Validador final anti-inversão (logo antes do `return { resposta: quoteMsg }`)
-Calcular `minPrice` de cada faixa renderizada. Se a ordem `eco ≤ inter ≤ prem` quebrar:
-- Logar `eventos_crm: cotacao_faixas_inconsistentes` com snapshot dos itens.
-- Recompor as 3 faixas por percentil puro de preço (descarta diversificação de marca nesse caso) e re-renderizar.
-- Esse fallback nunca produz inversão porque é matemático.
+Mantém:
+- Guard de 24h (interativas também só dentro da janela — fora exige template).
+- Validação de telefone.
+- Persistência em `mensagens` com `tipo_conteudo: "interactive"`, `conteudo` = `interactive.texto`, e `metadata.interactive` = payload original (para auditoria/render no Atrium).
 
-### 4. Detector pre-LLM de "preço invertido" reclamado pelo cliente
-Em `ai-triage`, antes da chamada ao LLM, se a última outbound bateu `orcamentoOutboundRegex` (já existe, linha 3783) **e** o inbound atual casa regex tipo:
+Ordem de prioridade no handler: `interactive` > `media_url` > `texto`.
+
+---
+
+### CAMADA 2 — `supabase/functions/whatsapp-webhook/index.ts`
+
+No parser onde `msg.type` é avaliado, adicionar:
+
+```ts
+if (msg.type === "interactive") {
+  const reply = msg.interactive?.button_reply ?? msg.interactive?.list_reply;
+  if (reply) return {
+    tipo_conteudo: "interactive_reply",
+    text: reply.title,                  // mantém compat com pipeline atual
+    interactive_reply: true,
+    button_id: reply.id,
+    button_title: reply.title,
+  };
+}
 ```
-/(mais\s+car[oa].*(que|do\s+que))|(econ[ôo]mica.*car)|(premium.*barat)|(invertid[ao])|(t[áa]\s+errad[ao].*pre[çc]o)/i
+
+Ao salvar em `mensagens`:
+- `conteudo` = `reply.title` (compat com IA legível e timeline)
+- `tipo_conteudo` = `"interactive_reply"`
+- `metadata.interactive_reply = true`
+- `metadata.button_id = reply.id`
+
+Propagar `button_id` para o invoke do `ai-triage` no payload (campo novo `button_id`).
+
+---
+
+### CAMADA 3 — `supabase/functions/ai-triage/index.ts`
+
+#### 3.1 — Helper `sendInteractive(phone, atendimentoId, interactive)`
+Wrapper sobre `supabase.functions.invoke("send-whatsapp", { body: { atendimento_id, interactive } })`. Loga `[INTERACTIVE] sent type=… buttons=…`.
+
+#### 3.2 — Router determinístico por `button_id` (TOPO do handler)
+Antes de `classifyIntent`/`deterministicIntentFallback`/LLM, se `payload.button_id` (ou `mensagem.metadata.button_id`) estiver presente:
+
+```ts
+const BUTTON_HANDLERS: Record<string, (ctx) => Promise<Resp>> = {
+  // Triagem
+  orcamento:        ctx => handleOrcamentoStart(ctx),
+  status_pedido:    ctx => escalateToOS(ctx),
+  duvida:           ctx => handleDuvidaLivre(ctx),
+  reclamacao:       ctx => escalateToHuman(ctx, "reclamacao"),
+  agendar:          ctx => startAgendamentoFlow(ctx),
+
+  // Receita
+  receita_foto:     ctx => askForReceitaPhoto(ctx),
+  receita_digitar:  ctx => sendMsgFixa(ctx, "MSG_PEDIR_RECEITA_TEXTO"),
+  receita_sem:      ctx => handleSemReceita(ctx),
+  receita_ok:       ctx => runConsultarLentesFromMetadata(ctx),
+  receita_corrigir: ctx => sendMsgFixa(ctx, "MSG_PEDIR_RECEITA_TEXTO"),
+
+  // Adicionais
+  adicional_azul:   ctx => continueQuoteWith(ctx, { filtro_blue: true }),
+  adicional_foto:   ctx => continueQuoteWith(ctx, { filtro_photo: true }),
+  adicional_nao:    ctx => continueQuoteWith(ctx, {}),
+
+  // Reação ao orçamento
+  orcamento_agendar:      ctx => startAgendamentoFlow(ctx),
+  orcamento_duvida:       ctx => handleDuvidaLivre(ctx),
+  orcamento_mais_barato:  ctx => offerDiscount(ctx),
+
+  // Desconto
+  desconto_aceito: ctx => startAgendamentoFlow(ctx),
+  desconto_loja:   ctx => sendEnderecosLojas(ctx),
+  desconto_pensar: ctx => sendDespedidaCordial(ctx),
+
+  // Cidade/loja (id = loja_id) — prefixo loja:<uuid>
+  // tratado por match prefixo, não na map
+
+  // Confirmação agendamento
+  ag_confirmar: ctx => callAgendarVisita(ctx),
+  ag_mudar:     ctx => askNovaDataHora(ctx),
+  ag_cancelar:  ctx => cancelarAgendamentoPending(ctx),
+
+  // Dia-D
+  show_confirma: ctx => confirmarPresencaDiaD(ctx),
+  show_remarcar: ctx => startReagendamentoFlow(ctx),
+  show_nao:      ctx => cancelarEReoferecer(ctx),
+
+  // Recuperação no-show
+  recupera_sim:  ctx => startAgendamentoFlow(ctx),
+  recupera_loja: ctx => sendEnderecosLojas(ctx),
+  recupera_nao:  ctx => marcarNegativaPosRetomada(ctx),
+};
 ```
-→ Forçar re-execução de `runConsultarLentes` com os mesmos args anteriores (recuperados de `eventos_crm` ou do snapshot em `atendimento.metadata.ultima_cotacao`). A nova cotação já passa pelos fixes 1–3, então sai correta. Prefixar com `"Você tem razão, deixa eu refazer as faixas certinho:"`.
 
-### 5. Persistir snapshot da última cotação
-No final de `runConsultarLentes` (sucesso), gravar `atendimento.metadata.ultima_cotacao = { args, faixas: [{tier, brand, family, price}…], at }`. Habilita o detector do passo 4 e melhora auditoria.
+Se `button_id` casar, executa handler e retorna — sem LLM, sem regex.
 
-### 6. Memória
-Criar `mem://ia/cotacao-faixas-validacao-e-varilux-premium.md` documentando: ordenação por preço em `preferencia_marca`, prioridade Varilux em Premium multifocal, validador anti-inversão, detector de reclamação. Atualizar `index.md` em `## Core` com regra curta: *"Cotação multifocal: Premium prioriza Varilux. Faixas sempre validadas Eco ≤ Inter ≤ Prem."*
+Prefixo especial `loja:<uuid>` (lista de lojas) → salva `loja_id` em `atendimento.metadata.agendamento_pending.loja_id` e avança para escolha de data.
 
-## Escopo
+#### 3.3–3.10 — 8 pontos de envio interativo
 
-Apenas `supabase/functions/ai-triage/index.ts` + memória. Sem migração de banco. Sem mudança no esquema da tool. Sem mexer em LC ou agendamento. Deploy apenas de `ai-triage`.
+Substituir os pontos atuais de texto livre por chamadas a `sendInteractive`:
 
-## Validação
+| # | Gatilho atual | Substituição |
+|---|---------------|--------------|
+| 1 | Triagem após confirmar nome (`inboundCount===2`) | Lista "Como posso te ajudar hoje?" com 5 itens |
+| 2 | 1ª solicitação de receita | Botões `receita_foto / receita_digitar / receita_sem` |
+| 3 | Pós-`interpretar_receita` OCR, antes de cotar | Botões `receita_ok / receita_corrigir` (snapshot da receita em `metadata.receita_pending`) |
+| 4 | Após confirmar receita, antes de `consultar_lentes` | Botões `adicional_azul / adicional_foto / adicional_nao` |
+| 5 | Junto com o orçamento renderizado | Botões `orcamento_agendar / orcamento_duvida / orcamento_mais_barato` |
+| 6 | Após oferecer desconto 20% | Botões `desconto_aceito / desconto_loja / desconto_pensar` |
+| 7 | Quando pediria cidade | Lista carregada de `telefones_lojas` (tipo=loja, ativo) — id=`loja:<uuid>`, descricao=endereço |
+| 8 | Antes de chamar `agendar_visita` | Botões `ag_confirmar / ag_mudar / ag_cancelar` |
 
-- Simular `runConsultarLentes` com a receita do Natan (OD -2/-0.5, OE -1.75/-0.75, ADD +2) **sem** `preferencia_marca`: Premium deve conter Varilux Comfort/Physio.
-- Simular **com** `preferencia_marca="ESSILOR"`: faixas Varilux ordenadas Liberty 3.0 < Liberty+Crizal < Comfort Max (preço crescente).
-- Curl no `ai-triage` enviando "a econômica está mais cara que a intermediária" após uma cotação real → deve disparar re-cotação prefixada.
-- Log `[QUOTE] faixas validadas: eco=X inter=Y prem=Z` em todas as execuções.
+Para cada ponto que hoje envia texto, manter fallback: se Meta retornar erro 4xx no interactive, fazer retry como texto simples.
+
+#### Estado pendente
+Persistir em `atendimento.metadata`:
+- `receita_pending` — receita interpretada aguardando `receita_ok`
+- `adicionais_pending` — guarda args parciais de cotação
+- `agendamento_pending` — `{ loja_id, loja_nome, data, hora }` aguardando `ag_confirmar`
+
+---
+
+### CAMADA 4 — `supabase/functions/agendamentos-cron/index.ts`
+
+#### Ponto 9 — Lembretes dia-D
+Onde hoje envia `lembrete_vespera` e `lembrete_1h` (texto/template), trocar para `sendInteractive` com botões `show_confirma / show_remarcar / show_nao`. Se estiver fora da janela 24h, manter template (botões não passam em template arbitrário — só templates com `BUTTONS` cadastrados na Meta funcionariam; usar texto interativo apenas se dentro da janela).
+
+#### Ponto 10 — Recuperação pós-no-show
+Nas 3 tentativas de recuperação, mesma substituição: botões `recupera_sim / recupera_loja / recupera_nao` quando dentro da janela 24h.
+
+**Importante:** O no-show é disparado pela loja via app InFoco Messenger (projeto cross). Não muda o gatilho — apenas a forma da mensagem ao cliente final.
+
+---
+
+### Renderização no Atrium (UI interna)
+
+`src/components/atendimentos/` — adicionar render para `tipo_conteudo === "interactive"` (mostra texto + lista visual dos botões/itens que foram enviados) e `tipo_conteudo === "interactive_reply"` (badge indicando "Cliente tocou em: {titulo}"). Mínimo viável — sem componente novo, só ajuste no balão atual.
+
+---
+
+### Memórias
+
+Criar `mem://ia/whatsapp-interativo-determinismo.md` com:
+- Map completo `button_id → handler`
+- Regra: nunca usar regex/LLM quando `button_id` presente
+- Limites Meta (3 botões, 10 itens lista, 20 chars title)
+- Guard 24h também vale para interactive
+
+Atualizar `mem://index.md` Core:
+> "Confirmações e escolhas usam botões/listas WA quando dentro da 24h. button_id é determinístico — nunca passar por regex/LLM."
+
+Atualizar referência aos pontos modificados em:
+- `pos-agendamento-silencio.md` (ag_confirmar)
+- `auto-receita-e-anti-loop.md` (receita_ok bypassa loop)
+- `agendamento-ativo-anti-duplicacao.md` (show_confirma idempotente)
+
+---
+
+### Deploy
+
+Funções a redeployar:
+- `send-whatsapp`
+- `whatsapp-webhook`
+- `ai-triage`
+- `agendamentos-cron`
+
+### Validação
+
+1. `curl` em `send-whatsapp` com `interactive: { type: "button", … }` → confirmar 200 e payload Meta correto.
+2. Simular webhook Meta com `interactive.button_reply` → confirmar `mensagens.metadata.button_id` populado e `ai-triage` invocado.
+3. Trigger manual `ai-triage` com `button_id: "orcamento"` → confirmar bypass de LLM e envio dos botões de receita.
+4. Verificar logs: `[INTERACTIVE] sent` e `[BUTTON ROUTER] hit id=…` em todas execuções.
+
+### Escopo
+
+- Não toca em fluxo de templates fora-janela (continuam texto puro).
+- Não cria tabela nova — usa `atendimento.metadata` para estado pendente.
+- Não muda esquema de tools do LLM — apenas redireciona quando há `button_id`.
+- B2B/InFoco Messenger não recebe botões (só clientes finais via Meta).

@@ -41,9 +41,9 @@ serve(async (req) => {
       });
     }
 
-    let { phone, senderName, text, messageId, mediaType, mediaId, mediaMimeType } = message;
+    let { phone, senderName, text, messageId, mediaType, mediaId, mediaMimeType, interactiveReply } = message;
     const source = "meta_official"; // CANAL ÚNICO: webhook só aceita Meta Official.
-    console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${text.substring(0, 50)}`);
+    console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${interactiveReply ? `[btn:${interactiveReply.id}]` : ''} ${text.substring(0, 50)}`);
 
     // ─── 0a. ECHO-SAUDAÇÃO FILTER ───
     // Defensivo: descarta se nosso próprio número devolver a saudação automática como inbound.
@@ -559,18 +559,25 @@ serve(async (req) => {
       }
     }
 
+    const isInteractiveReply = !!interactiveReply;
     await supabase.from("mensagens").insert({
       atendimento_id: atendimentoId,
       direcao: "inbound",
-      conteudo: messageContent,
+      conteudo: isInteractiveReply ? (interactiveReply!.title || messageContent) : messageContent,
       remetente_nome: senderName || contato.nome,
-      tipo_conteudo: isTranscribedAudio ? "text" : tipoConteudo,
+      tipo_conteudo: isInteractiveReply ? "interactive_reply" : (isTranscribedAudio ? "text" : tipoConteudo),
       metadata: {
         whatsapp_message_id: messageId,
         source: "meta_official",
         ...(storedMediaUrl && { media_url: storedMediaUrl }),
         ...(storedMediaMimeType && { mime_type: storedMediaMimeType }),
         ...(isTranscribedAudio && { transcribed_from: "audio", original_type: "audio" }),
+        ...(isInteractiveReply ? {
+          interactive_reply: true,
+          button_id: interactiveReply!.id,
+          button_title: interactiveReply!.title,
+          interactive_source: interactiveReply!.source,
+        } : {}),
       },
       provedor: "meta_official",
     });
@@ -790,6 +797,9 @@ serve(async (req) => {
           mime_type: storedMediaMimeType,
           inline_base64: inlineMediaBase64,
           is_transcribed_audio: !!isTranscribedAudio,
+          interactive_reply: interactiveReply
+            ? { id: interactiveReply.id, title: interactiveReply.title, source: interactiveReply.source }
+            : null,
         }).catch(
           (e) => console.error("AI triage trigger failed:", e)
         )
@@ -979,8 +989,18 @@ async function triggerAiTriage(
   contatoId: string,
   phone: string,
   text: string,
-  mediaInfo?: { tipo_conteudo: string; media_url: string | null; mime_type?: string | null; inline_base64?: string | null; is_transcribed_audio?: boolean }
+  mediaInfo?: {
+    tipo_conteudo: string;
+    media_url: string | null;
+    mime_type?: string | null;
+    inline_base64?: string | null;
+    is_transcribed_audio?: boolean;
+    interactive_reply?: { id: string; title: string; source: "button" | "list" } | null;
+  }
 ) {
+  const interactivePart = mediaInfo?.interactive_reply
+    ? { button_id: mediaInfo.interactive_reply.id, interactive_reply: mediaInfo.interactive_reply }
+    : {};
   await fetch(`${supabaseUrl}/functions/v1/ai-triage`, {
     method: "POST",
     headers: {
@@ -991,6 +1011,7 @@ async function triggerAiTriage(
       atendimento_id: atendimentoId,
       contato_id: contatoId,
       mensagem_texto: text,
+      ...interactivePart,
       ...(mediaInfo && { media: mediaInfo }),
     }),
   });
@@ -1123,9 +1144,10 @@ interface NormalizedMessage {
   senderName: string;
   text: string;
   messageId: string;
-  mediaType?: string;    // image, audio, video, document, sticker
+  mediaType?: string;    // image, audio, video, document, sticker, interactive_reply
   mediaId?: string;      // Meta media ID
   mediaMimeType?: string;
+  interactiveReply?: { id: string; title: string; source: "button" | "list" };
 }
 
 // ── Filter out brand/store names that come as pushName from customers
@@ -1234,6 +1256,23 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
             mediaId: msg.sticker?.id,
             mediaMimeType: msg.sticker?.mime_type,
           };
+        }
+        if (msg.type === "interactive") {
+          const br = msg.interactive?.button_reply;
+          const lr = msg.interactive?.list_reply;
+          const reply = br || lr;
+          if (reply) {
+            return {
+              ...base,
+              text: reply.title || "",
+              mediaType: "interactive_reply",
+              interactiveReply: {
+                id: reply.id,
+                title: reply.title || "",
+                source: br ? "button" : "list",
+              },
+            };
+          }
         }
       }
     }
