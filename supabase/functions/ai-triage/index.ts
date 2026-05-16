@@ -2844,6 +2844,7 @@ serve(async (req) => {
           );
           const prefixo = "Você tem razão, deixa eu refazer as faixas certinho 😊\n\n";
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, prefixo + reQuote.resposta);
+          await sendPostQuoteButtons(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id);
           await supabase.from("eventos_crm").insert({
             contato_id: atendimento.contato_id,
             tipo: "cotacao_reexecutada_reclamacao_inversao",
@@ -3352,6 +3353,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               }
             } catch (_) { /* noop */ }
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respCotacao);
+            await sendPostQuoteButtons(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id);
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId,
               tipo: "cotacao_pos_confirmacao_forcada",
@@ -6614,6 +6616,19 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
     } else {
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+      // Follow-up determinístico após cotação de óculos/LC: oferece próximos passos em botões
+      try {
+        const _toolNamesQ: string[] = Array.isArray(toolCalls) ? toolCalls.map((t: any) => t?.function?.name).filter(Boolean) : [];
+        const _quoteFired = _toolNamesQ.some((n) =>
+          n === "consultar_lentes" || n === "consultar_lentes_contato" || n === "consultar_lentes_estimativa"
+        );
+        const _agFired = _toolNamesQ.some((n) => n === "agendar_visita" || n === "reagendar_visita");
+        if (_quoteFired && !_agFired) {
+          await sendPostQuoteButtons(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id);
+        }
+      } catch (e) {
+        console.warn("[POS-QUOTE-BTN] falha ao enviar botões pós-cotação:", e);
+      }
     }
 
     // ── 10.05. DETECTOR PÓS-LLM: agendamento prometido sem tool disparada ──
@@ -7847,6 +7862,52 @@ async function sendReceitaConfirmInteractive(
     botoes: [
       { id: "receita_ok", titulo: "✅ Tá certo" },
       { id: "receita_corrigir", titulo: "✏️ Corrigir" },
+    ],
+  });
+}
+
+// Envia botões de follow-up após cotação (orçamento mostrado).
+// Idempotente por janela curta via metadata.pos_quote_botoes_at.
+async function sendPostQuoteButtons(
+  supabaseClient: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+) {
+  try {
+    const { data: atRow } = await supabaseClient
+      .from("atendimentos").select("metadata").eq("id", atendimentoId).maybeSingle();
+    const meta = (atRow?.metadata || {}) as Record<string, any>;
+    const last = meta.pos_quote_botoes_at ? Date.parse(meta.pos_quote_botoes_at) : 0;
+    if (last && Date.now() - last < 5 * 60 * 1000) return; // evita duplicação <5min
+    await supabaseClient.from("atendimentos")
+      .update({ metadata: { ...meta, pos_quote_botoes_at: new Date().toISOString() } })
+      .eq("id", atendimentoId);
+  } catch (_) { /* noop */ }
+  await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
+    type: "button",
+    texto: "O que prefere fazer agora? 😊",
+    botoes: [
+      { id: "orcamento_agendar", titulo: "📅 Agendar visita" },
+      { id: "orcamento_duvida", titulo: "💬 Tirar dúvida" },
+      { id: "orcamento_mais_barato", titulo: "💸 Mais barato?" },
+    ],
+  });
+}
+
+// Envia botões de follow-up após mensagem de recuperação (IA/no-show).
+async function sendPostRecoveryButtons(
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+) {
+  await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
+    type: "button",
+    texto: "Quer dar continuidade?",
+    botoes: [
+      { id: "recupera_sim", titulo: "✅ Quero remarcar" },
+      { id: "recupera_loja", titulo: "🏪 Ver endereço" },
+      { id: "recupera_nao", titulo: "❌ Agora não" },
     ],
   });
 }
