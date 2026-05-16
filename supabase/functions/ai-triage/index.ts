@@ -323,6 +323,81 @@ function isReceitaPending(metadata: any): boolean {
   return metadata?.receita_confirmacao?.pending === true;
 }
 
+function detectExpectedReplyAction(expectedReply: unknown, text: string): string | null {
+  const stage = String(expectedReply || "").trim();
+  const t = norm(String(text || ""));
+  if (!stage || !t) return null;
+
+  if (stage === "menu_triagem") {
+    if (/\b(orcamento|orçamento|preco|preço|valor|cotacao|cotação|multifocal|lente|lentes|oculos|óculos)\b/.test(t)) return "orcamento";
+    if (/\b(agendar|agendamento|marcar|visita|horario|horário)\b/.test(t)) return "agendar";
+    if (/\b(status|pedido|os|oculos pronto|óculos pronto|pronto)\b/.test(t)) return "status_pedido";
+    if (/\b(reclamacao|reclamação|problema|insatisfeito|insatisfacao|insatisfação)\b/.test(t)) return "reclamacao";
+    if (/\b(duvida|dúvida|pergunta|ajuda|explica|explicacao|explicação)\b/.test(t)) return "duvida";
+    return null;
+  }
+
+  if (stage === "receita_envio") {
+    if (/\b(foto|imagem|anexo|pdf|arquivo|mandar foto|enviar foto)\b/.test(t)) return "receita_foto";
+    if (/\b(digitar|digitado|escrever|por texto|texto|informar aqui)\b/.test(t)) return "receita_digitar";
+    if (/\b(nao tenho|não tenho|sem receita|nao possuo|não possuo|nao tenho receita|não tenho receita)\b/.test(t)) return "receita_sem";
+    return null;
+  }
+
+  if (stage === "receita_confirmacao") {
+    if (detectRxConfirmation(t)) return "receita_ok";
+    if (detectRxRejeicao(t)) return "receita_corrigir";
+    return null;
+  }
+
+  if (stage === "adicional_lentes") {
+    if (/\b(luz azul|filtro azul|anti blue|antiblue|blue cut|azul)\b/.test(t)) return "adicional_azul";
+    if (/\b(fotossensivel|fotocromatica|fotocromatico|transitions|escurece no sol)\b/.test(t)) return "adicional_foto";
+    if (/\b(sem|nenhum|nao quero|nao precisa|nada|so a lente|so as lentes)\b/.test(t) || t === "nao") return "adicional_nao";
+    return null;
+  }
+
+  if (stage === "pos_cotacao") {
+    if (/\b(mais barato|mais em conta|baratinho|barato|desconto|economica|economico)\b/.test(t)) return "orcamento_mais_barato";
+    if (/\b(duvida|duvidas|explica|explicar|entendi|entender|qual a diferenca|qual a diferença)\b/.test(t)) return "orcamento_duvida";
+    if (/\b(agendar|agendo|agenda|visita|quero ir|ir na loja|marcar|quero ver na loja|fechar na loja)\b/.test(t)) return "orcamento_agendar";
+    return null;
+  }
+
+  if (stage === "recuperacao") {
+    if (/\b(loja|lojas|endereco|endereco|onde fica|unidade|unidades)\b/.test(t)) return "recupera_loja";
+    if (/^(sim|quero|bora|vamos|pode|claro|gostaria|agendar|marcar|com certeza|por favor|pfv|👍|✅|positivo|topo)\b/.test(t)) return "recupera_sim";
+    if (/^(nao|não|agora nao|agora não|depois|outro momento|nao quero|não quero|sem interesse|deixa)\b/.test(t)) return "recupera_nao";
+    return null;
+  }
+
+  if (stage === "desconto_followup") {
+    if (/\b(loja|lojas|endereco|endereco|onde fica|unidade|unidades)\b/.test(t)) return "desconto_loja";
+    if (/\b(aceito|fechar|fecho|agendar|agenda|quero|vamos|bora|topo|pode ser|combinado)\b/.test(t)) return "desconto_aceito";
+    if (/\b(vou pensar|pensar|depois|mais tarde|agora nao|agora não|nao sei|não sei)\b/.test(t)) return "desconto_pensar";
+    return null;
+  }
+
+  return null;
+}
+
+function matchLojaByTypedText(lojas: Array<{ id: string; nome_loja?: string | null; endereco?: string | null }>, text: string) {
+  const t = norm(String(text || ""));
+  if (!t) return null;
+
+  return lojas.find((loja) => {
+    const nome = norm(loja.nome_loja || "");
+    const endereco = norm(loja.endereco || "");
+    if (!nome && !endereco) return false;
+    if (nome && (t === nome || t.includes(nome) || nome.includes(t))) return true;
+    const tokens = `${nome} ${endereco}`
+      .split(/\s+/)
+      .filter((token) => token.length >= 4)
+      .filter((token) => !["oticas", "diniz", "loja", "shopping", "osasco", "centro", "unidade"].includes(token));
+    return tokens.some((token) => t.includes(token));
+  }) || null;
+}
+
 // Detecta escolha do cliente entre múltiplas receitas ("a primeira", "a segunda", "a nova", etc.)
 function detectEscolhaReceita(text: string, receitas: any[]): { idx: number; how: string } | null {
   if (!Array.isArray(receitas) || receitas.length < 2) return null;
@@ -2811,9 +2886,33 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
+    const atendimentoMeta = (atendimento.metadata as Record<string, any>) || {};
+
+    // ── PRE-LLM ROUTER: cliente digitou a resposta esperada para uma etapa determinística ──
+    try {
+      const handledTypedReply = await routeExpectedTypedReply({
+        atendimento,
+        atendimentoMeta,
+        supabase,
+        supabaseUrl: SUPABASE_URL,
+        serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        mensagemTexto: String(mensagem_texto || ""),
+      });
+      if (handledTypedReply) {
+        return jsonResponse({
+          status: "ok",
+          tools_used: ["expected_reply_typed_router"],
+          intencao: atendimentoMeta?.intent_detected || "roteamento_deterministico",
+          precisa_humano: false,
+          modo: atendimento.modo,
+        });
+      }
+    } catch (e) {
+      console.warn("[EXPECTED REPLY] fallback digitado falhou:", (e as Error)?.message);
+    }
+
     // ── PRE-LLM ROUTER: Cliente DIGITOU resposta ao prompt "Quer algum adicional?" ──
-    // Caso o cliente não use os botões (digita "luz azul", "fotossensível", "sem", "não", etc.),
-    // roteia direto para runQuoteWithFilter — mesmo caminho dos botões adicional_*.
+    // Mantido como compatibilidade para conversas antigas sem expected_reply salvo.
     try {
       const _msgAd = String(mensagem_texto || "").trim().toLowerCase();
       const _lastOut = recentOutbound.slice(-1)[0] || "";
@@ -7883,7 +7982,7 @@ async function sendReceitaConfirmInteractive(
     const meta = (atRow?.metadata || {}) as Record<string, any>;
     await supabaseClient
       .from("atendimentos")
-      .update({ metadata: { ...meta, receita_pending: true, receita_pending_at: new Date().toISOString() } })
+      .update({ metadata: { ...meta, receita_pending: true, receita_pending_at: new Date().toISOString(), expected_reply: "receita_confirmacao" } })
       .eq("id", atendimentoId);
   } catch (e) {
     console.warn("[RX-CONFIRM-BTN] falha ao marcar receita_pending:", e);
@@ -7913,7 +8012,7 @@ async function sendPostQuoteButtons(
     const last = meta.pos_quote_botoes_at ? Date.parse(meta.pos_quote_botoes_at) : 0;
     if (last && Date.now() - last < 5 * 60 * 1000) return; // evita duplicação <5min
     await supabaseClient.from("atendimentos")
-      .update({ metadata: { ...meta, pos_quote_botoes_at: new Date().toISOString() } })
+      .update({ metadata: { ...meta, pos_quote_botoes_at: new Date().toISOString(), expected_reply: "pos_cotacao" } })
       .eq("id", atendimentoId);
   } catch (_) { /* noop */ }
   await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
@@ -7929,10 +8028,23 @@ async function sendPostQuoteButtons(
 
 // Envia botões de follow-up após mensagem de recuperação (IA/no-show).
 async function sendPostRecoveryButtons(
+  supabaseClient: any,
   supabaseUrl: string,
   serviceKey: string,
   atendimentoId: string,
 ) {
+  try {
+    const { data: atRow } = await supabaseClient
+      .from("atendimentos")
+      .select("metadata")
+      .eq("id", atendimentoId)
+      .maybeSingle();
+    const meta = (atRow?.metadata || {}) as Record<string, any>;
+    await supabaseClient
+      .from("atendimentos")
+      .update({ metadata: { ...meta, expected_reply: "recuperacao" } })
+      .eq("id", atendimentoId);
+  } catch (_) { /* noop */ }
   await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
     type: "button",
     texto: "Quer dar continuidade?",
@@ -7996,6 +8108,70 @@ async function runQuoteWithFilter(
     );
   }
 }
+
+async function routeExpectedTypedReply(args: {
+  atendimento: any;
+  atendimentoMeta: Record<string, any>;
+  supabase: any;
+  supabaseUrl: string;
+  serviceKey: string;
+  mensagemTexto: string;
+}): Promise<boolean> {
+  const { atendimento, atendimentoMeta, supabase, supabaseUrl, serviceKey, mensagemTexto } = args;
+  const expectedReply = atendimentoMeta?.expected_reply;
+  const atId = atendimento.id;
+  const replyAction = detectExpectedReplyAction(expectedReply, mensagemTexto);
+
+  const patchMeta = async (patch: Record<string, any>) => {
+    await supabase.from("atendimentos")
+      .update({ metadata: { ...atendimentoMeta, ...patch } })
+      .eq("id", atId);
+  };
+
+  if (expectedReply === "loja_selecao") {
+    const { data: lojas } = await supabase
+      .from("telefones_lojas")
+      .select("id, nome_loja, endereco")
+      .eq("tipo", "loja")
+      .eq("ativo", true)
+      .order("nome_loja", { ascending: true })
+      .limit(10);
+
+    const lojaMatch = matchLojaByTypedText(lojas || [], mensagemTexto);
+    if (!lojaMatch) return false;
+
+    await patchMeta({
+      expected_reply: "agendamento_data_horario",
+      agendamento_pending: {
+        ...(atendimentoMeta.agendamento_pending || {}),
+        loja_id: lojaMatch.id,
+        loja_nome: lojaMatch.nome_loja,
+      },
+      ultimo_typed_expected_reply_at: new Date().toISOString(),
+    });
+    await sendWhatsApp(
+      supabaseUrl,
+      serviceKey,
+      atId,
+      `Perfeito! Loja escolhida: *${lojaMatch.nome_loja}*.
+Qual dia e horário ficaria melhor pra você? 😊`,
+    );
+    return true;
+  }
+
+  if (!replyAction) return false;
+
+  console.log(`[EXPECTED REPLY] stage=${expectedReply} typed_action=${replyAction}`);
+  return await routeButtonClick({
+    buttonId: replyAction,
+    atendimento,
+    atendimentoMeta,
+    supabase,
+    supabaseUrl,
+    serviceKey,
+  });
+}
+
 async function routeButtonClick(args: {
   buttonId: string;
   atendimento: any;
@@ -8058,7 +8234,7 @@ async function routeButtonClick(args: {
         ],
       },
     });
-    await patchMeta({ menu_triagem_enviado_at: new Date().toISOString() });
+    await patchMeta({ menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" });
     return true;
   }
 
@@ -8103,7 +8279,7 @@ async function routeButtonClick(args: {
           { id: "receita_sem", titulo: "📄 Não tenho" },
         ],
       });
-      await patchMeta({ intent_detected: "orcamento" });
+      await patchMeta({ intent_detected: "orcamento", expected_reply: "receita_envio" });
       return true;
     case "status_pedido":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂");
@@ -8111,8 +8287,9 @@ async function routeButtonClick(args: {
       await supabase.from("eventos_crm").insert({ contato_id: atendimento.contato_id, tipo: "consulta_os", descricao: "Botão Status do pedido — escalado", referencia_tipo: "atendimento", referencia_id: atId });
       return true;
     case "duvida":
-      await patchMeta({ intent_detected: "duvida_livre" });
-      return false;
+      await patchMeta({ intent_detected: "duvida_livre", expected_reply: null });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me contar sua dúvida por aqui 😊");
+      return true;
     case "reclamacao":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sinto muito que algo não saiu como esperado 😟 Já estou chamando um responsável pra te atender.");
       await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
@@ -8123,18 +8300,19 @@ async function routeButtonClick(args: {
       return true;
     case "receita_foto":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Beleza! Me manda a foto da receita por aqui que eu já analiso 📷");
-      await patchMeta({ aguardando_receita_foto: true });
+      await patchMeta({ aguardando_receita_foto: true, expected_reply: "receita_foto" });
       return true;
     case "receita_digitar":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      await patchMeta({ expected_reply: "receita_digitada" });
       return true;
     case "receita_sem":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Sem a receita não consigo fechar valor exato, mas posso te dar uma faixa estimada. Você usa óculos pra perto, pra longe, ou multifocal? 😊");
-      await patchMeta({ intent_detected: "sem_receita" });
+      await patchMeta({ intent_detected: "sem_receita", expected_reply: "sem_receita_tipo" });
       return true;
     case "receita_ok": {
       if (atendimentoMeta.receita_pending) {
-        await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString() });
+        await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString(), expected_reply: "adicional_lentes" });
         // CRÍTICO: também limpa pending no contato (isReceitaPending checa lá),
         // senão a cotação subsequente devolve "Li sua receita assim, confere?".
         try {
@@ -8160,25 +8338,27 @@ async function routeButtonClick(args: {
     }
     case "receita_corrigir":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
-      await patchMeta({ receita_pending: null });
+      await patchMeta({ receita_pending: null, expected_reply: "receita_digitada" });
       return true;
     case "adicional_azul":
-      await patchMeta({ adicionais_pending: { filtro_blue: true } });
+      await patchMeta({ adicionais_pending: { filtro_blue: true }, expected_reply: null });
       await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_blue: true });
       return true;
     case "adicional_foto":
-      await patchMeta({ adicionais_pending: { filtro_photo: true } });
+      await patchMeta({ adicionais_pending: { filtro_photo: true }, expected_reply: null });
       await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_photo: true });
       return true;
     case "adicional_nao":
-      await patchMeta({ adicionais_pending: {} });
+      await patchMeta({ adicionais_pending: {}, expected_reply: null });
       await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, {});
       return true;
     case "orcamento_agendar":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
       return true;
     case "orcamento_duvida":
-      return false;
+      await patchMeta({ expected_reply: null, intent_detected: "duvida_pos_orcamento" });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Claro! Me diz qual ponto da cotação você quer que eu explique melhor 😊");
+      return true;
     case "orcamento_mais_barato":
       await sendInteractive(supabaseUrl, serviceKey, atId, {
         type: "button",
@@ -8189,16 +8369,18 @@ async function routeButtonClick(args: {
           { id: "desconto_pensar", titulo: "⏳ Vou pensar" },
         ],
       });
-      await patchMeta({ desconto_oferecido_at: new Date().toISOString() });
+      await patchMeta({ desconto_oferecido_at: new Date().toISOString(), expected_reply: "desconto_followup" });
       return true;
     case "desconto_aceito":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
       return true;
     case "desconto_loja":
       await sendEnderecosLojas(supabase, supabaseUrl, serviceKey, atId);
+      await patchMeta({ expected_reply: null });
       return true;
     case "desconto_pensar":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Quando quiser dar continuidade, é só me chamar 😊");
+      await patchMeta({ expected_reply: null });
       return true;
     case "ag_confirmar": {
       const pend = atendimentoMeta.agendamento_pending;
@@ -8208,7 +8390,7 @@ async function routeButtonClick(args: {
           headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ atendimento_id: atId, contato_id: atendimento.contato_id, loja_nome: pend.loja_nome, data_horario: pend.data_horario }),
         });
-        await patchMeta({ agendamento_pending: null });
+        await patchMeta({ agendamento_pending: null, expected_reply: null });
         return true;
       }
       return false;
@@ -8217,7 +8399,7 @@ async function routeButtonClick(args: {
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tranquilo! Qual dia e horário fica melhor pra você? 🙂");
       return true;
     case "ag_cancelar":
-      await patchMeta({ agendamento_pending: null });
+      await patchMeta({ agendamento_pending: null, expected_reply: null });
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema, cancelei a tentativa. Quando quiser, é só me chamar! 😊");
       return true;
     case "show_confirma": {
@@ -8268,9 +8450,10 @@ async function routeButtonClick(args: {
       return true;
     case "recupera_loja":
       await sendEnderecosLojas(supabase, supabaseUrl, serviceKey, atId);
+      await patchMeta({ expected_reply: null });
       return true;
     case "recupera_nao":
-      await patchMeta({ recuperacao_recusada_at: new Date().toISOString() });
+      await patchMeta({ recuperacao_recusada_at: new Date().toISOString(), expected_reply: null });
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Compreendo! Obrigada pelo retorno. Quando precisar, estaremos por aqui 😊");
       return true;
   }
@@ -8278,14 +8461,23 @@ async function routeButtonClick(args: {
 }
 
 async function sendListaLojas(supabase: any, supabaseUrl: string, serviceKey: string, atId: string) {
+  let metaAtual: Record<string, any> = {};
+  try {
+    const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", atId).maybeSingle();
+    metaAtual = (atRow?.metadata || {}) as Record<string, any>;
+  } catch (_) { /* noop */ }
   const { data: lojas } = await supabase
     .from("telefones_lojas").select("id, nome_loja, endereco")
     .eq("tipo", "loja").eq("ativo", true)
     .order("nome_loja", { ascending: true }).limit(10);
   if (!lojas?.length) {
+    await supabase.from("atendimentos").update({ metadata: { ...metaAtual, expected_reply: "bairro_regiao_livre" } }).eq("id", atId);
     await sendWhatsApp(supabaseUrl, serviceKey, atId, "Em qual cidade ou bairro fica melhor pra você? 😊");
     return;
   }
+  try {
+    await supabase.from("atendimentos").update({ metadata: { ...metaAtual, expected_reply: "loja_selecao" } }).eq("id", atId);
+  } catch (_) { /* noop */ }
   await sendInteractive(supabaseUrl, serviceKey, atId, {
     type: "list",
     texto: "Em qual loja prefere ser atendido? 😊",

@@ -408,6 +408,11 @@ async function processContato(
     // Follow-up determinístico com botões — só na 1ª tentativa pra não poluir cadência
     if (tentativas === 0) {
       try {
+        const atMeta = (atendimento.metadata || {}) as Record<string, any>;
+        await supabase
+          .from("atendimentos")
+          .update({ metadata: { ...atMeta, expected_reply: "recuperacao" } })
+          .eq("id", atendimento.id);
         await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
           method: "POST",
           headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
