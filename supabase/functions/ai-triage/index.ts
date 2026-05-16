@@ -2765,6 +2765,61 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
+    // ── PRE-LLM ROUTER: Cliente reclamou de inversão de preço nas faixas ──
+    // Caso Natan 16/05/2026: IA mandou "Econômica R$2.135, Intermediária R$1.199,
+    // Premium R$1.699" (inversão). Cliente disse "a econômica está mais cara que
+    // a intermediária" e o LLM degradou para "já te mandei as opções acima".
+    // Agora: detecta reclamação, re-roda runConsultarLentes (já com fixes de ordenação),
+    // envia prefixado e retorna sem passar pelo LLM.
+    try {
+      const _atMetaPx = (atendimento.metadata as Record<string, any>) || {};
+      const _ultCotacao = _atMetaPx?.ultima_cotacao || null;
+      const _ultAtMs = _ultCotacao?.at ? Date.parse(_ultCotacao.at) : 0;
+      const _ultRecente = _ultAtMs && (Date.now() - _ultAtMs) < 30 * 60 * 1000; // 30min
+      const _msgPxRaw = String(mensagem_texto || "").trim();
+      const _msgPxLow = _msgPxRaw.toLowerCase();
+      const _PRECO_INVERTIDO_RE = /(mais\s+car[oa].*(que|do\s+que))|(econ[ôo]mica.*car)|(premium.*barat)|(invertid[ao])|(t[áa]\s+errad[ao].*pre[çc]o)|(pre[çc]o.*invertid)|(t[áa]\s+invertid)/i;
+      const _orcamentoRecente = /(🔍\s*\*?Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎|🟢\s*\*?Econ|🟡\s*\*?Inter)/i.test(
+        String((recentOutbound || []).slice(-1)[0] || "")
+      );
+      if (
+        _ultRecente && _orcamentoRecente && _PRECO_INVERTIDO_RE.test(_msgPxLow) &&
+        (atendimento.modo === "ia" || atendimento.modo === "hibrido")
+      ) {
+        console.log("[ROUTER] Reclamação de inversão de preço detectada — re-cotando deterministicamente");
+        try {
+          const reArgs = {
+            preferencia_marca: _ultCotacao?.args?.preferencia_marca || undefined,
+            filtro_blue: _ultCotacao?.args?.filtro_blue === true ? true : undefined,
+            filtro_photo: _ultCotacao?.args?.filtro_photo === true ? true : undefined,
+          };
+          const reQuote = await runConsultarLentes(
+            supabase, atendimento.contato_id, recentOutbound, reArgs, atendimento_id,
+          );
+          const prefixo = "Você tem razão, deixa eu refazer as faixas certinho 😊\n\n";
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, prefixo + reQuote.resposta);
+          await supabase.from("eventos_crm").insert({
+            contato_id: atendimento.contato_id,
+            tipo: "cotacao_reexecutada_reclamacao_inversao",
+            descricao: "Cliente reclamou de inversão de preço nas faixas — re-cotação determinística disparada",
+            metadata: { mensagem_cliente: _msgPxRaw, ultima_cotacao_at: _ultCotacao?.at },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          return jsonResponse({
+            status: "ok",
+            tools_used: ["consultar_lentes_recotacao_reclamacao"],
+            intencao: "orcamento",
+            precisa_humano: false,
+            modo: atendimento.modo,
+          });
+        } catch (e) {
+          console.warn("[ROUTER] re-cotação por reclamação falhou — caindo para LLM:", (e as Error)?.message);
+        }
+      }
+    } catch (e) {
+      console.warn("[ROUTER-INVERSAO] preskip falhou:", (e as Error)?.message);
+    }
+
     // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA + AUTO-PERSISTÊNCIA DE NOME ──
     // Elimina vazamento de prompt (proximo_passo, instruções internas) e reduz latência.
     // Só dispara para texto puro — imagens (receita) seguem o fluxo normal.
