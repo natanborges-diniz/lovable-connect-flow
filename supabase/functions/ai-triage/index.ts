@@ -7810,6 +7810,71 @@ async function routeButtonClick(args: {
       .eq("id", atId);
   };
 
+  // ── Confirmação de nome via botão ──
+  if (buttonId.startsWith("nome_ok:") || buttonId === "nome_ok") {
+    const nomeBotao = buttonId.startsWith("nome_ok:") ? buttonId.slice(8).trim() : "";
+    const { data: ct } = await supabase
+      .from("contatos").select("id, nome, metadata").eq("id", atendimento.contato_id).maybeSingle();
+    const ctMeta = (ct?.metadata as Record<string, any>) || {};
+    const nomeFinal = nomeBotao || ctMeta.nome_candidato_botao || ctMeta.nome_perfil_whatsapp || ct?.nome || "";
+    if (nomeFinal && nomeFinal.length >= 2) {
+      await supabase.from("contatos").update({
+        nome: nomeFinal,
+        metadata: {
+          ...ctMeta,
+          nome_confirmado: true,
+          precisa_confirmar_nome: false,
+          nome_origem: "botao_confirmacao",
+          nome_atualizado_at: new Date().toISOString(),
+          tentativas_pedido_nome: 0,
+          nome_candidato_botao: null,
+        },
+      }).eq("id", atendimento.contato_id);
+      await supabase.from("eventos_crm").insert({
+        contato_id: atendimento.contato_id,
+        tipo: "nome_confirmado_botao",
+        descricao: `Nome confirmado via botão: "${nomeFinal}"`,
+        referencia_tipo: "atendimento",
+        referencia_id: atId,
+      });
+    }
+    const firstName = (nomeFinal || "").split(" ")[0] || "";
+    const saudacao = firstName ? `Prazer, ${firstName}! 🙌 Como posso te ajudar hoje?` : "Como posso te ajudar hoje? 😊";
+    await sendInteractive(supabaseUrl, serviceKey, atId, {
+      type: "list",
+      texto: saudacao,
+      lista: {
+        label: "Ver opções",
+        secao: "Posso te ajudar com",
+        itens: [
+          { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa pelo seu grau" },
+          { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
+          { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
+          { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
+          { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
+        ],
+      },
+    });
+    await patchMeta({ menu_triagem_enviado_at: new Date().toISOString() });
+    return true;
+  }
+
+  if (buttonId === "nome_outro") {
+    const { data: ct } = await supabase
+      .from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+    const ctMeta = (ct?.metadata as Record<string, any>) || {};
+    await supabase.from("contatos").update({
+      metadata: {
+        ...ctMeta,
+        precisa_confirmar_nome: true,
+        nome_confirmado: false,
+        nome_candidato_botao: null,
+      },
+    }).eq("id", atendimento.contato_id);
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Como prefere ser chamado(a)? ✍️");
+    return true;
+  }
+
   if (buttonId.startsWith("loja:")) {
     const lojaId = buttonId.slice(5);
     const { data: loja } = await supabase
