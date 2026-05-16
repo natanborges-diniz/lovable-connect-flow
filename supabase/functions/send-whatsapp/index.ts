@@ -20,6 +20,7 @@ serve(async (req) => {
       media_url,
       mime_type,
       caption,
+      interactive,
     }: {
       atendimento_id?: string;
       texto?: string;
@@ -27,10 +28,20 @@ serve(async (req) => {
       media_url?: string;
       mime_type?: string;
       caption?: string;
+      interactive?: InteractivePayload;
     } = body || {};
 
     if (!atendimento_id) throw new Error("atendimento_id is required");
-    if (!texto && !media_url) throw new Error("texto or media_url is required");
+    if (!texto && !media_url && !interactive) throw new Error("texto, media_url or interactive is required");
+
+    if (interactive) {
+      const valErr = validateInteractive(interactive);
+      if (valErr) {
+        return new Response(JSON.stringify({ error: "invalid_interactive", reason: valErr }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
