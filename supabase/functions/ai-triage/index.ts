@@ -8055,6 +8055,70 @@ async function runQuoteWithFilter(
     );
   }
 }
+
+async function routeExpectedTypedReply(args: {
+  atendimento: any;
+  atendimentoMeta: Record<string, any>;
+  supabase: any;
+  supabaseUrl: string;
+  serviceKey: string;
+  mensagemTexto: string;
+}): Promise<boolean> {
+  const { atendimento, atendimentoMeta, supabase, supabaseUrl, serviceKey, mensagemTexto } = args;
+  const expectedReply = atendimentoMeta?.expected_reply;
+  const atId = atendimento.id;
+  const replyAction = detectExpectedReplyAction(expectedReply, mensagemTexto);
+
+  const patchMeta = async (patch: Record<string, any>) => {
+    await supabase.from("atendimentos")
+      .update({ metadata: { ...atendimentoMeta, ...patch } })
+      .eq("id", atId);
+  };
+
+  if (expectedReply === "loja_selecao") {
+    const { data: lojas } = await supabase
+      .from("telefones_lojas")
+      .select("id, nome_loja, endereco")
+      .eq("tipo", "loja")
+      .eq("ativo", true)
+      .order("nome_loja", { ascending: true })
+      .limit(10);
+
+    const lojaMatch = matchLojaByTypedText(lojas || [], mensagemTexto);
+    if (!lojaMatch) return false;
+
+    await patchMeta({
+      expected_reply: "agendamento_data_horario",
+      agendamento_pending: {
+        ...(atendimentoMeta.agendamento_pending || {}),
+        loja_id: lojaMatch.id,
+        loja_nome: lojaMatch.nome_loja,
+      },
+      ultimo_typed_expected_reply_at: new Date().toISOString(),
+    });
+    await sendWhatsApp(
+      supabaseUrl,
+      serviceKey,
+      atId,
+      `Perfeito! Loja escolhida: *${lojaMatch.nome_loja}*.
+Qual dia e horário ficaria melhor pra você? 😊`,
+    );
+    return true;
+  }
+
+  if (!replyAction) return false;
+
+  console.log(`[EXPECTED REPLY] stage=${expectedReply} typed_action=${replyAction}`);
+  return await routeButtonClick({
+    buttonId: replyAction,
+    atendimento,
+    atendimentoMeta,
+    supabase,
+    supabaseUrl,
+    serviceKey,
+  });
+}
+
 async function routeButtonClick(args: {
   buttonId: string;
   atendimento: any;
