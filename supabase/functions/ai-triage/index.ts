@@ -323,6 +323,65 @@ function isReceitaPending(metadata: any): boolean {
   return metadata?.receita_confirmacao?.pending === true;
 }
 
+function detectExpectedReplyAction(expectedReply: unknown, text: string): string | null {
+  const stage = String(expectedReply || "").trim();
+  const t = norm(String(text || ""));
+  if (!stage || !t) return null;
+
+  if (stage === "receita_confirmacao") {
+    if (detectRxConfirmation(t)) return "receita_ok";
+    if (detectRxRejeicao(t)) return "receita_corrigir";
+    return null;
+  }
+
+  if (stage === "adicional_lentes") {
+    if (/\b(luz azul|filtro azul|anti blue|antiblue|blue cut|azul)\b/.test(t)) return "adicional_azul";
+    if (/\b(fotossensivel|fotocromatica|fotocromatico|transitions|escurece no sol)\b/.test(t)) return "adicional_foto";
+    if (/\b(sem|nenhum|nao quero|nao precisa|nada|so a lente|so as lentes)\b/.test(t) || t === "nao") return "adicional_nao";
+    return null;
+  }
+
+  if (stage === "pos_cotacao") {
+    if (/\b(mais barato|mais em conta|baratinho|barato|desconto|economica|economico)\b/.test(t)) return "orcamento_mais_barato";
+    if (/\b(duvida|duvidas|explica|explicar|entendi|entender|qual a diferenca|qual a diferença)\b/.test(t)) return "orcamento_duvida";
+    if (/\b(agendar|agendo|agenda|visita|quero ir|ir na loja|marcar|quero ver na loja|fechar na loja)\b/.test(t)) return "orcamento_agendar";
+    return null;
+  }
+
+  if (stage === "recuperacao") {
+    if (/\b(loja|lojas|endereco|endereco|onde fica|unidade|unidades)\b/.test(t)) return "recupera_loja";
+    if (/^(sim|quero|bora|vamos|pode|claro|gostaria|agendar|marcar|com certeza|por favor|pfv|👍|✅|positivo|topo)\b/.test(t)) return "recupera_sim";
+    if (/^(nao|não|agora nao|agora não|depois|outro momento|nao quero|não quero|sem interesse|deixa)\b/.test(t)) return "recupera_nao";
+    return null;
+  }
+
+  if (stage === "desconto_followup") {
+    if (/\b(loja|lojas|endereco|endereco|onde fica|unidade|unidades)\b/.test(t)) return "desconto_loja";
+    if (/\b(aceito|fechar|fecho|agendar|agenda|quero|vamos|bora|topo|pode ser|combinado)\b/.test(t)) return "desconto_aceito";
+    if (/\b(vou pensar|pensar|depois|mais tarde|agora nao|agora não|nao sei|não sei)\b/.test(t)) return "desconto_pensar";
+    return null;
+  }
+
+  return null;
+}
+
+function matchLojaByTypedText(lojas: Array<{ id: string; nome_loja?: string | null; endereco?: string | null }>, text: string) {
+  const t = norm(String(text || ""));
+  if (!t) return null;
+
+  return lojas.find((loja) => {
+    const nome = norm(loja.nome_loja || "");
+    const endereco = norm(loja.endereco || "");
+    if (!nome && !endereco) return false;
+    if (nome && (t === nome || t.includes(nome) || nome.includes(t))) return true;
+    const tokens = `${nome} ${endereco}`
+      .split(/\s+/)
+      .filter((token) => token.length >= 4)
+      .filter((token) => !["oticas", "diniz", "loja", "shopping", "osasco", "centro", "unidade"].includes(token));
+    return tokens.some((token) => t.includes(token));
+  }) || null;
+}
+
 // Detecta escolha do cliente entre múltiplas receitas ("a primeira", "a segunda", "a nova", etc.)
 function detectEscolhaReceita(text: string, receitas: any[]): { idx: number; how: string } | null {
   if (!Array.isArray(receitas) || receitas.length < 2) return null;
