@@ -229,3 +229,98 @@ async function sendImageViaMeta(phone: string, mediaUrl: string, caption?: strin
   }
   return result;
 }
+
+// ─── Interactive Messages (botões / listas) ───
+// Modelo: clientes recebem botões/listas Meta SOMENTE dentro da janela de 24h.
+// Fora dela, usar send-whatsapp-template.
+
+interface InteractivePayload {
+  type: "button" | "list";
+  texto: string;
+  botoes?: Array<{ id: string; titulo: string }>;
+  lista?: {
+    label: string;
+    secao: string;
+    itens: Array<{ id: string; titulo: string; descricao?: string }>;
+  };
+}
+
+function validateInteractive(p: InteractivePayload): string | null {
+  if (!p || !p.texto || !p.type) return "missing_fields";
+  if (p.type === "button") {
+    if (!p.botoes?.length) return "missing_botoes";
+    if (p.botoes.length > 3) return "botoes_max_3";
+    for (const b of p.botoes) {
+      if (!b.id || !b.titulo) return "botao_id_or_titulo_missing";
+      if (b.id.length > 256) return "botao_id_too_long";
+    }
+    return null;
+  }
+  if (p.type === "list") {
+    if (!p.lista?.itens?.length) return "missing_itens";
+    if (p.lista.itens.length > 10) return "itens_max_10";
+    if (!p.lista.label || !p.lista.secao) return "missing_lista_label_or_secao";
+    for (const it of p.lista.itens) {
+      if (!it.id || !it.titulo) return "item_id_or_titulo_missing";
+    }
+    return null;
+  }
+  return "invalid_type";
+}
+
+function trunc(s: string, n: number): string {
+  if (!s) return s;
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+async function sendInteractiveViaMeta(phone: string, p: InteractivePayload) {
+  const { accessToken, phoneNumberId } = getMetaCreds();
+
+  let interactive: any;
+  if (p.type === "button") {
+    interactive = {
+      type: "button",
+      body: { text: trunc(p.texto, 1024) },
+      action: {
+        buttons: p.botoes!.slice(0, 3).map((b) => ({
+          type: "reply",
+          reply: { id: b.id, title: trunc(b.titulo, 20) },
+        })),
+      },
+    };
+  } else {
+    interactive = {
+      type: "list",
+      body: { text: trunc(p.texto, 1024) },
+      action: {
+        button: trunc(p.lista!.label, 20),
+        sections: [{
+          title: trunc(p.lista!.secao, 24),
+          rows: p.lista!.itens.slice(0, 10).map((it) => ({
+            id: it.id,
+            title: trunc(it.titulo, 24),
+            ...(it.descricao ? { description: trunc(it.descricao, 72) } : {}),
+          })),
+        }],
+      },
+    };
+  }
+
+  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: phone,
+      type: "interactive",
+      interactive,
+    }),
+  });
+
+  const result = await readResponseBody(res);
+  if (!res.ok) {
+    throw new Error(`Meta API error (status ${res.status}) [interactive ${p.type}]: ${bodyToString(result?.error?.message || result)}`);
+  }
+  return result;
+}
