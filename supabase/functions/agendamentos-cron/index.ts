@@ -300,6 +300,15 @@ async function processLembreteVespera(
       metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "vespera", lembrete_ok: sendRes.ok },
     }).eq("id", ag.id);
 
+    // Marca expected_reply no atendimento p/ router determinístico capturar respostas digitadas
+    try {
+      const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", ag.atendimento_id).maybeSingle();
+      const atMd = (atRow?.metadata || {}) as Record<string, any>;
+      await supabase.from("atendimentos").update({
+        metadata: { ...atMd, expected_reply: "dia_d_lembrete", dia_d_lembrete_at: stampNow },
+      }).eq("id", ag.atendimento_id);
+    } catch (_) { /* noop */ }
+
     await supabase.from("eventos_crm").insert({
       contato_id: ag.contato_id,
       tipo: sendRes.ok ? "lembrete_vespera_enviado" : "lembrete_vespera_falha",
@@ -402,6 +411,15 @@ async function processLembrete1hAntes(
       tentativas_lembrete: 1,
       metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "1h_antes", lembrete_ok: sendRes.ok },
     }).eq("id", ag.id);
+
+    // Marca expected_reply no atendimento p/ router determinístico capturar respostas digitadas
+    try {
+      const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", ag.atendimento_id).maybeSingle();
+      const atMd = (atRow?.metadata || {}) as Record<string, any>;
+      await supabase.from("atendimentos").update({
+        metadata: { ...atMd, expected_reply: "dia_d_lembrete", dia_d_lembrete_at: stampNow },
+      }).eq("id", ag.atendimento_id);
+    } catch (_) { /* noop */ }
 
     await supabase.from("eventos_crm").insert({
       contato_id: ag.contato_id,
