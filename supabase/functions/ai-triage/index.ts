@@ -7808,6 +7808,45 @@ async function sendInteractive(supabaseUrl: string, serviceKey: string, atendime
   }
 }
 
+// Detecta se um texto é uma confirmação de receita (saída de buildMsgConfirmarReceita)
+function isReceitaConfirmText(t: string): boolean {
+  const s = String(t || "");
+  return /li sua receita assim, confere|anotei! ficou assim/i.test(s);
+}
+
+// Envia confirmação de receita com botões OK / Corrigir e marca receita_pending
+async function sendReceitaConfirmInteractive(
+  supabaseClient: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+  texto: string,
+) {
+  // Marca pending antes de enviar para que o clique do botão receita_ok funcione
+  try {
+    const { data: atRow } = await supabaseClient
+      .from("atendimentos")
+      .select("metadata")
+      .eq("id", atendimentoId)
+      .maybeSingle();
+    const meta = (atRow?.metadata || {}) as Record<string, any>;
+    await supabaseClient
+      .from("atendimentos")
+      .update({ metadata: { ...meta, receita_pending: true, receita_pending_at: new Date().toISOString() } })
+      .eq("id", atendimentoId);
+  } catch (e) {
+    console.warn("[RX-CONFIRM-BTN] falha ao marcar receita_pending:", e);
+  }
+  await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
+    type: "button",
+    texto,
+    botoes: [
+      { id: "receita_ok", titulo: "✅ Tá certo" },
+      { id: "receita_corrigir", titulo: "✏️ Corrigir" },
+    ],
+  });
+}
+
 // ─── routeButtonClick: dispatcher determinístico ───
 async function routeButtonClick(args: {
   buttonId: string;
