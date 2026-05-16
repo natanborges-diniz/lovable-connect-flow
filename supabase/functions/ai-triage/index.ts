@@ -2982,16 +2982,34 @@ serve(async (req) => {
 
           if (looksReal && !nomeConfirmado) {
             const primeiroNome = candidato.split(/\s+/)[0];
-            greetingMsg = inboundCount > 1
-              ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
-              : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
-          } else {
-            greetingMsg = inboundCount > 1
-              ? `Antes de seguir, posso saber seu nome, por favor? 😊`
-              : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+            const introTxt = inboundCount > 1
+              ? `Antes de seguir, posso confirmar — falo com *${primeiroNome}*? 😊`
+              : `Olá! Aqui é o Gael das Óticas Diniz Osasco 😊 Falo com *${primeiroNome}*?`;
+            // Persistência via botões — elimina ambiguidade ("sim/não/é outro").
+            await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+              type: "button",
+              texto: introTxt,
+              botoes: [
+                { id: `nome_ok:${primeiroNome}`, titulo: `✅ Sim, sou ${primeiroNome.slice(0, 15)}` },
+                { id: "nome_outro", titulo: "✏️ Outro nome" },
+              ],
+            });
+            try {
+              await supabase
+                .from("contatos")
+                .update({ metadata: { ...contatoMeta, tentativas_pedido_nome: tentativas + 1, nome_candidato_botao: primeiroNome } })
+                .eq("id", contatoId);
+            } catch (_) { /* noop */ }
+            console.log(`[FAST-PATH] greeting_buttons_sent candidato="${primeiroNome}" tentativas=${tentativas + 1}`);
+            await logEvent(supabase, contatoId, atendimento_id, "saudacao_botoes_nome", introTxt);
+            return jsonResponse({ status: "ok", tools_used: ["greeting_buttons_nome"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
           }
 
-          // Incrementa contador apenas quando estamos pedindo nome (não 1ª interação tipo "Falo com X?")
+          // Sem candidato real — pergunta livre (não há perfil WhatsApp para botão)
+          greetingMsg = inboundCount > 1
+            ? `Antes de seguir, posso saber seu nome, por favor? 😊`
+            : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+
           try {
             await supabase
               .from("contatos")
@@ -2999,7 +3017,7 @@ serve(async (req) => {
               .eq("id", contatoId);
           } catch (_) { /* noop */ }
 
-          console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} nomeWa="${nomePerfilWhatsapp}" tentativas=${tentativas + 1}`);
+          console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} tentativas=${tentativas + 1}`);
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, greetingMsg);
           await logEvent(supabase, contatoId, atendimento_id, "saudacao_deterministica", greetingMsg);
           return jsonResponse({ status: "ok", tools_used: ["greeting_deterministic"], intencao: "saudacao", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
