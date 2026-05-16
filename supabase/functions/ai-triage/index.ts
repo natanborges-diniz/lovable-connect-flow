@@ -328,6 +328,22 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
   const t = norm(String(text || ""));
   if (!stage || !t) return null;
 
+  if (stage === "menu_triagem") {
+    if (/\b(orcamento|orçamento|preco|preço|valor|cotacao|cotação|multifocal|lente|lentes|oculos|óculos)\b/.test(t)) return "orcamento";
+    if (/\b(agendar|agendamento|marcar|visita|horario|horário)\b/.test(t)) return "agendar";
+    if (/\b(status|pedido|os|oculos pronto|óculos pronto|pronto)\b/.test(t)) return "status_pedido";
+    if (/\b(reclamacao|reclamação|problema|insatisfeito|insatisfacao|insatisfação)\b/.test(t)) return "reclamacao";
+    if (/\b(duvida|dúvida|pergunta|ajuda|explica|explicacao|explicação)\b/.test(t)) return "duvida";
+    return null;
+  }
+
+  if (stage === "receita_envio") {
+    if (/\b(foto|imagem|anexo|pdf|arquivo|mandar foto|enviar foto)\b/.test(t)) return "receita_foto";
+    if (/\b(digitar|digitado|escrever|por texto|texto|informar aqui)\b/.test(t)) return "receita_digitar";
+    if (/\b(nao tenho|não tenho|sem receita|nao possuo|não possuo|nao tenho receita|não tenho receita)\b/.test(t)) return "receita_sem";
+    return null;
+  }
+
   if (stage === "receita_confirmacao") {
     if (detectRxConfirmation(t)) return "receita_ok";
     if (detectRxRejeicao(t)) return "receita_corrigir";
