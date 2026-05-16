@@ -377,9 +377,20 @@ serve(async (req) => {
         .eq("setor_id", (fluxo as any).setor_destino_id)
         .eq("ativo", true)
         .order("ordem", { ascending: true });
-      const prio = [acao.coluna_destino].filter(Boolean) as string[];
-      const found = (cols || []).find((c: any) => prio.includes(c.nome));
-      colunaId = found?.id || (cols && cols[0]?.id) || null;
+      const destinoConfigurado = (acao.coluna_destino || "").toString().trim();
+      if (destinoConfigurado) {
+        const found = (cols || []).find((c: any) => c.nome === destinoConfigurado);
+        if (!found) {
+          return new Response(JSON.stringify({
+            ok: false,
+            error: `Coluna destino "${destinoConfigurado}" do fluxo "${fluxoChave}" não existe ou está inativa no setor.`,
+            code: "COLUNA_DESTINO_INVALIDA",
+          }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        colunaId = found.id;
+      } else {
+        colunaId = (cols && cols[0]?.id) || null;
+      }
     }
 
     // ── Insere solicitação ──
