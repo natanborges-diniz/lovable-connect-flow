@@ -92,26 +92,49 @@ serve(async (req) => {
       }
     }
 
-    const isImage = !!media_url;
+    const isInteractive = !!interactive;
+    const isImage = !isInteractive && !!media_url;
     const finalCaption = (caption ?? texto ?? "").trim();
 
-    const apiResult = isImage
-      ? await sendImageViaMeta(cleanPhone, media_url!, finalCaption || undefined)
-      : await sendTextViaMeta(cleanPhone, texto!);
+    let apiResult: any;
+    let kind: "interactive" | "image" | "text";
+    if (isInteractive) {
+      kind = "interactive";
+      try {
+        apiResult = await sendInteractiveViaMeta(cleanPhone, interactive!);
+      } catch (e) {
+        // Fallback p/ texto se Meta rejeitar payload interativo
+        console.warn("[send-whatsapp] interactive failed, falling back to text:", e);
+        apiResult = await sendTextViaMeta(cleanPhone, interactive!.texto);
+        kind = "text";
+      }
+    } else if (isImage) {
+      kind = "image";
+      apiResult = await sendImageViaMeta(cleanPhone, media_url!, finalCaption || undefined);
+    } else {
+      kind = "text";
+      apiResult = await sendTextViaMeta(cleanPhone, texto!);
+    }
 
-    console.log(`[send-whatsapp] Sent via meta_official (${isImage ? "image" : "text"}):`, apiResult?.messages?.[0]?.id);
+    console.log(`[send-whatsapp] Sent via meta_official (${kind}):`, apiResult?.messages?.[0]?.id);
+
+    const persistedContent = isInteractive
+      ? interactive!.texto
+      : (isImage ? (finalCaption || "[image]") : texto!);
+    const persistedTipo = isInteractive ? "interactive" : (isImage ? "image" : "text");
 
     const { error: msgErr } = await supabase.from("mensagens").insert({
       atendimento_id,
       direcao: "outbound",
-      conteudo: isImage ? (finalCaption || "[image]") : texto!,
-      tipo_conteudo: isImage ? "image" : "text",
+      conteudo: persistedContent,
+      tipo_conteudo: persistedTipo,
       remetente_nome: remetente_nome || "Operador",
       provedor: "meta_official",
       metadata: {
         whatsapp_message_id: apiResult.messages?.[0]?.id || null,
         provedor: "meta_official",
         ...(isImage ? { media_url, mime_type: mime_type || null } : {}),
+        ...(isInteractive ? { interactive } : {}),
       },
     });
 
