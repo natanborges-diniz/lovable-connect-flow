@@ -7717,8 +7717,243 @@ async function sendInteractive(supabaseUrl: string, serviceKey: string, atendime
   }
 }
 
+// ─── routeButtonClick: dispatcher determinístico ───
+async function routeButtonClick(args: {
+  buttonId: string;
+  atendimento: any;
+  atendimentoMeta: Record<string, any>;
+  supabase: any;
+  supabaseUrl: string;
+  serviceKey: string;
+}): Promise<boolean> {
+  const { buttonId, atendimento, atendimentoMeta, supabase, supabaseUrl, serviceKey } = args;
+  const atId = atendimento.id;
 
-async function logEvent(supabase: any, contatoId: string, atendimentoId: string, tipo: string, msg: string) {
+  const patchMeta = async (patch: Record<string, any>) => {
+    await supabase.from("atendimentos")
+      .update({ metadata: { ...atendimentoMeta, ...patch, ultimo_button_id: buttonId, ultimo_button_at: new Date().toISOString() } })
+      .eq("id", atId);
+  };
+
+  if (buttonId.startsWith("loja:")) {
+    const lojaId = buttonId.slice(5);
+    const { data: loja } = await supabase
+      .from("telefones_lojas").select("id, nome_loja, endereco").eq("id", lojaId).maybeSingle();
+    if (loja) {
+      await patchMeta({
+        agendamento_pending: { ...(atendimentoMeta.agendamento_pending || {}), loja_id: loja.id, loja_nome: loja.nome_loja },
+      });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId,
+        `Perfeito! Loja escolhida: *${loja.nome_loja}*.\nQual dia e horário ficaria melhor pra você? 😊`);
+      return true;
+    }
+  }
+
+  switch (buttonId) {
+    case "orcamento":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Pra te passar um orçamento certinho, preciso da sua receita 😊 Como prefere enviar?",
+        botoes: [
+          { id: "receita_foto", titulo: "📷 Enviar foto" },
+          { id: "receita_digitar", titulo: "⌨️ Digitar valores" },
+          { id: "receita_sem", titulo: "📄 Não tenho" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento" });
+      return true;
+    case "status_pedido":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂");
+      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+      await supabase.from("eventos_crm").insert({ contato_id: atendimento.contato_id, tipo: "consulta_os", descricao: "Botão Status do pedido — escalado", referencia_tipo: "atendimento", referencia_id: atId });
+      return true;
+    case "duvida":
+      await patchMeta({ intent_detected: "duvida_livre" });
+      return false;
+    case "reclamacao":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sinto muito que algo não saiu como esperado 😟 Já estou chamando um responsável pra te atender.");
+      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+      await supabase.from("eventos_crm").insert({ contato_id: atendimento.contato_id, tipo: "reclamacao_cliente", descricao: "Botão Reclamação — escalado", referencia_tipo: "atendimento", referencia_id: atId });
+      return true;
+    case "agendar":
+      await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "receita_foto":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Beleza! Me manda a foto da receita por aqui que eu já analiso 📷");
+      await patchMeta({ aguardando_receita_foto: true });
+      return true;
+    case "receita_digitar":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      return true;
+    case "receita_sem":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Sem a receita não consigo fechar valor exato, mas posso te dar uma faixa estimada. Você usa óculos pra perto, pra longe, ou multifocal? 😊");
+      await patchMeta({ intent_detected: "sem_receita" });
+      return true;
+    case "receita_ok": {
+      if (atendimentoMeta.receita_pending) {
+        await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString() });
+        await sendInteractive(supabaseUrl, serviceKey, atId, {
+          type: "button",
+          texto: "Receita confirmada 🙌 Quer algum adicional nas lentes?",
+          botoes: [
+            { id: "adicional_azul", titulo: "💙 Luz azul" },
+            { id: "adicional_foto", titulo: "☀️ Fotossensível" },
+            { id: "adicional_nao", titulo: "➡️ Sem adicionais" },
+          ],
+        });
+        return true;
+      }
+      return false;
+    }
+    case "receita_corrigir":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      await patchMeta({ receita_pending: null });
+      return true;
+    case "adicional_azul":
+      await patchMeta({ adicionais_pending: { filtro_blue: true } });
+      return false;
+    case "adicional_foto":
+      await patchMeta({ adicionais_pending: { filtro_photo: true } });
+      return false;
+    case "adicional_nao":
+      await patchMeta({ adicionais_pending: {} });
+      return false;
+    case "orcamento_agendar":
+      await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "orcamento_duvida":
+      return false;
+    case "orcamento_mais_barato":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Posso te oferecer 20% de desconto nas lentes se fechar hoje 🤝 O que acha?",
+        botoes: [
+          { id: "desconto_aceito", titulo: "✅ Aceito, agendar" },
+          { id: "desconto_loja", titulo: "🏪 Ver na loja" },
+          { id: "desconto_pensar", titulo: "⏳ Vou pensar" },
+        ],
+      });
+      await patchMeta({ desconto_oferecido_at: new Date().toISOString() });
+      return true;
+    case "desconto_aceito":
+      await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "desconto_loja":
+      await sendEnderecosLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "desconto_pensar":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Quando quiser dar continuidade, é só me chamar 😊");
+      return true;
+    case "ag_confirmar": {
+      const pend = atendimentoMeta.agendamento_pending;
+      if (pend?.loja_nome && pend?.data_horario) {
+        await fetch(`${supabaseUrl}/functions/v1/agendar-cliente`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ atendimento_id: atId, contato_id: atendimento.contato_id, loja_nome: pend.loja_nome, data_horario: pend.data_horario }),
+        });
+        await patchMeta({ agendamento_pending: null });
+        return true;
+      }
+      return false;
+    }
+    case "ag_mudar":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tranquilo! Qual dia e horário fica melhor pra você? 🙂");
+      return true;
+    case "ag_cancelar":
+      await patchMeta({ agendamento_pending: null });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema, cancelei a tentativa. Quando quiser, é só me chamar! 😊");
+      return true;
+    case "show_confirma": {
+      const { data: ag } = await supabase
+        .from("agendamentos").select("id, data_horario, loja_nome, metadata")
+        .eq("contato_id", atendimento.contato_id)
+        .in("status", ["lembrete_enviado", "agendado", "confirmado"])
+        .order("data_horario", { ascending: true }).limit(1).maybeSingle();
+      if (ag) {
+        const md = (ag.metadata || {}) as Record<string, any>;
+        await supabase.from("agendamentos").update({
+          status: "confirmado", confirmacao_enviada: true,
+          metadata: { ...md, cliente_confirmou_at: new Date().toISOString(), via: "interactive_button" },
+        }).eq("id", ag.id);
+        const dt = new Date(ag.data_horario);
+        const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+        const dataFmt = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, `✅ Confirmado! Te esperamos ${dataFmt} às ${hora} na ${ag.loja_nome}. Até lá! 😊`);
+        fetch(`${supabaseUrl}/functions/v1/notificar-loja-agendamento`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ agendamento_id: ag.id }),
+        }).catch(() => {});
+      }
+      return true;
+    }
+    case "show_remarcar":
+      await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "show_nao": {
+      const { data: ag } = await supabase
+        .from("agendamentos").select("id, metadata")
+        .eq("contato_id", atendimento.contato_id)
+        .in("status", ["lembrete_enviado", "agendado", "confirmado"])
+        .order("data_horario", { ascending: true }).limit(1).maybeSingle();
+      if (ag) {
+        const md = (ag.metadata || {}) as Record<string, any>;
+        await supabase.from("agendamentos").update({
+          status: "cancelado",
+          metadata: { ...md, cancelado_via: "interactive_button", cancelado_at: new Date().toISOString() },
+        }).eq("id", ag.id);
+      }
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tudo bem! Quando quiser remarcar, é só me chamar por aqui 😊");
+      return true;
+    }
+    case "recupera_sim":
+      await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "recupera_loja":
+      await sendEnderecosLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "recupera_nao":
+      await patchMeta({ recuperacao_recusada_at: new Date().toISOString() });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Compreendo! Obrigada pelo retorno. Quando precisar, estaremos por aqui 😊");
+      return true;
+  }
+  return false;
+}
+
+async function sendListaLojas(supabase: any, supabaseUrl: string, serviceKey: string, atId: string) {
+  const { data: lojas } = await supabase
+    .from("telefones_lojas").select("id, nome_loja, endereco")
+    .eq("tipo", "loja").eq("ativo", true)
+    .order("nome_loja", { ascending: true }).limit(10);
+  if (!lojas?.length) {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Em qual cidade ou bairro fica melhor pra você? 😊");
+    return;
+  }
+  await sendInteractive(supabaseUrl, serviceKey, atId, {
+    type: "list",
+    texto: "Em qual loja prefere ser atendido? 😊",
+    lista: {
+      label: "Ver lojas", secao: "Nossas unidades",
+      itens: lojas.map((l: any) => ({ id: `loja:${l.id}`, titulo: l.nome_loja, descricao: (l.endereco || "").slice(0, 72) })),
+    },
+  });
+}
+
+async function sendEnderecosLojas(supabase: any, supabaseUrl: string, serviceKey: string, atId: string) {
+  const { data: lojas } = await supabase
+    .from("telefones_lojas").select("nome_loja, endereco")
+    .eq("tipo", "loja").eq("ativo", true)
+    .order("nome_loja", { ascending: true }).limit(8);
+  if (!lojas?.length) {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Te passo as lojas em instantes 🙂");
+    return;
+  }
+  const linhas = lojas.map((l: any) => `📍 *${l.nome_loja}*\n${l.endereco || ""}`).join("\n\n");
+  await sendWhatsApp(supabaseUrl, serviceKey, atId, `Aqui estão as nossas lojas, é só passar quando puder 😊\n\n${linhas}`);
+}
+
+
   await supabase.from("eventos_crm").insert({
     contato_id: contatoId, tipo,
     descricao: msg.substring(0, 200),
