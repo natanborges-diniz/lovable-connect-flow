@@ -8071,13 +8071,16 @@ async function routeButtonClick(args: {
       return true;
     case "adicional_azul":
       await patchMeta({ adicionais_pending: { filtro_blue: true } });
-      return false;
+      await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_blue: true });
+      return true;
     case "adicional_foto":
       await patchMeta({ adicionais_pending: { filtro_photo: true } });
-      return false;
+      await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_photo: true });
+      return true;
     case "adicional_nao":
       await patchMeta({ adicionais_pending: {} });
-      return false;
+      await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, {});
+      return true;
     case "orcamento_agendar":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
       return true;
