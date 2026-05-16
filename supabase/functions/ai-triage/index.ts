@@ -2457,7 +2457,7 @@ serve(async (req) => {
                     referencia_id: atendimento_id,
                   }).then(() => undefined, () => undefined);
 
-                  await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(_merged, false));
+                  await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(_merged, false));
                   console.log(`[RX-RETOMADA] Cliente digitou receita pós-escalada (motivo=${_motivo}) — IA retomou`);
                   return jsonResponse({
                     status: "ok",
