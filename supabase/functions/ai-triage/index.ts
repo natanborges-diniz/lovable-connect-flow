@@ -3038,7 +3038,7 @@ serve(async (req) => {
             },
           });
           await supabase.from("atendimentos").update({
-            metadata: { ..._atMetaMenu, menu_triagem_enviado_at: new Date().toISOString() },
+            metadata: { ..._atMetaMenu, menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" },
           }).eq("id", atendimento_id);
           await logEvent(supabase, contatoId, atendimento_id, "menu_triagem_recorrente", "Cliente já cadastrado — menu direto");
           return jsonResponse({ status: "ok", tools_used: ["menu_triagem_recorrente"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
@@ -5762,7 +5762,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             // Marca que o menu inicial foi servido — evita LLM duplicar a pergunta.
             const _curAtMeta = (atendimento.metadata as Record<string, any>) || {};
             await supabase.from("atendimentos").update({
-              metadata: { ..._curAtMeta, menu_triagem_enviado_at: new Date().toISOString() },
+              metadata: { ..._curAtMeta, menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" },
             }).eq("id", atendimento_id);
             resposta = ""; // não emite texto adicional do LLM nesta rodada
           } catch (e) {
