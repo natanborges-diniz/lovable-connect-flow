@@ -5541,6 +5541,29 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               referencia_id: atendimento_id,
             });
             console.log(`[TOOL] registrar_nome_cliente: ${novoNome}`);
+            // Logo após confirmar o nome, oferece o menu de triagem por lista interativa.
+            // Substitui a pergunta livre "como posso te ajudar" pelo card determinístico.
+            const firstName = novoNome.split(" ")[0];
+            await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+              type: "list",
+              texto: `Prazer, ${firstName}! 🙌 Como posso te ajudar hoje?`,
+              lista: {
+                label: "Ver opções",
+                secao: "Posso te ajudar com",
+                itens: [
+                  { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa de lentes pelo seu grau" },
+                  { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
+                  { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
+                  { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Falar sobre produtos / serviços" },
+                  { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
+                ],
+              },
+            });
+            // Marca que o menu inicial foi servido — evita LLM duplicar a pergunta.
+            await supabase.from("atendimentos").update({
+              metadata: { ...atendimentoMeta, menu_triagem_enviado_at: new Date().toISOString() },
+            }).eq("id", atendimento_id);
+            resposta = ""; // não emite texto adicional do LLM nesta rodada
           } catch (e) {
             console.error("[TOOL] registrar_nome_cliente failed:", e);
           }
