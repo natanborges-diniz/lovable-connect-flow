@@ -3353,6 +3353,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               }
             } catch (_) { /* noop */ }
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respCotacao);
+            await sendPostQuoteButtons(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id);
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId,
               tipo: "cotacao_pos_confirmacao_forcada",
