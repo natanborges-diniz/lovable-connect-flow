@@ -7009,8 +7009,20 @@ async function runConsultarLentes(
     const faixaDe = (preco: number): "eco" | "inter" | "prem" => preco <= p1 ? "eco" : preco <= p2 ? "inter" : "prem";
 
     // 3) Para cada faixa, pega até 2 entradas com marcas distintas.
+    //    Em MULTIFOCAL Premium sem marca pedida, prioriza Varilux/Essilor antes
+    //    do loop — regra comercial: Premium multifocal = referência Varilux.
+    const isVarilux = (l: any) => /essilor|varilux/i.test(String(l.brand || "")) || /varilux/i.test(String(l.family || ""));
     const pickPorFaixa = (faixa: "eco" | "inter" | "prem"): any[] => {
-      const pool = sorted.filter((l) => faixaDe(Number(l.price_brl)) === faixa);
+      let pool = sorted.filter((l) => faixaDe(Number(l.price_brl)) === faixa);
+      if (faixa === "prem" && rxType === "progressive") {
+        // Ranqueia Varilux primeiro; empate desfaz por preço (sorted já está por preço asc).
+        pool = [...pool].sort((a, b) => {
+          const va = isVarilux(a) ? 0 : 1;
+          const vb = isVarilux(b) ? 0 : 1;
+          if (va !== vb) return va - vb;
+          return Number(a.price_brl) - Number(b.price_brl);
+        });
+      }
       const seen = new Set<string>();
       const out: any[] = [];
       for (const l of pool) {
@@ -7028,9 +7040,9 @@ async function runConsultarLentes(
       return out;
     };
 
-    const eco = pickPorFaixa("eco");
-    const inter = pickPorFaixa("inter");
-    const prem = pickPorFaixa("prem");
+    let eco = pickPorFaixa("eco");
+    let inter = pickPorFaixa("inter");
+    let prem = pickPorFaixa("prem");
 
     // 4) Garante que marcas presentes no catálogo mas que não entraram em nenhuma faixa
     //    apareçam pelo menos uma vez (priorizando faixa equivalente à mais barata delas).
@@ -7043,6 +7055,39 @@ async function runConsultarLentes(
         target.push(l);
         usados.add(l.id);
       }
+    }
+
+    // 4b) VALIDADOR ANTI-INVERSÃO — garante min(eco) ≤ min(inter) ≤ min(prem).
+    //     Caso quebre (cross-contamination por inclusão da etapa 4), descarta diversificação
+    //     e re-particiona puramente por preço. Caso Natan 16/05/2026.
+    const minPreco = (arr: any[]) => arr.length ? Math.min(...arr.map((l) => Number(l.price_brl))) : Infinity;
+    const minEco = minPreco(eco);
+    const minInter = minPreco(inter);
+    const minPrem = minPreco(prem);
+    const inversao = (eco.length && inter.length && minEco > minInter)
+                  || (inter.length && prem.length && minInter > minPrem)
+                  || (eco.length && prem.length && minEco > minPrem);
+    if (inversao) {
+      console.warn(`[QUOTE] faixas inconsistentes (eco=${minEco} inter=${minInter} prem=${minPrem}) — re-particionando por preço puro`);
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "cotacao_faixas_inconsistentes",
+          descricao: `Inversão de faixas detectada — re-particionado por preço puro`,
+          metadata: { eco: eco.map((l: any) => ({ brand: l.brand, family: l.family, price: l.price_brl })),
+                      inter: inter.map((l: any) => ({ brand: l.brand, family: l.family, price: l.price_brl })),
+                      prem: prem.map((l: any) => ({ brand: l.brand, family: l.family, price: l.price_brl })) },
+          referencia_tipo: atendimentoId ? "atendimento" : null,
+          referencia_id: atendimentoId || null,
+        });
+      } catch (_) { /* noop */ }
+      // Re-particionamento determinístico por preço
+      const n = sorted.length;
+      const i1 = Math.max(1, Math.floor(n / 3));
+      const i2 = Math.max(i1 + 1, Math.floor((2 * n) / 3));
+      eco = sorted.slice(0, i1).slice(0, 2);
+      inter = sorted.slice(i1, i2).slice(0, 2);
+      prem = sorted.slice(i2).slice(0, 2);
     }
 
     const renderFaixa = (label: string, itens: any[]) => {
