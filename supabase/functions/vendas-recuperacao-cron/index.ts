@@ -810,7 +810,7 @@ async function processLembretes(supabase: any, SUPABASE_URL: string, SUPABASE_SE
             },
             body: JSON.stringify({
               atendimento_id: atendimentoId,
-              mensagem: lembrete.mensagem,
+              texto: lembrete.mensagem,
               remetente_nome: "Gael",
             }),
           });
