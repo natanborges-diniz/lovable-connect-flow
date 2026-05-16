@@ -559,18 +559,25 @@ serve(async (req) => {
       }
     }
 
+    const isInteractiveReply = !!interactiveReply;
     await supabase.from("mensagens").insert({
       atendimento_id: atendimentoId,
       direcao: "inbound",
-      conteudo: messageContent,
+      conteudo: isInteractiveReply ? (interactiveReply!.title || messageContent) : messageContent,
       remetente_nome: senderName || contato.nome,
-      tipo_conteudo: isTranscribedAudio ? "text" : tipoConteudo,
+      tipo_conteudo: isInteractiveReply ? "interactive_reply" : (isTranscribedAudio ? "text" : tipoConteudo),
       metadata: {
         whatsapp_message_id: messageId,
         source: "meta_official",
         ...(storedMediaUrl && { media_url: storedMediaUrl }),
         ...(storedMediaMimeType && { mime_type: storedMediaMimeType }),
         ...(isTranscribedAudio && { transcribed_from: "audio", original_type: "audio" }),
+        ...(isInteractiveReply ? {
+          interactive_reply: true,
+          button_id: interactiveReply!.id,
+          button_title: interactiveReply!.title,
+          interactive_source: interactiveReply!.source,
+        } : {}),
       },
       provedor: "meta_official",
     });
