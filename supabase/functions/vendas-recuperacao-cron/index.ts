@@ -594,9 +594,9 @@ async function processHumano(
     }
   }
 
-  // Lock otimista: grava ultima_tentativa_at ANTES do fetch.
-  // A 2ª execução concorrente cai no guard acima na próxima leitura.
-  await supabase.from("atendimentos").update({
+  // Lock atômico via CAS: bloqueia race entre execuções concorrentes do cron.
+  const prevTsH = recH.ultima_tentativa_at || null;
+  const lockQueryH = supabase.from("atendimentos").update({
     metadata: {
       ...atMeta,
       recuperacao_humano: {
@@ -607,6 +607,14 @@ async function processHumano(
       },
     },
   }).eq("id", atendimento.id);
+  const { data: lockedH } = await (prevTsH
+    ? lockQueryH.eq("metadata->recuperacao_humano->>ultima_tentativa_at", prevTsH)
+    : lockQueryH.is("metadata->recuperacao_humano->>ultima_tentativa_at", null)
+  ).select("id").maybeSingle();
+  if (!lockedH) {
+    console.log(`[HUMANO-DEDUPE-CAS] ${contato.nome}: outra execução já tomou o lock — abortando`);
+    return result;
+  }
 
   const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
   const topico = inferirTopico(lastOutbound) || recH.topico || "seu atendimento";
