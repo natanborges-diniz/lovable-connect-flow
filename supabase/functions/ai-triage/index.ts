@@ -4582,7 +4582,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             return jsonResponse({ status: "ok", tools_used: ["receita_escalada_humano"], intencao: "receita_oftalmologica", precisa_humano: true, pipeline_coluna_sugerida: "Aguardando Humano", modo: "humano" });
           }
 
-          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(merged, true));
+          await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(merged, true));
           try {
             const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
             delete m.ia_lock;
