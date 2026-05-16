@@ -7966,7 +7966,7 @@ async function sendReceitaConfirmInteractive(
     const meta = (atRow?.metadata || {}) as Record<string, any>;
     await supabaseClient
       .from("atendimentos")
-      .update({ metadata: { ...meta, receita_pending: true, receita_pending_at: new Date().toISOString() } })
+      .update({ metadata: { ...meta, receita_pending: true, receita_pending_at: new Date().toISOString(), expected_reply: "receita_confirmacao" } })
       .eq("id", atendimentoId);
   } catch (e) {
     console.warn("[RX-CONFIRM-BTN] falha ao marcar receita_pending:", e);
@@ -7996,7 +7996,7 @@ async function sendPostQuoteButtons(
     const last = meta.pos_quote_botoes_at ? Date.parse(meta.pos_quote_botoes_at) : 0;
     if (last && Date.now() - last < 5 * 60 * 1000) return; // evita duplicação <5min
     await supabaseClient.from("atendimentos")
-      .update({ metadata: { ...meta, pos_quote_botoes_at: new Date().toISOString() } })
+      .update({ metadata: { ...meta, pos_quote_botoes_at: new Date().toISOString(), expected_reply: "pos_cotacao" } })
       .eq("id", atendimentoId);
   } catch (_) { /* noop */ }
   await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
@@ -8012,10 +8012,23 @@ async function sendPostQuoteButtons(
 
 // Envia botões de follow-up após mensagem de recuperação (IA/no-show).
 async function sendPostRecoveryButtons(
+  supabaseClient: any,
   supabaseUrl: string,
   serviceKey: string,
   atendimentoId: string,
 ) {
+  try {
+    const { data: atRow } = await supabaseClient
+      .from("atendimentos")
+      .select("metadata")
+      .eq("id", atendimentoId)
+      .maybeSingle();
+    const meta = (atRow?.metadata || {}) as Record<string, any>;
+    await supabaseClient
+      .from("atendimentos")
+      .update({ metadata: { ...meta, expected_reply: "recuperacao" } })
+      .eq("id", atendimentoId);
+  } catch (_) { /* noop */ }
   await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
     type: "button",
     texto: "Quer dar continuidade?",
@@ -8437,9 +8450,15 @@ async function sendListaLojas(supabase: any, supabaseUrl: string, serviceKey: st
     .eq("tipo", "loja").eq("ativo", true)
     .order("nome_loja", { ascending: true }).limit(10);
   if (!lojas?.length) {
+    await supabase.from("atendimentos").update({ metadata: { expected_reply: "bairro_regiao_livre" } }).eq("id", atId);
     await sendWhatsApp(supabaseUrl, serviceKey, atId, "Em qual cidade ou bairro fica melhor pra você? 😊");
     return;
   }
+  try {
+    const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", atId).maybeSingle();
+    const meta = (atRow?.metadata || {}) as Record<string, any>;
+    await supabase.from("atendimentos").update({ metadata: { ...meta, expected_reply: "loja_selecao" } }).eq("id", atId);
+  } catch (_) { /* noop */ }
   await sendInteractive(supabaseUrl, serviceKey, atId, {
     type: "list",
     texto: "Em qual loja prefere ser atendido? 😊",
