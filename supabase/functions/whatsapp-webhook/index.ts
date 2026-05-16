@@ -1236,6 +1236,23 @@ function normalizeWebhookPayload(body: any): NormalizedMessage | null {
             mediaMimeType: msg.sticker?.mime_type,
           };
         }
+        if (msg.type === "interactive") {
+          const br = msg.interactive?.button_reply;
+          const lr = msg.interactive?.list_reply;
+          const reply = br || lr;
+          if (reply) {
+            return {
+              ...base,
+              text: reply.title || "",
+              mediaType: "interactive_reply",
+              interactiveReply: {
+                id: reply.id,
+                title: reply.title || "",
+                source: br ? "button" : "list",
+              },
+            };
+          }
+        }
       }
     }
     return null;
