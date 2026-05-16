@@ -5560,8 +5560,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               },
             });
             // Marca que o menu inicial foi servido — evita LLM duplicar a pergunta.
+            const _curAtMeta = (atendimento.metadata as Record<string, any>) || {};
             await supabase.from("atendimentos").update({
-              metadata: { ...atendimentoMeta, menu_triagem_enviado_at: new Date().toISOString() },
+              metadata: { ..._curAtMeta, menu_triagem_enviado_at: new Date().toISOString() },
             }).eq("id", atendimento_id);
             resposta = ""; // não emite texto adicional do LLM nesta rodada
           } catch (e) {
