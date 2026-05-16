@@ -2765,6 +2765,61 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
+    // ── PRE-LLM ROUTER: Cliente reclamou de inversão de preço nas faixas ──
+    // Caso Natan 16/05/2026: IA mandou "Econômica R$2.135, Intermediária R$1.199,
+    // Premium R$1.699" (inversão). Cliente disse "a econômica está mais cara que
+    // a intermediária" e o LLM degradou para "já te mandei as opções acima".
+    // Agora: detecta reclamação, re-roda runConsultarLentes (já com fixes de ordenação),
+    // envia prefixado e retorna sem passar pelo LLM.
+    try {
+      const _atMetaPx = (atendimento.metadata as Record<string, any>) || {};
+      const _ultCotacao = _atMetaPx?.ultima_cotacao || null;
+      const _ultAtMs = _ultCotacao?.at ? Date.parse(_ultCotacao.at) : 0;
+      const _ultRecente = _ultAtMs && (Date.now() - _ultAtMs) < 30 * 60 * 1000; // 30min
+      const _msgPxRaw = String(mensagem_texto || "").trim();
+      const _msgPxLow = _msgPxRaw.toLowerCase();
+      const _PRECO_INVERTIDO_RE = /(mais\s+car[oa].*(que|do\s+que))|(econ[ôo]mica.*car)|(premium.*barat)|(invertid[ao])|(t[áa]\s+errad[ao].*pre[çc]o)|(pre[çc]o.*invertid)|(t[áa]\s+invertid)/i;
+      const _orcamentoRecente = /(🔍\s*\*?Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎|🟢\s*\*?Econ|🟡\s*\*?Inter)/i.test(
+        String((recentOutbound || []).slice(-1)[0] || "")
+      );
+      if (
+        _ultRecente && _orcamentoRecente && _PRECO_INVERTIDO_RE.test(_msgPxLow) &&
+        (atendimento.modo === "ia" || atendimento.modo === "hibrido")
+      ) {
+        console.log("[ROUTER] Reclamação de inversão de preço detectada — re-cotando deterministicamente");
+        try {
+          const reArgs = {
+            preferencia_marca: _ultCotacao?.args?.preferencia_marca || undefined,
+            filtro_blue: _ultCotacao?.args?.filtro_blue === true ? true : undefined,
+            filtro_photo: _ultCotacao?.args?.filtro_photo === true ? true : undefined,
+          };
+          const reQuote = await runConsultarLentes(
+            supabase, atendimento.contato_id, recentOutbound, reArgs, atendimento_id,
+          );
+          const prefixo = "Você tem razão, deixa eu refazer as faixas certinho 😊\n\n";
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, prefixo + reQuote.resposta);
+          await supabase.from("eventos_crm").insert({
+            contato_id: atendimento.contato_id,
+            tipo: "cotacao_reexecutada_reclamacao_inversao",
+            descricao: "Cliente reclamou de inversão de preço nas faixas — re-cotação determinística disparada",
+            metadata: { mensagem_cliente: _msgPxRaw, ultima_cotacao_at: _ultCotacao?.at },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+          return jsonResponse({
+            status: "ok",
+            tools_used: ["consultar_lentes_recotacao_reclamacao"],
+            intencao: "orcamento",
+            precisa_humano: false,
+            modo: atendimento.modo,
+          });
+        } catch (e) {
+          console.warn("[ROUTER] re-cotação por reclamação falhou — caindo para LLM:", (e as Error)?.message);
+        }
+      }
+    } catch (e) {
+      console.warn("[ROUTER-INVERSAO] preskip falhou:", (e as Error)?.message);
+    }
+
     // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA + AUTO-PERSISTÊNCIA DE NOME ──
     // Elimina vazamento de prompt (proximo_passo, instruções internas) e reduz latência.
     // Só dispara para texto puro — imagens (receita) seguem o fluxo normal.
@@ -6977,15 +7032,24 @@ async function runConsultarLentes(
   let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
 
   // ---- Diversificação por marca + 3 faixas ----
-  // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar).
+  // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar)
+  // PORÉM ordenando por PREÇO ASC (não por priority) — query original ordena por
+  // priority+price, o que pode inverter faixas quando há SKUs da mesma marca com
+  // priority distinta. Caso Natan 16/05/2026: Liberty+Crizal R$2.135 caía em
+  // "Econômica" enquanto Comfort Max R$1.699 caía em "Premium" (inversão grosseira).
   if (args?.preferencia_marca) {
-    const economy = lenses[0];
-    const premium = lenses[lenses.length - 1];
-    const midIndex = Math.floor(lenses.length / 2);
-    const mid = lenses.length >= 3 ? lenses[midIndex] : null;
+    const sortedByPrice = [...lenses].sort((a, b) => Number(a.price_brl) - Number(b.price_brl));
+    const economy = sortedByPrice[0];
+    const premium = sortedByPrice[sortedByPrice.length - 1];
+    const midIndex = Math.floor(sortedByPrice.length / 2);
+    const mid = sortedByPrice.length >= 3 ? sortedByPrice[midIndex] : null;
     quoteMsg += formatLens(economy, "💚 Econômica");
-    if (mid && mid.id !== economy.id && mid.id !== premium.id) quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
-    if (premium.id !== economy.id) quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+    if (mid && mid.id !== economy.id && mid.id !== premium.id && Number(mid.price_brl) > Number(economy.price_brl)) {
+      quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
+    }
+    if (premium.id !== economy.id && Number(premium.price_brl) > Number(economy.price_brl)) {
+      quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+    }
   } else {
     // 1) Agrupa por marca (case-insensitive) e pega a mais barata de cada.
     const cheapestByBrand = new Map<string, any>();
@@ -7000,8 +7064,20 @@ async function runConsultarLentes(
     const faixaDe = (preco: number): "eco" | "inter" | "prem" => preco <= p1 ? "eco" : preco <= p2 ? "inter" : "prem";
 
     // 3) Para cada faixa, pega até 2 entradas com marcas distintas.
+    //    Em MULTIFOCAL Premium sem marca pedida, prioriza Varilux/Essilor antes
+    //    do loop — regra comercial: Premium multifocal = referência Varilux.
+    const isVarilux = (l: any) => /essilor|varilux/i.test(String(l.brand || "")) || /varilux/i.test(String(l.family || ""));
     const pickPorFaixa = (faixa: "eco" | "inter" | "prem"): any[] => {
-      const pool = sorted.filter((l) => faixaDe(Number(l.price_brl)) === faixa);
+      let pool = sorted.filter((l) => faixaDe(Number(l.price_brl)) === faixa);
+      if (faixa === "prem" && rxType === "progressive") {
+        // Ranqueia Varilux primeiro; empate desfaz por preço (sorted já está por preço asc).
+        pool = [...pool].sort((a, b) => {
+          const va = isVarilux(a) ? 0 : 1;
+          const vb = isVarilux(b) ? 0 : 1;
+          if (va !== vb) return va - vb;
+          return Number(a.price_brl) - Number(b.price_brl);
+        });
+      }
       const seen = new Set<string>();
       const out: any[] = [];
       for (const l of pool) {
@@ -7019,9 +7095,9 @@ async function runConsultarLentes(
       return out;
     };
 
-    const eco = pickPorFaixa("eco");
-    const inter = pickPorFaixa("inter");
-    const prem = pickPorFaixa("prem");
+    let eco = pickPorFaixa("eco");
+    let inter = pickPorFaixa("inter");
+    let prem = pickPorFaixa("prem");
 
     // 4) Garante que marcas presentes no catálogo mas que não entraram em nenhuma faixa
     //    apareçam pelo menos uma vez (priorizando faixa equivalente à mais barata delas).
@@ -7034,6 +7110,39 @@ async function runConsultarLentes(
         target.push(l);
         usados.add(l.id);
       }
+    }
+
+    // 4b) VALIDADOR ANTI-INVERSÃO — garante min(eco) ≤ min(inter) ≤ min(prem).
+    //     Caso quebre (cross-contamination por inclusão da etapa 4), descarta diversificação
+    //     e re-particiona puramente por preço. Caso Natan 16/05/2026.
+    const minPreco = (arr: any[]) => arr.length ? Math.min(...arr.map((l) => Number(l.price_brl))) : Infinity;
+    const minEco = minPreco(eco);
+    const minInter = minPreco(inter);
+    const minPrem = minPreco(prem);
+    const inversao = (eco.length && inter.length && minEco > minInter)
+                  || (inter.length && prem.length && minInter > minPrem)
+                  || (eco.length && prem.length && minEco > minPrem);
+    if (inversao) {
+      console.warn(`[QUOTE] faixas inconsistentes (eco=${minEco} inter=${minInter} prem=${minPrem}) — re-particionando por preço puro`);
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "cotacao_faixas_inconsistentes",
+          descricao: `Inversão de faixas detectada — re-particionado por preço puro`,
+          metadata: { eco: eco.map((l: any) => ({ brand: l.brand, family: l.family, price: l.price_brl })),
+                      inter: inter.map((l: any) => ({ brand: l.brand, family: l.family, price: l.price_brl })),
+                      prem: prem.map((l: any) => ({ brand: l.brand, family: l.family, price: l.price_brl })) },
+          referencia_tipo: atendimentoId ? "atendimento" : null,
+          referencia_id: atendimentoId || null,
+        });
+      } catch (_) { /* noop */ }
+      // Re-particionamento determinístico por preço
+      const n = sorted.length;
+      const i1 = Math.max(1, Math.floor(n / 3));
+      const i2 = Math.max(i1 + 1, Math.floor((2 * n) / 3));
+      eco = sorted.slice(0, i1).slice(0, 2);
+      inter = sorted.slice(i1, i2).slice(0, 2);
+      prem = sorted.slice(i2).slice(0, 2);
     }
 
     const renderFaixa = (label: string, itens: any[]) => {
@@ -7115,6 +7224,29 @@ async function runConsultarLentes(
   console.log(`[QUOTE] Found ${lenses.length} lenses for ${rxType} sphere=${worstSphere} cyl=${worstCylinder} add=${maxAdd}${isDuplicate ? " (DEDUPED)" : ""}${revisao.precisa ? ` [revisao:${revisao.motivos.join("|")}]` : ""}`);
   if (isDuplicate) {
     return { resposta: "Já te mandei as opções acima 😊 Quer que eu detalhe alguma delas, ou prefere agendar uma visita pra ver as armações pessoalmente?" };
+  }
+  // Snapshot da última cotação — habilita detector pre-LLM de reclamação de inversão
+  // ("a econômica está mais cara que a intermediária") e melhora auditoria.
+  if (atendimentoId) {
+    try {
+      const { data: atSnap } = await supabase.from("atendimentos").select("metadata").eq("id", atendimentoId).single();
+      const metaSnap = (atSnap?.metadata as Record<string, any>) || {};
+      await supabase.from("atendimentos").update({
+        metadata: {
+          ...metaSnap,
+          ultima_cotacao: {
+            at: new Date().toISOString(),
+            args: {
+              preferencia_marca: args?.preferencia_marca || null,
+              filtro_blue: !!args?.filtro_blue,
+              filtro_photo: !!args?.filtro_photo,
+            },
+            rx_type: rxType,
+            lentes: (lenses || []).slice(0, 12).map((l: any) => ({ id: l.id, brand: l.brand, family: l.family, price: Number(l.price_brl) })),
+          },
+        },
+      }).eq("id", atendimentoId);
+    } catch (e) { console.warn("[QUOTE] snapshot ultima_cotacao falhou", e); }
   }
   return { resposta: quoteMsg };
 }
