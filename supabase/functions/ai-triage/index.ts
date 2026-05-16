@@ -2859,10 +2859,43 @@ serve(async (req) => {
       const _lastInboundFP = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
       const _isImageFP = (_lastInboundFP?.tipo_conteudo || "text") === "image"
         || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+      // Skip total quando o contato já tem nome confirmado no CRM (cliente recorrente).
+      // O LLM cumprimenta naturalmente; se for 1º inbound do atendimento, oferecemos
+      // direto o menu de triagem.
+      const _nomeJaSalvo = nomeConfirmado && !nomeEhPlaceholder(contatoNomeAtual);
       const _greetingEligible =
         !_isImageFP &&
         contatoTipo === "cliente" &&
+        !_nomeJaSalvo &&
         (inboundCount === 1 || (precisaConfirmarNome && !nomeConfirmado));
+
+      // Cliente recorrente + 1º inbound deste atendimento → menu de triagem direto.
+      if (!_isImageFP && _nomeJaSalvo && inboundCount === 1 && contatoTipo === "cliente") {
+        const _atMetaMenu = (atendimento.metadata as Record<string, any>) || {};
+        if (!_atMetaMenu.menu_triagem_enviado_at) {
+          const firstName = contatoNomeAtual.split(" ")[0];
+          await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+            type: "list",
+            texto: `Oi, ${firstName}! Que bom te ver de novo 🙌 Como posso te ajudar hoje?`,
+            lista: {
+              label: "Ver opções",
+              secao: "Posso te ajudar com",
+              itens: [
+                { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa pelo seu grau" },
+                { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
+                { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
+                { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
+                { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
+              ],
+            },
+          });
+          await supabase.from("atendimentos").update({
+            metadata: { ..._atMetaMenu, menu_triagem_enviado_at: new Date().toISOString() },
+          }).eq("id", atendimento_id);
+          await logEvent(supabase, contatoId, atendimento_id, "menu_triagem_recorrente", "Cliente já cadastrado — menu direto");
+          return jsonResponse({ status: "ok", tools_used: ["menu_triagem_recorrente"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
+        }
+      }
 
       if (_greetingEligible) {
         const candidato = (nomePerfilWhatsapp || contatoNomeAtual || "").trim();
