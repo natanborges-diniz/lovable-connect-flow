@@ -7912,7 +7912,48 @@ async function sendPostRecoveryButtons(
   });
 }
 
-// ─── routeButtonClick: dispatcher determinístico ───
+// Roda cotação determinística aplicando filtro de adicional escolhido e
+// envia resposta + botões de follow-up. Usado tanto pelos botões quanto
+// pelo fallback de texto (cliente digita "luz azul", "fotossensível", "sem").
+async function runQuoteWithFilter(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimento: any,
+  filtros: { filtro_blue?: boolean; filtro_photo?: boolean },
+): Promise<void> {
+  try {
+    const labelAdicional = filtros.filtro_blue
+      ? "com filtro de luz azul"
+      : filtros.filtro_photo
+        ? "com lente fotossensível"
+        : "sem adicionais";
+    const quote = await runConsultarLentes(
+      supabase,
+      atendimento.contato_id,
+      [],
+      filtros,
+      atendimento.id,
+    );
+    const prefixo = `Perfeito, atualizei as opções ${labelAdicional} 😊\n\n`;
+    await sendWhatsApp(supabaseUrl, serviceKey, atendimento.id, prefixo + quote.resposta);
+    await sendPostQuoteButtons(supabase, supabaseUrl, serviceKey, atendimento.id);
+    await supabase.from("eventos_crm").insert({
+      contato_id: atendimento.contato_id,
+      tipo: "cotacao_apos_adicional_botao",
+      descricao: `Cotação re-executada após escolha de adicional: ${labelAdicional}`,
+      metadata: { filtros },
+      referencia_tipo: "atendimento",
+      referencia_id: atendimento.id,
+    });
+  } catch (e) {
+    console.error("[ADICIONAL] runQuoteWithFilter falhou:", e);
+    await sendWhatsApp(
+      supabaseUrl, serviceKey, atendimento.id,
+      "Anotei sua escolha! 🙌 Em qual loja prefere ser atendido? Posso te enviar a lista 😊",
+    );
+  }
+}
 async function routeButtonClick(args: {
   buttonId: string;
   atendimento: any;
