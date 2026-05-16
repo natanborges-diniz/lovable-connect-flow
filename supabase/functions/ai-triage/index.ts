@@ -2870,9 +2870,33 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
+    const atendimentoMeta = (atendimento.metadata as Record<string, any>) || {};
+
+    // ── PRE-LLM ROUTER: cliente digitou a resposta esperada para uma etapa determinística ──
+    try {
+      const handledTypedReply = await routeExpectedTypedReply({
+        atendimento,
+        atendimentoMeta,
+        supabase,
+        supabaseUrl: SUPABASE_URL,
+        serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        mensagemTexto: String(mensagem_texto || ""),
+      });
+      if (handledTypedReply) {
+        return jsonResponse({
+          status: "ok",
+          tools_used: ["expected_reply_typed_router"],
+          intencao: atendimentoMeta?.intent_detected || "roteamento_deterministico",
+          precisa_humano: false,
+          modo: atendimento.modo,
+        });
+      }
+    } catch (e) {
+      console.warn("[EXPECTED REPLY] fallback digitado falhou:", (e as Error)?.message);
+    }
+
     // ── PRE-LLM ROUTER: Cliente DIGITOU resposta ao prompt "Quer algum adicional?" ──
-    // Caso o cliente não use os botões (digita "luz azul", "fotossensível", "sem", "não", etc.),
-    // roteia direto para runQuoteWithFilter — mesmo caminho dos botões adicional_*.
+    // Mantido como compatibilidade para conversas antigas sem expected_reply salvo.
     try {
       const _msgAd = String(mensagem_texto || "").trim().toLowerCase();
       const _lastOut = recentOutbound.slice(-1)[0] || "";
@@ -8181,7 +8205,7 @@ async function routeButtonClick(args: {
         ],
       },
     });
-    await patchMeta({ menu_triagem_enviado_at: new Date().toISOString() });
+    await patchMeta({ menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" });
     return true;
   }
 
@@ -8226,7 +8250,7 @@ async function routeButtonClick(args: {
           { id: "receita_sem", titulo: "📄 Não tenho" },
         ],
       });
-      await patchMeta({ intent_detected: "orcamento" });
+      await patchMeta({ intent_detected: "orcamento", expected_reply: "receita_envio" });
       return true;
     case "status_pedido":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂");
@@ -8234,8 +8258,9 @@ async function routeButtonClick(args: {
       await supabase.from("eventos_crm").insert({ contato_id: atendimento.contato_id, tipo: "consulta_os", descricao: "Botão Status do pedido — escalado", referencia_tipo: "atendimento", referencia_id: atId });
       return true;
     case "duvida":
-      await patchMeta({ intent_detected: "duvida_livre" });
-      return false;
+      await patchMeta({ intent_detected: "duvida_livre", expected_reply: null });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me contar sua dúvida por aqui 😊");
+      return true;
     case "reclamacao":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sinto muito que algo não saiu como esperado 😟 Já estou chamando um responsável pra te atender.");
       await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
@@ -8246,18 +8271,19 @@ async function routeButtonClick(args: {
       return true;
     case "receita_foto":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Beleza! Me manda a foto da receita por aqui que eu já analiso 📷");
-      await patchMeta({ aguardando_receita_foto: true });
+      await patchMeta({ aguardando_receita_foto: true, expected_reply: "receita_foto" });
       return true;
     case "receita_digitar":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      await patchMeta({ expected_reply: "receita_digitada" });
       return true;
     case "receita_sem":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Sem a receita não consigo fechar valor exato, mas posso te dar uma faixa estimada. Você usa óculos pra perto, pra longe, ou multifocal? 😊");
-      await patchMeta({ intent_detected: "sem_receita" });
+      await patchMeta({ intent_detected: "sem_receita", expected_reply: "sem_receita_tipo" });
       return true;
     case "receita_ok": {
       if (atendimentoMeta.receita_pending) {
-        await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString() });
+        await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString(), expected_reply: "adicional_lentes" });
         // CRÍTICO: também limpa pending no contato (isReceitaPending checa lá),
         // senão a cotação subsequente devolve "Li sua receita assim, confere?".
         try {
@@ -8283,25 +8309,27 @@ async function routeButtonClick(args: {
     }
     case "receita_corrigir":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
-      await patchMeta({ receita_pending: null });
+      await patchMeta({ receita_pending: null, expected_reply: "receita_digitada" });
       return true;
     case "adicional_azul":
-      await patchMeta({ adicionais_pending: { filtro_blue: true } });
+      await patchMeta({ adicionais_pending: { filtro_blue: true }, expected_reply: null });
       await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_blue: true });
       return true;
     case "adicional_foto":
-      await patchMeta({ adicionais_pending: { filtro_photo: true } });
+      await patchMeta({ adicionais_pending: { filtro_photo: true }, expected_reply: null });
       await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_photo: true });
       return true;
     case "adicional_nao":
-      await patchMeta({ adicionais_pending: {} });
+      await patchMeta({ adicionais_pending: {}, expected_reply: null });
       await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, {});
       return true;
     case "orcamento_agendar":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
       return true;
     case "orcamento_duvida":
-      return false;
+      await patchMeta({ expected_reply: null, intent_detected: "duvida_pos_orcamento" });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Claro! Me diz qual ponto da cotação você quer que eu explique melhor 😊");
+      return true;
     case "orcamento_mais_barato":
       await sendInteractive(supabaseUrl, serviceKey, atId, {
         type: "button",
@@ -8312,16 +8340,18 @@ async function routeButtonClick(args: {
           { id: "desconto_pensar", titulo: "⏳ Vou pensar" },
         ],
       });
-      await patchMeta({ desconto_oferecido_at: new Date().toISOString() });
+      await patchMeta({ desconto_oferecido_at: new Date().toISOString(), expected_reply: "desconto_followup" });
       return true;
     case "desconto_aceito":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
       return true;
     case "desconto_loja":
       await sendEnderecosLojas(supabase, supabaseUrl, serviceKey, atId);
+      await patchMeta({ expected_reply: null });
       return true;
     case "desconto_pensar":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Quando quiser dar continuidade, é só me chamar 😊");
+      await patchMeta({ expected_reply: null });
       return true;
     case "ag_confirmar": {
       const pend = atendimentoMeta.agendamento_pending;
@@ -8331,7 +8361,7 @@ async function routeButtonClick(args: {
           headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ atendimento_id: atId, contato_id: atendimento.contato_id, loja_nome: pend.loja_nome, data_horario: pend.data_horario }),
         });
-        await patchMeta({ agendamento_pending: null });
+        await patchMeta({ agendamento_pending: null, expected_reply: null });
         return true;
       }
       return false;
@@ -8340,7 +8370,7 @@ async function routeButtonClick(args: {
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tranquilo! Qual dia e horário fica melhor pra você? 🙂");
       return true;
     case "ag_cancelar":
-      await patchMeta({ agendamento_pending: null });
+      await patchMeta({ agendamento_pending: null, expected_reply: null });
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema, cancelei a tentativa. Quando quiser, é só me chamar! 😊");
       return true;
     case "show_confirma": {
@@ -8391,9 +8421,10 @@ async function routeButtonClick(args: {
       return true;
     case "recupera_loja":
       await sendEnderecosLojas(supabase, supabaseUrl, serviceKey, atId);
+      await patchMeta({ expected_reply: null });
       return true;
     case "recupera_nao":
-      await patchMeta({ recuperacao_recusada_at: new Date().toISOString() });
+      await patchMeta({ recuperacao_recusada_at: new Date().toISOString(), expected_reply: null });
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Compreendo! Obrigada pelo retorno. Quando precisar, estaremos por aqui 😊");
       return true;
   }
