@@ -975,14 +975,30 @@ function detectPrescriptionCorrection(text: string): {
       eye.add = eye.add ?? parseDiopter(addM[1]);
       block = block.replace(addM[0], " ");
     }
-    // Restante: pega TODOS os números na ordem (esfera, cilindro)
+    // Restante: pega TODOS os números na ordem (esfera, cilindro, eixo posicional)
     const nums = block.match(/[+-]?\d+[.,]?\d*/g) || [];
     if (nums.length >= 1 && eye.sphere == null) eye.sphere = parseDiopter(nums[0]);
     if (nums.length >= 2 && eye.cylinder == null) eye.cylinder = parseDiopter(nums[1]);
+    // 3º número posicional sem keyword = eixo (inteiro 1..180, sem sinal explícito de diopter)
+    if (nums.length >= 3 && eye.axis == null) {
+      const tok = nums[2];
+      const isIntLike = /^-?\d{1,3}$/.test(tok);
+      const n = parseInt(tok, 10);
+      if (isIntLike && n >= 1 && n <= 180) eye.axis = n;
+    }
   };
   while ((bm = eyeBlockRe.exec(t)) !== null) {
     const eye = bm[1].toLowerCase() === "od" ? od : oe;
     extractFromBlock(bm[2], eye);
+  }
+
+  // "Adição +2,00" solto (sem OD/OE) → aplica em ambos os olhos
+  if (od.add == null && oe.add == null) {
+    const addLoose = t.match(/(?:add?|adi[cç][aã]o)\s*([+-]?\d+[.,]?\d*)/i);
+    if (addLoose) {
+      const a = parseDiopter(addLoose[1]);
+      if (a != null) { od.add = a; oe.add = a; }
+    }
   }
 
   // Fallback: blocos longe/perto (cliente separa por distância sem od/oe)
