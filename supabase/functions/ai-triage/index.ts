@@ -2811,6 +2811,38 @@ serve(async (req) => {
     // Recent outbound for anti-repetition (last 10 only)
     const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
 
+    // ── PRE-LLM ROUTER: Cliente DIGITOU resposta ao prompt "Quer algum adicional?" ──
+    // Caso o cliente não use os botões (digita "luz azul", "fotossensível", "sem", "não", etc.),
+    // roteia direto para runQuoteWithFilter — mesmo caminho dos botões adicional_*.
+    try {
+      const _msgAd = String(mensagem_texto || "").trim().toLowerCase();
+      const _lastOut = recentOutbound.slice(-1)[0] || "";
+      const _promptAdicional = /quer algum adicional nas lentes\??/i.test(_lastOut);
+      if (_msgAd && _promptAdicional && atendimento.modo !== "humano") {
+        let _filtros: { filtro_blue?: boolean; filtro_photo?: boolean } | null = null;
+        if (/\b(luz azul|filtro azul|anti.?blue|blue.?cut|azul)\b/.test(_msgAd)) {
+          _filtros = { filtro_blue: true };
+        } else if (/\b(fotossens[ií]vel|fotocrom[aá]tic[ao]|transitions?|escurec[ei])\b/.test(_msgAd)) {
+          _filtros = { filtro_photo: true };
+        } else if (/\b(sem|nenhum|n[aã]o quero|n[aã]o precisa|nada|s[oó] (a|as) lentes?)\b/.test(_msgAd) || _msgAd === "nao" || _msgAd === "não") {
+          _filtros = {};
+        }
+        if (_filtros !== null) {
+          await runQuoteWithFilter(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento, _filtros);
+          return jsonResponse({
+            status: "ok",
+            tools_used: ["adicional_via_texto"],
+            intencao: "orcamento",
+            precisa_humano: false,
+            modo: atendimento.modo,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[PRE-LLM ADICIONAL] fallback texto falhou:", (e as Error)?.message);
+    }
+
+
     // ── PRE-LLM ROUTER: Cliente reclamou de inversão de preço nas faixas ──
     // Caso Natan 16/05/2026: IA mandou "Econômica R$2.135, Intermediária R$1.199,
     // Premium R$1.699" (inversão). Cliente disse "a econômica está mais cara que
@@ -7912,7 +7944,48 @@ async function sendPostRecoveryButtons(
   });
 }
 
-// ─── routeButtonClick: dispatcher determinístico ───
+// Roda cotação determinística aplicando filtro de adicional escolhido e
+// envia resposta + botões de follow-up. Usado tanto pelos botões quanto
+// pelo fallback de texto (cliente digita "luz azul", "fotossensível", "sem").
+async function runQuoteWithFilter(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimento: any,
+  filtros: { filtro_blue?: boolean; filtro_photo?: boolean },
+): Promise<void> {
+  try {
+    const labelAdicional = filtros.filtro_blue
+      ? "com filtro de luz azul"
+      : filtros.filtro_photo
+        ? "com lente fotossensível"
+        : "sem adicionais";
+    const quote = await runConsultarLentes(
+      supabase,
+      atendimento.contato_id,
+      [],
+      filtros,
+      atendimento.id,
+    );
+    const prefixo = `Perfeito, atualizei as opções ${labelAdicional} 😊\n\n`;
+    await sendWhatsApp(supabaseUrl, serviceKey, atendimento.id, prefixo + quote.resposta);
+    await sendPostQuoteButtons(supabase, supabaseUrl, serviceKey, atendimento.id);
+    await supabase.from("eventos_crm").insert({
+      contato_id: atendimento.contato_id,
+      tipo: "cotacao_apos_adicional_botao",
+      descricao: `Cotação re-executada após escolha de adicional: ${labelAdicional}`,
+      metadata: { filtros },
+      referencia_tipo: "atendimento",
+      referencia_id: atendimento.id,
+    });
+  } catch (e) {
+    console.error("[ADICIONAL] runQuoteWithFilter falhou:", e);
+    await sendWhatsApp(
+      supabaseUrl, serviceKey, atendimento.id,
+      "Anotei sua escolha! 🙌 Em qual loja prefere ser atendido? Posso te enviar a lista 😊",
+    );
+  }
+}
 async function routeButtonClick(args: {
   buttonId: string;
   atendimento: any;
@@ -8071,13 +8144,16 @@ async function routeButtonClick(args: {
       return true;
     case "adicional_azul":
       await patchMeta({ adicionais_pending: { filtro_blue: true } });
-      return false;
+      await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_blue: true });
+      return true;
     case "adicional_foto":
       await patchMeta({ adicionais_pending: { filtro_photo: true } });
-      return false;
+      await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_photo: true });
+      return true;
     case "adicional_nao":
       await patchMeta({ adicionais_pending: {} });
-      return false;
+      await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, {});
+      return true;
     case "orcamento_agendar":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
       return true;
