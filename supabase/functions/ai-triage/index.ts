@@ -4318,7 +4318,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         console.log(`[RX-FIRST-TYPED] Skipped: no prior request from IA and no strong signal`);
       } else {
         if (isFirst && !iaJustAskedForText && hasStrongRxSignal) {
-          console.log(`[RX-FIRST-TYPED] Accepted via strong signal (OD+OE completos)`);
+          console.log(`[RX-FIRST-TYPED] Accepted via strong signal (rótulo OD/OE + esfera em ≥1 olho)`);
         }
         const idx = isFirst ? 0 : receitas.length - 1;
         const old: any = isFirst ? {} : (receitas[idx] || {});
