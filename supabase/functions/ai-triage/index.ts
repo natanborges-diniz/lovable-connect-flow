@@ -2844,6 +2844,7 @@ serve(async (req) => {
           );
           const prefixo = "Você tem razão, deixa eu refazer as faixas certinho 😊\n\n";
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, prefixo + reQuote.resposta);
+          await sendPostQuoteButtons(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id);
           await supabase.from("eventos_crm").insert({
             contato_id: atendimento.contato_id,
             tipo: "cotacao_reexecutada_reclamacao_inversao",
