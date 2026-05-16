@@ -3496,7 +3496,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             metadata: { rx_label: rxLabelEsc, rx_index: escolha.idx, how: escolha.how },
             referencia_tipo: "atendimento", referencia_id: atendimento_id,
           }).then(() => undefined, () => undefined);
-          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(rxEscolhida, false));
+          await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(rxEscolhida, false));
           console.log(`[RX-ESCOLHA] Cliente escolheu receita idx=${escolha.idx} ainda não confirmada — pedindo confirmação`);
           return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
         }
