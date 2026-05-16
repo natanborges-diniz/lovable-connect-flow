@@ -2859,10 +2859,43 @@ serve(async (req) => {
       const _lastInboundFP = allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0];
       const _isImageFP = (_lastInboundFP?.tipo_conteudo || "text") === "image"
         || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+      // Skip total quando o contato já tem nome confirmado no CRM (cliente recorrente).
+      // O LLM cumprimenta naturalmente; se for 1º inbound do atendimento, oferecemos
+      // direto o menu de triagem.
+      const _nomeJaSalvo = nomeConfirmado && !nomeEhPlaceholder(contatoNomeAtual);
       const _greetingEligible =
         !_isImageFP &&
         contatoTipo === "cliente" &&
+        !_nomeJaSalvo &&
         (inboundCount === 1 || (precisaConfirmarNome && !nomeConfirmado));
+
+      // Cliente recorrente + 1º inbound deste atendimento → menu de triagem direto.
+      if (!_isImageFP && _nomeJaSalvo && inboundCount === 1 && contatoTipo === "cliente") {
+        const _atMetaMenu = (atendimento.metadata as Record<string, any>) || {};
+        if (!_atMetaMenu.menu_triagem_enviado_at) {
+          const firstName = contatoNomeAtual.split(" ")[0];
+          await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+            type: "list",
+            texto: `Oi, ${firstName}! Que bom te ver de novo 🙌 Como posso te ajudar hoje?`,
+            lista: {
+              label: "Ver opções",
+              secao: "Posso te ajudar com",
+              itens: [
+                { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa pelo seu grau" },
+                { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
+                { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
+                { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
+                { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
+              ],
+            },
+          });
+          await supabase.from("atendimentos").update({
+            metadata: { ..._atMetaMenu, menu_triagem_enviado_at: new Date().toISOString() },
+          }).eq("id", atendimento_id);
+          await logEvent(supabase, contatoId, atendimento_id, "menu_triagem_recorrente", "Cliente já cadastrado — menu direto");
+          return jsonResponse({ status: "ok", tools_used: ["menu_triagem_recorrente"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
+        }
+      }
 
       if (_greetingEligible) {
         const candidato = (nomePerfilWhatsapp || contatoNomeAtual || "").trim();
@@ -2949,16 +2982,34 @@ serve(async (req) => {
 
           if (looksReal && !nomeConfirmado) {
             const primeiroNome = candidato.split(/\s+/)[0];
-            greetingMsg = inboundCount > 1
-              ? `Antes de seguir, posso confirmar — falo com ${primeiroNome}? 😊`
-              : `Olá! Falo com ${primeiroNome}? 😊 Aqui é o Gael das Óticas Diniz Osasco.`;
-          } else {
-            greetingMsg = inboundCount > 1
-              ? `Antes de seguir, posso saber seu nome, por favor? 😊`
-              : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+            const introTxt = inboundCount > 1
+              ? `Antes de seguir, posso confirmar — falo com *${primeiroNome}*? 😊`
+              : `Olá! Aqui é o Gael das Óticas Diniz Osasco 😊 Falo com *${primeiroNome}*?`;
+            // Persistência via botões — elimina ambiguidade ("sim/não/é outro").
+            await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+              type: "button",
+              texto: introTxt,
+              botoes: [
+                { id: `nome_ok:${primeiroNome}`, titulo: `✅ Sim, sou ${primeiroNome.slice(0, 15)}` },
+                { id: "nome_outro", titulo: "✏️ Outro nome" },
+              ],
+            });
+            try {
+              await supabase
+                .from("contatos")
+                .update({ metadata: { ...contatoMeta, tentativas_pedido_nome: tentativas + 1, nome_candidato_botao: primeiroNome } })
+                .eq("id", contatoId);
+            } catch (_) { /* noop */ }
+            console.log(`[FAST-PATH] greeting_buttons_sent candidato="${primeiroNome}" tentativas=${tentativas + 1}`);
+            await logEvent(supabase, contatoId, atendimento_id, "saudacao_botoes_nome", introTxt);
+            return jsonResponse({ status: "ok", tools_used: ["greeting_buttons_nome"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
           }
 
-          // Incrementa contador apenas quando estamos pedindo nome (não 1ª interação tipo "Falo com X?")
+          // Sem candidato real — pergunta livre (não há perfil WhatsApp para botão)
+          greetingMsg = inboundCount > 1
+            ? `Antes de seguir, posso saber seu nome, por favor? 😊`
+            : `Oi! Tudo bem? Aqui é o Gael das Óticas Diniz Osasco 😊 Posso saber seu nome, por favor?`;
+
           try {
             await supabase
               .from("contatos")
@@ -2966,7 +3017,7 @@ serve(async (req) => {
               .eq("id", contatoId);
           } catch (_) { /* noop */ }
 
-          console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} nomeWa="${nomePerfilWhatsapp}" tentativas=${tentativas + 1}`);
+          console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} tentativas=${tentativas + 1}`);
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, greetingMsg);
           await logEvent(supabase, contatoId, atendimento_id, "saudacao_deterministica", greetingMsg);
           return jsonResponse({ status: "ok", tools_used: ["greeting_deterministic"], intencao: "saudacao", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
@@ -7758,6 +7809,71 @@ async function routeButtonClick(args: {
       .update({ metadata: { ...atendimentoMeta, ...patch, ultimo_button_id: buttonId, ultimo_button_at: new Date().toISOString() } })
       .eq("id", atId);
   };
+
+  // ── Confirmação de nome via botão ──
+  if (buttonId.startsWith("nome_ok:") || buttonId === "nome_ok") {
+    const nomeBotao = buttonId.startsWith("nome_ok:") ? buttonId.slice(8).trim() : "";
+    const { data: ct } = await supabase
+      .from("contatos").select("id, nome, metadata").eq("id", atendimento.contato_id).maybeSingle();
+    const ctMeta = (ct?.metadata as Record<string, any>) || {};
+    const nomeFinal = nomeBotao || ctMeta.nome_candidato_botao || ctMeta.nome_perfil_whatsapp || ct?.nome || "";
+    if (nomeFinal && nomeFinal.length >= 2) {
+      await supabase.from("contatos").update({
+        nome: nomeFinal,
+        metadata: {
+          ...ctMeta,
+          nome_confirmado: true,
+          precisa_confirmar_nome: false,
+          nome_origem: "botao_confirmacao",
+          nome_atualizado_at: new Date().toISOString(),
+          tentativas_pedido_nome: 0,
+          nome_candidato_botao: null,
+        },
+      }).eq("id", atendimento.contato_id);
+      await supabase.from("eventos_crm").insert({
+        contato_id: atendimento.contato_id,
+        tipo: "nome_confirmado_botao",
+        descricao: `Nome confirmado via botão: "${nomeFinal}"`,
+        referencia_tipo: "atendimento",
+        referencia_id: atId,
+      });
+    }
+    const firstName = (nomeFinal || "").split(" ")[0] || "";
+    const saudacao = firstName ? `Prazer, ${firstName}! 🙌 Como posso te ajudar hoje?` : "Como posso te ajudar hoje? 😊";
+    await sendInteractive(supabaseUrl, serviceKey, atId, {
+      type: "list",
+      texto: saudacao,
+      lista: {
+        label: "Ver opções",
+        secao: "Posso te ajudar com",
+        itens: [
+          { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa pelo seu grau" },
+          { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
+          { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
+          { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
+          { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
+        ],
+      },
+    });
+    await patchMeta({ menu_triagem_enviado_at: new Date().toISOString() });
+    return true;
+  }
+
+  if (buttonId === "nome_outro") {
+    const { data: ct } = await supabase
+      .from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+    const ctMeta = (ct?.metadata as Record<string, any>) || {};
+    await supabase.from("contatos").update({
+      metadata: {
+        ...ctMeta,
+        precisa_confirmar_nome: true,
+        nome_confirmado: false,
+        nome_candidato_botao: null,
+      },
+    }).eq("id", atendimento.contato_id);
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Como prefere ser chamado(a)? ✍️");
+    return true;
+  }
 
   if (buttonId.startsWith("loja:")) {
     const lojaId = buttonId.slice(5);
