@@ -405,6 +405,30 @@ async function processContato(
       await sendRecoveryTemplate(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, contato, tentativas, firstName, resumoContexto);
     }
 
+    // Follow-up determinístico com botões — só na 1ª tentativa pra não poluir cadência
+    if (tentativas === 0) {
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            atendimento_id: atendimento.id,
+            interactive: {
+              type: "button",
+              texto: "Quer dar continuidade?",
+              botoes: [
+                { id: "recupera_sim", titulo: "✅ Quero remarcar" },
+                { id: "recupera_loja", titulo: "🏪 Ver endereço" },
+                { id: "recupera_nao", titulo: "❌ Agora não" },
+              ],
+            },
+          }),
+        });
+      } catch (e) {
+        console.warn(`[RECOVERY-BTN] follow-up botões falhou para ${contato.id}:`, e);
+      }
+    }
+
     const updatedRecuperacao = {
       tentativas: tentativas + 1,
       ultima_tentativa_at: now.toISOString(),
