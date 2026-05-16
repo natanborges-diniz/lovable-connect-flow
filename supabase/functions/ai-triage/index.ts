@@ -308,15 +308,15 @@ function buildMsgConfirmarReceita(rx: any, isCorrection: boolean): string {
 function detectRxConfirmation(text: string): boolean {
   const t = String(text || "").toLowerCase().trim();
   if (!t) return false;
-  if (/\b(n[ãa]o|errad|incorret|tá errado|nao confere)\b/.test(t)) return false;
-  return /^(sim|confere|isso|perfeito|certinho|certo|correto|exato|t[áa]\s+certo|ok|positivo|👍|👌|✅|tudo certo|isso mesmo)\b/.test(t);
+  if (/\b(n[ãa]o|errad|incorret|t[áa]\s+errad|est[áa]\s+errad|nao confere)\b/.test(t)) return false;
+  return /^(sim|confere|isso|perfeito|certinho|certo|correto|exato|t[áa]\s+certo|t[áa]\s+certinho|est[áa]\s+certo|est[áa]\s+certinho|est[áa]\s+correto|ok|positivo|👍|👌|✅|tudo certo|isso mesmo)\b/.test(t);
 }
 
 function detectRxRejeicao(text: string): boolean {
   const t = String(text || "").toLowerCase().trim();
   if (!t) return false;
-  return /^(n[ãa]o|errad|incorret|nao confere|t[áa]\s+errad|errou|nao\s*[eé]\s+isso|n[ãa]o\s*[eé]\s+isso)\b/.test(t)
-    || /\b(t[áa]\s+errad|n[ãa]o\s+confere|nao\s*[eé]\s+isso|errou|esses?\s+valores?\s+est[aã]o\s+errad)\b/.test(t);
+  return /^(n[ãa]o|errad|incorret|nao confere|t[áa]\s+errad|est[áa]\s+errad|errou|nao\s*[eé]\s+isso|n[ãa]o\s*[eé]\s+isso)\b/.test(t)
+    || /\b(t[áa]\s+errad|est[áa]\s+errad|n[ãa]o\s+confere|nao\s*[eé]\s+isso|errou|esses?\s+valores?\s+est[aã]o\s+errad)\b/.test(t);
 }
 
 function isReceitaPending(metadata: any): boolean {
