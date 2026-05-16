@@ -6610,7 +6610,11 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.warn("[PHASE4-LOOP] guardrail falhou — seguindo com envio normal", e);
     }
 
-    await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+    if (isReceitaConfirmText(resposta)) {
+      await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+    } else {
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+    }
 
     // ── 10.05. DETECTOR PÓS-LLM: agendamento prometido sem tool disparada ──
     // Se a resposta da IA contém promessa de agendamento (data + hora + loja) mas a tool
