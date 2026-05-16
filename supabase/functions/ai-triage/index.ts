@@ -7960,6 +7960,16 @@ async function runQuoteWithFilter(
       : filtros.filtro_photo
         ? "com lente fotossensível"
         : "sem adicionais";
+    // DEFESA: usuário escolheu adicional → receita JÁ foi confirmada por definição.
+    // Força pending=false no contato pra não cair no guard de runConsultarLentes.
+    try {
+      const { data: cRow } = await supabase.from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+      const cMeta = (cRow?.metadata || {}) as Record<string, any>;
+      if (cMeta?.receita_confirmacao?.pending === true) {
+        cMeta.receita_confirmacao = { ...cMeta.receita_confirmacao, pending: false, confirmed_at: new Date().toISOString(), confirmed_via: "adicional_botao" };
+        await supabase.from("contatos").update({ metadata: cMeta }).eq("id", atendimento.contato_id);
+      }
+    } catch (_) { /* noop */ }
     const quote = await runConsultarLentes(
       supabase,
       atendimento.contato_id,
