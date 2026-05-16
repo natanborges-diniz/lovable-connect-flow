@@ -278,7 +278,20 @@ async function processLembreteVespera(
     const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
       method: "POST",
       headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ atendimento_id: ag.atendimento_id, texto: msg, remetente_nome: "Sistema" }),
+      body: JSON.stringify({
+        atendimento_id: ag.atendimento_id,
+        remetente_nome: "Sistema",
+        interactive: {
+          type: "button",
+          texto: msg,
+          botoes: [
+            { id: "show_confirma", titulo: "✅ Confirmo" },
+            { id: "show_remarcar", titulo: "🔄 Remarcar" },
+            { id: "show_nao", titulo: "❌ Não vou" },
+          ],
+        },
+        texto: msg,
+      }),
     });
 
     await supabase.from("agendamentos").update({
