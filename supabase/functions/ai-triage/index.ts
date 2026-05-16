@@ -2809,7 +2809,37 @@ serve(async (req) => {
 
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
-    const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
+    // ── PRE-LLM ROUTER: Cliente DIGITOU resposta ao prompt "Quer algum adicional?" ──
+    // Caso o cliente não use os botões (digita "luz azul", "fotossensível", "sem", "não", etc.),
+    // roteia direto para runQuoteWithFilter — mesmo caminho dos botões adicional_*.
+    try {
+      const _msgAd = String(mensagem_texto || "").trim().toLowerCase();
+      const _lastOut = recentOutbound.slice(-1)[0] || "";
+      const _promptAdicional = /quer algum adicional nas lentes\??/i.test(_lastOut);
+      if (_msgAd && _promptAdicional && atendimento.modo !== "humano") {
+        let _filtros: { filtro_blue?: boolean; filtro_photo?: boolean } | null = null;
+        if (/\b(luz azul|filtro azul|anti.?blue|blue.?cut|azul)\b/.test(_msgAd)) {
+          _filtros = { filtro_blue: true };
+        } else if (/\b(fotossens[ií]vel|fotocrom[aá]tic[ao]|transitions?|escurec[ei])\b/.test(_msgAd)) {
+          _filtros = { filtro_photo: true };
+        } else if (/\b(sem|nenhum|n[aã]o quero|n[aã]o precisa|nada|s[oó] (a|as) lentes?)\b/.test(_msgAd) || _msgAd === "nao" || _msgAd === "não") {
+          _filtros = {};
+        }
+        if (_filtros !== null) {
+          await runQuoteWithFilter(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento, _filtros);
+          return jsonResponse({
+            status: "ok",
+            tools_used: ["adicional_via_texto"],
+            intencao: "orcamento",
+            precisa_humano: false,
+            modo: atendimento.modo,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[PRE-LLM ADICIONAL] fallback texto falhou:", (e as Error)?.message);
+    }
+
 
     // ── PRE-LLM ROUTER: Cliente reclamou de inversão de preço nas faixas ──
     // Caso Natan 16/05/2026: IA mandou "Econômica R$2.135, Intermediária R$1.199,
