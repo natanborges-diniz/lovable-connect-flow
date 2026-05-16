@@ -4303,10 +4303,24 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*/i.test(o)
       );
       const isFirst = receitas.length === 0;
-      if (isFirst && !iaJustAskedForText) {
+      // Strong signal: ambos os olhos com esfera + (cilindro OU eixo em algum) ou tem adição.
+      // Aceita receita digitada espontaneamente (sem pedido prévio da IA) quando
+      // o cliente envia bloco completo OD/OE — caso Natan (15/05).
+      const hasStrongRxSignal = !!correction
+        && correction.od?.sphere != null
+        && correction.oe?.sphere != null
+        && (
+          correction.od?.cylinder != null || correction.od?.axis != null ||
+          correction.oe?.cylinder != null || correction.oe?.axis != null ||
+          correction.has_addition === true
+        );
+      if (isFirst && !iaJustAskedForText && !hasStrongRxSignal) {
         // Cliente mandou padrão de receita do nada — ignora pra evitar falso positivo.
-        console.log(`[RX-FIRST-TYPED] Skipped: no prior request from IA`);
+        console.log(`[RX-FIRST-TYPED] Skipped: no prior request from IA and no strong signal`);
       } else {
+        if (isFirst && !iaJustAskedForText && hasStrongRxSignal) {
+          console.log(`[RX-FIRST-TYPED] Accepted via strong signal (OD+OE completos)`);
+        }
         const idx = isFirst ? 0 : receitas.length - 1;
         const old: any = isFirst ? {} : (receitas[idx] || {});
         const merged = {
