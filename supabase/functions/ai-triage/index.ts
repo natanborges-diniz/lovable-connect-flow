@@ -378,6 +378,21 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
     return null;
   }
 
+  if (stage === "confirmar_nome") {
+    // Cliente respondeu por texto à pergunta "Falo com X?"
+    if (/^(sim|isso|sou eu|sou|exato|exatamente|correto|positivo|pode ser|é isso|eh isso|👍|✅)\b/.test(t)) return "nome_ok";
+    if (/\b(nao|não|outro|errado|nao sou|não sou|me chamo|meu nome|sou (o |a )?[a-zà-ÿ]+|prefiro)\b/.test(t)) return "nome_outro";
+    return null;
+  }
+
+  if (stage === "dia_d_lembrete") {
+    // Lembrete véspera / 1h antes — cliente digitou em vez de tocar botão
+    if (/\b(confirmo|confirmado|confirma|sim|vou sim|estarei|tô indo|to indo|vou|pode confirmar|positivo|👍|✅)\b/.test(t)) return "show_confirma";
+    if (/\b(remarcar|remarca|mudar|trocar (o )?horario|trocar (o )?horário|outro (dia|horario|horário)|adiar)\b/.test(t)) return "show_remarcar";
+    if (/\b(nao vou|não vou|cancela|cancelar|desmarca|desmarcar|nao consigo|não consigo|nao posso|não posso|nao da|não dá)\b/.test(t)) return "show_nao";
+    return null;
+  }
+
   return null;
 }
 
