@@ -2809,6 +2809,8 @@ serve(async (req) => {
 
     const inboundCount = allMsgs.filter((m: any) => m.direcao === "inbound").length;
     // Recent outbound for anti-repetition (last 10 only)
+    const recentOutbound = allMsgs.filter((m: any) => m.direcao === "outbound").slice(-10).map((m: any) => m.conteudo);
+
     // ── PRE-LLM ROUTER: Cliente DIGITOU resposta ao prompt "Quer algum adicional?" ──
     // Caso o cliente não use os botões (digita "luz azul", "fotossensível", "sem", "não", etc.),
     // roteia direto para runQuoteWithFilter — mesmo caminho dos botões adicional_*.
