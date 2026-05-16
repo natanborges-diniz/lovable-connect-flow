@@ -2258,6 +2258,34 @@ serve(async (req) => {
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // BUTTON ROUTER — Resposta determinística a cliques de botão/lista WhatsApp
+    // Quando o cliente toca em um botão (interactive_reply), o webhook propaga
+    // o button_id pra cá. Mapeamos IDs canônicos pra ações concretas, evitando
+    // regex/LLM. IDs que começam com "loja:" são tratados como escolha de loja.
+    // IDs não mapeados caem no fluxo normal (LLM recebe o título como texto).
+    // ─────────────────────────────────────────────────────────────────────────
+    if (incomingButtonId && (atendimento.modo === "ia" || atendimento.modo === "hibrido")) {
+      try {
+        const _atMeta = (atendimento.metadata as Record<string, any>) || {};
+        const handled = await routeButtonClick({
+          buttonId: incomingButtonId,
+          atendimento,
+          atendimentoMeta: _atMeta,
+          supabase,
+          supabaseUrl: SUPABASE_URL,
+          serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        });
+        if (handled) {
+          console.log(`[BUTTON ROUTER] handled id=${incomingButtonId} — bypassing LLM`);
+          return jsonResponse({ status: "ok", route: "button_router", button_id: incomingButtonId });
+        }
+        console.log(`[BUTTON ROUTER] id=${incomingButtonId} not mapped — falling through to normal pipeline`);
+      } catch (e) {
+        console.error("[BUTTON ROUTER] erro:", e);
+      }
+    }
+
     // ── PRE-SKIP: Consulta de OS roda em QUALQUER modo (ia/hibrido/humano/ponte) ──
     // Em humano/ponte: apenas marca flag + evento para o operador ver o contexto. NÃO envia mensagem.
     // Em ia/hibrido: escala completa (flag + mensagem + move card).
