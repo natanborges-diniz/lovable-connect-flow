@@ -7851,6 +7851,52 @@ async function sendReceitaConfirmInteractive(
   });
 }
 
+// Envia botões de follow-up após cotação (orçamento mostrado).
+// Idempotente por janela curta via metadata.pos_quote_botoes_at.
+async function sendPostQuoteButtons(
+  supabaseClient: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+) {
+  try {
+    const { data: atRow } = await supabaseClient
+      .from("atendimentos").select("metadata").eq("id", atendimentoId).maybeSingle();
+    const meta = (atRow?.metadata || {}) as Record<string, any>;
+    const last = meta.pos_quote_botoes_at ? Date.parse(meta.pos_quote_botoes_at) : 0;
+    if (last && Date.now() - last < 5 * 60 * 1000) return; // evita duplicação <5min
+    await supabaseClient.from("atendimentos")
+      .update({ metadata: { ...meta, pos_quote_botoes_at: new Date().toISOString() } })
+      .eq("id", atendimentoId);
+  } catch (_) { /* noop */ }
+  await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
+    type: "button",
+    texto: "O que prefere fazer agora? 😊",
+    botoes: [
+      { id: "orcamento_agendar", titulo: "📅 Agendar visita" },
+      { id: "orcamento_duvida", titulo: "💬 Tirar dúvida" },
+      { id: "orcamento_mais_barato", titulo: "💸 Mais barato?" },
+    ],
+  });
+}
+
+// Envia botões de follow-up após mensagem de recuperação (IA/no-show).
+async function sendPostRecoveryButtons(
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+) {
+  await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
+    type: "button",
+    texto: "Quer dar continuidade?",
+    botoes: [
+      { id: "recupera_sim", titulo: "✅ Quero remarcar" },
+      { id: "recupera_loja", titulo: "🏪 Ver endereço" },
+      { id: "recupera_nao", titulo: "❌ Agora não" },
+    ],
+  });
+}
+
 // ─── routeButtonClick: dispatcher determinístico ───
 async function routeButtonClick(args: {
   buttonId: string;
