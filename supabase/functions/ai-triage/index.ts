@@ -7651,6 +7651,43 @@ async function sendWhatsApp(supabaseUrl: string, serviceKey: string, atendimento
   throw new Error(`send-whatsapp failed after ${maxAttempts} attempts: ${lastError}`);
 }
 
+// ── sendInteractive: botões/listas determinísticos (sem texto livre) ──
+// Quando dentro da janela 24h envia interactive via send-whatsapp; se Meta rejeitar
+// (ou estiver fora 24h), o próprio send-whatsapp já faz fallback para texto puro.
+interface InteractiveOut {
+  type: "button" | "list";
+  texto: string;
+  botoes?: Array<{ id: string; titulo: string }>;
+  lista?: {
+    label: string;
+    secao: string;
+    itens: Array<{ id: string; titulo: string; descricao?: string }>;
+  };
+}
+async function sendInteractive(supabaseUrl: string, serviceKey: string, atendimentoId: string, interactive: InteractiveOut) {
+  console.log(`[INTERACTIVE] sending type=${interactive.type} ids=${interactive.type === "button" ? (interactive.botoes||[]).map(b=>b.id).join(",") : (interactive.lista?.itens||[]).map(i=>i.id).join(",")}`);
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/send-whatsapp`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        atendimento_id: atendimentoId,
+        interactive,
+        remetente_nome: "Assistente IA",
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.warn(`[INTERACTIVE] send-whatsapp returned ${res.status}: ${(body || "").slice(0, 200)} — falling back to text`);
+      await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, interactive.texto);
+    }
+  } catch (e) {
+    console.warn(`[INTERACTIVE] exception: ${e instanceof Error ? e.message : String(e)} — falling back to text`);
+    await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, interactive.texto);
+  }
+}
+
+
 async function logEvent(supabase: any, contatoId: string, atendimentoId: string, tipo: string, msg: string) {
   await supabase.from("eventos_crm").insert({
     contato_id: contatoId, tipo,
