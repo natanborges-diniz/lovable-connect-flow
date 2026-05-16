@@ -350,8 +350,10 @@ async function processContato(
     }
   }
 
-  // Lock otimista: marca ultima_tentativa_at ANTES do fetch
-  await supabase.from("contatos").update({
+  // Lock atômico via CAS: só atualiza se ultima_tentativa_at ainda for o valor lido.
+  // Se outra execução concorrente já gravou, o WHERE não casa e a 2ª invocação aborta.
+  const prevTsIa = recuperacao.ultima_tentativa_at || null;
+  const lockQueryIa = supabase.from("contatos").update({
     metadata: {
       ...meta,
       recuperacao_vendas: {
@@ -362,6 +364,14 @@ async function processContato(
       },
     },
   }).eq("id", contato.id);
+  const { data: lockedIa } = await (prevTsIa
+    ? lockQueryIa.eq("metadata->recuperacao_vendas->>ultima_tentativa_at", prevTsIa)
+    : lockQueryIa.is("metadata->recuperacao_vendas->>ultima_tentativa_at", null)
+  ).select("id").maybeSingle();
+  if (!lockedIa) {
+    console.log(`[IA-DEDUPE-CAS] ${contato.nome}: outra execução já tomou o lock — abortando`);
+    return result;
+  }
 
   // Generate context summary on first attempt
   let resumoContexto = recuperacao.resumo_contexto || "";
@@ -584,9 +594,9 @@ async function processHumano(
     }
   }
 
-  // Lock otimista: grava ultima_tentativa_at ANTES do fetch.
-  // A 2ª execução concorrente cai no guard acima na próxima leitura.
-  await supabase.from("atendimentos").update({
+  // Lock atômico via CAS: bloqueia race entre execuções concorrentes do cron.
+  const prevTsH = recH.ultima_tentativa_at || null;
+  const lockQueryH = supabase.from("atendimentos").update({
     metadata: {
       ...atMeta,
       recuperacao_humano: {
@@ -597,6 +607,14 @@ async function processHumano(
       },
     },
   }).eq("id", atendimento.id);
+  const { data: lockedH } = await (prevTsH
+    ? lockQueryH.eq("metadata->recuperacao_humano->>ultima_tentativa_at", prevTsH)
+    : lockQueryH.is("metadata->recuperacao_humano->>ultima_tentativa_at", null)
+  ).select("id").maybeSingle();
+  if (!lockedH) {
+    console.log(`[HUMANO-DEDUPE-CAS] ${contato.nome}: outra execução já tomou o lock — abortando`);
+    return result;
+  }
 
   const firstName = (contato.nome || "").split(" ")[0] || "tudo bem";
   const topico = inferirTopico(lastOutbound) || recH.topico || "seu atendimento";
