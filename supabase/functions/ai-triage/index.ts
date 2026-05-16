@@ -8461,19 +8461,22 @@ async function routeButtonClick(args: {
 }
 
 async function sendListaLojas(supabase: any, supabaseUrl: string, serviceKey: string, atId: string) {
+  let metaAtual: Record<string, any> = {};
+  try {
+    const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", atId).maybeSingle();
+    metaAtual = (atRow?.metadata || {}) as Record<string, any>;
+  } catch (_) { /* noop */ }
   const { data: lojas } = await supabase
     .from("telefones_lojas").select("id, nome_loja, endereco")
     .eq("tipo", "loja").eq("ativo", true)
     .order("nome_loja", { ascending: true }).limit(10);
   if (!lojas?.length) {
-    await supabase.from("atendimentos").update({ metadata: { expected_reply: "bairro_regiao_livre" } }).eq("id", atId);
+    await supabase.from("atendimentos").update({ metadata: { ...metaAtual, expected_reply: "bairro_regiao_livre" } }).eq("id", atId);
     await sendWhatsApp(supabaseUrl, serviceKey, atId, "Em qual cidade ou bairro fica melhor pra você? 😊");
     return;
   }
   try {
-    const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", atId).maybeSingle();
-    const meta = (atRow?.metadata || {}) as Record<string, any>;
-    await supabase.from("atendimentos").update({ metadata: { ...meta, expected_reply: "loja_selecao" } }).eq("id", atId);
+    await supabase.from("atendimentos").update({ metadata: { ...metaAtual, expected_reply: "loja_selecao" } }).eq("id", atId);
   } catch (_) { /* noop */ }
   await sendInteractive(supabaseUrl, serviceKey, atId, {
     type: "list",
