@@ -4303,17 +4303,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*/i.test(o)
       );
       const isFirst = receitas.length === 0;
-      // Strong signal: ambos os olhos com esfera + (cilindro OU eixo em algum) ou tem adição.
-      // Aceita receita digitada espontaneamente (sem pedido prévio da IA) quando
-      // o cliente envia bloco completo OD/OE — caso Natan (15/05).
+      // Strong signal: ambos os olhos com esfera definida.
+      // O parser por bloco só preenche od.sphere E oe.sphere quando o texto contém
+      // rótulos OD e OE explícitos (padrões isolados como "od -2.50" só preenchem 1
+      // olho e NÃO disparam). Receita só-esférica (sem cilindro/eixo) é comum e válida —
+      // não exigimos cilindro nem adição. Caso Natan (15/05).
       const hasStrongRxSignal = !!correction
         && correction.od?.sphere != null
-        && correction.oe?.sphere != null
-        && (
-          correction.od?.cylinder != null || correction.od?.axis != null ||
-          correction.oe?.cylinder != null || correction.oe?.axis != null ||
-          correction.has_addition === true
-        );
+        && correction.oe?.sphere != null;
       if (isFirst && !iaJustAskedForText && !hasStrongRxSignal) {
         // Cliente mandou padrão de receita do nada — ignora pra evitar falso positivo.
         console.log(`[RX-FIRST-TYPED] Skipped: no prior request from IA and no strong signal`);
