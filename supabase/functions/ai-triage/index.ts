@@ -6977,15 +6977,24 @@ async function runConsultarLentes(
   let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
 
   // ---- Diversificação por marca + 3 faixas ----
-  // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar).
+  // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar)
+  // PORÉM ordenando por PREÇO ASC (não por priority) — query original ordena por
+  // priority+price, o que pode inverter faixas quando há SKUs da mesma marca com
+  // priority distinta. Caso Natan 16/05/2026: Liberty+Crizal R$2.135 caía em
+  // "Econômica" enquanto Comfort Max R$1.699 caía em "Premium" (inversão grosseira).
   if (args?.preferencia_marca) {
-    const economy = lenses[0];
-    const premium = lenses[lenses.length - 1];
-    const midIndex = Math.floor(lenses.length / 2);
-    const mid = lenses.length >= 3 ? lenses[midIndex] : null;
+    const sortedByPrice = [...lenses].sort((a, b) => Number(a.price_brl) - Number(b.price_brl));
+    const economy = sortedByPrice[0];
+    const premium = sortedByPrice[sortedByPrice.length - 1];
+    const midIndex = Math.floor(sortedByPrice.length / 2);
+    const mid = sortedByPrice.length >= 3 ? sortedByPrice[midIndex] : null;
     quoteMsg += formatLens(economy, "💚 Econômica");
-    if (mid && mid.id !== economy.id && mid.id !== premium.id) quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
-    if (premium.id !== economy.id) quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+    if (mid && mid.id !== economy.id && mid.id !== premium.id && Number(mid.price_brl) > Number(economy.price_brl)) {
+      quoteMsg += "\n" + formatLens(mid, "💛 Intermediária");
+    }
+    if (premium.id !== economy.id && Number(premium.price_brl) > Number(economy.price_brl)) {
+      quoteMsg += "\n" + formatLens(premium, "💎 Premium");
+    }
   } else {
     // 1) Agrupa por marca (case-insensitive) e pega a mais barata de cada.
     const cheapestByBrand = new Map<string, any>();
