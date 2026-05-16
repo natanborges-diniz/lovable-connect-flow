@@ -8125,6 +8125,16 @@ async function routeButtonClick(args: {
     case "receita_ok": {
       if (atendimentoMeta.receita_pending) {
         await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString() });
+        // CRÍTICO: também limpa pending no contato (isReceitaPending checa lá),
+        // senão a cotação subsequente devolve "Li sua receita assim, confere?".
+        try {
+          const { data: cRow } = await supabase.from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+          const cMeta = (cRow?.metadata || {}) as Record<string, any>;
+          cMeta.receita_confirmacao = { ...(cMeta.receita_confirmacao || {}), pending: false, confirmed_at: new Date().toISOString(), confirmed_via: "botao_receita_ok" };
+          await supabase.from("contatos").update({ metadata: cMeta }).eq("id", atendimento.contato_id);
+        } catch (e) {
+          console.warn("[RECEITA_OK] falha ao limpar pending no contato:", e);
+        }
         await sendInteractive(supabaseUrl, serviceKey, atId, {
           type: "button",
           texto: "Receita confirmada 🙌 Quer algum adicional nas lentes?",
