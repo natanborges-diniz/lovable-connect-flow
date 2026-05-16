@@ -1,0 +1,7 @@
+.env
+.env.local
+output/*.json
+output/*.csv
+!output/.gitkeep
+node_modules/
+dist/

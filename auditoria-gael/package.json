@@ -1,0 +1,21 @@
+{
+  "name": "auditoria-gael",
+  "version": "1.0.0",
+  "description": "Scripts internos de extração de dados para auditoria do agente Gael (Óticas Diniz).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "extract": "tsx scripts/01-extracao.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
+    "dotenv": "^16.5.0",
+    "pg": "^8.14.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "@types/pg": "^8.11.11",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
