@@ -7170,6 +7170,29 @@ async function runConsultarLentes(
   if (isDuplicate) {
     return { resposta: "Já te mandei as opções acima 😊 Quer que eu detalhe alguma delas, ou prefere agendar uma visita pra ver as armações pessoalmente?" };
   }
+  // Snapshot da última cotação — habilita detector pre-LLM de reclamação de inversão
+  // ("a econômica está mais cara que a intermediária") e melhora auditoria.
+  if (atendimentoId) {
+    try {
+      const { data: atSnap } = await supabase.from("atendimentos").select("metadata").eq("id", atendimentoId).single();
+      const metaSnap = (atSnap?.metadata as Record<string, any>) || {};
+      await supabase.from("atendimentos").update({
+        metadata: {
+          ...metaSnap,
+          ultima_cotacao: {
+            at: new Date().toISOString(),
+            args: {
+              preferencia_marca: args?.preferencia_marca || null,
+              filtro_blue: !!args?.filtro_blue,
+              filtro_photo: !!args?.filtro_photo,
+            },
+            rx_type: rxType,
+            lentes: (lenses || []).slice(0, 12).map((l: any) => ({ id: l.id, brand: l.brand, family: l.family, price: Number(l.price_brl) })),
+          },
+        },
+      }).eq("id", atendimentoId);
+    } catch (e) { console.warn("[QUOTE] snapshot ultima_cotacao falhou", e); }
+  }
   return { resposta: quoteMsg };
 }
 
