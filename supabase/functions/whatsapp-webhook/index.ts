@@ -1123,9 +1123,10 @@ interface NormalizedMessage {
   senderName: string;
   text: string;
   messageId: string;
-  mediaType?: string;    // image, audio, video, document, sticker
+  mediaType?: string;    // image, audio, video, document, sticker, interactive_reply
   mediaId?: string;      // Meta media ID
   mediaMimeType?: string;
+  interactiveReply?: { id: string; title: string; source: "button" | "list" };
 }
 
 // ── Filter out brand/store names that come as pushName from customers
