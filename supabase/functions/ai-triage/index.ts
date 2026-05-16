@@ -2239,14 +2239,16 @@ serve(async (req) => {
   let atendimentoIdForCleanup: string | null = null;
 
   try {
-    const { atendimento_id, mensagem_texto, contato_id, media, forcar_processamento, motivo_disparo } = await req.json();
+    const { atendimento_id, mensagem_texto, contato_id, media, forcar_processamento, motivo_disparo, button_id, interactive_reply } = await req.json();
     const isTranscribedAudio = media?.is_transcribed_audio === true;
     const forceMode = forcar_processamento === true;
     const isDevolucaoHumanoIA = motivo_disparo === "devolucao_humano_ia";
+    const incomingButtonId: string | null = button_id || interactive_reply?.id || null;
     atendimentoIdForCleanup = atendimento_id;
     if (!atendimento_id) throw new Error("atendimento_id is required");
     if (forceMode) console.log(`[FORCE] forcar_processamento=true | motivo=${motivo_disparo || "n/a"} — bypassing debounce/locks`);
     if (isDevolucaoHumanoIA) console.log("[DEVOLUCAO] humano→ia handoff — continuity mode active");
+    if (incomingButtonId) console.log(`[BUTTON ROUTER] received button_id=${incomingButtonId}`);
 
     // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
