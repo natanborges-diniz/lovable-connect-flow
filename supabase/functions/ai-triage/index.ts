@@ -4303,20 +4303,22 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*/i.test(o)
       );
       const isFirst = receitas.length === 0;
-      // Strong signal: ambos os olhos com esfera definida.
-      // O parser por bloco só preenche od.sphere E oe.sphere quando o texto contém
-      // rótulos OD e OE explícitos (padrões isolados como "od -2.50" só preenchem 1
-      // olho e NÃO disparam). Receita só-esférica (sem cilindro/eixo) é comum e válida —
-      // não exigimos cilindro nem adição. Caso Natan (15/05).
+      // Strong signal: pelo menos UM olho com esfera definida E rótulo explícito de olho
+      // (OD/OE/OS) no texto — evita padrões isolados como "-2.50" sem contexto, mas aceita
+      // receita de um olho só (é vendável e comum). Princípio: aceitar a possibilidade e
+      // SEMPRE confirmar com o cliente (confirmed_by_client_at=null + gate de confirmação
+      // pós-LLM bloqueia cotação). Nunca decidir/cotar sem o "Sim, confere".
+      // Casos: Natan (15/05) receita completa OD+OE; visão monocular (1 olho só).
+      const hasEyeLabel = /\b(od|oe|os)\b/i.test(lastInboundText);
       const hasStrongRxSignal = !!correction
-        && correction.od?.sphere != null
-        && correction.oe?.sphere != null;
+        && hasEyeLabel
+        && (correction.od?.sphere != null || correction.oe?.sphere != null);
       if (isFirst && !iaJustAskedForText && !hasStrongRxSignal) {
         // Cliente mandou padrão de receita do nada — ignora pra evitar falso positivo.
         console.log(`[RX-FIRST-TYPED] Skipped: no prior request from IA and no strong signal`);
       } else {
         if (isFirst && !iaJustAskedForText && hasStrongRxSignal) {
-          console.log(`[RX-FIRST-TYPED] Accepted via strong signal (OD+OE completos)`);
+          console.log(`[RX-FIRST-TYPED] Accepted via strong signal (rótulo OD/OE + esfera em ≥1 olho)`);
         }
         const idx = isFirst ? 0 : receitas.length - 1;
         const old: any = isFirst ? {} : (receitas[idx] || {});
