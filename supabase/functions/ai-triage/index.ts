@@ -7978,14 +7978,6 @@ async function sendEnderecosLojas(supabase: any, supabaseUrl: string, serviceKey
 }
 
 
-  await supabase.from("eventos_crm").insert({
-    contato_id: contatoId, tipo,
-    descricao: msg.substring(0, 200),
-    metadata: { trigger: tipo },
-    referencia_tipo: "atendimento", referencia_id: atendimentoId,
-  });
-}
-
 async function handleEscalation(
   supabase: any, supabaseUrl: string, serviceKey: string,
   atendimentoId: string, contatoId: string, mensagem: string, trigger: string,
