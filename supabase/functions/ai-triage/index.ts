@@ -378,6 +378,21 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
     return null;
   }
 
+  if (stage === "confirmar_nome") {
+    // Cliente respondeu por texto à pergunta "Falo com X?"
+    if (/^(sim|isso|sou eu|sou|exato|exatamente|correto|positivo|pode ser|é isso|eh isso|👍|✅)\b/.test(t)) return "nome_ok";
+    if (/\b(nao|não|outro|errado|nao sou|não sou|me chamo|meu nome|sou (o |a )?[a-zà-ÿ]+|prefiro)\b/.test(t)) return "nome_outro";
+    return null;
+  }
+
+  if (stage === "dia_d_lembrete") {
+    // Lembrete véspera / 1h antes — cliente digitou em vez de tocar botão
+    if (/\b(confirmo|confirmado|confirma|sim|vou sim|estarei|tô indo|to indo|vou|pode confirmar|positivo|👍|✅)\b/.test(t)) return "show_confirma";
+    if (/\b(remarcar|remarca|mudar|trocar (o )?horario|trocar (o )?horário|outro (dia|horario|horário)|adiar)\b/.test(t)) return "show_remarcar";
+    if (/\b(nao vou|não vou|cancela|cancelar|desmarca|desmarcar|nao consigo|não consigo|nao posso|não posso|nao da|não dá)\b/.test(t)) return "show_nao";
+    return null;
+  }
+
   return null;
 }
 
@@ -3038,7 +3053,7 @@ serve(async (req) => {
             },
           });
           await supabase.from("atendimentos").update({
-            metadata: { ..._atMetaMenu, menu_triagem_enviado_at: new Date().toISOString() },
+            metadata: { ..._atMetaMenu, menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" },
           }).eq("id", atendimento_id);
           await logEvent(supabase, contatoId, atendimento_id, "menu_triagem_recorrente", "Cliente já cadastrado — menu direto");
           return jsonResponse({ status: "ok", tools_used: ["menu_triagem_recorrente"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
@@ -3147,6 +3162,11 @@ serve(async (req) => {
                 .from("contatos")
                 .update({ metadata: { ...contatoMeta, tentativas_pedido_nome: tentativas + 1, nome_candidato_botao: primeiroNome } })
                 .eq("id", contatoId);
+              const _atMetaCN = (atendimento.metadata as Record<string, any>) || {};
+              await supabase
+                .from("atendimentos")
+                .update({ metadata: { ..._atMetaCN, expected_reply: "confirmar_nome" } })
+                .eq("id", atendimento_id);
             } catch (_) { /* noop */ }
             console.log(`[FAST-PATH] greeting_buttons_sent candidato="${primeiroNome}" tentativas=${tentativas + 1}`);
             await logEvent(supabase, contatoId, atendimento_id, "saudacao_botoes_nome", introTxt);
@@ -5762,7 +5782,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             // Marca que o menu inicial foi servido — evita LLM duplicar a pergunta.
             const _curAtMeta = (atendimento.metadata as Record<string, any>) || {};
             await supabase.from("atendimentos").update({
-              metadata: { ..._curAtMeta, menu_triagem_enviado_at: new Date().toISOString() },
+              metadata: { ..._curAtMeta, menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" },
             }).eq("id", atendimento_id);
             resposta = ""; // não emite texto adicional do LLM nesta rodada
           } catch (e) {
