@@ -6616,6 +6616,19 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
     } else {
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+      // Follow-up determinístico após cotação de óculos/LC: oferece próximos passos em botões
+      try {
+        const _toolNamesQ: string[] = Array.isArray(toolCalls) ? toolCalls.map((t: any) => t?.function?.name).filter(Boolean) : [];
+        const _quoteFired = _toolNamesQ.some((n) =>
+          n === "consultar_lentes" || n === "consultar_lentes_contato" || n === "consultar_lentes_estimativa"
+        );
+        const _agFired = _toolNamesQ.some((n) => n === "agendar_visita" || n === "reagendar_visita");
+        if (_quoteFired && !_agFired) {
+          await sendPostQuoteButtons(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id);
+        }
+      } catch (e) {
+        console.warn("[POS-QUOTE-BTN] falha ao enviar botões pós-cotação:", e);
+      }
     }
 
     // ── 10.05. DETECTOR PÓS-LLM: agendamento prometido sem tool disparada ──
