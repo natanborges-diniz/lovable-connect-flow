@@ -568,6 +568,23 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                         ? <TemplateMessageBubble conteudo={m.conteudo} templates={templatesCatalog} />
                         : <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
                     )}
+                    {m.tipo_conteudo === "interactive" && m.metadata?.interactive && (
+                      <div className="mt-2 space-y-1">
+                        {m.metadata.interactive.type === "button" && (m.metadata.interactive.botoes || []).map((b: any) => (
+                          <div key={b.id} className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-center opacity-80">
+                            {b.titulo}
+                          </div>
+                        ))}
+                        {m.metadata.interactive.type === "list" && (
+                          <div className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-[11px] opacity-80">
+                            📋 {m.metadata.interactive.lista?.label || "Ver opções"} ({m.metadata.interactive.lista?.itens?.length || 0})
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {m.tipo_conteudo === "interactive_reply" && (
+                      <span className="ml-1 inline-flex items-center rounded-sm bg-background/40 px-1.5 py-0.5 text-[10px] opacity-70">↩ botão</span>
+                    )}
                     <div className="flex items-center justify-between gap-2 mt-1">
                       <p className="text-[10px] opacity-50 flex items-center gap-1">
                         <span>{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</span>
