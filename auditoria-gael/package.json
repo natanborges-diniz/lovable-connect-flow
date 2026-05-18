@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "extract": "tsx scripts/01-extracao.ts"
+    "extract": "tsx scripts/01-extracao.ts",
+    "test": "tsx scripts/02-testes-anonimizacao.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
