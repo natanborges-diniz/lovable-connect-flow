@@ -51,6 +51,25 @@ function anonimizarTextoComNome(texto: string, nomeContato: string | null, alias
   return anonimizar(t);
 }
 
+// ── Error serializer ──────────────────────────────────────────────────────────
+
+function serializeError(e: unknown): string {
+  if (e instanceof Error) return e.message || e.toString();
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    // deno-lint-ignore no-explicit-any
+    const err = e as any;
+    const parts: string[] = [];
+    if (err.message) parts.push(String(err.message));
+    if (err.code) parts.push(`[code=${err.code}]`);
+    if (err.details) parts.push(`details: ${err.details}`);
+    if (err.hint) parts.push(`hint: ${err.hint}`);
+    if (parts.length > 0) return parts.join(" ");
+    try { return JSON.stringify(e); } catch { return String(e); }
+  }
+  return String(e);
+}
+
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
 // deno-lint-ignore no-explicit-any
@@ -149,7 +168,7 @@ async function runExtraction(
   try {
     result.extractions[name] = await fn();
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = serializeError(e);
     result.errors.push({ extraction: name, message });
     result.extractions[name] = null;
   }
@@ -161,29 +180,37 @@ async function extractMetrics(supabase: SupabaseClient) {
   const ha30dias = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const ha7dias = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  // 3.1 — Taxa de escalada
+  // 3.1 — Taxa de escalada (filtra por data em ambas as queries, cruza em memória)
   const escalada = await (async () => {
     const { data: atendimentos } = await supabase
       .from("atendimentos")
       .select("id, created_at")
-      .gte("created_at", ha30dias);
+      .gte("created_at", ha30dias)
+      .limit(50000);
 
     const rows = (atendimentos ?? []) as Array<{ id: string; created_at: string }>;
     const total = rows.length;
     if (total === 0) return { total: 0, escalados: 0, pct: 0, avg_min_ate_escalada: null };
 
-    const ids = rows.map((a) => a.id);
+    const atIdSet = new Set(rows.map((a) => a.id));
+    const atMap = Object.fromEntries(rows.map((a) => [a.id, a.created_at]));
+
+    // Puxa TODOS escalonamentos no período (sem .in com lista enorme)
     const { data: escalamentos } = await supabase
       .from("eventos_crm")
       .select("referencia_id, created_at")
       .eq("tipo", "escalonamento_humano")
-      .in("referencia_id", ids);
+      .eq("referencia_tipo", "atendimento")
+      .gte("created_at", ha30dias)
+      .limit(50000);
 
-    const escRows = (escalamentos ?? []) as Array<{ referencia_id: string; created_at: string }>;
+    // Filtra localmente — só conta os que apontam pra um atendimento do período
+    const escRows = ((escalamentos ?? []) as Array<{ referencia_id: string; created_at: string }>)
+      .filter((e) => atIdSet.has(e.referencia_id));
+
     const escalados = new Set(escRows.map((e) => e.referencia_id)).size;
     const pct = Math.round((escalados / total) * 10000) / 100;
 
-    const atMap = Object.fromEntries(rows.map((a) => [a.id, a.created_at]));
     const firstEscByAt: Record<string, string> = {};
     for (const e of escRows) {
       if (!firstEscByAt[e.referencia_id] || e.created_at < firstEscByAt[e.referencia_id]) {
@@ -233,7 +260,8 @@ async function extractMetrics(supabase: SupabaseClient) {
       .from("eventos_crm")
       .select("referencia_id, metadata")
       .in("tipo", ["triagem_ia", "escalonamento_humano"])
-      .gte("created_at", ha30dias);
+      .gte("created_at", ha30dias)
+      .limit(50000);
 
     const idsOrcamento = new Set(
       ((evTriage ?? []) as Array<{ referencia_id: string; metadata: Record<string, unknown> }>)
@@ -249,7 +277,9 @@ async function extractMetrics(supabase: SupabaseClient) {
       .from("eventos_crm")
       .select("referencia_id")
       .eq("tipo", "agendamento_criado")
-      .gte("created_at", ha30dias);
+      .eq("referencia_tipo", "atendimento")
+      .gte("created_at", ha30dias)
+      .limit(50000);
 
     const idsAgend = new Set(
       ((evAgend ?? []) as Array<{ referencia_id: string }>).map((e) => e.referencia_id)
@@ -272,7 +302,8 @@ async function extractMetrics(supabase: SupabaseClient) {
       .from("eventos_crm")
       .select("metadata")
       .in("tipo", ["triagem_ia", "escalonamento_humano"])
-      .gte("created_at", ha30dias);
+      .gte("created_at", ha30dias)
+      .limit(50000);
 
     const counts: Record<string, number> = {};
     for (const row of (data ?? []) as Array<{ metadata: Record<string, unknown> }>) {
@@ -293,7 +324,8 @@ async function extractMetrics(supabase: SupabaseClient) {
     const { data } = await supabase
       .from("eventos_crm")
       .select("tipo, created_at")
-      .gte("created_at", ha30dias);
+      .gte("created_at", ha30dias)
+      .limit(50000);
 
     const total30: Record<string, number> = {};
     const total7: Record<string, number> = {};
@@ -308,23 +340,32 @@ async function extractMetrics(supabase: SupabaseClient) {
       .map(([tipo, total_30d]) => ({ tipo, total_30d, total_7d: total7[tipo] ?? 0 }));
   })();
 
-  // 3.5 — Mensagens IA por dia (sem cálculo de custo — sem dados confiáveis de tokens)
+  // 3.5 — Mensagens não-humanas por dia, separadas por categoria
+  // Para diferenciar: turno conversacional do Gael vs disparos proativos do sistema
   const mensagens_ia_por_dia = await (async () => {
     const { data } = await supabase
       .from("mensagens")
-      .select("created_at")
+      .select("created_at, remetente_nome")
       .eq("direcao", "outbound")
-      .eq("remetente_nome", "Gael")
-      .gte("created_at", ha30dias);
+      .in("remetente_nome", ["Assistente IA", "Gael", "Sistema", "Bot Lojas", "Recuperação"])
+      .gte("created_at", ha30dias)
+      .limit(100000);
 
-    const byDay: Record<string, number> = {};
-    for (const row of (data ?? []) as Array<{ created_at: string }>) {
+    // gael_turno = "Assistente IA" + "Gael" (resposta no fluxo conversacional)
+    // proativo   = "Sistema" + "Bot Lojas" (templates, automações)
+    // recuperacao = "Recuperação" (cron de recuperação)
+    const byDay: Record<string, { gael_turno: number; proativo: number; recuperacao: number }> = {};
+    for (const row of (data ?? []) as Array<{ created_at: string; remetente_nome: string | null }>) {
       const day = row.created_at.slice(0, 10);
-      byDay[day] = (byDay[day] ?? 0) + 1;
+      if (!byDay[day]) byDay[day] = { gael_turno: 0, proativo: 0, recuperacao: 0 };
+      const nome = String(row.remetente_nome || "");
+      if (nome === "Assistente IA" || nome === "Gael") byDay[day].gael_turno++;
+      else if (nome === "Recuperação") byDay[day].recuperacao++;
+      else byDay[day].proativo++;
     }
     return Object.entries(byDay)
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([dia, mensagens]) => ({ dia, mensagens }));
+      .map(([dia, counts]) => ({ dia, ...counts, total: counts.gael_turno + counts.proativo + counts.recuperacao }));
   })();
 
   return {
