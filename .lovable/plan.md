@@ -1,10 +1,15 @@
-## Deploy da edge function `auditoria-export`
+## Fix: gênero da mensagem do Gael (masculino)
 
-A função já existe em `supabase/functions/auditoria-export/index.ts` (commit externo 86dc76f) e está registrada em `supabase/config.toml` com `verify_jwt = false`, mas nunca foi deployada.
+Trocar "Obrigada" por "Obrigado" na resposta determinística do handler `recupera_nao` em `supabase/functions/ai-triage/index.ts` (linha 8477).
 
-### Ação
-1. Rodar `supabase--deploy_edge_functions` com `["auditoria-export"]`.
-2. Verificar logs com `supabase--edge_function_logs` para confirmar boot sem erros.
+**Antes:**
+```ts
+await sendWhatsApp(..., "Compreendo! Obrigada pelo retorno. Quando precisar, estaremos por aqui 😊");
+```
 
-### Observação
-A função exige o secret `AUDITORIA_EXPORT_TOKEN`. Se ainda não estiver configurado, qualquer chamada retornará 500 ("AUDITORIA_EXPORT_TOKEN não configurado"). O deploy em si funciona mesmo sem o secret — só aviso para configurar depois se quiser usar.
+**Depois:**
+```ts
+await sendWhatsApp(..., "Compreendo! Obrigado pelo retorno. Quando precisar, estaremos por aqui 😊");
+```
+
+Após o ajuste, redeploy da edge function `ai-triage`. Nenhuma outra ocorrência de "Obrigada" foi encontrada em `supabase/functions`, `src/` ou memórias.

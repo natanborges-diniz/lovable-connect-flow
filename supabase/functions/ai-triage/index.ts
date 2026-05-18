@@ -8474,7 +8474,7 @@ async function routeButtonClick(args: {
       return true;
     case "recupera_nao":
       await patchMeta({ recuperacao_recusada_at: new Date().toISOString(), expected_reply: null });
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Compreendo! Obrigada pelo retorno. Quando precisar, estaremos por aqui 😊");
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Compreendo! Obrigado pelo retorno. Quando precisar, estaremos por aqui 😊");
       return true;
   }
   return false;
