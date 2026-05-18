@@ -1,5 +1,8 @@
 project_id = "kvggebtnqmxydtwaumqz"
 
+[functions.auditoria-export]
+verify_jwt = false
+
 [functions.ai-triage]
 verify_jwt = false
 
