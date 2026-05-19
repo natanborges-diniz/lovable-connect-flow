@@ -476,7 +476,7 @@ async function extractAmostra(supabase: SupabaseClient) {
         id, modo, created_at, fim_at, status,
         contato:contatos(nome, telefone)
       `)
-      .eq("status", "finalizado")
+      .eq("status", "encerrado")
       .gte("created_at", ha30dias)
   );
 
