@@ -23,18 +23,22 @@ function escapeRegex(s: string): string {
 }
 
 function anonimizar(texto: string): string {
+  if (!texto) return texto;
   let t = texto;
+  // Telefones com DDI/DDD/celular brasileiro
   t = t.replace(/\+?55\s*\(?\d{2}\)?\s*9?\s*\d{4}[-\s]?\d{4}/g, "+55XXXXXXXXX");
   t = t.replace(/\(\d{2}\)\s*9?\d{4}[-\s]?\d{4}/g, "(XX) XXXX-XXXX");
+  // Telefones soltos (11 dígitos com possível celular)
+  t = t.replace(/\b\d{2}\s*9\d{4}[-\s]?\d{4}\b/g, "TELEFONE_REDIGIDO");
+  // CPF / CNPJ
   t = t.replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, "CPF_REDIGIDO");
   t = t.replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "CNPJ_REDIGIDO");
+  // E-mail
   t = t.replace(/[\w._%+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "email@redigido");
+  // CEP (formato XXXXX-XXX ou 8 dígitos corridos)
   t = t.replace(/\b\d{5}-?\d{3}\b/g, "CEP_REDIGIDO");
-  t = t.replace(/\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b/g, "DATA_REDIGIDA");
-  t = t.replace(
-    /\b[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+(?:de|da|do|das|dos|e)\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]?[a-záéíóúâêîôûãõç]+)*(?:\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+)*\b/g,
-    "PESSOA_REDIGIDA"
-  );
+  // Datas desativadas — auditor precisa de timestamps pra detectar agendamentos.
+  // t = t.replace(/\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b/g, "DATA_REDIGIDA");
   return t;
 }
 
@@ -595,18 +599,50 @@ async function extractAmostra(supabase: SupabaseClient) {
       .eq("atendimento_id", at.id)
       .order("created_at");
 
+    // FIX 13 — tools derivadas do tipo do evento, não de metadata.tools (que não existe)
+    const TOOL_EVENT_TYPES = new Set([
+      "agendamento_criado",
+      "receita_interpretada",
+      "receita_corrigida_pelo_cliente",
+      "receita_rejeitada_cliente",
+      "nome_confirmado",
+      "consultar_lentes_bloqueado_pendente_confirmacao",
+      "cotacao_pos_confirmacao_forcada",
+      "cta_visita_aceito",
+      "cta_visita_recusado",
+      "cidade_escolhida",
+      "loja_escolhida",
+      "pos_orcamento_fallback_llm",
+      "despedida_deterministica",
+      "despedida_duplicada_evitada",
+      "escalonamento_humano",
+      "intent_consulta_os",
+      "intent_rede_diniz",
+      "intent_fornecedor_b2b",
+      "triagem_ia",
+    ]);
+
     const { data: toolsEvs } = await supabase
       .from("eventos_crm")
-      .select("metadata")
+      .select("tipo, created_at")
       .eq("referencia_id", at.id)
-      .not("metadata->tools", "is", null);
+      .eq("referencia_tipo", "atendimento")
+      .in("tipo", Array.from(TOOL_EVENT_TYPES))
+      .order("created_at");
 
     const tools_chamadas: string[] = [];
-    for (const ev of (toolsEvs ?? []) as Array<{ metadata: Record<string, unknown> }>) {
-      const t = ev.metadata?.tools;
-      if (Array.isArray(t)) tools_chamadas.push(...(t as string[]));
-      else if (typeof t === "string") tools_chamadas.push(t);
+    for (const ev of (toolsEvs ?? []) as Array<{ tipo: string }>) {
+      tools_chamadas.push(ev.tipo);
     }
+
+    // FIX 12 — remetente correto: inbound → alias, outbound IA → literal, outbound humano → Operador_humano
+    const REMETENTES_NAO_HUMANOS = new Set([
+      "Assistente IA",
+      "Gael",
+      "Sistema",
+      "Bot Lojas",
+      "Recuperação",
+    ]);
 
     // 7. Anonimizar transcrição (nome do contato e PII)
     const transcricao = ((mensagens ?? []) as Array<{
@@ -619,7 +655,13 @@ async function extractAmostra(supabase: SupabaseClient) {
       id: m.id,
       direcao: m.direcao,
       created_at: m.created_at,
-      remetente: m.remetente_nome === "Gael" ? "Gael" : alias,
+      remetente: (() => {
+        if (m.direcao === "inbound") return alias;
+        const nome = String(m.remetente_nome || "").trim();
+        if (!nome) return "Desconhecido";
+        if (REMETENTES_NAO_HUMANOS.has(nome)) return nome;
+        return "Operador_humano";
+      })(),
       conteudo: anonimizarTextoComNome(m.conteudo ?? "", nomeContato, alias),
     }));
 
