@@ -3337,6 +3337,45 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       const correctionCount = Number(contatoMeta.receita_confirmacao?.correction_count || 0);
       const lastRx = receitas[receitas.length - 1] || null;
 
+      // ── Defesa anti-loop (Mai/2026, caso Wilson): se uma cotação já foi enviada
+      // (humano ou IA) cobrindo essa receita, considera receita confirmada
+      // implicitamente. Sem isso o pending fica eterno e cada nova msg do
+      // cliente re-dispara "Li sua receita assim, confere?" mesmo após orçamento.
+      try {
+        const outboundJoined = (recentOutbound || []).join(" \n ");
+        const temCotacaoEnviada = /(🟢|🟡|💎|🟢\s*Econ[oô]mica|Intermedi[aá]ria|Premium)/i.test(outboundJoined)
+          && /R\$\s?\d/.test(outboundJoined);
+        if (temCotacaoEnviada && !detectRxConfirmation(lastInboundText) && !detectRxRejeicao(lastInboundText) && !detectPrescriptionCorrection(lastInboundText)) {
+          await supabase.from("contatos").update({
+            metadata: {
+              ...contatoMeta,
+              receita_confirmacao: {
+                ...contatoMeta.receita_confirmacao,
+                pending: false,
+                confirmed_at: new Date().toISOString(),
+                confirmed_via: "cotacao_ja_enviada_implicito",
+              },
+            },
+          }).eq("id", contatoId);
+          contatoMeta.receita_confirmacao = { ...contatoMeta.receita_confirmacao, pending: false, confirmed_at: new Date().toISOString(), confirmed_via: "cotacao_ja_enviada_implicito" };
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_confirmada_implicita_pos_cotacao",
+            descricao: "Pending de receita limpo automaticamente — cotação já havia sido enviada",
+            metadata: { rx_label: rxLabel },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          }).then(() => undefined, () => undefined);
+          console.log("[RX-CONFIRMACAO] Cotação já enviada — limpando pending e liberando fluxo");
+          // segue para o LLM tratar a dúvida real do cliente
+        }
+      } catch (_) { /* noop */ }
+    }
+    if (isReceitaPending(contatoMeta) && !lastIsImage) {
+      const rxLabel = contatoMeta.receita_confirmacao?.rx_label || null;
+      const foraDaFaixa = contatoMeta.receita_confirmacao?.fora_da_faixa === true;
+      const correctionCount = Number(contatoMeta.receita_confirmacao?.correction_count || 0);
+      const lastRx = receitas[receitas.length - 1] || null;
+
       // ── Defesa: pending corrompida com receita inválida (caso Yuri) ──
       // Se a última receita salva não é válida, NUNCA aceitar "sim" — limpa pending,
       // pede valores por texto e sai. Idempotente para conversas já corrompidas.
