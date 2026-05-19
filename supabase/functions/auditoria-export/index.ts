@@ -70,6 +70,30 @@ function serializeError(e: unknown): string {
   return String(e);
 }
 
+// ── Paginação ─────────────────────────────────────────────────────────────────
+
+// Contorna o teto server-side de 1000 linhas do PostgREST via .range().
+// .limit() maior que db-max-rows é silenciosamente ignorado pelo servidor.
+async function fetchAllPaged<T = unknown>(
+  // deno-lint-ignore no-explicit-any
+  queryFactory: () => any,
+  pageSize = 1000,
+  maxRows = 50000,
+): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  while (from < maxRows) {
+    const to = from + pageSize - 1;
+    const { data, error } = await queryFactory().range(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...(data as T[]));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
 // deno-lint-ignore no-explicit-any
@@ -182,13 +206,9 @@ async function extractMetrics(supabase: SupabaseClient) {
 
   // 3.1 — Taxa de escalada (filtra por data em ambas as queries, cruza em memória)
   const escalada = await (async () => {
-    const { data: atendimentos } = await supabase
-      .from("atendimentos")
-      .select("id, created_at")
-      .gte("created_at", ha30dias)
-      .limit(50000);
-
-    const rows = (atendimentos ?? []) as Array<{ id: string; created_at: string }>;
+    const rows = await fetchAllPaged<{ id: string; created_at: string }>(() =>
+      supabase.from("atendimentos").select("id, created_at").gte("created_at", ha30dias)
+    );
     const total = rows.length;
     if (total === 0) return { total: 0, escalados: 0, pct: 0, avg_min_ate_escalada: null };
 
@@ -196,17 +216,17 @@ async function extractMetrics(supabase: SupabaseClient) {
     const atMap = Object.fromEntries(rows.map((a) => [a.id, a.created_at]));
 
     // Puxa TODOS escalonamentos no período (sem .in com lista enorme)
-    const { data: escalamentos } = await supabase
-      .from("eventos_crm")
-      .select("referencia_id, created_at")
-      .eq("tipo", "escalonamento_humano")
-      .eq("referencia_tipo", "atendimento")
-      .gte("created_at", ha30dias)
-      .limit(50000);
+    const escRowsAll = await fetchAllPaged<{ referencia_id: string; created_at: string }>(() =>
+      supabase
+        .from("eventos_crm")
+        .select("referencia_id, created_at")
+        .eq("tipo", "escalonamento_humano")
+        .eq("referencia_tipo", "atendimento")
+        .gte("created_at", ha30dias)
+    );
 
     // Filtra localmente — só conta os que apontam pra um atendimento do período
-    const escRows = ((escalamentos ?? []) as Array<{ referencia_id: string; created_at: string }>)
-      .filter((e) => atIdSet.has(e.referencia_id));
+    const escRows = escRowsAll.filter((e) => atIdSet.has(e.referencia_id));
 
     const escalados = new Set(escRows.map((e) => e.referencia_id)).size;
     const pct = Math.round((escalados / total) * 10000) / 100;
@@ -230,14 +250,16 @@ async function extractMetrics(supabase: SupabaseClient) {
 
   // 3.1b — Top 5 motivos de escalada
   const motivos_escalada_top5 = await (async () => {
-    const { data } = await supabase
-      .from("eventos_crm")
-      .select("metadata")
-      .in("tipo", ["escalonamento_humano", "escalar_consultor"])
-      .gte("created_at", ha30dias);
+    const data = await fetchAllPaged<{ metadata: Record<string, unknown> }>(() =>
+      supabase
+        .from("eventos_crm")
+        .select("metadata")
+        .in("tipo", ["escalonamento_humano", "escalar_consultor"])
+        .gte("created_at", ha30dias)
+    );
 
     const counts: Record<string, number> = {};
-    for (const row of (data ?? []) as Array<{ metadata: Record<string, unknown> }>) {
+    for (const row of data) {
       const motivo = (row.metadata?.motivo as string) ?? "sem_motivo";
       counts[motivo] = (counts[motivo] ?? 0) + 1;
     }
@@ -256,15 +278,16 @@ async function extractMetrics(supabase: SupabaseClient) {
 
   // 3.2 — Funil orçamento → agendamento
   const funil_orcamento_agendamento = await (async () => {
-    const { data: evTriage } = await supabase
-      .from("eventos_crm")
-      .select("referencia_id, metadata")
-      .in("tipo", ["triagem_ia", "escalonamento_humano"])
-      .gte("created_at", ha30dias)
-      .limit(50000);
+    const evTriage = await fetchAllPaged<{ referencia_id: string; metadata: Record<string, unknown> }>(() =>
+      supabase
+        .from("eventos_crm")
+        .select("referencia_id, metadata")
+        .in("tipo", ["triagem_ia", "escalonamento_humano"])
+        .gte("created_at", ha30dias)
+    );
 
     const idsOrcamento = new Set(
-      ((evTriage ?? []) as Array<{ referencia_id: string; metadata: Record<string, unknown> }>)
+      evTriage
         .filter(
           (e) =>
             (e.metadata?.pipeline_coluna as string | undefined)?.toLowerCase().includes("orç") ||
@@ -273,17 +296,16 @@ async function extractMetrics(supabase: SupabaseClient) {
         .map((e) => e.referencia_id)
     );
 
-    const { data: evAgend } = await supabase
-      .from("eventos_crm")
-      .select("referencia_id")
-      .eq("tipo", "agendamento_criado")
-      .eq("referencia_tipo", "atendimento")
-      .gte("created_at", ha30dias)
-      .limit(50000);
-
-    const idsAgend = new Set(
-      ((evAgend ?? []) as Array<{ referencia_id: string }>).map((e) => e.referencia_id)
+    const evAgend = await fetchAllPaged<{ referencia_id: string }>(() =>
+      supabase
+        .from("eventos_crm")
+        .select("referencia_id")
+        .eq("tipo", "agendamento_criado")
+        .eq("referencia_tipo", "atendimento")
+        .gte("created_at", ha30dias)
     );
+
+    const idsAgend = new Set(evAgend.map((e) => e.referencia_id));
     const convertidos = [...idsOrcamento].filter((id) => idsAgend.has(id)).length;
 
     return {
@@ -298,15 +320,16 @@ async function extractMetrics(supabase: SupabaseClient) {
 
   // 3.3 — Distribuição validator_flags
   const validator_flags = await (async () => {
-    const { data } = await supabase
-      .from("eventos_crm")
-      .select("metadata")
-      .in("tipo", ["triagem_ia", "escalonamento_humano"])
-      .gte("created_at", ha30dias)
-      .limit(50000);
+    const data = await fetchAllPaged<{ metadata: Record<string, unknown> }>(() =>
+      supabase
+        .from("eventos_crm")
+        .select("metadata")
+        .in("tipo", ["triagem_ia", "escalonamento_humano"])
+        .gte("created_at", ha30dias)
+    );
 
     const counts: Record<string, number> = {};
-    for (const row of (data ?? []) as Array<{ metadata: Record<string, unknown> }>) {
+    for (const row of data) {
       const flags = row.metadata?.validator_flags;
       if (Array.isArray(flags)) {
         for (const f of flags as string[]) {
@@ -321,15 +344,13 @@ async function extractMetrics(supabase: SupabaseClient) {
 
   // 3.4 — Distribuição eventos_crm
   const eventos_crm_distribuicao = await (async () => {
-    const { data } = await supabase
-      .from("eventos_crm")
-      .select("tipo, created_at")
-      .gte("created_at", ha30dias)
-      .limit(50000);
+    const data = await fetchAllPaged<{ tipo: string; created_at: string }>(() =>
+      supabase.from("eventos_crm").select("tipo, created_at").gte("created_at", ha30dias)
+    );
 
     const total30: Record<string, number> = {};
     const total7: Record<string, number> = {};
-    for (const row of (data ?? []) as Array<{ tipo: string; created_at: string }>) {
+    for (const row of data) {
       total30[row.tipo] = (total30[row.tipo] ?? 0) + 1;
       if (row.created_at >= ha7dias) {
         total7[row.tipo] = (total7[row.tipo] ?? 0) + 1;
@@ -341,31 +362,36 @@ async function extractMetrics(supabase: SupabaseClient) {
   })();
 
   // 3.5 — Mensagens não-humanas por dia, separadas por categoria
-  // Para diferenciar: turno conversacional do Gael vs disparos proativos do sistema
+  // gael_turno = resposta no fluxo conversacional (ai-triage / responder-solicitacao)
+  // proativo   = templates/automações fora do turno (send-whatsapp-template, bridge, etc.)
+  // Nota: "Recuperação" removido — vendas-recuperacao-cron envia como "Assistente IA",
+  //       "Sistema" ou "Gael", nunca como remetente_nome="Recuperação".
   const mensagens_ia_por_dia = await (async () => {
-    const { data } = await supabase
-      .from("mensagens")
-      .select("created_at, remetente_nome")
-      .eq("direcao", "outbound")
-      .in("remetente_nome", ["Assistente IA", "Gael", "Sistema", "Bot Lojas", "Recuperação"])
-      .gte("created_at", ha30dias)
-      .limit(100000);
+    const data = await fetchAllPaged<{ created_at: string; remetente_nome: string | null }>(() =>
+      supabase
+        .from("mensagens")
+        .select("created_at, remetente_nome")
+        .eq("direcao", "outbound")
+        .in("remetente_nome", ["Assistente IA", "Gael", "Sistema", "Bot Lojas"])
+        .gte("created_at", ha30dias)
+    );
 
-    // gael_turno = "Assistente IA" + "Gael" (resposta no fluxo conversacional)
-    // proativo   = "Sistema" + "Bot Lojas" (templates, automações)
-    // recuperacao = "Recuperação" (cron de recuperação)
-    const byDay: Record<string, { gael_turno: number; proativo: number; recuperacao: number }> = {};
-    for (const row of (data ?? []) as Array<{ created_at: string; remetente_nome: string | null }>) {
+    const byDay: Record<string, { gael_turno: number; proativo: number }> = {};
+    for (const row of data) {
       const day = row.created_at.slice(0, 10);
-      if (!byDay[day]) byDay[day] = { gael_turno: 0, proativo: 0, recuperacao: 0 };
+      if (!byDay[day]) byDay[day] = { gael_turno: 0, proativo: 0 };
       const nome = String(row.remetente_nome || "");
       if (nome === "Assistente IA" || nome === "Gael") byDay[day].gael_turno++;
-      else if (nome === "Recuperação") byDay[day].recuperacao++;
       else byDay[day].proativo++;
     }
     return Object.entries(byDay)
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([dia, counts]) => ({ dia, ...counts, total: counts.gael_turno + counts.proativo + counts.recuperacao }));
+      .map(([dia, counts]) => ({
+        dia,
+        gael_turno: counts.gael_turno,
+        proativo: counts.proativo,
+        total: counts.gael_turno + counts.proativo,
+      }));
   })();
 
   return {
@@ -435,36 +461,78 @@ interface AtClassified extends AtRow {
 async function extractAmostra(supabase: SupabaseClient) {
   const ha30dias = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  // 1. Atendimentos finalizados com contato e auditoria
-  const { data: atendimentos, error: errAt } = await supabase
-    .from("atendimentos")
-    .select(`
-      id, modo, created_at, fim_at, status,
-      contato:contatos(nome, telefone),
-      auditoria:ia_auditorias(score_global, severidade)
-    `)
-    .eq("status", "finalizado")
-    .gte("created_at", ha30dias);
+  // 1. Atendimentos finalizados (SEM join ia_auditorias — FK não declarada na migration)
+  const atendimentos = await fetchAllPaged<{
+    id: string;
+    modo: string;
+    created_at: string;
+    fim_at: string | null;
+    status: string;
+    contato: { nome: string | null; telefone: string | null } | null;
+  }>(() =>
+    supabase
+      .from("atendimentos")
+      .select(`
+        id, modo, created_at, fim_at, status,
+        contato:contatos(nome, telefone)
+      `)
+      .eq("status", "finalizado")
+      .gte("created_at", ha30dias)
+  );
 
-  if (errAt) throw errAt;
-  if (!atendimentos || atendimentos.length === 0) return [];
+  if (atendimentos.length === 0) return [];
 
-  const rows = atendimentos as AtRow[];
-  const ids = rows.map((a) => a.id);
+  const ids = atendimentos.map((a) => a.id);
+  const idSet = new Set(ids);
+
+  // 1b. Auditorias em query separada, cruzadas em código
+  // Abordagem inversa: pega todas do período e filtra por idSet localmente
+  const auditsAll = await fetchAllPaged<{
+    atendimento_id: string | null;
+    score_global: number | null;
+    severidade: string | null;
+  }>(() =>
+    supabase
+      .from("ia_auditorias")
+      .select("atendimento_id, score_global, severidade")
+      .gte("created_at", ha30dias)
+  );
+
+  const sevOrder: Record<string, number> = { critical: 3, warn: 2, info: 1, ok: 0 };
+  const auditByAt = new Map<string, { score_global: number | null; severidade: string | null }>();
+  for (const a of auditsAll) {
+    if (!a.atendimento_id || !idSet.has(a.atendimento_id)) continue;
+    const cur = auditByAt.get(a.atendimento_id);
+    const curRank = cur ? (sevOrder[cur.severidade ?? "ok"] ?? 0) : -1;
+    const newRank = sevOrder[a.severidade ?? "ok"] ?? 0;
+    if (!cur || newRank > curRank) {
+      auditByAt.set(a.atendimento_id, { score_global: a.score_global, severidade: a.severidade });
+    }
+  }
+
+  const rows: AtRow[] = atendimentos.map((a) => ({
+    ...a,
+    auditoria: auditByAt.has(a.id) ? [auditByAt.get(a.id)!] : null,
+  }));
 
   // 2. Último evento triagem_ia / escalonamento por atendimento
-  const { data: evTriagem } = await supabase
-    .from("eventos_crm")
-    .select("referencia_id, metadata, created_at")
-    .in("tipo", ["triagem_ia", "escalonamento_humano"])
-    .in("referencia_id", ids)
-    .order("created_at", { ascending: false });
-
-  const ultimoTriage: Record<string, { intencao: string | null; pipeline_coluna: string | null }> = {};
-  for (const ev of (evTriagem ?? []) as Array<{
+  // Filtra por data + idSet localmente (sem .in(ids) gigante)
+  const evTriagemAll = await fetchAllPaged<{
     referencia_id: string;
     metadata: Record<string, unknown>;
-  }>) {
+    created_at: string;
+  }>(() =>
+    supabase
+      .from("eventos_crm")
+      .select("referencia_id, metadata, created_at")
+      .in("tipo", ["triagem_ia", "escalonamento_humano"])
+      .gte("created_at", ha30dias)
+      .order("created_at", { ascending: false })
+  );
+
+  const ultimoTriage: Record<string, { intencao: string | null; pipeline_coluna: string | null }> = {};
+  for (const ev of evTriagemAll) {
+    if (!idSet.has(ev.referencia_id)) continue;
     if (!ultimoTriage[ev.referencia_id]) {
       ultimoTriage[ev.referencia_id] = {
         intencao: (ev.metadata?.intencao as string) ?? null,
@@ -473,15 +541,17 @@ async function extractAmostra(supabase: SupabaseClient) {
     }
   }
 
-  // 3. Atendimentos que foram escalados
-  const { data: evEscalada } = await supabase
-    .from("eventos_crm")
-    .select("referencia_id")
-    .eq("tipo", "escalonamento_humano")
-    .in("referencia_id", ids);
+  // 3. Atendimentos que foram escalados (mesma abordagem: data + filtro local)
+  const evEscaladaAll = await fetchAllPaged<{ referencia_id: string }>(() =>
+    supabase
+      .from("eventos_crm")
+      .select("referencia_id")
+      .eq("tipo", "escalonamento_humano")
+      .gte("created_at", ha30dias)
+  );
 
   const foiEscalado = new Set(
-    ((evEscalada ?? []) as Array<{ referencia_id: string }>).map((e) => e.referencia_id)
+    evEscaladaAll.filter((e) => idSet.has(e.referencia_id)).map((e) => e.referencia_id)
   );
 
   // 4. Classificar
