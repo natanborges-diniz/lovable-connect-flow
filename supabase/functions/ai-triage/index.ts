@@ -4650,8 +4650,15 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     const correction = detectPrescriptionCorrection(lastInboundText);
     if (correction) {
       const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
-        typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*/i.test(o)
+        typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*|beleza! me passa por texto/i.test(o)
       );
+      // Quando o cliente clicou em "⌨️ Digitar valores" / "✏️ Corrigir", o atendimento
+      // fica com expected_reply = "receita_digitada". Nesse caso a digitação é uma
+      // RECEITA NOVA standalone — NÃO deve herdar cilindro/eixo/add de uma receita
+      // antiga salva no contato (causava hallucination: cliente digita só esférico
+      // e IA confirma com CIL/EIXO/ADD herdados — caso Natan 20/05).
+      const aguardandoDigitada = atendimentoMeta?.expected_reply === "receita_digitada";
+      const treatAsFreshRx = iaJustAskedForText || aguardandoDigitada;
       const isFirst = receitas.length === 0;
       // Strong signal: pelo menos UM olho com esfera definida E rótulo explícito de olho
       // (OD/OE/OS) no texto — evita padrões isolados como "-2.50" sem contexto, mas aceita
@@ -4670,8 +4677,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         if (isFirst && !iaJustAskedForText && hasStrongRxSignal) {
           console.log(`[RX-FIRST-TYPED] Accepted via strong signal (rótulo OD/OE + esfera em ≥1 olho)`);
         }
-        const idx = isFirst ? 0 : receitas.length - 1;
-        const old: any = isFirst ? {} : (receitas[idx] || {});
+        // treatAsFreshRx ⇒ receita standalone (não herda nada de receitas antigas).
+        // Caso contrário ⇒ correção da última receita (mantém merge para corrigir
+        // só campos enviados, ex.: cliente diz "OD na verdade é -2,25" e mantém OE).
+        const useFreshSlot = treatAsFreshRx || isFirst;
+        const idx = useFreshSlot ? receitas.length : receitas.length - 1;
+        const old: any = useFreshSlot ? {} : (receitas[idx] || {});
         const merged = {
           ...old,
           eyes: {
@@ -4687,26 +4698,27 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           },
           confidence: 0.99,
           data_leitura: new Date().toISOString(),
-          source: isFirst ? "client_typed_first" : "client_correction",
+          source: useFreshSlot ? "client_typed_first" : "client_correction",
           raw_correction: correction.raw,
           needs_human_review: false,
-          label: old.label || (isFirst ? "digitada pelo cliente" : undefined),
+          label: old.label || (useFreshSlot ? "digitada pelo cliente" : undefined),
         };
         // ── Detecta correção de ALTO IMPACTO ──
-        // Se a esfera mudou ≥0,75D em qualquer olho OU a esfera nova é >|10|D (lente especial),
-        // OBRIGA confirmação explícita do cliente antes de cotar/escalar.
-        const oldOdSph = typeof old?.eyes?.od?.sphere === "number" ? old.eyes.od.sphere : null;
-        const oldOeSph = typeof old?.eyes?.oe?.sphere === "number" ? old.eyes.oe.sphere : null;
+        // Só faz sentido em MODO CORREÇÃO (useFreshSlot=false) — receita standalone
+        // não tem "anterior" para comparar. maxNewAbs>10 segue valendo (lente especial).
+        const oldOdSph = (!useFreshSlot && typeof old?.eyes?.od?.sphere === "number") ? old.eyes.od.sphere : null;
+        const oldOeSph = (!useFreshSlot && typeof old?.eyes?.oe?.sphere === "number") ? old.eyes.oe.sphere : null;
         const newOdSph = typeof correction.od?.sphere === "number" ? correction.od.sphere : null;
         const newOeSph = typeof correction.oe?.sphere === "number" ? correction.oe.sphere : null;
         const deltaOd = (oldOdSph != null && newOdSph != null) ? Math.abs(newOdSph - oldOdSph) : 0;
         const deltaOe = (oldOeSph != null && newOeSph != null) ? Math.abs(newOeSph - oldOeSph) : 0;
         const maxNewAbs = Math.max(Math.abs(newOdSph ?? 0), Math.abs(newOeSph ?? 0));
-        const isHighImpact = (!isFirst && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs > 10;
+        const isHighImpact = (!useFreshSlot && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs > 10;
 
         // Marca a receita recém-gravada como NÃO confirmada pelo cliente
         merged.confirmed_by_client_at = null;
-        if (isFirst) receitas.push(merged); else receitas[idx] = merged;
+        if (useFreshSlot) receitas.push(merged); else receitas[idx] = merged;
+
 
         const newMeta: any = { ...contatoMeta, receitas };
         if (isHighImpact) {
