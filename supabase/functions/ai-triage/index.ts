@@ -107,6 +107,8 @@ function mensagemEscaladaForaHorario(nomePrim: string): string {
 // Mensagem padrão quando OCR falha / receita ilegível. Mutável: ressincronizada
 // pelo loader; mantém uso síncrono nos vários pontos do fluxo.
 let MSG_PEDIR_RECEITA_TEXTO = _msgFixaDefaults.pedir_receita_texto;
+let MSG_PEDIR_RECEITA_TEXTO_BOTAO = _msgFixaDefaults.pedir_receita_texto_botao;
+
 
 // ═══════════════════════════════════════════
 // CONFIRMAÇÃO PÓS-OCR + CTA AGENDAMENTO + ESCOLHA CIDADE → LOJA (Mai/2026)
