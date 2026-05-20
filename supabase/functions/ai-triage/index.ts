@@ -83,6 +83,7 @@ async function loadMensagensFixas(client: any): Promise<void> {
         }
       }
       MSG_PEDIR_RECEITA_TEXTO = _msgFixaCache.pedir_receita_texto || _msgFixaDefaults.pedir_receita_texto;
+      MSG_PEDIR_RECEITA_TEXTO_BOTAO = _msgFixaCache.pedir_receita_texto_botao || _msgFixaDefaults.pedir_receita_texto_botao;
     }
   } catch (e) {
     console.warn("[ia_mensagens_fixas] load falhou, usando defaults", (e as Error)?.message);
