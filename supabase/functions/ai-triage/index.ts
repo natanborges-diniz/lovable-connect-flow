@@ -8314,7 +8314,7 @@ async function sendOrcamentoEstimativaLCDescartavel(
   }
 }
 
-
+async function routeButtonClick(args: {
   buttonId: string;
   atendimento: any;
   atendimentoMeta: Record<string, any>;
