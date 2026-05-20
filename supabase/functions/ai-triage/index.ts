@@ -2822,6 +2822,69 @@ serve(async (req) => {
     const contatoTipo = (contatoMetaRes.data as any)?.tipo || "cliente";
     let contatoNomeAtual = String((contatoMetaRes.data as any)?.nome || "").trim();
     console.log(`[PERF] load_all_data=${Date.now() - _t_load}ms`);
+
+    // ── PROTEÇÃO 2: auto-reset de pending órfão entre atendimentos ──
+    // Se o pending de receita foi marcado ANTES do início do atendimento atual,
+    // significa que sobrou de uma sessão antiga. Limpa silenciosamente.
+    try {
+      const rc = contatoMeta?.receita_confirmacao;
+      const askedAt = rc?.asked_at || rc?.solicitada_at || rc?.set_at;
+      const inicioAt = (atendimento as any)?.inicio_at;
+      if (rc?.pending === true && askedAt && inicioAt) {
+        const askedTs = Date.parse(String(askedAt));
+        const inicioTs = Date.parse(String(inicioAt));
+        if (!Number.isNaN(askedTs) && !Number.isNaN(inicioTs) && askedTs < inicioTs) {
+          const novoMeta = {
+            ...contatoMeta,
+            receita_confirmacao: { ...rc, pending: false, auto_reset_at: new Date().toISOString(), auto_reset_reason: "atendimento_novo" },
+          };
+          await supabase.from("contatos").update({ metadata: novoMeta }).eq("id", contatoId);
+          contatoMeta = novoMeta;
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_pending_auto_reset",
+            descricao: "Pending de receita herdado de atendimento anterior — limpo automaticamente",
+            metadata: { asked_at: askedAt, inicio_at: inicioAt },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          console.log("[RX-PENDING-RESET] pending órfão limpo (asked_at < inicio_at)");
+        }
+      }
+    } catch (e) {
+      console.warn("[RX-PENDING-RESET] falha:", e);
+    }
+
+    // ── PROTEÇÃO 4: watchdog de loop de confirmação de receita ──
+    // Se nas últimas 60min mandamos ≥3 mensagens "Li sua receita assim, confere?"
+    // ou "Anotei! Ficou assim:" SEM o cliente confirmar, audita em ia_feedbacks
+    // e marca flag pra forçar escalada humana neste turno.
+    let forcarEscaladaPorLoopReceita = false;
+    try {
+      const oneHourAgo = Date.now() - 60 * 60 * 1000;
+      const recentConfirmPrompts = (allMsgs || []).filter((m: any) => {
+        if (m.direcao !== "outbound") return false;
+        const ts = Date.parse(String(m.created_at || ""));
+        if (Number.isNaN(ts) || ts < oneHourAgo) return false;
+        const c = String(m.conteudo || "");
+        return /li sua receita assim, confere|anotei! ficou assim/i.test(c);
+      });
+      if (recentConfirmPrompts.length >= 3 && contatoMeta?.receita_confirmacao?.pending === true) {
+        forcarEscaladaPorLoopReceita = true;
+        console.warn(`[RX-LOOP-WATCHDOG] ${recentConfirmPrompts.length} prompts de confirmação em 1h sem resolução — forçando escalada`);
+        await supabase.from("ia_feedbacks").insert({
+          atendimento_id,
+          contato_id: contatoId,
+          avaliacao: "loop_receita_confirmacao",
+          mensagem_ia: recentConfirmPrompts[recentConfirmPrompts.length - 1]?.conteudo?.slice(0, 500) || "",
+          comentario: `Watchdog detectou ${recentConfirmPrompts.length} prompts de confirmação em 60min sem cliente confirmar/corrigir`,
+          metadata: { prompts_count: recentConfirmPrompts.length, janela_min: 60, receita_confirmacao: contatoMeta.receita_confirmacao },
+        }).then(() => {}, (e: any) => console.warn("[RX-LOOP-WATCHDOG] falha audit:", e));
+      }
+    } catch (e) {
+      console.warn("[RX-LOOP-WATCHDOG] falha:", e);
+    }
+
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
     const precisaConfirmarNome = contatoMeta.precisa_confirmar_nome === true && !nomeConfirmado;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
