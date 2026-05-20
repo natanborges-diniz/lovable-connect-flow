@@ -234,11 +234,9 @@ async function processLembreteVespera(
   supabase: any, now: Date, SUPABASE_URL: string, SERVICE_KEY: string, results: string[]
 ) {
   const spNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
-  // Roda só entre 08:00 e 08:59 SP. Cron de 5 em 5 min cobre.
   if (spNow.getHours() !== 8) return;
   if (!dentroDeJanelaComunicacaoCliente(now)) return;
 
-  // Janela "amanhã em SP" → ISO UTC
   const startSP = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate() + 1, 0, 0, 0);
   const endSP = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate() + 1, 23, 59, 59);
   const toUtcIso = (d: Date) => new Date(d.getTime() + 3 * 60 * 60 * 1000).toISOString();
@@ -257,7 +255,6 @@ async function processLembreteVespera(
     if (md.cliente_confirmou_at) continue;
     if (!ag.atendimento_id) continue;
 
-    // Lock atômico
     const stampNow = new Date().toISOString();
     const { data: locked } = await supabase
       .from("agendamentos")
@@ -268,39 +265,21 @@ async function processLembreteVespera(
       .maybeSingle();
     if (!locked) continue;
 
-    const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
-    const firstName = contato?.nome?.split(" ")[0] || "";
-    const dt = new Date(ag.data_horario);
-    const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
-    const lojaTxt = ag.loja_nome ? `*${ag.loja_nome}*` : "*Óticas Diniz*";
-    const msg = `Bom dia${firstName ? ", " + firstName : ""}! 👋 Passando pra confirmar sua visita amanhã às *${hora}* na ${lojaTxt}. Posso confirmar?`;
-
-    const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        atendimento_id: ag.atendimento_id,
-        remetente_nome: "Sistema",
-        interactive: {
-          type: "button",
-          texto: msg,
-          botoes: [
-            { id: "show_confirma", titulo: "✅ Confirmo" },
-            { id: "show_remarcar", titulo: "🔄 Remarcar" },
-            { id: "show_nao", titulo: "❌ Não vou" },
-          ],
-        },
-        texto: msg,
-      }),
-    });
+    const envio = await enviarLembreteCliente(supabase, SUPABASE_URL, SERVICE_KEY, ag, "vespera");
 
     await supabase.from("agendamentos").update({
       status: "lembrete_enviado",
       tentativas_lembrete: 1,
-      metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "vespera", lembrete_ok: sendRes.ok },
+      metadata: {
+        ...md,
+        lembrete_enviado_at: stampNow,
+        lembrete_tipo: "vespera",
+        lembrete_ok: envio.ok,
+        lembrete_via: envio.via,
+        lembrete_erro: envio.erro || null,
+      },
     }).eq("id", ag.id);
 
-    // Marca expected_reply no atendimento p/ router determinístico capturar respostas digitadas
     try {
       const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", ag.atendimento_id).maybeSingle();
       const atMd = (atRow?.metadata || {}) as Record<string, any>;
@@ -311,12 +290,13 @@ async function processLembreteVespera(
 
     await supabase.from("eventos_crm").insert({
       contato_id: ag.contato_id,
-      tipo: sendRes.ok ? "lembrete_vespera_enviado" : "lembrete_vespera_falha",
-      descricao: `Lembrete véspera ${sendRes.ok ? "enviado" : "falhou"} (${hora} ${ag.loja_nome || ""})`,
+      tipo: envio.ok ? "lembrete_vespera_enviado" : "lembrete_vespera_falha",
+      descricao: `Lembrete véspera ${envio.ok ? "enviado" : "falhou"} via ${envio.via} (${envio.horaTxt} ${ag.loja_nome || ""})`,
       referencia_id: ag.id,
       referencia_tipo: "agendamento",
+      metadata: { via: envio.via, ok: envio.ok, motivo: envio.erro || null },
     });
-    results.push(`lembrete_vespera:${ag.id}`);
+    results.push(`lembrete_vespera:${ag.id}:${envio.via}:${envio.ok ? "ok" : "fail"}`);
   }
 }
 
@@ -330,7 +310,6 @@ async function processLembrete1hAntes(
 ) {
   if (!dentroDeJanelaComunicacaoCliente(now)) return;
 
-  // Janela: agendamentos com data_horario entre now+55min e now+65min
   const lo = new Date(now.getTime() + 55 * 60 * 1000).toISOString();
   const hi = new Date(now.getTime() + 65 * 60 * 1000).toISOString();
 
@@ -348,13 +327,11 @@ async function processLembrete1hAntes(
     if (md.cliente_confirmou_at) continue;
     if (!ag.atendimento_id) continue;
 
-    // Antecedência de criação vs. horário do agendamento
     const created = new Date(ag.created_at).getTime();
     const dataAg = new Date(ag.data_horario).getTime();
     const antecedenciaMin = (dataAg - created) / (1000 * 60);
 
     if (antecedenciaMin < 60) {
-      // Marcado com menos de 1h de antecedência → não envia lembrete.
       await supabase.from("agendamentos").update({
         metadata: { ...md, lembrete_skip_motivo: "janela_curta", lembrete_skipped_at: new Date().toISOString() },
       }).eq("id", ag.id);
@@ -369,7 +346,6 @@ async function processLembrete1hAntes(
       continue;
     }
 
-    // Lock atômico
     const stampNow = new Date().toISOString();
     const { data: locked } = await supabase
       .from("agendamentos")
@@ -380,39 +356,21 @@ async function processLembrete1hAntes(
       .maybeSingle();
     if (!locked) continue;
 
-    const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
-    const firstName = contato?.nome?.split(" ")[0] || "";
-    const dt = new Date(ag.data_horario);
-    const hora = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
-    const lojaTxt = ag.loja_nome ? `*${ag.loja_nome}*` : "*Óticas Diniz*";
-    const msg = `Oi${firstName ? ", " + firstName : ""}! 👋 Passando pra lembrar da sua visita hoje às *${hora}* na ${lojaTxt}. Posso confirmar?`;
-
-    const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        atendimento_id: ag.atendimento_id,
-        remetente_nome: "Sistema",
-        interactive: {
-          type: "button",
-          texto: msg,
-          botoes: [
-            { id: "show_confirma", titulo: "✅ Confirmo" },
-            { id: "show_remarcar", titulo: "🔄 Remarcar" },
-            { id: "show_nao", titulo: "❌ Não vou" },
-          ],
-        },
-        texto: msg,
-      }),
-    });
+    const envio = await enviarLembreteCliente(supabase, SUPABASE_URL, SERVICE_KEY, ag, "1h_antes");
 
     await supabase.from("agendamentos").update({
       status: "lembrete_enviado",
       tentativas_lembrete: 1,
-      metadata: { ...md, lembrete_enviado_at: stampNow, lembrete_tipo: "1h_antes", lembrete_ok: sendRes.ok },
+      metadata: {
+        ...md,
+        lembrete_enviado_at: stampNow,
+        lembrete_tipo: "1h_antes",
+        lembrete_ok: envio.ok,
+        lembrete_via: envio.via,
+        lembrete_erro: envio.erro || null,
+      },
     }).eq("id", ag.id);
 
-    // Marca expected_reply no atendimento p/ router determinístico capturar respostas digitadas
     try {
       const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", ag.atendimento_id).maybeSingle();
       const atMd = (atRow?.metadata || {}) as Record<string, any>;
@@ -423,14 +381,113 @@ async function processLembrete1hAntes(
 
     await supabase.from("eventos_crm").insert({
       contato_id: ag.contato_id,
-      tipo: sendRes.ok ? "lembrete_1h_enviado" : "lembrete_1h_falha",
-      descricao: `Lembrete 1h antes ${sendRes.ok ? "enviado" : "falhou"} (${hora} ${ag.loja_nome || ""})`,
+      tipo: envio.ok ? "lembrete_1h_enviado" : "lembrete_1h_falha",
+      descricao: `Lembrete 1h antes ${envio.ok ? "enviado" : "falhou"} via ${envio.via} (${envio.horaTxt} ${ag.loja_nome || ""})`,
       referencia_id: ag.id,
       referencia_tipo: "agendamento",
+      metadata: { via: envio.via, ok: envio.ok, motivo: envio.erro || null },
     });
-    results.push(`lembrete_1h:${ag.id}`);
+    results.push(`lembrete_1h:${ag.id}:${envio.via}:${envio.ok ? "ok" : "fail"}`);
   }
 }
+
+// ═══════════════════════════════════════════
+// Helper unificado: envia lembrete tentando texto livre quando dentro de 24h;
+// fora da janela (ou em caso de outside_24h_window), faz fallback automático
+// para o template HSM aprovado `lembrete_visita` (alias → lembrete_agendamento).
+// ═══════════════════════════════════════════
+async function enviarLembreteCliente(
+  supabase: any,
+  SUPABASE_URL: string,
+  SERVICE_KEY: string,
+  ag: any,
+  tipoLembrete: "vespera" | "1h_antes",
+): Promise<{ ok: boolean; via: "texto" | "template" | "erro"; horaTxt: string; erro?: any }> {
+  const { data: contato } = await supabase.from("contatos").select("nome").eq("id", ag.contato_id).single();
+  const firstName = contato?.nome?.split(" ")[0] || "";
+  const fullName = contato?.nome || "cliente";
+  const dt = new Date(ag.data_horario);
+  const horaTxt = dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+  const dataTxt = dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Sao_Paulo" });
+  const lojaNome = ag.loja_nome || "Óticas Diniz";
+  const lojaTxt = `*${lojaNome}*`;
+
+  const msg = tipoLembrete === "vespera"
+    ? `Bom dia${firstName ? ", " + firstName : ""}! 👋 Passando pra confirmar sua visita amanhã às *${horaTxt}* na ${lojaTxt}. Posso confirmar?`
+    : `Oi${firstName ? ", " + firstName : ""}! 👋 Passando pra lembrar da sua visita hoje às *${horaTxt}* na ${lojaTxt}. Posso confirmar?`;
+
+  // Pré-check da janela 24h pra evitar tentativa fadada ao 422.
+  let foraDe24h = true;
+  try {
+    const { data: lastInbound } = await supabase
+      .from("mensagens")
+      .select("created_at")
+      .eq("atendimento_id", ag.atendimento_id)
+      .eq("direcao", "inbound")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastInbound) {
+      const horas = (Date.now() - new Date(lastInbound.created_at).getTime()) / 3_600_000;
+      foraDe24h = horas > 24;
+    }
+  } catch (_) { /* assume fora */ }
+
+  // 1) Dentro da janela: tenta texto livre interativo (UX melhor com botões)
+  if (!foraDe24h) {
+    try {
+      const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          atendimento_id: ag.atendimento_id,
+          remetente_nome: "Sistema",
+          interactive: {
+            type: "button",
+            texto: msg,
+            botoes: [
+              { id: "show_confirma", titulo: "✅ Confirmo" },
+              { id: "show_remarcar", titulo: "🔄 Remarcar" },
+              { id: "show_nao", titulo: "❌ Não vou" },
+            ],
+          },
+          texto: msg,
+        }),
+      });
+      if (sendRes.ok) return { ok: true, via: "texto", horaTxt };
+      const errBody = await sendRes.json().catch(() => ({}));
+      if (!(sendRes.status === 422 && errBody?.error === "outside_24h_window")) {
+        return { ok: false, via: "texto", horaTxt, erro: { status: sendRes.status, ...errBody } };
+      }
+      // outside_24h_window → cai pro template abaixo
+    } catch (e) {
+      return { ok: false, via: "texto", horaTxt, erro: { exception: String(e) } };
+    }
+  }
+
+  // 2) Fora da janela: dispara template HSM aprovado
+  try {
+    const tplRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contato_id: ag.contato_id,
+        template_alias: "lembrete_visita",
+        template_params: [fullName, lojaNome, dataTxt, horaTxt],
+        language: "pt_BR",
+      }),
+    });
+    const body = await tplRes.json().catch(() => ({}));
+    if (tplRes.ok && body?.status === "sent") {
+      return { ok: true, via: "template", horaTxt };
+    }
+    return { ok: false, via: "template", horaTxt, erro: { status: tplRes.status, ...body } };
+  } catch (e) {
+    return { ok: false, via: "template", horaTxt, erro: { exception: String(e) } };
+  }
+}
+
+
 
 
 // ═══════════════════════════════════════════
