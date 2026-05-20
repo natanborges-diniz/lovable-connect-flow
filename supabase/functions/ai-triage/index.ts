@@ -8302,7 +8302,7 @@ async function routeButtonClick(args: {
         label: "Ver opções",
         secao: "Posso te ajudar com",
         itens: [
-          { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa pelo seu grau" },
+          { id: "orcamento", titulo: "💰 Orçamento", descricao: "Óculos ou lentes de contato" },
           { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
           { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
           { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
