@@ -324,8 +324,22 @@ function detectRxRejeicao(text: string): boolean {
     || /\b(t[áa]\s+errad|est[áa]\s+errad|n[ãa]o\s+confere|nao\s*[eé]\s+isso|errou|esses?\s+valores?\s+est[aã]o\s+errad)\b/.test(t);
 }
 
+// PROTEÇÃO 1 (TTL): pending de receita expira em 24h.
+// Evita que cliente que sumiu e voltou dias depois caia em loop de
+// "confirme essa receita" referenciando uma leitura velha.
+const RECEITA_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 function isReceitaPending(metadata: any): boolean {
-  return metadata?.receita_confirmacao?.pending === true;
+  const rc = metadata?.receita_confirmacao;
+  if (!rc || rc.pending !== true) return false;
+  const ts = rc.asked_at || rc.solicitada_at || rc.set_at;
+  if (!ts) return true; // sem timestamp = legado, mantém pending
+  const askedAt = Date.parse(String(ts));
+  if (Number.isNaN(askedAt)) return true;
+  if (Date.now() - askedAt > RECEITA_PENDING_TTL_MS) {
+    console.log(`[RX-PENDING-TTL] pending expirado (${Math.round((Date.now()-askedAt)/3600000)}h) — ignorando`);
+    return false;
+  }
+  return true;
 }
 
 function detectExpectedReplyAction(expectedReply: unknown, text: string): string | null {
