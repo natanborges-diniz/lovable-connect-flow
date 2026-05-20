@@ -8248,7 +8248,73 @@ Qual dia e horário ficaria melhor pra você? 😊`,
   });
 }
 
-async function routeButtonClick(args: {
+// Estimativa de LC descartável: usa o produto DNZ esférico não-tórico mais barato
+// do catálogo (pricing_lentes_contato) como ponto de partida. NÃO substitui a cotação
+// real (que exige receita), mas mantém o cliente engajado quando ele não tem receita,
+// não sabe o tipo, ou tem receita só de óculos fora do horário comercial.
+async function sendOrcamentoEstimativaLCDescartavel(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+  ctx: { motivo: "tipo_indefinido" | "cliente_nao_sabe" | "sem_receita_lc" | "receita_oculos_fora_horario" },
+): Promise<void> {
+  let preco = "R$ 204,99/caixa"; // fallback (DNZ Mensal — atualizado Mai/2026)
+  let produto = "DNZ Mensal";
+  let unidadesCx = 6;
+  try {
+    const { data } = await supabase
+      .from("pricing_lentes_contato")
+      .select("produto, price_brl, unidades_por_caixa, descarte")
+      .eq("is_dnz", true)
+      .eq("is_toric", false)
+      .eq("active", true)
+      .order("price_brl", { ascending: true })
+      .limit(1);
+    if (Array.isArray(data) && data.length > 0) {
+      const it = data[0];
+      const v = typeof it.price_brl === "number" ? it.price_brl : Number(it.price_brl);
+      if (Number.isFinite(v)) {
+        preco = `R$ ${v.toFixed(2).replace(".", ",")}/caixa`;
+        produto = String(it.produto || produto);
+        unidadesCx = Number(it.unidades_por_caixa || unidadesCx);
+      }
+    }
+  } catch (e) {
+    console.warn("[EST-LC] falha ao consultar pricing_lentes_contato — usando fallback:", (e as Error)?.message);
+  }
+
+  const intro =
+    ctx.motivo === "receita_oculos_fora_horario"
+      ? "Pra LC com receita de óculos, o consultor especializado faz a conversão certinha — ele te atende assim que o expediente abrir 🙌\n\nEnquanto isso, te dou um *ponto de partida* de valor pra você ir se planejando:"
+      : ctx.motivo === "cliente_nao_sabe"
+      ? "Sem stress! Te passo um *ponto de partida* de valor com a opção mais em conta da casa:"
+      : ctx.motivo === "sem_receita_lc"
+      ? "Sem a receita não consigo fechar o valor exato, mas te dou um *ponto de partida* com a opção mais em conta:"
+      : "Te passo um *ponto de partida* de valor com a opção mais em conta de LC descartável:";
+
+  const corpo = `\n\n👁️ *${produto}* — a partir de *${preco}* (${unidadesCx} lentes por caixa)`;
+
+  const fechamento =
+    ctx.motivo === "receita_oculos_fora_horario"
+      ? "\n\n_Esse é o valor base. O produto em si quase não muda de preço entre as opções de descartável, mas a confirmação só sai com a receita certa em mãos — o consultor já te ajuda com isso assim que o expediente abrir._ 😊"
+      : "\n\n_Esse é o valor base. O produto quase não muda de preço entre as opções de descartável, mas a confirmação só sai com a receita de LC em mãos (curvatura e material podem mudar a indicação)._\n\nQuer agendar uma visita pra fechar com a receita certa? 😊";
+
+  try {
+    await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, intro + corpo + fechamento);
+    await supabase.from("eventos_crm").insert({
+      tipo: "orcamento_lc_estimativa_dnz",
+      descricao: `Estimativa LC descartável enviada (${ctx.motivo}) — ${produto} ${preco}`,
+      metadata: { motivo: ctx.motivo, produto, preco },
+      referencia_tipo: "atendimento",
+      referencia_id: atendimentoId,
+    });
+  } catch (e) {
+    console.error("[EST-LC] falha ao enviar estimativa:", e);
+  }
+}
+
+
   buttonId: string;
   atendimento: any;
   atendimentoMeta: Record<string, any>;
