@@ -355,6 +355,13 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
     return null;
   }
 
+  if (stage === "receita_digitada") {
+    if (/\b(foto|imagem|anexo|pdf|arquivo|mandar foto|enviar foto)\b/.test(t)) return "receita_foto";
+    if (/\b(nao tenho|não tenho|sem receita|nao possuo|não possuo|nao tenho receita|não tenho receita)\b/.test(t)) return "receita_sem";
+    if (/\b(orcamento|orçamento|preco|preço|valor|cotacao|cotação|quanto custa|quanto fica)\b/.test(t)) return "receita_digitar";
+    return null;
+  }
+
   if (stage === "adicional_lentes") {
     if (/\b(luz azul|filtro azul|anti blue|antiblue|blue cut|azul)\b/.test(t)) return "adicional_azul";
     if (/\b(fotossensivel|fotocromatica|fotocromatico|transitions|escurece no sol)\b/.test(t)) return "adicional_foto";
@@ -4652,13 +4659,18 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
         typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*|beleza! me passa por texto/i.test(o)
       );
+      const clienteAcabouDeEscolherDigitacao = (inboundMsgs || []).slice(-3).some((m: any) => {
+        const txt = String(m?.conteudo || "");
+        const tipo = String(m?.tipo_conteudo || "");
+        return tipo === "interactive_reply" && /⌨️\s*Digitar valores|✏️\s*Corrigir/i.test(txt);
+      });
       // Quando o cliente clicou em "⌨️ Digitar valores" / "✏️ Corrigir", o atendimento
       // fica com expected_reply = "receita_digitada". Nesse caso a digitação é uma
       // RECEITA NOVA standalone — NÃO deve herdar cilindro/eixo/add de uma receita
       // antiga salva no contato (causava hallucination: cliente digita só esférico
       // e IA confirma com CIL/EIXO/ADD herdados — caso Natan 20/05).
       const aguardandoDigitada = atendimentoMeta?.expected_reply === "receita_digitada";
-      const treatAsFreshRx = iaJustAskedForText || aguardandoDigitada;
+      const treatAsFreshRx = iaJustAskedForText || aguardandoDigitada || clienteAcabouDeEscolherDigitacao;
       const isFirst = receitas.length === 0;
       // Strong signal: pelo menos UM olho com esfera definida E rótulo explícito de olho
       // (OD/OE/OS) no texto — evita padrões isolados como "-2.50" sem contexto, mas aceita
@@ -4681,6 +4693,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         // Caso contrário ⇒ correção da última receita (mantém merge para corrigir
         // só campos enviados, ex.: cliente diz "OD na verdade é -2,25" e mantém OE).
         const useFreshSlot = treatAsFreshRx || isFirst;
+        const isStandaloneTyped = useFreshSlot;
         const idx = useFreshSlot ? receitas.length : receitas.length - 1;
         const old: any = useFreshSlot ? {} : (receitas[idx] || {});
         const merged = {
@@ -4698,10 +4711,10 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           },
           confidence: 0.99,
           data_leitura: new Date().toISOString(),
-          source: useFreshSlot ? "client_typed_first" : "client_correction",
+          source: isStandaloneTyped ? "client_typed_first" : "client_correction",
           raw_correction: correction.raw,
           needs_human_review: false,
-          label: old.label || (useFreshSlot ? "digitada pelo cliente" : undefined),
+          label: old.label || (isStandaloneTyped ? "digitada pelo cliente" : undefined),
         };
         // ── Detecta correção de ALTO IMPACTO ──
         // Só faz sentido em MODO CORREÇÃO (useFreshSlot=false) — receita standalone
@@ -4721,6 +4734,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
 
         const newMeta: any = { ...contatoMeta, receitas };
+        if (isStandaloneTyped && contatoMeta?.receita_confirmacao?.pending === true) {
+          newMeta.receita_confirmacao = {
+            ...(contatoMeta.receita_confirmacao || {}),
+            pending: false,
+            superseded_at: new Date().toISOString(),
+            superseded_by: "receita_digitada_fresca",
+          };
+        }
         if (isHighImpact) {
           newMeta.receita_confirmacao = {
             pending: true,
@@ -4740,9 +4761,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           contato_id: contatoId,
           tipo: isHighImpact
             ? "receita_corrigida_alto_impacto"
-            : (isFirst ? "receita_digitada_pelo_cliente" : "receita_corrigida_pelo_cliente"),
-          descricao: `Cliente ${isFirst ? "digitou" : "corrigiu"} receita por texto. Tipo: ${correction.rx_type}${isHighImpact ? ` [ALTO IMPACTO Δ=${Math.max(deltaOd,deltaOe).toFixed(2)} max=${maxNewAbs}]` : ""}`,
-          metadata: { od: correction.od, oe: correction.oe, rx_type: correction.rx_type, raw: correction.raw, mode: isFirst ? "first" : "correction", high_impact: isHighImpact, delta_od: deltaOd, delta_oe: deltaOe, max_abs: maxNewAbs },
+            : (isStandaloneTyped ? "receita_digitada_pelo_cliente" : "receita_corrigida_pelo_cliente"),
+          descricao: `Cliente ${isStandaloneTyped ? "digitou" : "corrigiu"} receita por texto. Tipo: ${correction.rx_type}${isHighImpact ? ` [ALTO IMPACTO Δ=${Math.max(deltaOd,deltaOe).toFixed(2)} max=${maxNewAbs}]` : ""}`,
+          metadata: { od: correction.od, oe: correction.oe, rx_type: correction.rx_type, raw: correction.raw, mode: isStandaloneTyped ? "first" : "correction", high_impact: isHighImpact, delta_od: deltaOd, delta_oe: deltaOe, max_abs: maxNewAbs },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
@@ -4828,11 +4849,11 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           : `\n⚠️ A última receita foi CORRIGIDA pelo cliente nesta mensagem. Use estes valores como verdade — NÃO mencione os valores antigos.`;
 
         correctionApplied = true;
-        correctionIsFirst = isFirst;
+        correctionIsFirst = isStandaloneTyped;
         // Atualiza flag para que forcedIntent (calculado logo abaixo) use o estado correto
         // e não force pedido de foto mesmo com receita recém-salva.
-        if (isFirst) hasValidReceitas = true;
-        console.log(`[RX-${isFirst ? "FIRST-TYPED" : "CORRECTION"}] rx_type=${correction.rx_type}, OD.sph=${correction.od.sphere}, OE.sph=${correction.oe.sphere}`);
+        if (isStandaloneTyped) hasValidReceitas = true;
+        console.log(`[RX-${isStandaloneTyped ? "FIRST-TYPED" : "CORRECTION"}] rx_type=${correction.rx_type}, OD.sph=${correction.od.sphere}, OE.sph=${correction.oe.sphere}`);
       }
     }
 
@@ -8509,9 +8530,27 @@ async function routeButtonClick(args: {
       await patchMeta({ aguardando_receita_foto: true, expected_reply: "receita_foto" });
       return true;
     case "receita_digitar":
+    case "receita_corrigir": {
+      const origem = buttonId === "receita_corrigir" ? "botao_receita_corrigir" : "botao_receita_digitar";
       await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO_BOTAO);
-      await patchMeta({ expected_reply: "receita_digitada" });
+      await patchMeta({ receita_pending: null, expected_reply: "receita_digitada" });
+      try {
+        const { data: cRow } = await supabase.from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+        const cMeta = (cRow?.metadata || {}) as Record<string, any>;
+        if (cMeta?.receita_confirmacao?.pending === true) {
+          cMeta.receita_confirmacao = {
+            ...cMeta.receita_confirmacao,
+            pending: false,
+            superseded_at: new Date().toISOString(),
+            superseded_by: origem,
+          };
+          await supabase.from("contatos").update({ metadata: cMeta }).eq("id", atendimento.contato_id);
+        }
+      } catch (e) {
+        console.warn(`[${origem}] falha ao limpar pending no contato:`, e);
+      }
       return true;
+    }
     case "receita_sem": {
       // Sem receita + contexto LC → vai direto pra estimativa DNZ mensal.
       if (atendimentoMeta?.contexto_lc === true) {
@@ -8549,10 +8588,6 @@ async function routeButtonClick(args: {
       }
       return false;
     }
-    case "receita_corrigir":
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO_BOTAO);
-      await patchMeta({ receita_pending: null, expected_reply: "receita_digitada" });
-      return true;
     case "adicional_azul":
       await patchMeta({ adicionais_pending: { filtro_blue: true }, expected_reply: null });
       await runQuoteWithFilter(supabase, supabaseUrl, serviceKey, atendimento, { filtro_blue: true });
