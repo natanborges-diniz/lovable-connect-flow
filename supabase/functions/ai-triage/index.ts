@@ -61,6 +61,8 @@ const _msgFixaDefaults: Record<string, string> = {
     "Vou acionar nossa equipe pra você{nome_saud}! 🙌 Só um detalhe: nosso time humano atende de seg a sex das 09h às 18h e sábado das 08h às 12h. Como estamos fora do horário agora, assim que abrir o próximo expediente ({proxima_abertura}), eles te respondem por aqui. Pode deixar registrado o que precisa que já encaminho 😉",
   pedir_receita_texto:
     "Tô tendo dificuldade de ler os valores na foto 😅 Pode me passar por texto, por favor?\n\nPreciso de:\n• *OD* (olho direito): esférico / cilíndrico / eixo (e adição se tiver)\n• *OE* (olho esquerdo): esférico / cilíndrico / eixo (e adição se tiver)\n\nEx: *OD -2,00 cil -0,75 eixo 180* / *OE -1,75 cil -0,50 eixo 170*\n\nSe preferir, mande outra foto com a receita inteira no enquadramento e boa iluminação 📸",
+  pedir_receita_texto_botao:
+    "Beleza! Me passa por texto então 😊\n\nPreciso de:\n• *OD* (olho direito): esférico / cilíndrico / eixo (e adição se tiver)\n• *OE* (olho esquerdo): esférico / cilíndrico / eixo (e adição se tiver)\n\nEx: *OD -2,00 cil -0,75 eixo 180* / *OE -1,75 cil -0,50 eixo 170*\n\nSe não tiver cilindro/eixo, manda só o esférico mesmo 👌",
   despedida_explicit_close:
     "Foi um prazer te atender{nome_comma}! 🙏 Obrigado pelo contato{tail}. Qualquer coisa, é só me chamar 👋",
   despedida_thanks:
@@ -81,6 +83,7 @@ async function loadMensagensFixas(client: any): Promise<void> {
         }
       }
       MSG_PEDIR_RECEITA_TEXTO = _msgFixaCache.pedir_receita_texto || _msgFixaDefaults.pedir_receita_texto;
+      MSG_PEDIR_RECEITA_TEXTO_BOTAO = _msgFixaCache.pedir_receita_texto_botao || _msgFixaDefaults.pedir_receita_texto_botao;
     }
   } catch (e) {
     console.warn("[ia_mensagens_fixas] load falhou, usando defaults", (e as Error)?.message);
@@ -104,6 +107,8 @@ function mensagemEscaladaForaHorario(nomePrim: string): string {
 // Mensagem padrão quando OCR falha / receita ilegível. Mutável: ressincronizada
 // pelo loader; mantém uso síncrono nos vários pontos do fluxo.
 let MSG_PEDIR_RECEITA_TEXTO = _msgFixaDefaults.pedir_receita_texto;
+let MSG_PEDIR_RECEITA_TEXTO_BOTAO = _msgFixaDefaults.pedir_receita_texto_botao;
+
 
 // ═══════════════════════════════════════════
 // CONFIRMAÇÃO PÓS-OCR + CTA AGENDAMENTO + ESCOLHA CIDADE → LOJA (Mai/2026)
@@ -3044,7 +3049,7 @@ serve(async (req) => {
               label: "Ver opções",
               secao: "Posso te ajudar com",
               itens: [
-                { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa pelo seu grau" },
+                { id: "orcamento", titulo: "💰 Orçamento", descricao: "Óculos ou lentes de contato" },
                 { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
                 { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
                 { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
@@ -4645,8 +4650,15 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     const correction = detectPrescriptionCorrection(lastInboundText);
     if (correction) {
       const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
-        typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*/i.test(o)
+        typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*|beleza! me passa por texto/i.test(o)
       );
+      // Quando o cliente clicou em "⌨️ Digitar valores" / "✏️ Corrigir", o atendimento
+      // fica com expected_reply = "receita_digitada". Nesse caso a digitação é uma
+      // RECEITA NOVA standalone — NÃO deve herdar cilindro/eixo/add de uma receita
+      // antiga salva no contato (causava hallucination: cliente digita só esférico
+      // e IA confirma com CIL/EIXO/ADD herdados — caso Natan 20/05).
+      const aguardandoDigitada = atendimentoMeta?.expected_reply === "receita_digitada";
+      const treatAsFreshRx = iaJustAskedForText || aguardandoDigitada;
       const isFirst = receitas.length === 0;
       // Strong signal: pelo menos UM olho com esfera definida E rótulo explícito de olho
       // (OD/OE/OS) no texto — evita padrões isolados como "-2.50" sem contexto, mas aceita
@@ -4665,8 +4677,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         if (isFirst && !iaJustAskedForText && hasStrongRxSignal) {
           console.log(`[RX-FIRST-TYPED] Accepted via strong signal (rótulo OD/OE + esfera em ≥1 olho)`);
         }
-        const idx = isFirst ? 0 : receitas.length - 1;
-        const old: any = isFirst ? {} : (receitas[idx] || {});
+        // treatAsFreshRx ⇒ receita standalone (não herda nada de receitas antigas).
+        // Caso contrário ⇒ correção da última receita (mantém merge para corrigir
+        // só campos enviados, ex.: cliente diz "OD na verdade é -2,25" e mantém OE).
+        const useFreshSlot = treatAsFreshRx || isFirst;
+        const idx = useFreshSlot ? receitas.length : receitas.length - 1;
+        const old: any = useFreshSlot ? {} : (receitas[idx] || {});
         const merged = {
           ...old,
           eyes: {
@@ -4682,26 +4698,27 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           },
           confidence: 0.99,
           data_leitura: new Date().toISOString(),
-          source: isFirst ? "client_typed_first" : "client_correction",
+          source: useFreshSlot ? "client_typed_first" : "client_correction",
           raw_correction: correction.raw,
           needs_human_review: false,
-          label: old.label || (isFirst ? "digitada pelo cliente" : undefined),
+          label: old.label || (useFreshSlot ? "digitada pelo cliente" : undefined),
         };
         // ── Detecta correção de ALTO IMPACTO ──
-        // Se a esfera mudou ≥0,75D em qualquer olho OU a esfera nova é >|10|D (lente especial),
-        // OBRIGA confirmação explícita do cliente antes de cotar/escalar.
-        const oldOdSph = typeof old?.eyes?.od?.sphere === "number" ? old.eyes.od.sphere : null;
-        const oldOeSph = typeof old?.eyes?.oe?.sphere === "number" ? old.eyes.oe.sphere : null;
+        // Só faz sentido em MODO CORREÇÃO (useFreshSlot=false) — receita standalone
+        // não tem "anterior" para comparar. maxNewAbs>10 segue valendo (lente especial).
+        const oldOdSph = (!useFreshSlot && typeof old?.eyes?.od?.sphere === "number") ? old.eyes.od.sphere : null;
+        const oldOeSph = (!useFreshSlot && typeof old?.eyes?.oe?.sphere === "number") ? old.eyes.oe.sphere : null;
         const newOdSph = typeof correction.od?.sphere === "number" ? correction.od.sphere : null;
         const newOeSph = typeof correction.oe?.sphere === "number" ? correction.oe.sphere : null;
         const deltaOd = (oldOdSph != null && newOdSph != null) ? Math.abs(newOdSph - oldOdSph) : 0;
         const deltaOe = (oldOeSph != null && newOeSph != null) ? Math.abs(newOeSph - oldOeSph) : 0;
         const maxNewAbs = Math.max(Math.abs(newOdSph ?? 0), Math.abs(newOeSph ?? 0));
-        const isHighImpact = (!isFirst && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs > 10;
+        const isHighImpact = (!useFreshSlot && (deltaOd >= 0.75 || deltaOe >= 0.75)) || maxNewAbs > 10;
 
         // Marca a receita recém-gravada como NÃO confirmada pelo cliente
         merged.confirmed_by_client_at = null;
-        if (isFirst) receitas.push(merged); else receitas[idx] = merged;
+        if (useFreshSlot) receitas.push(merged); else receitas[idx] = merged;
+
 
         const newMeta: any = { ...contatoMeta, receitas };
         if (isHighImpact) {
@@ -5810,7 +5827,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                 label: "Ver opções",
                 secao: "Posso te ajudar com",
                 itens: [
-                  { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa de lentes pelo seu grau" },
+                  { id: "orcamento", titulo: "💰 Orçamento", descricao: "Óculos ou lentes de contato" },
                   { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
                   { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
                   { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Falar sobre produtos / serviços" },
@@ -8231,6 +8248,72 @@ Qual dia e horário ficaria melhor pra você? 😊`,
   });
 }
 
+// Estimativa de LC descartável: usa o produto DNZ esférico não-tórico mais barato
+// do catálogo (pricing_lentes_contato) como ponto de partida. NÃO substitui a cotação
+// real (que exige receita), mas mantém o cliente engajado quando ele não tem receita,
+// não sabe o tipo, ou tem receita só de óculos fora do horário comercial.
+async function sendOrcamentoEstimativaLCDescartavel(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+  ctx: { motivo: "tipo_indefinido" | "cliente_nao_sabe" | "sem_receita_lc" | "receita_oculos_fora_horario" },
+): Promise<void> {
+  let preco = "R$ 204,99/caixa"; // fallback (DNZ Mensal — atualizado Mai/2026)
+  let produto = "DNZ Mensal";
+  let unidadesCx = 6;
+  try {
+    const { data } = await supabase
+      .from("pricing_lentes_contato")
+      .select("produto, price_brl, unidades_por_caixa, descarte")
+      .eq("is_dnz", true)
+      .eq("is_toric", false)
+      .eq("active", true)
+      .order("price_brl", { ascending: true })
+      .limit(1);
+    if (Array.isArray(data) && data.length > 0) {
+      const it = data[0];
+      const v = typeof it.price_brl === "number" ? it.price_brl : Number(it.price_brl);
+      if (Number.isFinite(v)) {
+        preco = `R$ ${v.toFixed(2).replace(".", ",")}/caixa`;
+        produto = String(it.produto || produto);
+        unidadesCx = Number(it.unidades_por_caixa || unidadesCx);
+      }
+    }
+  } catch (e) {
+    console.warn("[EST-LC] falha ao consultar pricing_lentes_contato — usando fallback:", (e as Error)?.message);
+  }
+
+  const intro =
+    ctx.motivo === "receita_oculos_fora_horario"
+      ? "Pra LC com receita de óculos, o consultor especializado faz a conversão certinha — ele te atende assim que o expediente abrir 🙌\n\nEnquanto isso, te dou um *ponto de partida* de valor pra você ir se planejando:"
+      : ctx.motivo === "cliente_nao_sabe"
+      ? "Sem stress! Te passo um *ponto de partida* de valor com a opção mais em conta da casa:"
+      : ctx.motivo === "sem_receita_lc"
+      ? "Sem a receita não consigo fechar o valor exato, mas te dou um *ponto de partida* com a opção mais em conta:"
+      : "Te passo um *ponto de partida* de valor com a opção mais em conta de LC descartável:";
+
+  const corpo = `\n\n👁️ *${produto}* — a partir de *${preco}* (${unidadesCx} lentes por caixa)`;
+
+  const fechamento =
+    ctx.motivo === "receita_oculos_fora_horario"
+      ? "\n\n_Esse é o valor base. O produto em si quase não muda de preço entre as opções de descartável, mas a confirmação só sai com a receita certa em mãos — o consultor já te ajuda com isso assim que o expediente abrir._ 😊"
+      : "\n\n_Esse é o valor base. O produto quase não muda de preço entre as opções de descartável, mas a confirmação só sai com a receita de LC em mãos (curvatura e material podem mudar a indicação)._\n\nQuer agendar uma visita pra fechar com a receita certa? 😊";
+
+  try {
+    await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, intro + corpo + fechamento);
+    await supabase.from("eventos_crm").insert({
+      tipo: "orcamento_lc_estimativa_dnz",
+      descricao: `Estimativa LC descartável enviada (${ctx.motivo}) — ${produto} ${preco}`,
+      metadata: { motivo: ctx.motivo, produto, preco },
+      referencia_tipo: "atendimento",
+      referencia_id: atendimentoId,
+    });
+  } catch (e) {
+    console.error("[EST-LC] falha ao enviar estimativa:", e);
+  }
+}
+
 async function routeButtonClick(args: {
   buttonId: string;
   atendimento: any;
@@ -8285,7 +8368,7 @@ async function routeButtonClick(args: {
         label: "Ver opções",
         secao: "Posso te ajudar com",
         itens: [
-          { id: "orcamento", titulo: "💰 Orçamento de óculos", descricao: "Estimativa pelo seu grau" },
+          { id: "orcamento", titulo: "💰 Orçamento", descricao: "Óculos ou lentes de contato" },
           { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
           { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
           { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
@@ -8331,14 +8414,78 @@ async function routeButtonClick(args: {
     case "orcamento":
       await sendInteractive(supabaseUrl, serviceKey, atId, {
         type: "button",
-        texto: "Pra te passar um orçamento certinho, preciso da sua receita 😊 Como prefere enviar?",
+        texto: "Beleza! O orçamento é pra qual tipo de lente? 😊",
+        botoes: [
+          { id: "orcamento_oculos", titulo: "👓 Óculos" },
+          { id: "orcamento_lc", titulo: "👁️ Lentes de contato" },
+          { id: "orcamento_indef", titulo: "🤔 Ainda não sei" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento", expected_reply: "orcamento_tipo" });
+      return true;
+    case "orcamento_oculos":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Pra te passar um orçamento de óculos certinho, preciso da sua receita 😊 Como prefere enviar?",
         botoes: [
           { id: "receita_foto", titulo: "📷 Enviar foto" },
           { id: "receita_digitar", titulo: "⌨️ Digitar valores" },
           { id: "receita_sem", titulo: "📄 Não tenho" },
         ],
       });
-      await patchMeta({ intent_detected: "orcamento", expected_reply: "receita_envio" });
+      await patchMeta({ intent_detected: "orcamento", contexto_lc: false, expected_reply: "receita_envio" });
+      return true;
+    case "orcamento_lc":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Pra LC, uma dúvida antes 😊 Sua receita atual é de óculos ou já é específica de lentes de contato?",
+        botoes: [
+          { id: "lc_rx_lc", titulo: "👁️ É de LC" },
+          { id: "lc_rx_oculos", titulo: "👓 É de óculos" },
+          { id: "lc_rx_naosei", titulo: "🤔 Não sei" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: "lc_tipo_receita" });
+      return true;
+    case "orcamento_indef":
+      await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "tipo_indefinido" });
+      await patchMeta({ intent_detected: "orcamento_indef", expected_reply: null });
+      return true;
+    case "lc_rx_lc":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Perfeito! Pra te passar o orçamento certinho de lentes de contato, me manda a receita 😊",
+        botoes: [
+          { id: "receita_foto", titulo: "📷 Enviar foto" },
+          { id: "receita_digitar", titulo: "⌨️ Digitar valores" },
+          { id: "receita_sem", titulo: "📄 Não tenho" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: "receita_envio" });
+      return true;
+    case "lc_rx_oculos": {
+      // Receita de óculos → consultor especializado converte. Fora do horário, estimativa.
+      if (isHorarioHumano()) {
+        await sendWhatsApp(
+          supabaseUrl, serviceKey, atId,
+          "Pra LC com receita de óculos, vou te conectar com um consultor especializado pra fazer a conversão direitinho 🙌 Só um instante!",
+        );
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+        await supabase.from("eventos_crm").insert({
+          contato_id: atendimento.contato_id,
+          tipo: "lc_conversao_receita_oculos",
+          descricao: "Cliente quer LC mas só tem receita de óculos — escalado para conversor especializado",
+          referencia_tipo: "atendimento", referencia_id: atId,
+        });
+      } else {
+        await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "receita_oculos_fora_horario" });
+      }
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: null });
+      return true;
+    }
+    case "lc_rx_naosei":
+      await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "cliente_nao_sabe" });
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: null });
       return true;
     case "status_pedido":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂");
@@ -8362,13 +8509,20 @@ async function routeButtonClick(args: {
       await patchMeta({ aguardando_receita_foto: true, expected_reply: "receita_foto" });
       return true;
     case "receita_digitar":
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO_BOTAO);
       await patchMeta({ expected_reply: "receita_digitada" });
       return true;
-    case "receita_sem":
+    case "receita_sem": {
+      // Sem receita + contexto LC → vai direto pra estimativa DNZ mensal.
+      if (atendimentoMeta?.contexto_lc === true) {
+        await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "sem_receita_lc" });
+        await patchMeta({ intent_detected: "orcamento_lentes_contato", expected_reply: null });
+        return true;
+      }
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Sem a receita não consigo fechar valor exato, mas posso te dar uma faixa estimada. Você usa óculos pra perto, pra longe, ou multifocal? 😊");
       await patchMeta({ intent_detected: "sem_receita", expected_reply: "sem_receita_tipo" });
       return true;
+    }
     case "receita_ok": {
       if (atendimentoMeta.receita_pending) {
         await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString(), expected_reply: "adicional_lentes" });
@@ -8396,7 +8550,7 @@ async function routeButtonClick(args: {
       return false;
     }
     case "receita_corrigir":
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO_BOTAO);
       await patchMeta({ receita_pending: null, expected_reply: "receita_digitada" });
       return true;
     case "adicional_azul":
