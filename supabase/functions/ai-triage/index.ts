@@ -2385,7 +2385,7 @@ serve(async (req) => {
     // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
       .from("atendimentos")
-      .select("id, contato_id, canal, canal_provedor, modo, metadata")
+      .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at")
       .eq("id", atendimento_id)
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
