@@ -8348,14 +8348,78 @@ async function routeButtonClick(args: {
     case "orcamento":
       await sendInteractive(supabaseUrl, serviceKey, atId, {
         type: "button",
-        texto: "Pra te passar um orçamento certinho, preciso da sua receita 😊 Como prefere enviar?",
+        texto: "Beleza! O orçamento é pra qual tipo de lente? 😊",
+        botoes: [
+          { id: "orcamento_oculos", titulo: "👓 Óculos" },
+          { id: "orcamento_lc", titulo: "👁️ Lentes de contato" },
+          { id: "orcamento_indef", titulo: "🤔 Ainda não sei" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento", expected_reply: "orcamento_tipo" });
+      return true;
+    case "orcamento_oculos":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Pra te passar um orçamento de óculos certinho, preciso da sua receita 😊 Como prefere enviar?",
         botoes: [
           { id: "receita_foto", titulo: "📷 Enviar foto" },
           { id: "receita_digitar", titulo: "⌨️ Digitar valores" },
           { id: "receita_sem", titulo: "📄 Não tenho" },
         ],
       });
-      await patchMeta({ intent_detected: "orcamento", expected_reply: "receita_envio" });
+      await patchMeta({ intent_detected: "orcamento", contexto_lc: false, expected_reply: "receita_envio" });
+      return true;
+    case "orcamento_lc":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Pra LC, uma dúvida antes 😊 Sua receita atual é de óculos ou já é específica de lentes de contato?",
+        botoes: [
+          { id: "lc_rx_lc", titulo: "👁️ É de LC" },
+          { id: "lc_rx_oculos", titulo: "👓 É de óculos" },
+          { id: "lc_rx_naosei", titulo: "🤔 Não sei" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: "lc_tipo_receita" });
+      return true;
+    case "orcamento_indef":
+      await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "tipo_indefinido" });
+      await patchMeta({ intent_detected: "orcamento_indef", expected_reply: null });
+      return true;
+    case "lc_rx_lc":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Perfeito! Pra te passar o orçamento certinho de lentes de contato, me manda a receita 😊",
+        botoes: [
+          { id: "receita_foto", titulo: "📷 Enviar foto" },
+          { id: "receita_digitar", titulo: "⌨️ Digitar valores" },
+          { id: "receita_sem", titulo: "📄 Não tenho" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: "receita_envio" });
+      return true;
+    case "lc_rx_oculos": {
+      // Receita de óculos → consultor especializado converte. Fora do horário, estimativa.
+      if (isHorarioHumano()) {
+        await sendWhatsApp(
+          supabaseUrl, serviceKey, atId,
+          "Pra LC com receita de óculos, vou te conectar com um consultor especializado pra fazer a conversão direitinho 🙌 Só um instante!",
+        );
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+        await supabase.from("eventos_crm").insert({
+          contato_id: atendimento.contato_id,
+          tipo: "lc_conversao_receita_oculos",
+          descricao: "Cliente quer LC mas só tem receita de óculos — escalado para conversor especializado",
+          referencia_tipo: "atendimento", referencia_id: atId,
+        });
+      } else {
+        await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "receita_oculos_fora_horario" });
+      }
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: null });
+      return true;
+    }
+    case "lc_rx_naosei":
+      await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "cliente_nao_sabe" });
+      await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: null });
       return true;
     case "status_pedido":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂");
@@ -8379,13 +8443,20 @@ async function routeButtonClick(args: {
       await patchMeta({ aguardando_receita_foto: true, expected_reply: "receita_foto" });
       return true;
     case "receita_digitar":
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO_BOTAO);
       await patchMeta({ expected_reply: "receita_digitada" });
       return true;
-    case "receita_sem":
+    case "receita_sem": {
+      // Sem receita + contexto LC → vai direto pra estimativa DNZ mensal.
+      if (atendimentoMeta?.contexto_lc === true) {
+        await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "sem_receita_lc" });
+        await patchMeta({ intent_detected: "orcamento_lentes_contato", expected_reply: null });
+        return true;
+      }
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Sem a receita não consigo fechar valor exato, mas posso te dar uma faixa estimada. Você usa óculos pra perto, pra longe, ou multifocal? 😊");
       await patchMeta({ intent_detected: "sem_receita", expected_reply: "sem_receita_tipo" });
       return true;
+    }
     case "receita_ok": {
       if (atendimentoMeta.receita_pending) {
         await patchMeta({ receita_pending: null, receita_confirmada_at: new Date().toISOString(), expected_reply: "adicional_lentes" });
@@ -8413,7 +8484,7 @@ async function routeButtonClick(args: {
       return false;
     }
     case "receita_corrigir":
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO);
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, MSG_PEDIR_RECEITA_TEXTO_BOTAO);
       await patchMeta({ receita_pending: null, expected_reply: "receita_digitada" });
       return true;
     case "adicional_azul":
