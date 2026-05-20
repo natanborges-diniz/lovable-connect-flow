@@ -852,15 +852,17 @@ function detectPendingIntent(
   return null;
 }
 
-// ── Loop detector: scans last 3 outbound for >70% similarity between any 2 ──
-// Returns: { detected: boolean, similarity: number }
+// ── Loop detector: scans last 5 outbound for >70% similarity between any 2 ──
+// Janela ampliada de 3→5 na Onda 1 Fase 1a (mai/2026): casos com inbound
+// intermediário entre duas outbounds idênticas escapavam da janela de 3.
+// Threshold permanece 0.7 — reavaliação em Fase 1b após dados empíricos.
 function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: number } {
-  const last3 = recentOutbound.slice(-3).map(norm).filter((s) => s.length > 0);
-  if (last3.length < 2) return { detected: false, similarity: 0 };
+  const last5 = recentOutbound.slice(-5).map(norm).filter((s) => s.length > 0);
+  if (last5.length < 2) return { detected: false, similarity: 0 };
   let maxSim = 0;
-  for (let i = 0; i < last3.length; i++) {
-    for (let j = i + 1; j < last3.length; j++) {
-      const sim = computeSimilarity(last3[i], last3[j]);
+  for (let i = 0; i < last5.length; i++) {
+    for (let j = i + 1; j < last5.length; j++) {
+      const sim = computeSimilarity(last5[i], last5[j]);
       if (sim > maxSim) maxSim = sim;
     }
   }
@@ -7239,6 +7241,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         validator_flags: validatorFlags,
         topics_blocked: sentTopics,
         is_image_context: isImageContext,
+        tools_used: toolCalls.map((t: any) => t?.function?.name).filter(Boolean),
       },
       referencia_tipo: "atendimento",
       referencia_id: atendimento_id,
@@ -8258,7 +8261,9 @@ function isReceitaConfirmText(t: string): boolean {
   return /li sua receita assim, confere|anotei! ficou assim/i.test(s);
 }
 
-// Envia confirmação de receita com botões OK / Corrigir e marca receita_pending
+// Envia confirmação de receita com botões OK / Corrigir e marca receita_pending.
+// Idempotente: se a última outbound deste atendimento foi outra confirmação de receita
+// E não houve inbound entre ela e agora E o gap é < 5min, NÃO reenvia (anti-loop dirigido).
 async function sendReceitaConfirmInteractive(
   supabaseClient: any,
   supabaseUrl: string,
@@ -8266,6 +8271,52 @@ async function sendReceitaConfirmInteractive(
   atendimentoId: string,
   texto: string,
 ) {
+  // ── IDEMPOTÊNCIA ── (Onda 1 Fase 1a — caso Lucineide mai/2026)
+  try {
+    const { data: ultimasMsgs } = await supabaseClient
+      .from("mensagens")
+      .select("direcao, conteudo, created_at")
+      .eq("atendimento_id", atendimentoId)
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (Array.isArray(ultimasMsgs) && ultimasMsgs.length > 0) {
+      const outboundsSemInbound: typeof ultimasMsgs = [];
+      for (const m of ultimasMsgs) {
+        if (m.direcao === "inbound") break;
+        if (m.direcao === "outbound") outboundsSemInbound.push(m);
+      }
+
+      const ultConfirmacao = outboundsSemInbound.find((m: any) =>
+        isReceitaConfirmText(String(m.conteudo || ""))
+      );
+
+      if (ultConfirmacao) {
+        const idadeMs = Date.now() - new Date(ultConfirmacao.created_at).getTime();
+        if (idadeMs < 5 * 60 * 1000) {
+          console.log(
+            `[RX-CONFIRM-IDEMP] Supressão: última confirmação há ${Math.round(idadeMs / 1000)}s sem inbound — não reenviando`
+          );
+          try {
+            await supabaseClient.from("eventos_crm").insert({
+              contato_id: null,
+              tipo: "receita_confirmacao_suprimida_idempotencia",
+              descricao: `Reenvio de confirmação de receita suprimido (${Math.round(idadeMs / 1000)}s desde última, sem inbound)`,
+              metadata: { idade_seg: Math.round(idadeMs / 1000), origem: "sendReceitaConfirmInteractive" } as any,
+              referencia_tipo: "atendimento",
+              referencia_id: atendimentoId,
+            });
+          } catch (_) { /* noop */ }
+          return;
+        }
+      }
+    }
+  } catch (e) {
+    // Falha de leitura não bloqueia envio — segue fluxo normal
+    console.warn("[RX-CONFIRM-IDEMP] verificação falhou — seguindo envio normal:", (e as Error)?.message);
+  }
+
+  // ── FLUXO NORMAL ──
   // Marca pending antes de enviar para que o clique do botão receita_ok funcione
   try {
     const { data: atRow } = await supabaseClient
