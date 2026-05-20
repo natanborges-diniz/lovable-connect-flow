@@ -2885,6 +2885,20 @@ serve(async (req) => {
       console.warn("[RX-LOOP-WATCHDOG] falha:", e);
     }
 
+    if (forcarEscaladaPorLoopReceita) {
+      // Limpa pending pra próxima sessão começar limpa
+      try {
+        const novoMeta = {
+          ...contatoMeta,
+          receita_confirmacao: { ...(contatoMeta.receita_confirmacao || {}), pending: false, encerrado_por_loop_at: new Date().toISOString() },
+        };
+        await supabase.from("contatos").update({ metadata: novoMeta }).eq("id", contatoId);
+      } catch (_) { /* noop */ }
+      const msg = "Vou pedir pra um consultor humano olhar sua receita com calma 😊 Já passo aqui rapidinho.";
+      return await handleEscalation(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, msg, "loop_receita_confirmacao");
+    }
+
+
     const nomeConfirmado = contatoMeta.nome_confirmado === true;
     const precisaConfirmarNome = contatoMeta.precisa_confirmar_nome === true && !nomeConfirmado;
     const nomePerfilWhatsapp = String(contatoMeta.nome_perfil_whatsapp || "").trim();
