@@ -15,6 +15,21 @@ type: feature
 
 Sempre **máximo 1 lembrete** por agendamento. Sem reenvio. Sem segunda tentativa. A mensagem "ainda não conseguimos confirmar" foi removida.
 
+## Canal de envio (Meta 24h)
+
+Helper `enviarLembreteCliente(ag, tipo)` decide o canal:
+
+- **Dentro da janela 24h** (último inbound ≤24h): texto livre interativo (botões "✅ Confirmo / 🔄 Remarcar / ❌ Não vou"). UX melhor.
+- **Fora da janela 24h** (ou sem inbound algum): fallback automático para template HSM aprovado **`lembrete_visita`** (alias → `lembrete_agendamento` UTILITY) com params `[nome, loja, data dd/mm/yyyy, horário HH:MM]`.
+- Se texto livre voltar `outside_24h_window` por race, também cai pro template.
+
+Persistência em `agendamentos.metadata`:
+- `lembrete_via` = `"texto"` | `"template"`
+- `lembrete_ok` = boolean
+- `lembrete_erro` = `{ status, error, reason, hours_since_last_inbound, ... }` quando falha
+
+Evento `lembrete_vespera_falha` / `lembrete_1h_falha` recebe `metadata.motivo` com o mesmo objeto pra diagnóstico futuro.
+
 ## Idempotência
 
 - Lock atômico via `metadata.lembrete_enviado_at` (CAS: `.is("metadata->>lembrete_enviado_at", null)`).
