@@ -281,7 +281,11 @@ async function extractMetrics(supabase: SupabaseClient) {
     .gte("created_at", ha30dias);
 
   // 3.2 — Funil orçamento → agendamento
+  // 3.2 — Funil: orçamento → agendamento
+  // Bug histórico: agendamento_criado.referencia_id é agendamento.id, não atendimento.id.
+  // Caminho correto: cruzar via tabela agendamentos.atendimento_id.
   const funil_orcamento_agendamento = await (async () => {
+    // a) Atendimentos que entraram em orçamento no período
     const evTriage = await fetchAllPaged<{ referencia_id: string; metadata: Record<string, unknown> }>(() =>
       supabase
         .from("eventos_crm")
@@ -292,24 +296,27 @@ async function extractMetrics(supabase: SupabaseClient) {
 
     const idsOrcamento = new Set(
       evTriage
-        .filter(
-          (e) =>
-            (e.metadata?.pipeline_coluna as string | undefined)?.toLowerCase().includes("orç") ||
-            (e.metadata?.intencao as string | undefined) === "orcamento"
-        )
-        .map((e) => e.referencia_id)
+        .filter((e) => {
+          const m = e.metadata as { intencao?: string; pipeline_coluna?: string };
+          return m?.intencao === "orcamento" || m?.pipeline_coluna === "Orçamento";
+        })
+        .map((e) => e.referencia_id),
     );
 
-    const evAgend = await fetchAllPaged<{ referencia_id: string }>(() =>
+    // b) Agendamentos criados no período via tabela agendamentos (tem atendimento_id)
+    const agendamentos = await fetchAllPaged<{ atendimento_id: string | null; created_at: string }>(() =>
       supabase
-        .from("eventos_crm")
-        .select("referencia_id")
-        .eq("tipo", "agendamento_criado")
-        .eq("referencia_tipo", "atendimento")
+        .from("agendamentos")
+        .select("atendimento_id, created_at")
         .gte("created_at", ha30dias)
     );
 
-    const idsAgend = new Set(evAgend.map((e) => e.referencia_id));
+    const idsAgend = new Set(
+      agendamentos
+        .filter((a) => a.atendimento_id !== null)
+        .map((a) => a.atendimento_id as string),
+    );
+
     const convertidos = [...idsOrcamento].filter((id) => idsAgend.has(id)).length;
 
     return {
@@ -319,6 +326,8 @@ async function extractMetrics(supabase: SupabaseClient) {
         idsOrcamento.size > 0
           ? Math.round((convertidos / idsOrcamento.size) * 10000) / 100
           : 0,
+      total_agendamentos_no_periodo: agendamentos.length,
+      agendamentos_sem_atendimento_id: agendamentos.length - idsAgend.size,
     };
   })();
 
@@ -398,6 +407,107 @@ async function extractMetrics(supabase: SupabaseClient) {
       }));
   })();
 
+  // 3.6 — TTR (Tempo até Primeira Resposta do Gael)
+  // Gap entre primeiro inbound e primeira outbound do Gael. Amostra de até 500 atendimentos.
+  const ttr = await (async () => {
+    const atendimentos = await fetchAllPaged<{ id: string }>(() =>
+      supabase.from("atendimentos").select("id").gte("created_at", ha30dias)
+    );
+    if (atendimentos.length === 0) {
+      return { total_atendimentos_amostrados: 0, mediana_seg: null, p90_seg: null, p99_seg: null };
+    }
+
+    const sample = atendimentos.slice(0, 500);
+    const gaps: number[] = [];
+    for (const at of sample) {
+      const { data: msgs } = await supabase
+        .from("mensagens")
+        .select("direcao, created_at, remetente_nome")
+        .eq("atendimento_id", at.id)
+        .order("created_at", { ascending: true })
+        .limit(20);
+
+      if (!msgs || msgs.length < 2) continue;
+      const firstInbound = msgs.find((m: { direcao: string }) => m.direcao === "inbound");
+      if (!firstInbound) continue;
+      const firstOutboundIA = msgs.find((m: { direcao: string; created_at: string; remetente_nome: string | null }) =>
+        m.direcao === "outbound" &&
+        new Date(m.created_at).getTime() > new Date((firstInbound as { created_at: string }).created_at).getTime() &&
+        ["Assistente IA", "Gael"].includes(String(m.remetente_nome || ""))
+      );
+      if (!firstOutboundIA) continue;
+
+      const gapSeg = Math.round(
+        (new Date((firstOutboundIA as { created_at: string }).created_at).getTime() -
+          new Date((firstInbound as { created_at: string }).created_at).getTime()) / 1000
+      );
+      if (gapSeg >= 0 && gapSeg < 3600 * 24) gaps.push(gapSeg);
+    }
+
+    gaps.sort((a, b) => a - b);
+    const pct = (p: number) => gaps[Math.floor(gaps.length * p)] ?? null;
+    return {
+      total_atendimentos_amostrados: sample.length,
+      total_gaps_validos: gaps.length,
+      mediana_seg: pct(0.5),
+      p90_seg: pct(0.9),
+      p99_seg: pct(0.99),
+    };
+  })();
+
+  // 3.7 — TTE (Tempo Até Escalada Efetiva)
+  // Gap entre evento escalonamento_humano e primeira outbound de humano real.
+  const tte = await (async () => {
+    const escalEvents = await fetchAllPaged<{ referencia_id: string; created_at: string }>(() =>
+      supabase
+        .from("eventos_crm")
+        .select("referencia_id, created_at")
+        .eq("tipo", "escalonamento_humano")
+        .eq("referencia_tipo", "atendimento")
+        .gte("created_at", ha30dias)
+    );
+    if (escalEvents.length === 0) {
+      return { total_eventos_escalonamento: 0, total_gaps_validos: 0, mediana_seg: null, p90_seg: null };
+    }
+
+    const sample = escalEvents.slice(0, 300);
+    const BOTS = new Set(["Assistente IA", "Gael", "Sistema", "Bot Lojas", "Recuperação"]);
+    const gaps: number[] = [];
+
+    for (const ev of sample) {
+      const { data: msgs } = await supabase
+        .from("mensagens")
+        .select("direcao, created_at, remetente_nome")
+        .eq("atendimento_id", ev.referencia_id)
+        .eq("direcao", "outbound")
+        .gte("created_at", ev.created_at)
+        .order("created_at", { ascending: true })
+        .limit(20);
+
+      if (!msgs) continue;
+      const firstHumana = msgs.find((m: { remetente_nome: string | null }) => {
+        const nome = String(m.remetente_nome || "").trim();
+        return nome.length > 0 && !BOTS.has(nome);
+      });
+      if (!firstHumana) continue;
+
+      const gapSeg = Math.round(
+        (new Date((firstHumana as { created_at: string }).created_at).getTime() -
+          new Date(ev.created_at).getTime()) / 1000
+      );
+      if (gapSeg >= 0 && gapSeg < 3600 * 72) gaps.push(gapSeg);
+    }
+
+    gaps.sort((a, b) => a - b);
+    const pct = (p: number) => gaps[Math.floor(gaps.length * p)] ?? null;
+    return {
+      total_eventos_escalonamento: sample.length,
+      total_gaps_validos: gaps.length,
+      mediana_seg: pct(0.5),
+      p90_seg: pct(0.9),
+    };
+  })();
+
   return {
     escalada,
     motivos_escalada_top5,
@@ -406,6 +516,8 @@ async function extractMetrics(supabase: SupabaseClient) {
     validator_flags,
     eventos_crm_distribuicao,
     mensagens_ia_por_dia,
+    ttr,
+    tte,
   };
 }
 
@@ -601,12 +713,14 @@ async function extractAmostra(supabase: SupabaseClient) {
 
     // FIX 13 — tools derivadas do tipo do evento, não de metadata.tools (que não existe)
     const TOOL_EVENT_TYPES = new Set([
+      // ── Tools clássicas ──
       "agendamento_criado",
       "receita_interpretada",
       "receita_corrigida_pelo_cliente",
       "receita_rejeitada_cliente",
       "nome_confirmado",
       "consultar_lentes_bloqueado_pendente_confirmacao",
+      // ── Ações determinísticas ──
       "cotacao_pos_confirmacao_forcada",
       "cta_visita_aceito",
       "cta_visita_recusado",
@@ -620,6 +734,23 @@ async function extractAmostra(supabase: SupabaseClient) {
       "intent_rede_diniz",
       "intent_fornecedor_b2b",
       "triagem_ia",
+      // ── Happy path observável ──
+      "consulta_lentes_contato",
+      "cotacao_apos_adicional_botao",
+      "cotacao_lc_pos_confirmacao_forcada",
+      "cotacao_reexecutada_reclamacao_inversao",
+      "agendamento_cancelado_cliente",
+      "agendamento_duplicado_evitado",
+      "consultar_lentes_zero_resultados",
+      "orcamento_revisao_humana",
+      "receita_confirmacao_solicitada",
+      "receita_pending_invalidada",
+      "receita_ocr_failsafe_pedido_texto",
+      "receita_escalada_apos_2_rejeicoes",
+      "regiao_pos_orcamento_forcando_tool",
+      "escalada_bloqueada_pendente_confirmacao",
+      "escalada_grau_sem_receita_bloqueada",
+      "lembrete_agendado",
     ]);
 
     const { data: toolsEvs } = await supabase

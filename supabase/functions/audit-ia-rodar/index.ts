@@ -106,6 +106,42 @@ function rodarHeuristicas(msgs: Msg[]): { flags: any[]; severidadeMax: string } 
     }
   }
 
+  // 7. Cotação inconsistente: mesmo SKU/marca aparece com R$ divergente >5%
+  // Detecta caso onde Gael cota mesmo produto com valores diferentes na mesma conversa.
+  // Severidade warn — pode ser receita diferente; calibrar após observação empírica.
+  {
+    const PRICE_RE = /\b(DNZ|DMax|D ?Max|Hoya|Hoyalux|Essilor|Crizal|Stellest|Eyezen|Varilux|Zeiss|Kodak|Solflex|DuraVision|BlueGuard)\b[^\n]{0,100}R\$\s*([\d.,]+)/gi;
+    const skuPrices: Record<string, number[]> = {};
+    for (const m of outbounds) {
+      let match;
+      const re = new RegExp(PRICE_RE.source, "gi");
+      while ((match = re.exec(m.conteudo)) !== null) {
+        const brand = match[1].toUpperCase().replace(/\s+/g, "");
+        const rawPrice = match[2].replace(/\./g, "").replace(",", ".");
+        const val = parseFloat(rawPrice);
+        if (!Number.isFinite(val) || val < 50 || val > 50000) continue;
+        if (!skuPrices[brand]) skuPrices[brand] = [];
+        skuPrices[brand].push(val);
+      }
+    }
+    for (const [brand, prices] of Object.entries(skuPrices)) {
+      if (prices.length < 2) continue;
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+      if (max === 0) continue;
+      const variacao = ((max - min) / max) * 100;
+      if (variacao > 5) {
+        flags.push({
+          tipo: "cotacao_inconsistente",
+          severidade: "warn",
+          trecho: `${brand}: ${prices.map((p) => `R$ ${p.toFixed(2)}`).join(" / ")} (variação ${variacao.toFixed(0)}%)`,
+        });
+        bump("warn");
+        break;
+      }
+    }
+  }
+
   return { flags, severidadeMax: sev };
 }
 
