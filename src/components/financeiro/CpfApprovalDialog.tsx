@@ -409,14 +409,66 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
 
           {/* Solicitar autorização de exceção */}
           {((alreadyProcessed && meta.resultado_consulta === "reprovado") || isDadosIncompletos) && !meta.autorizacao_excecao && (
-            <Button
-              variant="outline"
-              className="w-full border-primary/40 text-primary hover:bg-primary/5"
-              onClick={() => setExcecaoOpen(true)}
-            >
-              <Shield className="h-4 w-4 mr-1" />
-              Solicitar autorização de exceção
-            </Button>
+            <div className="space-y-2">
+              {!meta.documento_url && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+                  <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div className="text-xs">
+                      <p className="font-medium">Anexe o documento da consulta (score) antes de pedir exceção.</p>
+                      <p className="text-amber-700/80 dark:text-amber-300/80 mt-0.5">
+                        O autorizador precisa avaliar o material antes de decidir.
+                      </p>
+                    </div>
+                  </div>
+                  <div>
+                    <Input
+                      type="file"
+                      accept="application/pdf,image/*"
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        if (f.size > 10 * 1024 * 1024) {
+                          toast.error("Arquivo muito grande. Máximo 10MB.");
+                          return;
+                        }
+                        setUploading(true);
+                        try {
+                          const ext = f.name.split(".").pop() || "pdf";
+                          const path = `${solicitacao.id}/${Date.now()}.${ext}`;
+                          const { error: upErr } = await supabase.storage
+                            .from("cpf-documentos")
+                            .upload(path, f, { contentType: f.type });
+                          if (upErr) throw upErr;
+                          const { error: updErr } = await supabase
+                            .from("solicitacoes")
+                            .update({ metadata: { ...meta, documento_url: path, documento_path: path } })
+                            .eq("id", solicitacao.id);
+                          if (updErr) throw updErr;
+                          toast.success("Documento anexado.");
+                          queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
+                        } catch (err: any) {
+                          toast.error("Erro ao anexar: " + err.message);
+                        } finally {
+                          setUploading(false);
+                        }
+                      }}
+                      disabled={uploading}
+                      className="text-xs h-9"
+                    />
+                  </div>
+                </div>
+              )}
+              <Button
+                variant="outline"
+                className="w-full border-primary/40 text-primary hover:bg-primary/5"
+                onClick={() => setExcecaoOpen(true)}
+                disabled={!meta.documento_url || uploading}
+              >
+                <Shield className="h-4 w-4 mr-1" />
+                Solicitar autorização de exceção
+              </Button>
+            </div>
           )}
 
           {meta.autorizacao_excecao && (
@@ -638,6 +690,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           dados_incompletos: meta.dados_incompletos_labels,
           observacao_dados_incompletos: meta.observacao_dados_incompletos,
           justificativa_interna: meta.justificativa_interna,
+          documento_url: meta.documento_url,
         }}
         motivoPadrao={
           meta.resultado_consulta === "reprovado"
