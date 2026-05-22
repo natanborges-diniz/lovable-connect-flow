@@ -173,11 +173,16 @@ export function SolicitarAutorizacaoDialog({
       // 2. Envia mensagem 1-a-1 com card interativo
       const conversaId = [user.id, escolhido.id].sort().join("__");
       const tituloProcesso = processo?.nome || processoNome || processoChave;
+      const temDoc = !!(contexto as any)?.documento_url;
+      const corpoMsg =
+        `🛡️ Pedido de autorização — ${tituloProcesso}\n\n` +
+        `Motivo: ${motivo.trim()}` +
+        (temDoc ? `\n\n📎 Documento da consulta (score) anexado — disponível no card abaixo.` : "");
       await supabase.from("mensagens_internas").insert({
         remetente_id: user.id,
         destinatario_id: escolhido.id,
         conversa_id: conversaId,
-        conteudo: `🛡️ Pedido de autorização — ${tituloProcesso}\n\nMotivo: ${motivo.trim()}`,
+        conteudo: corpoMsg,
         metadata: {
           kind: "autorizacao_excecao",
           autorizacao_id: autz.id,
