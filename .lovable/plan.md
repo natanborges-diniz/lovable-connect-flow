@@ -1,66 +1,69 @@
+## Contexto rápido (para alinhar)
 
-## Problema
+Hoje, no Atrium:
+- **Quem pede exceção:** apenas o Financeiro, pelo botão "Solicitar autorização de exceção" dentro do `CpfApprovalDialog` (aparece quando o card está Reprovado ou Dados Incompletos).
+- **Loja:** não pede exceção. Só recebe o retorno read-only via `solicitacao_comentarios.tipo='retorno_setor'` + push.
+- **Documento da consulta (o "score"):** é o mesmo arquivo que o Financeiro anexa no momento de aprovar/reprovar — fica em `solicitacao.metadata.documento_url` (bucket `cpf-documentos`).
 
-Meta bloqueia texto livre fora de 24h do último inbound. Como o lembrete de véspera é enviado 1 dia antes da visita (e o último inbound do cliente costuma estar a 2–14 dias atrás), praticamente **todos** os lembretes véspera caem em `outside_24h_window` e morrem silenciosos. Resultado prático Jhanys: cliente nunca recebeu o lembrete, loja nunca confirmou, sistema marcou no-show.
+Problema: o Financeiro pode hoje clicar em "Solicitar autorização de exceção" **sem ter anexado o documento da consulta**, e o autorizador recebe o pedido cego, sem o material que justifica a análise.
 
-## Solução
+## Solução proposta
 
-Não dá pra "convencer" a Meta — a regra é dela. A saída é **usar template HSM aprovado sempre que estivermos fora da janela**, e só usar texto livre quando estivermos dentro.
+Manter a arquitetura atual (só Financeiro pede; só Aprovar/Rejeitar do lado do autorizador) e adicionar **bloqueio prévio + transporte do documento até o autorizador**.
 
-### 1. Template UTILITY dedicado a lembrete de visita
+### 1. Bloqueio prévio no `CpfApprovalDialog`
 
-Criar (ou reaproveitar) `lembrete_agendamento` no catálogo `whatsapp_templates`:
-- Categoria **UTILITY** (≈ 5–10× mais barato que MARKETING e a Meta aprova rápido pra esse caso de uso).
-- Variáveis: `{{1}}` nome do cliente, `{{2}}` data/hora formatada, `{{3}}` loja, `{{4}}` endereço curto.
-- Body sugerido: "Oi {{1}}, passando pra lembrar do seu horário na Óticas Diniz {{3}} em {{2}}. Endereço: {{4}}. Pode responder SIM pra confirmar ou me chamar aqui se precisar remarcar."
-- Idioma `pt_BR`. Submeter à Meta pelo card existente em Configurações > Templates WhatsApp.
-- Registrar **alias lógico** `lembrete_visita` → `lembrete_agendamento` em `template_aliases` (mesmo padrão das retomadas), pra trocar versão sem redeploy.
+No bloco que renderiza o botão "Solicitar autorização de exceção" (linhas 410-420):
 
-### 2. Lógica de envio com fallback automático
+- Se `meta.documento_url` **estiver presente** → botão habilitado normalmente.
+- Se **não estiver** → botão fica desabilitado, com tooltip e bloco explicativo logo acima:
+  > "Para pedir exceção é obrigatório anexar o documento da consulta (score). O autorizador precisa avaliar o material antes de decidir."
+  
+  Junto, mostrar um mini-uploader inline ("Anexar documento da consulta") que grava direto em `solicitacao.metadata.documento_url` (mesmo storage path que o fluxo de Aprovar/Reprovar já usa) e, assim que sobe, libera o botão.
 
-Em `agendamentos-cron`, `processLembreteVespera` e `processLembrete1hAntes`:
+Isso reaproveita 100% o `handleFileChange` + `documento_url` que já existem; nenhuma coluna nova.
 
-```text
-1. Calcular horasDesdeUltimoInbound (igual o guard que send-whatsapp já faz)
-2. Se ≤ 24h  → send-whatsapp (texto livre, como hoje)
-3. Se > 24h ou sem inbound → send-whatsapp-template
-                              template_alias='lembrete_visita'
-                              params=[nome, data_formatada, loja, endereco]
-4. Em ambos os casos, capturar o JSON de resposta inteiro
-   (não só sendRes.ok)
-```
+### 2. Transporte do documento até o autorizador
 
-Mesma estratégia em qualquer outro cron que ainda mande texto livre proativo (revisar `vendas-recuperacao-cron` — pelos logs ele também está batendo no 24h window).
+No `SolicitarAutorizacaoDialog.handleEnviar`:
 
-### 3. Persistir motivo de falha
+- Antes do `insert` em `autorizacoes_excecao`, ler `meta.documento_url` do `contexto` (já está sendo passado pelo `CpfApprovalDialog`, basta adicionar o campo).
+- Persistir em dois lugares para o autorizador encontrar:
+  - `autorizacoes_excecao.contexto.documento_url` (já passa por `contexto`, é só incluir).
+  - No corpo da mensagem 1-a-1 (`mensagens_internas.conteudo`): adicionar uma linha "📎 Documento da consulta anexado" — e no `metadata.kind=autorizacao_excecao` já existente, o card visual da mensagem (`AutorizacaoExcecaoCard`) ganha um botão **"Ver documento"** que abre signed URL do bucket `cpf-documentos`.
 
-Quando `send-whatsapp` devolver erro:
-- `metadata.lembrete_ok = false`
-- `metadata.lembrete_erro = { code, reason, hours_since_last_inbound }` (hoje só fica `false` sem detalhe)
-- `evento_crm` tipo `lembrete_vespera_falha` ganha `payload.motivo` com o mesmo objeto.
+### 3. Card do autorizador (`AutorizacaoExcecaoCard`)
 
-Mesma coisa para `lembrete_1h_antes_falha`.
+Adicionar botão "Abrir documento da consulta" que:
+- Chama `supabase.storage.from('cpf-documentos').createSignedUrl(path, 600)` com o path vindo de `metadata.contexto.documento_url`.
+- Abre em nova aba.
+- Se o documento não estiver presente (casos antigos), mostra aviso vermelho "⚠️ Pedido sem documento anexado" — para deixar evidente para o autorizador que aquele caso antigo veio sem score.
 
-### 4. Re-tentativa de Jhanys e órfãos retroativos
+### 4. Lado da loja — sem mudança funcional
 
-Script único (executado uma vez) que pega agendamentos com `lembrete_vespera_falha` + `motivo=outside_24h_window` ainda no futuro próximo (próximas 48h) e re-dispara o lembrete já pelo template novo, marcando idempotência com `metadata.lembrete_enviado_at`.
+Confirmado: loja segue recebendo apenas o retorno read-only. Se discordar do resultado, pode:
+- Abrir uma nova solicitação de consulta CPF com dados corrigidos (fluxo já existente).
+- Mandar mensagem ao Financeiro pelo canal interno comum.
 
-### 5. Memória
+Nenhuma alteração no `LojaNovaDemanda` ou no wizard da loja.
 
-Atualizar `mem://agendamentos/janela-comunicacao-e-d-day` registrando: "lembretes véspera/1h sempre tentam template HSM quando fora de 24h; texto livre só dentro da janela".
+### 5. Auditoria mínima
+
+Quando o pedido for enviado, gravar no comentário "retorno_setor" da loja (`SolicitarAutorizacaoDialog` linhas 222-229) que o documento foi enviado junto — só para rastreabilidade interna. Não muda a UX da loja.
 
 ## Detalhes técnicos
 
-- Arquivos: `supabase/functions/agendamentos-cron/index.ts` (helpers `processLembreteVespera`, `processLembrete1hAntes`), `supabase/functions/send-whatsapp/index.ts` (já devolve o erro estruturado, só precisamos consumir), `supabase/functions/send-whatsapp-template/index.ts` (já existe e respeita `template_alias` + gate `approved`).
-- Migração: nenhuma estrutural. Apenas inserts em `whatsapp_templates` (rascunho do `lembrete_agendamento`) e `template_aliases` (`lembrete_visita`).
-- A submissão à Meta é manual via card existente — sem aprovação não há fallback real. Enquanto pending, o cron loga `template_pendente` e o evento `lembrete_vespera_falha` fica com `motivo=blocked_template_not_approved`, o que já é diagnóstico claro.
-- Não mexe em RLS nem em horário comercial.
+**Arquivos tocados:**
+- `src/components/financeiro/CpfApprovalDialog.tsx` — gate visual + mini-uploader inline; incluir `documento_url` no objeto `contexto` passado ao `SolicitarAutorizacaoDialog` (já existe, falta a chave).
+- `src/components/financeiro/SolicitarAutorizacaoDialog.tsx` — propagar `contexto.documento_url` (já é spreadado, basta validar que está vindo) e enriquecer o texto da `mensagens_internas`.
+- `src/components/mensagens/AutorizacaoExcecaoCard.tsx` — botão "Abrir documento", com `createSignedUrl` e fallback para "sem documento".
 
-## Ordem de execução
+**Sem mudanças de schema.** `autorizacoes_excecao.contexto` já é `jsonb`; `metadata.documento_url` já é convenção em `solicitacoes.metadata`. RLS do bucket `cpf-documentos` já permite signed URL para autenticados.
 
-1. Inserir template + alias e submeter à Meta (eu preparo o SQL e o texto sugerido).
-2. Enquanto Meta analisa: implementar fallback + persistência de motivo + redeploy de `agendamentos-cron`.
-3. Quando template ficar `approved`: trocar alias (1 clique), rodar o script de re-envio dos órfãos.
-4. Atualizar memória.
+**Sem mudanças no edge function `responder-autorizacao`** — Aprovar/Rejeitar continuam idênticos.
 
-Quer que eu siga por aí?
+## Fora de escopo (rejeitado nas perguntas)
+
+- Loja iniciando pedido de exceção.
+- Terceira ação "Devolver pedindo score" no autorizador (bloqueio prévio torna desnecessária).
+- Novo campo `score_url` separado do `documento_url`.
