@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Shield, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Shield, CheckCircle2, XCircle, Loader2, FileText, AlertTriangle } from "lucide-react";
 
 interface Props {
   metadata: any;
