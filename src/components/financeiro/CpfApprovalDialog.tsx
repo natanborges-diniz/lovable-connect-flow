@@ -690,6 +690,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           dados_incompletos: meta.dados_incompletos_labels,
           observacao_dados_incompletos: meta.observacao_dados_incompletos,
           justificativa_interna: meta.justificativa_interna,
+          documento_url: meta.documento_url,
         }}
         motivoPadrao={
           meta.resultado_consulta === "reprovado"
