@@ -96,6 +96,36 @@ export function AutorizacaoExcecaoCard({ metadata, isMine }: Props) {
         </div>
       )}
 
+      {/* Documento da consulta (score) */}
+      {contexto.documento_url ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full h-8 text-xs"
+          onClick={async () => {
+            try {
+              const { data, error } = await supabase.storage
+                .from("cpf-documentos")
+                .createSignedUrl(contexto.documento_url, 600);
+              if (error) throw error;
+              window.open(data.signedUrl, "_blank");
+            } catch (e: any) {
+              toast.error("Erro ao abrir documento: " + (e.message || "falha"));
+            }
+          }}
+        >
+          <FileText className="h-3.5 w-3.5 mr-1" />
+          Abrir documento da consulta (score)
+        </Button>
+      ) : (
+        isAutorizador && (
+          <div className="flex items-start gap-1.5 rounded border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>Pedido sem documento da consulta anexado. Considere não aprovar e pedir o score ao Financeiro.</span>
+          </div>
+        )
+      )}
+
       {/* Resposta já dada */}
       {status !== "pendente" && (
         <div className="text-xs text-muted-foreground">
