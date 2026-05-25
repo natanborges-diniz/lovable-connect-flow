@@ -275,20 +275,26 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
 
         // Intercepta 422 outside_24h_window: prepara reabertura via template
         let errPayload: any = data;
-        if (error && (error as any).context && typeof (error as any).context.json === "function") {
+        const ctx: any = (error as any)?.context;
+        if (ctx && typeof ctx.clone === "function") {
           try {
-            errPayload = await (error as any).context.clone().json();
+            errPayload = await ctx.clone().json();
           } catch {
-            try { errPayload = await (error as any).context.clone().text(); } catch { /* noop */ }
+            try { errPayload = await ctx.clone().text(); } catch { /* noop */ }
           }
         }
-        const errStr = typeof errPayload === "string" ? errPayload : JSON.stringify(errPayload || {});
+        const errMsg = (error as any)?.message || "";
+        const errStr = (typeof errPayload === "string" ? errPayload : JSON.stringify(errPayload || {})) + " " + errMsg;
         if (errStr.includes("outside_24h_window")) {
           let horas = 0;
           try {
             const parsed = typeof errPayload === "string" ? JSON.parse(errPayload) : errPayload;
             horas = parsed?.hours_since_last_inbound ?? 0;
           } catch { /* noop */ }
+          if (!horas) {
+            const m = errMsg.match(/hours_since_last_inbound"?\s*:\s*(\d+)/);
+            if (m) horas = Number(m[1]);
+          }
           setJanelaFechadaHoras(horas);
           setJanelaFechadaOpen(true);
           // Preserva rascunho e anexo para retry via template
