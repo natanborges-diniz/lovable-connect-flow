@@ -4486,7 +4486,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // Só sai desse modo se cliente trouxer novo intent (pergunta, palavra-chave de produto/preço/remarcar, foto, áudio).
     {
       const _lastOut = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
-      const _despediuJa = /qualquer dúvida é só me chamar|qualquer coisa estou por aqui|foi um prazer te atender/i.test(_lastOut)
+      const _despediuJa = (/qualquer dúvida é só me chamar|qualquer coisa estou por aqui|foi um prazer te atender|te espero|te aguardamos|at[eé] j[aá]|at[eé] daqui a pouco|nos vemos/i.test(_lastOut))
         && /👋/.test(_lastOut);
       if (hasAgendamentoAtivo && _despediuJa) {
         const _msgLow = String(currentMsg || "").toLowerCase().trim();
