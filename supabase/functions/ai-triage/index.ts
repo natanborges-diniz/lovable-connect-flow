@@ -4414,7 +4414,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       // Anti-duplicação: se último outbound já é uma despedida canônica, silencia
       const lastOut = String((recentOutbound || []).slice(-1)[0] || "").toLowerCase();
       const jaDespediu =
-        /foi um prazer te atender|qualquer dúvida é só me chamar|qualquer coisa estou por aqui/i.test(lastOut)
+        /foi um prazer te atender|qualquer dúvida é só me chamar|qualquer coisa estou por aqui|te espero|te aguardamos|at[eé] j[aá]|at[eé] daqui a pouco|nos vemos/i.test(lastOut)
         && /👋/.test(lastOut);
       if (jaDespediu) {
         console.log("[CLOSE-DEDUP] Despedida canônica já enviada — silenciando reenvio");
