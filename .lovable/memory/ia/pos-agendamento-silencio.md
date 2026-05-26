@@ -18,6 +18,12 @@ Quando `hasAgendamentoAtivo && último outbound é despedida canônica`:
 
 Palavras-chave que quebram silêncio: preço/valor/orçamento, remarcar/reagendar/cancelar/mudar/trocar, endereço/como chego, horário/abre/fecha, receita/foto/imagem/grau, marcas (Ray-Ban, Oakley, Varilux, Zeiss, Hoya etc.).
 
+**Despedida canônica reconhecida** (gate de silêncio + anti-dup): regex aceita `qualquer dúvida é só me chamar | qualquer coisa estou por aqui | foi um prazer te atender | te espero | te aguardamos | até já | até daqui a pouco | nos vemos` **combinado com 👋**. Caso Dany (2026-05): "Até já 👋" antes era ignorado → gate falhava → IA gerava retomada genérica + comparativo pós-exame.
+
+**`isThanksOnly` expandido** para `ok|okay|okey|blz|beleza|combinado|perfeito|tudo certinho|tudo certo então` — só vira despedida se `hasAgendamentoAtivo && !askedHelpMore` (gate `isThanksClose`). **`SHORT_NO_RE` expandido** com `só isso mesmo|só isso então|era isso|era isso mesmo|nada mais|nada por enquanto|por agora não`.
+
+**Hint pré-LLM (agendamento ativo)** também proíbe "após o exame, prefere já olhar armações ou só retirar a receita?", "quer que eu separe modelos?", "prefere X ou Y?" — não emendar nova pergunta depois de despedida/confirmação.
+
 ## Detector pós-LLM auto-persistência (ai-triage/index.ts ~3954)
 
 Após `sendWhatsApp` final, se `toolCalls` não inclui agendar_visita/reagendar_visita MAS `resposta` contém promessa (`agendamento confirmado|te esperamos|ficou (re)agendado|marquei pra você` etc.) + extrai data DD/MM + hora HH(h|:)MM + match de loja em `telefones_lojas`, dispara `agendar-cliente` em background (fire-and-forget). Idempotente: pula se já existe linha em `agendamentos` para mesma loja+data. Log: `eventos_crm.tipo='agendamento_auto_persistido'`.

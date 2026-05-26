@@ -1,34 +1,45 @@
-## Contexto
-Katia confirmou ("Sim") a receita lida pelo operador:
-- LONGE — OD -0,50 esf / OE -0,25 esf / -0,25 cil eixo 75°
-- ADIÇÃO +2,00 (perto = +1,50 OD / +1,75 OE)
-- Tipo: **multifocal/progressiva**, grau baixo, cilindro mínimo.
+## Diagnóstico do caso Dany
 
-Última msg da cliente foi há horas e ela perguntou "Ola??" — abrir reconectando com leveza e já entregando o orçamento.
+Cronologia + por que cada balão extra escapou:
 
-## Resposta a enviar (tom Gael, assinatura Óticas Diniz)
+| # | Cliente | IA respondeu | Causa |
+|---|---------|--------------|-------|
+| 1 | "Sim" (confirma agendamento) | "…Precisa de mais alguma coisa antes da visita?" | Esperado — pergunta de fechamento canônica (`askedHelpMore`). |
+| 2 | **"Só isso mesmo"** | "…**Precisa de algo antes de vir?**" | `SHORT_NO_RE` (linha 4276) só casa `só isso` / `era só isso` exatos — **não casa "só isso mesmo"**. Cai no LLM normal, que devolveu nova pergunta. |
+| 3 | (sem inbound) | "…Até já 👋" | Provável reenvio do mesmo turno (LLM retry / merge resposta+proximo_passo). |
+| 4 | **"Ok"** | "Conta pra mim com mais detalhes…" + depois "Após o exame, você prefere já olhar armações…?" | `"ok"` **não está** em `isThanksOnly` (linha 4268) **nem** em `SHORT_NO_RE`. Sem despedida determinística. Gate de **silêncio pós-agendamento** (linha 4487) exige que o último outbound contenha `qualquer dúvida é só me chamar` ou `qualquer coisa estou por aqui` + 👋. As despedidas anteriores foram "Precisa de algo antes de vir?" e "Até já 👋" — **nenhuma bate a assinatura canônica**, então o silêncio não ativou e o LLM gerou retomada genérica + oferta de comparativo (proibida pós-agendamento). |
 
-> Oi Katia, voltei! 🙌 Desculpa a demora. Recebi a confirmação da sua receita, valeu por reenviar com mais luz 📸
->
-> Como é progressiva (longe + perto numa lente só), separei 3 caminhos:
->
-> 🟢 **Econômica — DMax Progressiva Acabada 1.56 AR Verde — R$ 306,60**
-> Entrega rápida, antirreflexo verde, ótima pra começar no multifocal.
->
-> 🟡 **Intermediária — Hoya Amplus 1.50 Hi-Vision Hard — R$ 690,00**
-> Campo de visão mais largo, adaptação mais suave no perto/longe. Tem também DNZ Basic 1.50 AR Verde pelo mesmo valor se preferir nacional.
->
-> 💎 **Premium — Varilux Liberty 3.0 (Essilor) c/ Trio Easy Clean + Filtro Azul — R$ 999,00**
-> Top de linha pra quem usa muito celular/computador: nitidez ampla, antirreflexo premium e filtro de luz azul.
->
-> Quer agendar uma passadinha pra escolher a armação e provar? Atendemos em **loja de rua** e **shopping** — qual fica mais perto de você?
->
-> _Equipe Óticas Diniz_
+Resumo: três regexes restritivas demais permitiram que mensagens triviais de encerramento ("só isso mesmo", "ok") furassem todas as camadas (despedida determinística → silêncio pós-agendamento → guardrail).
 
-## Passos
-1. Abrir o atendimento da Katia no CRM.
-2. Garantir que o atendimento está em **modo humano** (operador).
-3. Colar a mensagem acima no compositor e enviar.
-4. Marcar coluna do pipeline conforme cadência normal (aguardando resposta cliente).
+## Correções propostas em `supabase/functions/ai-triage/index.ts`
 
-Sem alterações de código.
+1. **Ampliar `SHORT_NO_RE` (linha 4276)** para cobrir variantes comuns de "estou ok":
+   - adicionar: `só isso mesmo`, `só isso então`, `era isso`, `era isso mesmo`, `nada mais`, `nada por enquanto`, `por agora não`, `ok`, `okay`, `ok então`, `tá ok`, `tá bom`, `ta bom`, `blz`, `beleza`, `tudo certo então`, `tudo certinho`, `perfeito`, `combinado`.
+
+2. **Ampliar `isThanksOnly` (linha 4268)** para tratar `"ok"`, `"okay"`, `"blz"`, `"beleza"`, `"combinado"` como agradecimento puro quando há agendamento ativo — assim `isThanksClose` dispara despedida determinística em vez de cair no LLM.
+
+3. **Ampliar regex de "despedida canônica" do gate de silêncio pós-agendamento (linha 4487)** para reconhecer também as variações já usadas pelo LLM:
+   - `te espero (hoje|amanhã|...)`, `te aguardamos`, `até já`, `até daqui a pouco`, `nos vemos`, `combinado!.*(te espero|te aguardamos)`.
+   - Manter exigência de 👋 OU término sem `?` para evitar false positives. Assim, mesmo que a despedida saia sem a assinatura "qualquer dúvida…", o silêncio ativa no turno seguinte.
+
+4. **Bloquear oferta de comparativo / "olhar armações vs. receita" pós-agendamento** no hint pré-LLM já existente (memory `agendamento-ativo-anti-duplicacao`): garantir que a lista de proibições inclua perguntar "prefere armações ou retirar a receita?" quando `hasAgendamentoAtivo && !explicitChange`. Hoje a regra cobre região/preço, mas a pergunta de pós-exame ainda passou.
+
+5. **Não enviar `proximo_passo` interrogativo no caminho `isShortNo` (não-ToHelp)** quando o último outbound já é despedida + agendamento ativo: tratar como `isShortNoToHelp`. Isso elimina o "Precisa de algo antes de vir?" do turno 2.
+
+6. **Anti-duplicação de despedida**: já existe (`_despedidaJaEnviada`) — adicionar à lista de assinaturas canônicas `"te espero hoje"`, `"até já 👋"`, `"te aguardamos"` para suprimir o reenvio observado no turno 3.
+
+## Verificações pós-correção
+
+- Logs de `ai-triage` no atendimento da Dany devem mostrar:
+  - turno "Só isso mesmo" → `[CLOSE] thanksClose=false shortNoToHelp=true → DESPEDIDA determinística`.
+  - turno "Ok" → `[POS-AGENDAMENTO-SILENCIO] silenciando` OU `isThanksClose=true` → despedida única.
+- Nenhum evento `eventos_crm.tipo='despedida_duplicada_evitada'` é necessário porque o silêncio bloqueia antes.
+
+## Atualizações de memória
+
+- `mem://crm/fluxo-encerramento-atendimento` — adicionar variantes "só isso mesmo", "ok", "beleza" à tabela `isShortNoToHelp` / `isThanksClose`.
+- `mem://ia/pos-agendamento-silencio` — registrar que o gate aceita também "te espero …", "te aguardamos", "até já 👋" como despedida canônica.
+
+## Fora de escopo
+- Sem mudanças de UI, sem alteração de prompt do LLM além do hint pré-LLM existente.
+- Sem migração SQL.
