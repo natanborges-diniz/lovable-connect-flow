@@ -4264,8 +4264,10 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       .replace(/\s+/g, " ")
       .trim();
 
-    // Detecta agradecimento puro (ex: "obg", "obrigado", "valeu", "ok obrigado")
-    const isThanksOnly = /^(obg|obrigad[oa]|valeu|vlw|brigad[oa]|tks|thx|muito obrigad[oa]|ok obrigad[oa]|t[aá] bom obrigad[oa])$/i.test(msgTrim);
+    // Detecta agradecimento puro (ex: "obg", "obrigado", "valeu", "ok obrigado", "ok", "beleza")
+    // OBS: "ok|okay|blz|beleza|combinado|perfeito|tudo certinho" só viram despedida quando há agendamento ativo
+    // (gate isThanksClose = hasAgendamentoAtivo && isThanksOnly && !askedHelpMore).
+    const isThanksOnly = /^(obg|obrigad[oa]|valeu|vlw|brigad[oa]|tks|thx|muito obrigad[oa]|ok obrigad[oa]|t[aá] bom obrigad[oa]|ok|okay|okey|blz|beleza|combinado|perfeito|tudo certinho|tudo certo ent[aã]o)$/i.test(msgTrim);
 
     // Detecta pedido EXPLÍCITO de encerramento (ex: "encerrar atendimento", "pode encerrar", "finalizar")
     const EXPLICIT_CLOSE_RE = /^(pode (encerrar|finalizar|fechar)( o)?( atendimento| chat| conversa)?|encerrar( o)?( atendimento| chat| conversa)?|finalizar( o)?( atendimento| chat| conversa)?|fechar( o)?( atendimento| chat| conversa)?|encerra( a[ií])?|encerra ai|pode (fechar|encerrar) por aqui|j[aá] resolveu|era (s[oó] )?isso( mesmo)?,?\s*(obrigad[oa])?)$/i;
@@ -4273,7 +4275,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 
     // Resposta curta SIM/NÃO à oferta pendente (usa msgTrim2 para tolerar "Não. Obg.")
     const SHORT_YES_RE = /^(sim|isso|pode|pode sim|claro|claro que sim|por favor|adoraria|vamos|bora|manda|manda ver|quero|quero ver|quero sim|show|massa|beleza|ok|tá|ta|tá bom|ta bom|perfeito|com certeza|👍|👌)$/i;
-    const SHORT_NO_RE = /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o|s[oó] isso|era s[oó] isso|sem mais)$/i;
+    const SHORT_NO_RE = /^(n[aã]o|nao precisa|tranquilo|depois|deixa pra l[aá]|t[oô] bem|tudo certo|tudo bem|sem necessidade|n|nn|n[aã]o obrigad[oa]|por enquanto n[aã]o|s[oó] isso|s[oó] isso mesmo|s[oó] isso ent[aã]o|era isso|era isso mesmo|era s[oó] isso|sem mais|nada mais|nada por enquanto|por agora n[aã]o)$/i;
 
     // Aceite afirmativo com cauda: "pode deixar o comparativo aqui", "manda o comparativo", "quero ver as opções"
     const LONG_YES_RE = /^(pode|quero|claro|manda|vamos|bora|ok|sim|adoraria|t[aá] bom|beleza)\b.{0,80}\b(comparativ|opç|diferen|ver|aqui|mostra|envia|prepara|deixa|deixar|separa|aceito)/i;
