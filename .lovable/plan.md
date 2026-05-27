@@ -1,50 +1,106 @@
-## Diagnóstico — atendimento da Iolanda
 
-Linha do tempo do atendimento `27ece2a1` (contato `17a88957`, agendamento Qua 27/05 15:00 DINIZ CARAPICUIBA):
+## Objetivo
+Criar o setor **Estoque de Armações** com pipeline próprio e um primeiro fluxo end-to-end: o estoquista abre uma **Solicitação de Confirmação de Peça** (ref., código, foto opcional, observação) → vira **Demanda** privada para a(s) loja(s) via Atrium Messenger → loja confirma **Tem / Não tem** com botões + observação → card no Kanban do estoque acompanha o status em tempo real, com lembrete a cada 15 min até a loja responder. Garantias ficam fora desta etapa (apenas a coluna placeholder, sem fluxo).
 
-| Quando (UTC) | Evento | Origem |
-|---|---|---|
-| 26/05 01:54–01:59 | Triagem, receita confirmada, cotação, escolha de loja, agendamento Qua 15h | IA normal |
-| 26/05 11:00:04 | "Bom dia, Iolanda… Posso confirmar?" | `agendamentos-cron` → **lembrete véspera (D-1)** |
-| 26/05 11:00:09 | Template `retomada_contexto_1` + "Quer dar continuidade?" | `vendas-recuperacao-cron` → **tentativa 1/2** |
-| 26/05 13:08 | Cliente responde "✅ Confirmo" → confirmação + aviso à loja | OK, recuperação cancelada |
-| **27/05 11:15** | **Template `retomada_contexto_1` + "Quer dar continuidade?"** | **`vendas-recuperacao-cron` → tentativa 1/2 (de novo)** |
+## Pipeline e setor (migration)
+- `setores`: inserir `Estoque de Armações` (slug `estoque_armacoes`).
+- `pipeline_colunas` para o setor, na ordem:
+  1. **Aguardando loja** (entrada, `tipo_acao = confirmacao_estoque_pendente`)
+  2. **Peça confirmada em estoque** (`tipo_acao = confirmacao_estoque_ok`)
+  3. **Sem estoque** (`tipo_acao = confirmacao_estoque_sem`)
+  4. **Faturada** (terminal positiva, manual pelo estoquista)
+  5. **Cancelada** (terminal negativa)
+  6. **Garantias** (placeholder — sem automação por enquanto)
+- Cria role `setor_usuario` ligada ao novo setor; usuários do estoque entram pela UI existente de Gestão de Usuários.
 
-Os dois envios estranhos vêm do **cron de recuperação de vendas** disparando mesmo com o agendamento ativo:
+## Nova entidade: `confirmacoes_estoque`
+Tabela enxuta, vinculada ao pipeline e à(s) demanda(s) geradas. Evita poluir `solicitacoes` (que é client-facing).
 
-1. **26/05 11:00** — O lembrete véspera e a retomada de vendas dispararam **no mesmo minuto** (não houve lock entre eles). Resultado: 3 balões em 5 segundos.
-2. **27/05 11:15** — Cliente já tinha **confirmado a visita 22h antes** (status `confirmado`), e mesmo assim o cron iniciou nova cadência de retomada ("tentativa 1/2"). Foi esse o "ele retornou conversa" que você viu.
+Campos chave: `id`, `protocolo` (`CEA-AAAA-NNNNN`), `referencia` (obrig.), `codigo_produto` (obrig.), `descricao_peca`, `foto_url` (opcional, bucket `estoque-confirmacoes`), `observacao_estoque`, `loja_nome` (1 por card; broadcast multi-loja gera 1 card por loja), `pipeline_coluna_id`, `status` (`aguardando` | `confirmada` | `sem_estoque` | `faturada` | `cancelada`), `resposta_loja` (`sim` | `nao` | null), `resposta_observacao`, `respondida_por`, `respondida_at`, `tentativas_lembrete`, `proximo_lembrete_at`, `solicitante_id`, `demanda_id` (FK lógica para `demandas_loja`), timestamps. Sequence própria para o `numero_curto`. RLS: setor_operador do Estoque + admin + service_role; loja vê só via demanda (já existe).
 
-## Causa raiz
+Bucket público novo: `estoque-confirmacoes` (foto da peça).
 
-`supabase/functions/vendas-recuperacao-cron/index.ts` decide elegibilidade do atendimento sem checar a tabela `agendamentos`. A varredura por `grep` confirma: o arquivo não tem nenhuma referência a `agendamentos` / `hasAgendamentoAtivo` / status `confirmado`. Hoje só barra por encerramento explícito, despedida ou `cancelar_visita`. Cliente que confirmou e ficou em silêncio aguardando a visita continua "elegível" para retomada.
+## Integração com o canal de demandas (reuso, sem reinvento)
+Reutiliza tudo que já existe (`criar-demanda-loja`, `bridge-demanda`, `mensagens_internas`, `notificacoes`, `dispatch-push`, `DemandaThreadView`).
 
-Bônus: também não há lock cruzado com `agendamentos-cron` (lembrete véspera / dia-D), por isso o pacote duplo de 26/05 11:00.
+- Nova edge function **`criar-confirmacao-estoque`** (chamada pelo botão "Nova solicitação de confirmação"):
+  1. Valida payload (zod: referencia/codigo obrigatórios, foto opcional <=5MB, observação <=500 char, ao menos 1 loja).
+  2. Para cada loja selecionada: cria `confirmacoes_estoque` na coluna **Aguardando loja**, gera protocolo, faz upload da foto se houver.
+  3. Chama `criar-demanda-loja` (modo interno, `X-Internal-Caller`) com:
+     - `tipo_chave = 'confirmacao_estoque'`
+     - `assunto = 'Confirmação de peça em estoque — REF X • COD Y'`
+     - `pergunta` = template padronizado (REF, COD, descrição, observação, foto via anexo) + instrução "Responda com os botões abaixo".
+     - `metadata = { confirmacao_estoque_id, foto_url, referencia, codigo }`.
+  4. Atualiza `confirmacoes_estoque.demanda_id` e seta `proximo_lembrete_at = now() + 15min`.
 
-## Correções propostas
+- **Botões "Tem / Não tem" + observação** dentro do `DemandaThreadView` (Atrium):
+  - Renderizar bloco de ação quando `demanda.metadata.tipo_chave === 'confirmacao_estoque'` e usuário é da loja destino e `status != encerrada`.
+  - 2 botões grandes (✅ Tenho a peça / ❌ Não tenho) + campo de observação opcional.
+  - Ao clicar chama nova EF **`responder-confirmacao-estoque`** que:
+    - Atualiza `confirmacoes_estoque` (`resposta_loja`, `resposta_observacao`, `respondida_por/_at`).
+    - Move o card para **Peça confirmada** ou **Sem estoque** via update de `pipeline_coluna_id` (dispara `pipeline-automations` via trigger existente).
+    - Insere `demanda_mensagens` `direcao='loja_para_operador'` com o conteúdo formatado ("✅ Tenho a peça. Obs: …").
+    - Encerra a demanda com `encerrado_por='loja'` (reusa `encerrar-demanda-loja`) — alinhado ao padrão financeiro/garantias.
+    - Cria `notificacoes` + push para o solicitante (estoquista).
 
-Escopo: edge function `vendas-recuperacao-cron` apenas. Sem mudanças de UI, schema ou prompts.
+- **Mensagens livres + observações na abertura**: tudo que loja escrever fora dos botões continua entrando pela bridge atual em `demanda_mensagens` e aparece na thread do estoquista (sem alterar o card). Só o clique nos botões muda o status.
 
-1. **Guardrail "agendamento ativo"** — antes de marcar atendimento como elegível à retomada, buscar `agendamentos` do contato com `status IN ('agendado','lembrete_enviado','confirmado')` e `data_horario > now() - 2h`. Se houver, pular e registrar `eventos_crm.tipo='recuperacao_suprimida_agendamento_ativo'`. Cobre os dois casos da Iolanda (D-1 já lembrado + D-day já confirmado).
+## Lembrete 15 em 15 min (Atrium-only)
+- Novo cron `confirmacao-estoque-watchdog` (a cada 1 min) registrado em `cron_jobs`, payload `{ intervalo_min: 15, max_tentativas: 4 }`.
+- Edge function **`watchdog-confirmacao-estoque`**:
+  - Busca cards com `status='aguardando'` e `proximo_lembrete_at <= now()`.
+  - Para cada um: insere `notificacoes` (com `setor_id` resolvido por `resolver_destinatarios_loja(loja_nome)`) → trigger atual dispara push automaticamente.
+  - Insere mensagem de sistema na própria thread da demanda (`direcao='sistema'`, "⏰ Lembrete: aguardando confirmação há X min").
+  - Incrementa `tentativas_lembrete`, recalcula `proximo_lembrete_at = now() + 15min`.
+  - Ao atingir `max_tentativas` (1h): cria `tarefa` para o supervisor do setor Estoque ("Loja não respondeu — escalar") e para de re-disparar. Card permanece em **Aguardando loja** até resposta ou cancelamento manual.
 
-2. **Lock anti-sobreposição com lembrete** — se o último outbound do atendimento foi um lembrete (`lembrete_vespera_enviado` ou `lembrete_dia_d_at`) há menos de 2h, adiar a retomada para o próximo ciclo (mesmo padrão já usado em `retomada_adiada_janela_noturna`).
+## UI
+- Nova rota `/pipeline-estoque` + entrada na sidebar (gated por setor Estoque ou admin), seguindo o esqueleto de `PipelineFinanceiro.tsx`:
+  - Kanban com as 6 colunas e drag-and-drop (só admins arrastam entre colunas terminais; loja-driven é via botões).
+  - Botão **"Nova solicitação de confirmação"** abre `NovaConfirmacaoEstoqueDialog`:
+    - Campos: referência*, código*, descrição, observação, upload de foto, multiselect de lojas (reusa `useLojas`).
+    - Submit → `criar-confirmacao-estoque`.
+  - Card mostra: protocolo, REF/COD, loja, thumb da foto, tempo aguardando, contador de lembretes, atalho "Abrir demanda" → `/demandas?demanda=<id>`.
+  - Drawer lateral / dialog do card embute a `DemandaThreadView` da demanda vinculada (reuso direto), e mostra ações terminais (Faturar / Cancelar) para o estoquista.
+- Em `DemandaThreadView`: bloco condicional de botões + observação para `tipo_chave='confirmacao_estoque'` (loja).
 
-3. **Idempotência adicional para `confirmado`** — após `agendamento_confirmado_cliente` recente (<48h), nunca disparar recuperação. Mesmo se a guarda (1) falhar por race condition, a (3) protege contra repetir o template no dia da visita.
+## Hooks e tipos
+- `useConfirmacoesEstoque` (lista + realtime em `confirmacoes_estoque`).
+- `useCreateConfirmacaoEstoque`, `useResponderConfirmacaoEstoque`.
+- Tipos em `src/types/database.ts` (`ConfirmacaoEstoque`, status enum string).
+- Reusa `useDemandas` / `useDemandaMensagens` para a thread.
 
-4. **Pós-visita** — manter a fase atual de "pós-venda/follow-up" apenas para atendimentos cujo agendamento mais recente está com `data_horario < now() - 24h` E status terminal (`compareceu` / `venda_fechada` / `no_show`). Hoje a porta está aberta inadvertidamente para agendamentos no futuro.
+## Memória a criar
+- `mem://setor/estoque-armacoes-pipeline` — colunas, fluxo confirmação, lembretes 15min, garantias placeholder.
+- `mem://funcionalidades/confirmacao-estoque-botoes` — botões Tem/Não tem na thread quando `tipo_chave='confirmacao_estoque'`.
 
-## Verificação após o deploy
+## Fora do escopo (próxima iteração)
+- Entrada de NF no estoque.
+- Fluxo completo de garantias (apenas coluna placeholder).
+- Integração automática com e-commerce (hook ficará pronto via `criar-confirmacao-estoque`, mas sem caller externo).
+- Confirmação pelo WhatsApp da loja (por ora só Atrium; mensagens livres por WhatsApp já chegam na thread via bridge).
 
-- Rodar `vendas-recuperacao-cron` manualmente com o contato da Iolanda e confirmar evento `recuperacao_suprimida_agendamento_ativo` nos logs.
-- Conferir que `eventos_crm` para clientes recém-confirmados deixa de registrar `recuperacao_tentativa` enquanto o agendamento está no futuro.
-- Spot-check em 3 outros atendimentos confirmados nas últimas 48h para garantir que nenhum recebeu nova retomada após o ajuste.
+## Detalhes técnicos resumidos
+```text
+Estoquista (UI)
+   │ NovaConfirmacaoEstoqueDialog
+   ▼
+criar-confirmacao-estoque (EF)
+   ├─► confirmacoes_estoque (status=aguardando, coluna=Aguardando loja)
+   └─► criar-demanda-loja (tipo_chave=confirmacao_estoque)
+            └─► mensagens_internas → bridge-demanda → demanda_mensagens
+                  + push/notificacoes para usuários da loja
 
-## Atualizações de memória
+Loja (Atrium)
+   │ DemandaThreadView → botões Tem / Não tem (+ obs)
+   ▼
+responder-confirmacao-estoque (EF)
+   ├─► update confirmacoes_estoque (resposta, status, coluna)
+   ├─► demanda_mensagens (loja_para_operador)
+   ├─► encerrar-demanda-loja (encerrado_por=loja)
+   └─► notificacao + push para estoquista
 
-- `mem://crm/recuperacao-ia-anti-abandono` — registrar que cadência é suprimida quando há `agendamentos` ativo/confirmado.
-- `mem://watchdog/lead-silencioso-perdidos` — anotar exceção: agendamento confirmado bloqueia tanto retomada quanto move-to-Perdidos.
-
-## Fora de escopo
-
-- Não vou alterar o lembrete véspera/dia-D em si, nem o template `retomada_contexto_1`.
-- Sem mudanças no `ai-triage`, prompt do LLM ou schema.
+Cron 1min → watchdog-confirmacao-estoque
+   • re-notifica loja a cada 15min (push + msg sistema)
+   • após 4 tentativas → tarefa para supervisor
+```

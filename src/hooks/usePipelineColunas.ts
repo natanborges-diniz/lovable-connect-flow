@@ -9,6 +9,7 @@ export interface PipelineColuna {
   ordem: number;
   ativo: boolean;
   grupo_funil: string | null;
+  tipo_acao: string | null;
   setor_id: string | null;
   created_at: string;
   updated_at: string;
