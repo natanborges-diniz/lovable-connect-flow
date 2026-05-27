@@ -66,17 +66,21 @@ export default function PipelineEstoque() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Estoque de Armações" subtitle="Confirmação de peça em estoque" icon={Package}>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="h-8 w-56 pl-7 text-sm" />
+      <PageHeader
+        title="Estoque de Armações"
+        description="Confirmação de peça em estoque"
+        actions={
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="h-8 w-56 pl-7 text-sm" />
+            </div>
+            <Button size="sm" onClick={() => setOpen(true)} className="gap-1">
+              <Plus className="h-4 w-4" /> Nova solicitação
+            </Button>
           </div>
-          <Button size="sm" onClick={() => setOpen(true)} className="gap-1">
-            <Plus className="h-4 w-4" /> Nova solicitação
-          </Button>
-        </div>
-      </PageHeader>
+        }
+      />
 
       <NovaConfirmacaoEstoqueDialog open={open} onOpenChange={setOpen} />
 
