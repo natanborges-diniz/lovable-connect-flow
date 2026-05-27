@@ -5,7 +5,7 @@ import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
 
-export type ModuleKey = "dashboard" | "crm" | "financeiro" | "lojas" | "ti" | "interno" | "tarefas" | "mensagens" | "configuracoes";
+export type ModuleKey = "dashboard" | "crm" | "financeiro" | "lojas" | "ti" | "interno" | "estoque" | "tarefas" | "mensagens" | "configuracoes";
 
 export const moduleFromPath = (pathname: string): ModuleKey => {
   if (pathname.startsWith("/lojas")) return "lojas";
@@ -13,6 +13,7 @@ export const moduleFromPath = (pathname: string): ModuleKey => {
   if (pathname.startsWith("/crm")) return "crm";
   if (pathname.startsWith("/ti")) return "ti";
   if (pathname.startsWith("/interno")) return "interno";
+  if (pathname.startsWith("/estoque")) return "estoque";
   if (pathname.startsWith("/tarefas")) return "tarefas";
   if (pathname.startsWith("/mensagens") || pathname.startsWith("/demandas")) return "mensagens";
   if (pathname.startsWith("/configuracoes")) return "configuracoes";
@@ -38,7 +39,9 @@ const SETOR_ROUTES_MAP: Record<string, string[]> = {
   atendimento: ["/crm", "/tarefas", "/mensagens"],
   loja: ["/lojas", "/mensagens"],
   "atendimento corporativo": ["/interno", "/mensagens"],
-  armacoes: ["/interno", "/mensagens", "/tarefas"],
+  armacoes: ["/estoque", "/mensagens", "/tarefas"],
+  "estoque armacoes": ["/estoque", "/mensagens", "/tarefas"],
+  estoque: ["/estoque", "/mensagens", "/tarefas"],
 };
 const DEFAULT_SETOR_ROUTES = ["/interno", "/mensagens", "/tarefas", "/demandas"];
 

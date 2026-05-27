@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, Settings, LogOut, DollarSign, Bell, Mail, Store, Monitor, ListTodo, Headset } from "lucide-react";
+import { LayoutDashboard, Users, Settings, LogOut, DollarSign, Bell, Mail, Store, Monitor, ListTodo, Headset, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,6 +25,7 @@ const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defa
   { key: "financeiro", label: "Financeiro", icon: DollarSign, defaultPath: "/financeiro" },
   { key: "ti", label: "TI", icon: Monitor, defaultPath: "/ti" },
   { key: "interno", label: "Interno", icon: Headset, defaultPath: "/interno" },
+  { key: "estoque", label: "Estoque", icon: Package, defaultPath: "/estoque" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
   { key: "mensagens", label: "Mensagens", icon: Mail, defaultPath: "/mensagens" },
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
@@ -49,7 +50,9 @@ const SETOR_MODULE_MAP: Record<string, ModuleKey[]> = {
   atendimento: ["crm", "tarefas", "mensagens"],
   loja: ["lojas", "mensagens"],
   "atendimento corporativo": ["interno", "mensagens"],
-  armacoes: ["interno", "mensagens", "tarefas"],
+  armacoes: ["estoque", "mensagens", "tarefas"],
+  "estoque armacoes": ["estoque", "mensagens", "tarefas"],
+  estoque: ["estoque", "mensagens", "tarefas"],
 };
 
 // Fallback para setores não mapeados (departamentos novos operam via Ponte de Mensageria)

@@ -2,7 +2,7 @@ import { useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
-  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin, ShieldAlert,
+  Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin, ShieldAlert, Package,
   ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -85,6 +85,14 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "Atendimento Interno",
       items: [
         { title: "Pipeline Corporativo", url: "/interno", icon: Headset },
+      ],
+    },
+  ],
+  estoque: [
+    {
+      label: "Estoque de Armações",
+      items: [
+        { title: "Confirmação de Peças", url: "/estoque", icon: Package },
       ],
     },
   ],
