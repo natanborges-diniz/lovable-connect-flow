@@ -12,6 +12,7 @@ import { useDemandaMensagens, useEditDemandaMensagem, useDeleteDemandaMensagem, 
 import { useAuth } from "@/hooks/useAuth";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
+import { useResponderConfirmacaoEstoque } from "@/hooks/useConfirmacoesEstoque";
 
 const dirColors: Record<string, string> = {
   operador_para_loja: "bg-primary text-primary-foreground ml-auto",
@@ -38,9 +39,15 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
   const [forwarding, setForwarding] = useState(false);
   const [closing, setClosing] = useState(false);
   const [expandLojas, setExpandLojas] = useState(false);
+  const [confestObs, setConfestObs] = useState("");
+  const responderConfest = useResponderConfirmacaoEstoque();
 
   const isGrupo = demanda.metadata?.grupo === true;
   const lojasNomes: string[] = demanda.metadata?.lojas_nomes ?? [];
+  const isConfest = (demanda as any).tipo_chave === "confirmacao_estoque"
+    || demanda.metadata?.tipo_chave === "confirmacao_estoque";
+  const confestId: string | undefined = demanda.metadata?.confirmacao_estoque_id;
+  const confestRespondida = !!demanda.metadata?.confirmacao_respondida;
 
   // Marca como vista
   useEffect(() => {
