@@ -510,6 +510,95 @@ export type Database = {
         }
         Relationships: []
       }
+      confirmacoes_estoque: {
+        Row: {
+          codigo_produto: string
+          created_at: string
+          demanda_id: string | null
+          descricao_peca: string | null
+          foto_url: string | null
+          id: string
+          loja_nome: string
+          loja_telefone: string | null
+          metadata: Json
+          numero_curto: number
+          observacao_estoque: string | null
+          pipeline_coluna_id: string | null
+          protocolo: string
+          proximo_lembrete_at: string | null
+          referencia: string
+          respondida_at: string | null
+          respondida_por: string | null
+          resposta_loja: string | null
+          resposta_observacao: string | null
+          solicitante_id: string | null
+          solicitante_nome: string | null
+          status: string
+          tentativas_lembrete: number
+          updated_at: string
+        }
+        Insert: {
+          codigo_produto: string
+          created_at?: string
+          demanda_id?: string | null
+          descricao_peca?: string | null
+          foto_url?: string | null
+          id?: string
+          loja_nome: string
+          loja_telefone?: string | null
+          metadata?: Json
+          numero_curto?: number
+          observacao_estoque?: string | null
+          pipeline_coluna_id?: string | null
+          protocolo: string
+          proximo_lembrete_at?: string | null
+          referencia: string
+          respondida_at?: string | null
+          respondida_por?: string | null
+          resposta_loja?: string | null
+          resposta_observacao?: string | null
+          solicitante_id?: string | null
+          solicitante_nome?: string | null
+          status?: string
+          tentativas_lembrete?: number
+          updated_at?: string
+        }
+        Update: {
+          codigo_produto?: string
+          created_at?: string
+          demanda_id?: string | null
+          descricao_peca?: string | null
+          foto_url?: string | null
+          id?: string
+          loja_nome?: string
+          loja_telefone?: string | null
+          metadata?: Json
+          numero_curto?: number
+          observacao_estoque?: string | null
+          pipeline_coluna_id?: string | null
+          protocolo?: string
+          proximo_lembrete_at?: string | null
+          referencia?: string
+          respondida_at?: string | null
+          respondida_por?: string | null
+          resposta_loja?: string | null
+          resposta_observacao?: string | null
+          solicitante_id?: string | null
+          solicitante_nome?: string | null
+          status?: string
+          tentativas_lembrete?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "confirmacoes_estoque_pipeline_coluna_id_fkey"
+            columns: ["pipeline_coluna_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_colunas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conhecimento_ia: {
         Row: {
           ativo: boolean
