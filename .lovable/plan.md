@@ -1,45 +1,50 @@
-## Diagnóstico do caso Dany
+## Diagnóstico — atendimento da Iolanda
 
-Cronologia + por que cada balão extra escapou:
+Linha do tempo do atendimento `27ece2a1` (contato `17a88957`, agendamento Qua 27/05 15:00 DINIZ CARAPICUIBA):
 
-| # | Cliente | IA respondeu | Causa |
-|---|---------|--------------|-------|
-| 1 | "Sim" (confirma agendamento) | "…Precisa de mais alguma coisa antes da visita?" | Esperado — pergunta de fechamento canônica (`askedHelpMore`). |
-| 2 | **"Só isso mesmo"** | "…**Precisa de algo antes de vir?**" | `SHORT_NO_RE` (linha 4276) só casa `só isso` / `era só isso` exatos — **não casa "só isso mesmo"**. Cai no LLM normal, que devolveu nova pergunta. |
-| 3 | (sem inbound) | "…Até já 👋" | Provável reenvio do mesmo turno (LLM retry / merge resposta+proximo_passo). |
-| 4 | **"Ok"** | "Conta pra mim com mais detalhes…" + depois "Após o exame, você prefere já olhar armações…?" | `"ok"` **não está** em `isThanksOnly` (linha 4268) **nem** em `SHORT_NO_RE`. Sem despedida determinística. Gate de **silêncio pós-agendamento** (linha 4487) exige que o último outbound contenha `qualquer dúvida é só me chamar` ou `qualquer coisa estou por aqui` + 👋. As despedidas anteriores foram "Precisa de algo antes de vir?" e "Até já 👋" — **nenhuma bate a assinatura canônica**, então o silêncio não ativou e o LLM gerou retomada genérica + oferta de comparativo (proibida pós-agendamento). |
+| Quando (UTC) | Evento | Origem |
+|---|---|---|
+| 26/05 01:54–01:59 | Triagem, receita confirmada, cotação, escolha de loja, agendamento Qua 15h | IA normal |
+| 26/05 11:00:04 | "Bom dia, Iolanda… Posso confirmar?" | `agendamentos-cron` → **lembrete véspera (D-1)** |
+| 26/05 11:00:09 | Template `retomada_contexto_1` + "Quer dar continuidade?" | `vendas-recuperacao-cron` → **tentativa 1/2** |
+| 26/05 13:08 | Cliente responde "✅ Confirmo" → confirmação + aviso à loja | OK, recuperação cancelada |
+| **27/05 11:15** | **Template `retomada_contexto_1` + "Quer dar continuidade?"** | **`vendas-recuperacao-cron` → tentativa 1/2 (de novo)** |
 
-Resumo: três regexes restritivas demais permitiram que mensagens triviais de encerramento ("só isso mesmo", "ok") furassem todas as camadas (despedida determinística → silêncio pós-agendamento → guardrail).
+Os dois envios estranhos vêm do **cron de recuperação de vendas** disparando mesmo com o agendamento ativo:
 
-## Correções propostas em `supabase/functions/ai-triage/index.ts`
+1. **26/05 11:00** — O lembrete véspera e a retomada de vendas dispararam **no mesmo minuto** (não houve lock entre eles). Resultado: 3 balões em 5 segundos.
+2. **27/05 11:15** — Cliente já tinha **confirmado a visita 22h antes** (status `confirmado`), e mesmo assim o cron iniciou nova cadência de retomada ("tentativa 1/2"). Foi esse o "ele retornou conversa" que você viu.
 
-1. **Ampliar `SHORT_NO_RE` (linha 4276)** para cobrir variantes comuns de "estou ok":
-   - adicionar: `só isso mesmo`, `só isso então`, `era isso`, `era isso mesmo`, `nada mais`, `nada por enquanto`, `por agora não`, `ok`, `okay`, `ok então`, `tá ok`, `tá bom`, `ta bom`, `blz`, `beleza`, `tudo certo então`, `tudo certinho`, `perfeito`, `combinado`.
+## Causa raiz
 
-2. **Ampliar `isThanksOnly` (linha 4268)** para tratar `"ok"`, `"okay"`, `"blz"`, `"beleza"`, `"combinado"` como agradecimento puro quando há agendamento ativo — assim `isThanksClose` dispara despedida determinística em vez de cair no LLM.
+`supabase/functions/vendas-recuperacao-cron/index.ts` decide elegibilidade do atendimento sem checar a tabela `agendamentos`. A varredura por `grep` confirma: o arquivo não tem nenhuma referência a `agendamentos` / `hasAgendamentoAtivo` / status `confirmado`. Hoje só barra por encerramento explícito, despedida ou `cancelar_visita`. Cliente que confirmou e ficou em silêncio aguardando a visita continua "elegível" para retomada.
 
-3. **Ampliar regex de "despedida canônica" do gate de silêncio pós-agendamento (linha 4487)** para reconhecer também as variações já usadas pelo LLM:
-   - `te espero (hoje|amanhã|...)`, `te aguardamos`, `até já`, `até daqui a pouco`, `nos vemos`, `combinado!.*(te espero|te aguardamos)`.
-   - Manter exigência de 👋 OU término sem `?` para evitar false positives. Assim, mesmo que a despedida saia sem a assinatura "qualquer dúvida…", o silêncio ativa no turno seguinte.
+Bônus: também não há lock cruzado com `agendamentos-cron` (lembrete véspera / dia-D), por isso o pacote duplo de 26/05 11:00.
 
-4. **Bloquear oferta de comparativo / "olhar armações vs. receita" pós-agendamento** no hint pré-LLM já existente (memory `agendamento-ativo-anti-duplicacao`): garantir que a lista de proibições inclua perguntar "prefere armações ou retirar a receita?" quando `hasAgendamentoAtivo && !explicitChange`. Hoje a regra cobre região/preço, mas a pergunta de pós-exame ainda passou.
+## Correções propostas
 
-5. **Não enviar `proximo_passo` interrogativo no caminho `isShortNo` (não-ToHelp)** quando o último outbound já é despedida + agendamento ativo: tratar como `isShortNoToHelp`. Isso elimina o "Precisa de algo antes de vir?" do turno 2.
+Escopo: edge function `vendas-recuperacao-cron` apenas. Sem mudanças de UI, schema ou prompts.
 
-6. **Anti-duplicação de despedida**: já existe (`_despedidaJaEnviada`) — adicionar à lista de assinaturas canônicas `"te espero hoje"`, `"até já 👋"`, `"te aguardamos"` para suprimir o reenvio observado no turno 3.
+1. **Guardrail "agendamento ativo"** — antes de marcar atendimento como elegível à retomada, buscar `agendamentos` do contato com `status IN ('agendado','lembrete_enviado','confirmado')` e `data_horario > now() - 2h`. Se houver, pular e registrar `eventos_crm.tipo='recuperacao_suprimida_agendamento_ativo'`. Cobre os dois casos da Iolanda (D-1 já lembrado + D-day já confirmado).
 
-## Verificações pós-correção
+2. **Lock anti-sobreposição com lembrete** — se o último outbound do atendimento foi um lembrete (`lembrete_vespera_enviado` ou `lembrete_dia_d_at`) há menos de 2h, adiar a retomada para o próximo ciclo (mesmo padrão já usado em `retomada_adiada_janela_noturna`).
 
-- Logs de `ai-triage` no atendimento da Dany devem mostrar:
-  - turno "Só isso mesmo" → `[CLOSE] thanksClose=false shortNoToHelp=true → DESPEDIDA determinística`.
-  - turno "Ok" → `[POS-AGENDAMENTO-SILENCIO] silenciando` OU `isThanksClose=true` → despedida única.
-- Nenhum evento `eventos_crm.tipo='despedida_duplicada_evitada'` é necessário porque o silêncio bloqueia antes.
+3. **Idempotência adicional para `confirmado`** — após `agendamento_confirmado_cliente` recente (<48h), nunca disparar recuperação. Mesmo se a guarda (1) falhar por race condition, a (3) protege contra repetir o template no dia da visita.
+
+4. **Pós-visita** — manter a fase atual de "pós-venda/follow-up" apenas para atendimentos cujo agendamento mais recente está com `data_horario < now() - 24h` E status terminal (`compareceu` / `venda_fechada` / `no_show`). Hoje a porta está aberta inadvertidamente para agendamentos no futuro.
+
+## Verificação após o deploy
+
+- Rodar `vendas-recuperacao-cron` manualmente com o contato da Iolanda e confirmar evento `recuperacao_suprimida_agendamento_ativo` nos logs.
+- Conferir que `eventos_crm` para clientes recém-confirmados deixa de registrar `recuperacao_tentativa` enquanto o agendamento está no futuro.
+- Spot-check em 3 outros atendimentos confirmados nas últimas 48h para garantir que nenhum recebeu nova retomada após o ajuste.
 
 ## Atualizações de memória
 
-- `mem://crm/fluxo-encerramento-atendimento` — adicionar variantes "só isso mesmo", "ok", "beleza" à tabela `isShortNoToHelp` / `isThanksClose`.
-- `mem://ia/pos-agendamento-silencio` — registrar que o gate aceita também "te espero …", "te aguardamos", "até já 👋" como despedida canônica.
+- `mem://crm/recuperacao-ia-anti-abandono` — registrar que cadência é suprimida quando há `agendamentos` ativo/confirmado.
+- `mem://watchdog/lead-silencioso-perdidos` — anotar exceção: agendamento confirmado bloqueia tanto retomada quanto move-to-Perdidos.
 
 ## Fora de escopo
-- Sem mudanças de UI, sem alteração de prompt do LLM além do hint pré-LLM existente.
-- Sem migração SQL.
+
+- Não vou alterar o lembrete véspera/dia-D em si, nem o template `retomada_contexto_1`.
+- Sem mudanças no `ai-triage`, prompt do LLM ou schema.
