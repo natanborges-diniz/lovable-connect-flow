@@ -106,8 +106,7 @@ export function useUpdateConfirmacaoColuna() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, coluna_id, status }: { id: string; coluna_id: string; status?: ConfirmacaoEstoqueRow["status"] }) => {
-      const patch: Record<string, unknown> = { pipeline_coluna_id: coluna_id };
-      if (status) patch.status = status;
+      const patch = { pipeline_coluna_id: coluna_id, ...(status ? { status } : {}) };
       const { error } = await supabase.from("confirmacoes_estoque").update(patch).eq("id", id);
       if (error) throw error;
     },
