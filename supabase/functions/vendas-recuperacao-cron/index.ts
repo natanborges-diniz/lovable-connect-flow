@@ -196,6 +196,77 @@ async function processContato(
     return result;
   }
 
+  // ── GUARDRAIL: agendamento ativo / lembrete recente / confirmação recente ──
+  // Evita disparar retomada_contexto_* quando o cliente já tem visita
+  // confirmada ou recém-lembrada — caso Iolanda (27/05/2026).
+  try {
+    // 1) Agendamento ativo (futuro >= now - 2h, status não-terminal)
+    const cutoffAg = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const { data: agAtivo } = await supabase
+      .from("agendamentos")
+      .select("id, status, data_horario")
+      .eq("contato_id", contato.id)
+      .in("status", ["agendado", "lembrete_enviado", "confirmado"])
+      .gte("data_horario", cutoffAg)
+      .order("data_horario", { ascending: true })
+      .limit(1);
+
+    if (agAtivo && agAtivo.length > 0) {
+      const ag = agAtivo[0];
+      console.log(`[AG-ATIVO] ${contato.nome}: agendamento ${ag.status} em ${ag.data_horario} — recuperação suprimida`);
+      await supabase.from("eventos_crm").insert({
+        contato_id: contato.id,
+        tipo: "recuperacao_suprimida_agendamento_ativo",
+        descricao: `Retomada bloqueada — agendamento ${ag.status} em ${ag.data_horario}`,
+        metadata: { agendamento_id: ag.id, status: ag.status, data_horario: ag.data_horario },
+      });
+      return result;
+    }
+
+    // 2) Confirmação do cliente nas últimas 48h
+    const cutoffConf = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
+    const { data: confEvt } = await supabase
+      .from("eventos_crm")
+      .select("id")
+      .eq("contato_id", contato.id)
+      .eq("tipo", "agendamento_confirmado_cliente")
+      .gte("created_at", cutoffConf)
+      .limit(1);
+    if (confEvt && confEvt.length > 0) {
+      console.log(`[AG-CONFIRMADO-RECENTE] ${contato.nome}: confirmação <48h — recuperação suprimida`);
+      await supabase.from("eventos_crm").insert({
+        contato_id: contato.id,
+        tipo: "recuperacao_suprimida_agendamento_ativo",
+        descricao: "Retomada bloqueada — agendamento_confirmado_cliente nas últimas 48h",
+        metadata: { motivo: "confirmacao_recente" },
+      });
+      return result;
+    }
+
+    // 3) Lembrete (véspera/dia-D) disparado nas últimas 2h — adia para próximo ciclo
+    const cutoffLemb = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const { data: lembEvt } = await supabase
+      .from("eventos_crm")
+      .select("id, tipo, created_at")
+      .eq("contato_id", contato.id)
+      .in("tipo", ["lembrete_vespera_enviado", "lembrete_dia_d_enviado"])
+      .gte("created_at", cutoffLemb)
+      .limit(1);
+    if (lembEvt && lembEvt.length > 0) {
+      console.log(`[LEMB-RECENTE] ${contato.nome}: lembrete há <2h — adiando retomada`);
+      await supabase.from("eventos_crm").insert({
+        contato_id: contato.id,
+        tipo: "retomada_adiada_lembrete_recente",
+        descricao: "Retomada adiada — lembrete enviado nas últimas 2h",
+        metadata: { lembrete_tipo: lembEvt[0].tipo, lembrete_at: lembEvt[0].created_at },
+      });
+      return result;
+    }
+  } catch (e) {
+    console.error("[GUARDRAIL-AG] erro consultando agendamentos:", e);
+    // Em caso de erro, segue o fluxo normal (fail-open) — guardrails secundários (cooldown humano, dedupe) ainda atuam.
+  }
+
   // ─────────────────────────────────────────────────────────────
   // MODO HUMANO/HÍBRIDO — cadência via templates Meta (>24h janela)
   // ─────────────────────────────────────────────────────────────
