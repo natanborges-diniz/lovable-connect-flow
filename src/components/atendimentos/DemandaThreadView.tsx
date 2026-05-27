@@ -213,6 +213,44 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
         )}
       </div>
 
+      {isConfest && confestId && demanda.status !== "encerrada" && !confestRespondida && (
+        <div className="shrink-0 space-y-2 border-t bg-background p-3">
+          <p className="text-[11px] font-medium">
+            🔎 Confirmação de peça em estoque — responda abaixo
+          </p>
+          <Textarea
+            value={confestObs}
+            onChange={(e) => setConfestObs(e.target.value)}
+            placeholder="Observação opcional (ex.: localização, lote, prazo)..."
+            rows={2}
+            className="resize-none text-sm"
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              disabled={responderConfest.isPending}
+              onClick={() => responderConfest.mutate({ confirmacao_id: confestId, resposta: "sim", observacao: confestObs || undefined })}
+              className="text-xs bg-emerald-600 hover:bg-emerald-700"
+            >
+              {responderConfest.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+              ✅ Tenho a peça
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={responderConfest.isPending}
+              onClick={() => responderConfest.mutate({ confirmacao_id: confestId, resposta: "nao", observacao: confestObs || undefined })}
+              className="text-xs"
+            >
+              <Ban className="mr-1 h-3 w-3" />
+              ❌ Não tenho
+            </Button>
+          </div>
+        </div>
+      )}
+
+
       {demanda.status !== "encerrada" && demanda.atendimento_cliente_id && (
         <div className="shrink-0 space-y-2 border-t bg-background p-3">
           {selectedMsgIds.size > 0 && (
