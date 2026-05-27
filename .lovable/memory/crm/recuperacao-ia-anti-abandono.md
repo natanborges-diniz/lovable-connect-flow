@@ -76,9 +76,21 @@ HUMANO_COOLDOWN_HORAS = 24
 
 Todos overridáveis via payload do cron em **Configurações → Agendamentos Automáticos** (`humano_delay_primeira`, `humano_delay_segunda`, `humano_espera_final`, `humano_max_tentativas`, `humano_cooldown_horas`).
 
+## Guardrail agendamento ativo (IA + Humano)
+
+Antes de qualquer cadência, `processContato` consulta:
+1. `agendamentos` com `status IN (agendado, lembrete_enviado, confirmado)` e `data_horario >= now − 2h` → grava `recuperacao_suprimida_agendamento_ativo` e retorna.
+2. `eventos_crm.tipo = 'agendamento_confirmado_cliente'` nas últimas 48h → mesmo bloqueio.
+3. `eventos_crm.tipo = 'lembrete_vespera_enviado' | 'lembrete_dia_d_enviado'` nas últimas 2h → grava `retomada_adiada_lembrete_recente` (sem consumir tentativa).
+
+Bug raiz corrigido (caso Iolanda 27/05/2026): cliente com agendamento `confirmado` para o mesmo dia recebia `retomada_contexto_1` no dia da visita porque a função não checava a tabela `agendamentos`. Fix aplicado em ambos os ramos (IA e Humano) por estar acima do branch `atendimento.modo`.
+
 ## Eventos registrados em `eventos_crm`
 - `recuperacao_tentativa` (IA)
 - `lead_despedida_final` (IA)
 - `recuperacao_humano_tentativa` (Humano)
 - `lead_despedida_humano` (Humano)
 - `retomada_adiada_janela_noturna` (IA + Humano, quando envio cai em 22h–08h)
+- `recuperacao_suprimida_agendamento_ativo` (novo)
+- `retomada_adiada_lembrete_recente` (novo)
+
