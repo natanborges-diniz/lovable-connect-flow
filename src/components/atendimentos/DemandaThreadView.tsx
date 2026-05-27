@@ -12,6 +12,7 @@ import { useDemandaMensagens, useEditDemandaMensagem, useDeleteDemandaMensagem, 
 import { useAuth } from "@/hooks/useAuth";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
+import { useResponderConfirmacaoEstoque } from "@/hooks/useConfirmacoesEstoque";
 
 const dirColors: Record<string, string> = {
   operador_para_loja: "bg-primary text-primary-foreground ml-auto",
@@ -38,9 +39,15 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
   const [forwarding, setForwarding] = useState(false);
   const [closing, setClosing] = useState(false);
   const [expandLojas, setExpandLojas] = useState(false);
+  const [confestObs, setConfestObs] = useState("");
+  const responderConfest = useResponderConfirmacaoEstoque();
 
   const isGrupo = demanda.metadata?.grupo === true;
   const lojasNomes: string[] = demanda.metadata?.lojas_nomes ?? [];
+  const isConfest = (demanda as any).tipo_chave === "confirmacao_estoque"
+    || demanda.metadata?.tipo_chave === "confirmacao_estoque";
+  const confestId: string | undefined = demanda.metadata?.confirmacao_estoque_id;
+  const confestRespondida = !!demanda.metadata?.confirmacao_respondida;
 
   // Marca como vista
   useEffect(() => {
@@ -205,6 +212,44 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
           })
         )}
       </div>
+
+      {isConfest && confestId && demanda.status === "aberta" && !confestRespondida && (
+        <div className="shrink-0 space-y-2 border-t bg-background p-3">
+          <p className="text-[11px] font-medium">
+            🔎 Confirmação de peça em estoque — responda abaixo
+          </p>
+          <Textarea
+            value={confestObs}
+            onChange={(e) => setConfestObs(e.target.value)}
+            placeholder="Observação opcional (ex.: localização, lote, prazo)..."
+            rows={2}
+            className="resize-none text-sm"
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              disabled={responderConfest.isPending}
+              onClick={() => responderConfest.mutate({ confirmacao_id: confestId, resposta: "sim", observacao: confestObs || undefined })}
+              className="text-xs bg-emerald-600 hover:bg-emerald-700"
+            >
+              {responderConfest.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+              ✅ Tenho a peça
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={responderConfest.isPending}
+              onClick={() => responderConfest.mutate({ confirmacao_id: confestId, resposta: "nao", observacao: confestObs || undefined })}
+              className="text-xs"
+            >
+              <Ban className="mr-1 h-3 w-3" />
+              ❌ Não tenho
+            </Button>
+          </div>
+        </div>
+      )}
+
 
       {demanda.status !== "encerrada" && demanda.atendimento_cliente_id && (
         <div className="shrink-0 space-y-2 border-t bg-background p-3">
