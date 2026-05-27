@@ -213,7 +213,7 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
         )}
       </div>
 
-      {isConfest && confestId && demanda.status !== "encerrada" && !confestRespondida && (
+      {isConfest && confestId && demanda.status === "aberta" && !confestRespondida && (
         <div className="shrink-0 space-y-2 border-t bg-background p-3">
           <p className="text-[11px] font-medium">
             🔎 Confirmação de peça em estoque — responda abaixo
