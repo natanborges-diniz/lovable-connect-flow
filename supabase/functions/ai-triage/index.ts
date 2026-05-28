@@ -69,6 +69,8 @@ const _msgFixaDefaults: Record<string, string> = {
     "De nada{nome_comma}! {tail} 👋 Qualquer dúvida é só me chamar.",
   despedida_short_no:
     "Combinado{nome_comma}! {tail} 👋 Qualquer dúvida é só me chamar.",
+  formas_pagamento:
+    "Trabalhamos com várias formas pra facilitar pra você 😊\n\n💳 *Cartão de crédito* — em até *10x sem juros*\n💰 *PIX / dinheiro* — com *desconto à vista*\n🧾 *Boleto* — à vista ou parcelado\n📋 *Crediário próprio Óticas Diniz* — análise na hora, sem cartão\n\nPosso já agendar uma visita na loja mais próxima pra você fechar o pedido? Me conta seu bairro 📍",
 };
 const _msgFixaCache: Record<string, string> = { ..._msgFixaDefaults };
 let _msgFixaExpire = 0;
@@ -675,6 +677,57 @@ function matchesConsultaOs(msg: string, keywords: string[]): boolean {
     if (re.test(msg) || re.test(n)) return true;
   }
   // 2) Keywords editáveis pela auditoria (substring case/accent-insensitive)
+  return keywords.some((k) => k && n.includes(k));
+}
+
+// ── PRE-LLM: Formas de pagamento ──
+// Detecta perguntas tipo "qual a forma de pagamento", "aceita cartão", "parcela em quantas", "somente à vista".
+// Responde determinístico (ia_mensagens_fixas.formas_pagamento) sem escalar.
+const PAGAMENTO_INTENT_DEFAULT_KEYWORDS: string[] = [
+  "forma de pagamento", "formas de pagamento",
+  "como pago", "como posso pagar", "como funciona o pagamento",
+  "aceita cartao", "aceitam cartao",
+  "parcela", "parcelar", "parcelado", "parcelamento",
+  "a vista", "somente a vista", "so a vista", "apenas a vista",
+  "tem desconto", "desconto a vista",
+  "pix", "boleto", "crediario", "credito", "debito",
+  "quantas vezes", "em quantas",
+];
+let _pagamentoKeywordsCache: string[] = PAGAMENTO_INTENT_DEFAULT_KEYWORDS;
+let _pagamentoKeywordsExpire = 0;
+async function loadPagamentoKeywords(client: any): Promise<string[]> {
+  if (Date.now() < _pagamentoKeywordsExpire) return _pagamentoKeywordsCache;
+  try {
+    const { data } = await client.from("configuracoes_ia").select("valor").eq("chave", "pagamento_intent_keywords").maybeSingle();
+    if (data?.valor) {
+      const parsed = JSON.parse(data.valor);
+      if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+        _pagamentoKeywordsCache = parsed.map((s) => norm(s)).filter(Boolean);
+      }
+    }
+  } catch (e) {
+    console.warn("[pagamento-keywords] load falhou, usando defaults", (e as Error)?.message);
+  }
+  _pagamentoKeywordsExpire = Date.now() + 60_000;
+  return _pagamentoKeywordsCache;
+}
+// Regex "núcleo" — paráfrases comuns que não dependem das keywords editáveis.
+const PAGAMENTO_INTENT_CORE_REGEX: RegExp[] = [
+  /\bcomo\s+(eu\s+)?(posso|pode|faço|fazer|fica)\b[\s\S]{0,20}\b(pag(ar|amento)|paga)\b/i,
+  /\bqual(is)?\s+(a|as|sao|são)?\s*(forma|formas|meio|meios|op[cç][aã]o|op[cç][oõ]es)\s*(de)?\s*pag(ar|amento)/i,
+  /\b(aceita|aceitam|tem)\b[\s\S]{0,15}\b(cart[aã]o|pix|boleto|crediar|credit|d[eé]bito)\b/i,
+  /\b(pode|d[aá]|tem|consigo|posso)\b[\s\S]{0,15}\bparcelar\b/i,
+  /\bsomente?\s+(a|à)\s+vista\b/i,
+  /\bso\s+(a|à)\s+vista\b/i,
+  /\bapenas\s+(a|à)\s+vista\b/i,
+  /\bem\s+quantas\s+vezes\b/i,
+];
+function matchesPagamentoIntent(msg: string, keywords: string[]): boolean {
+  if (!msg) return false;
+  const n = norm(msg);
+  for (const re of PAGAMENTO_INTENT_CORE_REGEX) {
+    if (re.test(msg) || re.test(n)) return true;
+  }
   return keywords.some((k) => k && n.includes(k));
 }
 
@@ -2732,9 +2785,54 @@ serve(async (req) => {
       }
     }
 
+    // ── 2.5.PAG PRE-LLM ROUTER: Formas de pagamento ──
+    // Responde determinístico (ia_mensagens_fixas.formas_pagamento), mantém modo IA, sem escalar.
+    // Skip se houver template de link de pagamento recente (delega ao fluxo financeiro).
+    {
+      const pagKw = await loadPagamentoKeywords(supabase);
+      if (matchesPagamentoIntent(currentMsg, pagKw)) {
+        // Checa últimos 5 outbounds por marker de link de pagamento
+        const { data: recentOut } = await supabase
+          .from("mensagens")
+          .select("conteudo")
+          .eq("atendimento_id", atendimento_id)
+          .eq("direcao", "outbound")
+          .order("created_at", { ascending: false })
+          .limit(5);
+        const hasLinkPagamento = (recentOut || []).some((m: any) =>
+          /\[Template:\s*link_pagamento/i.test(String(m?.conteudo || ""))
+        );
+
+        if (hasLinkPagamento) {
+          console.log("[ROUTER-PAGAMENTO] link_pagamento ativo — delegando ao fluxo financeiro (skip router)");
+        } else {
+          console.log("[ROUTER-PAGAMENTO] intent detectado — resposta determinística");
+          await loadMensagensFixas(supabase);
+          const pagMsg = renderMsgFixa("formas_pagamento");
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, pagMsg);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "duvida_pagamento",
+            descricao: "Cliente perguntou sobre formas de pagamento — resposta determinística enviada",
+            metadata: { mensagem_cliente: currentMsg, modo: atendimento.modo },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          return jsonResponse({
+            status: "ok",
+            tools_used: ["router_formas_pagamento"],
+            intencao: "duvida_pagamento",
+            precisa_humano: false,
+            modo: atendimento.modo,
+          });
+        }
+      }
+    }
+
     // ── 2.5. (REMOVIDO) Escalação determinística de lentes de contato ──
     // Agora a IA tem catálogo (pricing_lentes_contato) e usa a tool consultar_lentes_contato.
     // Tóricas: aviso "sob encomenda — pagamento confirma o pedido".
+
 
     // ── 2.6. PRE-LLM ROUTER: Rede Diniz / Franchising → escalation + tag ──
     if (matchesRedeDiniz(currentMsg) && !isHibrido) {
