@@ -680,6 +680,57 @@ function matchesConsultaOs(msg: string, keywords: string[]): boolean {
   return keywords.some((k) => k && n.includes(k));
 }
 
+// ── PRE-LLM: Formas de pagamento ──
+// Detecta perguntas tipo "qual a forma de pagamento", "aceita cartão", "parcela em quantas", "somente à vista".
+// Responde determinístico (ia_mensagens_fixas.formas_pagamento) sem escalar.
+const PAGAMENTO_INTENT_DEFAULT_KEYWORDS: string[] = [
+  "forma de pagamento", "formas de pagamento",
+  "como pago", "como posso pagar", "como funciona o pagamento",
+  "aceita cartao", "aceitam cartao",
+  "parcela", "parcelar", "parcelado", "parcelamento",
+  "a vista", "somente a vista", "so a vista", "apenas a vista",
+  "tem desconto", "desconto a vista",
+  "pix", "boleto", "crediario", "credito", "debito",
+  "quantas vezes", "em quantas",
+];
+let _pagamentoKeywordsCache: string[] = PAGAMENTO_INTENT_DEFAULT_KEYWORDS;
+let _pagamentoKeywordsExpire = 0;
+async function loadPagamentoKeywords(client: any): Promise<string[]> {
+  if (Date.now() < _pagamentoKeywordsExpire) return _pagamentoKeywordsCache;
+  try {
+    const { data } = await client.from("configuracoes_ia").select("valor").eq("chave", "pagamento_intent_keywords").maybeSingle();
+    if (data?.valor) {
+      const parsed = JSON.parse(data.valor);
+      if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+        _pagamentoKeywordsCache = parsed.map((s) => norm(s)).filter(Boolean);
+      }
+    }
+  } catch (e) {
+    console.warn("[pagamento-keywords] load falhou, usando defaults", (e as Error)?.message);
+  }
+  _pagamentoKeywordsExpire = Date.now() + 60_000;
+  return _pagamentoKeywordsCache;
+}
+// Regex "núcleo" — paráfrases comuns que não dependem das keywords editáveis.
+const PAGAMENTO_INTENT_CORE_REGEX: RegExp[] = [
+  /\bcomo\s+(eu\s+)?(posso|pode|faço|fazer|fica)\b[\s\S]{0,20}\b(pag(ar|amento)|paga)\b/i,
+  /\bqual(is)?\s+(a|as|sao|são)?\s*(forma|formas|meio|meios|op[cç][aã]o|op[cç][oõ]es)\s*(de)?\s*pag(ar|amento)/i,
+  /\b(aceita|aceitam|tem)\b[\s\S]{0,15}\b(cart[aã]o|pix|boleto|crediar|credit|d[eé]bito)\b/i,
+  /\b(pode|d[aá]|tem|consigo|posso)\b[\s\S]{0,15}\bparcelar\b/i,
+  /\bsomente?\s+(a|à)\s+vista\b/i,
+  /\bso\s+(a|à)\s+vista\b/i,
+  /\bapenas\s+(a|à)\s+vista\b/i,
+  /\bem\s+quantas\s+vezes\b/i,
+];
+function matchesPagamentoIntent(msg: string, keywords: string[]): boolean {
+  if (!msg) return false;
+  const n = norm(msg);
+  for (const re of PAGAMENTO_INTENT_CORE_REGEX) {
+    if (re.test(msg) || re.test(n)) return true;
+  }
+  return keywords.some((k) => k && n.includes(k));
+}
+
 function norm(t: string): string {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
