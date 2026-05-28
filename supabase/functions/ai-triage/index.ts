@@ -69,6 +69,8 @@ const _msgFixaDefaults: Record<string, string> = {
     "De nada{nome_comma}! {tail} 👋 Qualquer dúvida é só me chamar.",
   despedida_short_no:
     "Combinado{nome_comma}! {tail} 👋 Qualquer dúvida é só me chamar.",
+  formas_pagamento:
+    "Trabalhamos com várias formas pra facilitar pra você 😊\n\n💳 *Cartão de crédito* — em até *10x sem juros*\n💰 *PIX / dinheiro* — com *desconto à vista*\n🧾 *Boleto* — à vista ou parcelado\n📋 *Crediário próprio Óticas Diniz* — análise na hora, sem cartão\n\nPosso já agendar uma visita na loja mais próxima pra você fechar o pedido? Me conta seu bairro 📍",
 };
 const _msgFixaCache: Record<string, string> = { ..._msgFixaDefaults };
 let _msgFixaExpire = 0;
