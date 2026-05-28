@@ -2810,7 +2810,14 @@ serve(async (req) => {
           await loadMensagensFixas(supabase);
           const pagMsg = renderMsgFixa("formas_pagamento");
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, pagMsg);
-          await logEvent(supabase, contatoId, atendimento_id, "router_formas_pagamento", currentMsg);
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "duvida_pagamento",
+            descricao: "Cliente perguntou sobre formas de pagamento — resposta determinística enviada",
+            metadata: { mensagem_cliente: currentMsg, modo: atendimento.modo },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
           return jsonResponse({
             status: "ok",
             tools_used: ["router_formas_pagamento"],
