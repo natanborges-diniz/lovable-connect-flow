@@ -2785,9 +2785,47 @@ serve(async (req) => {
       }
     }
 
+    // ── 2.5.PAG PRE-LLM ROUTER: Formas de pagamento ──
+    // Responde determinístico (ia_mensagens_fixas.formas_pagamento), mantém modo IA, sem escalar.
+    // Skip se houver template de link de pagamento recente (delega ao fluxo financeiro).
+    {
+      const pagKw = await loadPagamentoKeywords(supabase);
+      if (matchesPagamentoIntent(currentMsg, pagKw)) {
+        // Checa últimos 5 outbounds por marker de link de pagamento
+        const { data: recentOut } = await supabase
+          .from("mensagens")
+          .select("conteudo")
+          .eq("atendimento_id", atendimento_id)
+          .eq("direcao", "outbound")
+          .order("created_at", { ascending: false })
+          .limit(5);
+        const hasLinkPagamento = (recentOut || []).some((m: any) =>
+          /\[Template:\s*link_pagamento/i.test(String(m?.conteudo || ""))
+        );
+
+        if (hasLinkPagamento) {
+          console.log("[ROUTER-PAGAMENTO] link_pagamento ativo — delegando ao fluxo financeiro (skip router)");
+        } else {
+          console.log("[ROUTER-PAGAMENTO] intent detectado — resposta determinística");
+          await loadMensagensFixas(supabase);
+          const pagMsg = renderMsgFixa("formas_pagamento");
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, pagMsg);
+          await logEvent(supabase, contatoId, atendimento_id, "router_formas_pagamento", currentMsg);
+          return jsonResponse({
+            status: "ok",
+            tools_used: ["router_formas_pagamento"],
+            intencao: "duvida_pagamento",
+            precisa_humano: false,
+            modo: atendimento.modo,
+          });
+        }
+      }
+    }
+
     // ── 2.5. (REMOVIDO) Escalação determinística de lentes de contato ──
     // Agora a IA tem catálogo (pricing_lentes_contato) e usa a tool consultar_lentes_contato.
     // Tóricas: aviso "sob encomenda — pagamento confirma o pedido".
+
 
     // ── 2.6. PRE-LLM ROUTER: Rede Diniz / Franchising → escalation + tag ──
     if (matchesRedeDiniz(currentMsg) && !isHibrido) {
