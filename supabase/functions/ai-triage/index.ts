@@ -4933,14 +4933,17 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             superseded_by: "receita_digitada_fresca",
           };
         }
-        if (isHighImpact) {
+        // ── Toda correção textual (qualquer magnitude) marca receita como pendente de confirmação ──
+        // Antes só o ramo isHighImpact fazia isso; correções iguais/pequenas caíam no LLM,
+        // que frequentemente respondia fallback genérico (caso Eduardo, mai/2026).
+        if (!isStandaloneTyped) {
           newMeta.receita_confirmacao = {
             pending: true,
             rx_index: idx,
             rx_label: merged.label || `receita_${idx + 1}`,
             asked_at: new Date().toISOString(),
             correction_count: Number(contatoMeta?.receita_confirmacao?.correction_count || 0) + 1,
-            reason: "high_impact_correction",
+            reason: isHighImpact ? "high_impact_correction" : "low_impact_correction",
             fora_da_faixa: maxNewAbs > 10,
           };
         }
@@ -4954,12 +4957,14 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             ? "receita_corrigida_alto_impacto"
             : (isStandaloneTyped ? "receita_digitada_pelo_cliente" : "receita_corrigida_pelo_cliente"),
           descricao: `Cliente ${isStandaloneTyped ? "digitou" : "corrigiu"} receita por texto. Tipo: ${correction.rx_type}${isHighImpact ? ` [ALTO IMPACTO Δ=${Math.max(deltaOd,deltaOe).toFixed(2)} max=${maxNewAbs}]` : ""}`,
-          metadata: { od: correction.od, oe: correction.oe, rx_type: correction.rx_type, raw: correction.raw, mode: isStandaloneTyped ? "first" : "correction", high_impact: isHighImpact, delta_od: deltaOd, delta_oe: deltaOe, max_abs: maxNewAbs },
+          metadata: { od: correction.od, oe: correction.oe, rx_type: correction.rx_type, raw: correction.raw, mode: isStandaloneTyped ? "first" : "correction", high_impact: isHighImpact, delta_od: deltaOd, delta_oe: deltaOe, max_abs: maxNewAbs, confirmacao_enviada: !isStandaloneTyped },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         });
 
-        // ── Em alto impacto: ENVIA pedido de confirmação determinístico e RETORNA antes do LLM ──
-        if (isHighImpact) {
+        // ── Toda correção textual: envia pedido de confirmação determinístico e RETORNA antes do LLM ──
+        // Mesmo quando os valores digitados forem idênticos à última leitura, reenviamos a
+        // mensagem com os valores (merge) para o cliente confirmar antes de cotar.
+        if (!isStandaloneTyped) {
           // Após 3+ correções textuais em sequência sem confirmação, IA admite
           // dificuldade e escala — evita loop "Anotei! / Não / corrige de novo".
           const corrCount = Number(newMeta?.receita_confirmacao?.correction_count || 0);
@@ -5009,8 +5014,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             delete m.ia_lock;
             await supabase.from("atendimentos").update({ metadata: m }).eq("id", atendimento_id);
           } catch (_) { /* noop */ }
-          console.log(`[RX-HIGH-IMPACT] Pedindo confirmação antes de cotar (Δod=${deltaOd}, Δoe=${deltaOe}, maxAbs=${maxNewAbs}, corrCount=${corrCount})`);
-          return jsonResponse({ status: "ok", tools_used: ["receita_alto_impacto_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+          const _tag = isHighImpact ? "RX-HIGH-IMPACT" : "RX-CORRECTION";
+          console.log(`[${_tag}] Pedindo confirmação antes de cotar (Δod=${deltaOd}, Δoe=${deltaOe}, maxAbs=${maxNewAbs}, corrCount=${corrCount}, highImpact=${isHighImpact})`);
+          return jsonResponse({ status: "ok", tools_used: [isHighImpact ? "receita_alto_impacto_confirmar" : "receita_corrigida_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
         }
 
         receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
