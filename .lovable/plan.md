@@ -1,66 +1,31 @@
-# Plano — IA responde formas de pagamento sem escalar
+# Fix: IA silencia após correção de receita por texto (caso Eduardo)
 
-## Problema observado
+## Causa raiz
 
-No atendimento da Tay, após receber a cotação a cliente perguntou:
-1. *"Qual é a forma de pagamento?"* → IA respondeu evasivo ("Já te mandei as opções acima")
-2. *"Somente à vista?"* → IA escalou para humano
+No gate 6.4 do `ai-triage/index.ts` (linhas 4840-5040), quando o cliente clica em ✏️ Corrigir e digita a receita:
 
-Isso é um intent comercial básico que a IA deve resolver sozinha, sem queimar fila humana nem perder o momento de compra.
+- Se a correção é **alto impacto** (Δsphere≥0.75D ou |sphere|≥8D), o código envia `buildMsgConfirmarReceita` deterministicamente e dá `return` antes do LLM. ✅
+- Se a correção é **igual ou de baixo impacto** (caso do Eduardo: digitou os mesmos valores do OCR), o código só marca `confirmed_by_client_at=null`, monta `receitaCtx` com hint "vá DIRETO para consultar_lentes" e devolve ao LLM. ❌
 
-## Solução
+O LLM frequentemente não dispara a tool nessa situação e cai em fallback genérico ("Conta pra mim com mais detalhes…"). O safety-net pós-LLM só intercepta saídas contendo `R$` — uma resposta genérica passa.
 
-Adicionar conhecimento determinístico sobre formas de pagamento + intent detector no `ai-triage`, espelhando o padrão já usado para "Consulta de OS" (router pre-LLM + mensagem fixa editável).
+## Mudança
 
-## Mudanças
+No gate 6.4, tratar **toda correção textual** (qualquer magnitude, inclusive valores idênticos aos da última leitura) como determinística:
 
-### 1. Nova mensagem fixa editável
+1. Após persistir a receita corrigida (`merged` com `confirmed_by_client_at=null`), **sempre** chamar `sendReceitaConfirmInteractive(...)` com `buildMsgConfirmarReceita(merged, true)` e dar `return` antes do LLM.
+2. Setar `metadata.receita_confirmacao = { pending:true, rx_index, asked_at, correction_count:+1, reason: isHighImpact ? "high_impact_correction" : "low_impact_correction" }`.
+3. Limpar `ia_lock` (igual ao ramo atual de alto impacto).
+4. Evento `receita_corrigida_pelo_cliente` (já existe) com `confirmacao_enviada:true`.
+5. **Manter** a escalada após 3 correções consecutivas sem confirmação (já existe).
+6. **Manter** o ramo standalone-typed (receita digitada do zero sem pedido prévio) intacto.
 
-Inserir em `ia_mensagens_fixas` a chave `formas_pagamento` com o conteúdo padrão (editável depois pela equipe via UI de auditoria/configurações):
+Resultado: Eduardo verá a mesma mensagem "Li sua receita assim, confere? OD … / OE …" com botões ✅ Tá certo / ✏️ Corrigir após qualquer redigitação. Ao clicar ✅, gate `isReceitaPending` marca `confirmed_by_client_at` e libera cotação.
 
-```
-Trabalhamos com várias formas pra facilitar pra você 😊
+## Arquivo
 
-💳 *Cartão de crédito* — em até *10x sem juros*
-💰 *PIX / dinheiro* — com *desconto à vista*
-🧾 *Boleto* — à vista ou parcelado
-📋 *Crediário próprio Óticas Diniz* — análise na hora, sem cartão
+- `supabase/functions/ai-triage/index.ts` — gate 6.4 (~linhas 4910-5014). Mover o bloco `sendReceitaConfirmInteractive + return` para fora do `if (isHighImpact)`, mantendo a escalada em `corrCount>=3` dentro dele.
 
-Posso já agendar uma visita na loja mais próxima pra você fechar o pedido? Me conta seu bairro 📍
-```
+## Memória
 
-### 2. Router pre-LLM no `ai-triage`
-
-Adicionar detector análogo ao `os_intent`:
-- Keywords: `forma de pagamento`, `formas de pagamento`, `como pago`, `como posso pagar`, `parcela`, `parcelar`, `parcelado`, `à vista`, `a vista`, `pix`, `boleto`, `cartão`, `crediário`, `crediario`, `aceita cartão`, `só à vista`, `somente à vista`
-- Keywords editáveis em `configuracoes_ia.pagamento_intent_keywords` (JSONB)
-- Match: envia `ia_mensagens_fixas.formas_pagamento` direto (cache 60s + fallback), bypassando LLM
-- Mantém modo IA (não escala) e não dispara `agendar_visita` automaticamente — só sugere
-- Skip do detector se já houver `[Template: link_pagamento_*]` recente ou comprovante pendente (delega ao fluxo financeiro)
-
-### 3. Reforço no prompt compiler
-
-Adicionar 1 bullet curto na seção de regras comerciais:
-> *Pagamento:* nunca responder "já mandei acima" nem escalar. Formas aceitas: crédito 10x sem juros, PIX/dinheiro à vista, boleto, crediário próprio. Conduzir para agendamento.
-
-### 4. Auditoria
-
-Auditor pode editar a mensagem via tool `ajustar_mensagem_fixa` (já existente) e as keywords via tool de configuração (padrão já existente para `os_intent_keywords`).
-
-## Detalhes técnicos
-
-**Arquivos:**
-- `supabase/functions/ai-triage/index.ts` — adicionar `runPagamentoIntentRouter()` antes do LLM, após router OS
-- Migration: insert em `ia_mensagens_fixas` (chave `formas_pagamento`) + insert/default em `configuracoes_ia.pagamento_intent_keywords`
-- Memória nova: `mem://ia/formas-pagamento-router` documentando o padrão
-
-**Não muda:**
-- Fluxo de link de pagamento (`payment-webhook`, templates `link_pagamento_*`)
-- Pipeline financeiro
-- UI cliente
-
-## Critério de pronto
-
-- Tay perguntando "qual a forma de pagamento?" → IA responde com as 4 formas + CTA agendamento, sem escalar
-- "Somente à vista?" → mesma resposta (re-trigger pelo intent detector)
-- Edição da mensagem via UI reflete em até 60s no próximo atendimento
+Atualizar `mem://ia/correcao-receita-por-texto.md`: "Toda correção textual reenvia confirmação determinística com os valores merge (mesmo se idênticos à última leitura). Sem confirmação implícita."
