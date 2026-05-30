@@ -196,6 +196,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
 
   // Realtime subscription (INSERT + UPDATE para refletir edições/exclusões)
   useEffect(() => {
