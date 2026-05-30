@@ -121,15 +121,15 @@ export function BuscarLentesSheet({ open, onOpenChange, atendimentoId, atendimen
     }
   };
 
-  const copiarMsg = async () => {
-    if (!result?.mensagem_formatada_cliente) return;
-    await navigator.clipboard.writeText(result.mensagem_formatada_cliente);
+  const copiarTexto = async (texto: string) => {
+    if (!texto) return;
+    await navigator.clipboard.writeText(texto);
     toast.success("Mensagem copiada");
   };
 
-  const inserirNoComposer = () => {
-    if (!result?.mensagem_formatada_cliente) return;
-    onInsertComposer(result.mensagem_formatada_cliente);
+  const inserirTexto = (texto: string) => {
+    if (!texto) return;
+    onInsertComposer(texto);
     toast.success("Mensagem inserida no campo de envio — revise e envie");
     onOpenChange(false);
   };
