@@ -803,6 +803,7 @@ function ConversationPanel({
   const [transferColunaId, setTransferColunaId] = useState("");
   const [transferColunaNome, setTransferColunaNome] = useState("");
   const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
+  const chatViewRef = useRef<ChatViewHandle>(null);
 
   // Known setor name mappings
   const SETOR_MAP: Record<string, "lojas" | "financeiro" | "ti"> = {
