@@ -1413,4 +1413,4 @@ const ChatView = forwardRef<ChatViewHandle, { atendimentoId: string; contatoNome
       </div>
     </>
   );
-}
+});
