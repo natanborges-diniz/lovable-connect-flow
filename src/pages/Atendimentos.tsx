@@ -353,11 +353,11 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                   console.info("[BuscarLentes] aberto", { atendimentoId: id });
                   setBuscarLentesOpen(true);
                 }}
-                aria-label="Buscar lentes (copiloto de cotação)"
+                aria-label="Buscar produto (copiloto de cotação)"
                 title="Copiloto de cotação de lentes (tom Gael / Óticas Diniz)"
               >
                 <Glasses className="h-4 w-4" />
-                <span className="hidden sm:inline">Buscar lentes</span>
+                <span className="hidden sm:inline">Buscar produto</span>
               </Button>
             )}
           </DialogTitle>
@@ -708,8 +708,8 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                   console.info("[BuscarLentes] aberto (composer)", { atendimentoId: id });
                   setBuscarLentesOpen(true);
                 }}
-                aria-label="Buscar lentes (copiloto)"
-                title="Buscar lentes — copiloto de cotação"
+                aria-label="Buscar produto (copiloto)"
+                title="Buscar produto — copiloto de cotação"
               >
                 <Glasses className="h-4 w-4" />
               </Button>
