@@ -802,6 +802,7 @@ function ConversationPanel({
   const [transferDestino, setTransferDestino] = useState<"lojas" | "financeiro" | "ti">("lojas");
   const [transferColunaId, setTransferColunaId] = useState("");
   const [transferColunaNome, setTransferColunaNome] = useState("");
+  const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
 
   // Known setor name mappings
   const SETOR_MAP: Record<string, "lojas" | "financeiro" | "ti"> = {
