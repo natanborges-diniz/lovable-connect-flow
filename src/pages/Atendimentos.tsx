@@ -712,8 +712,9 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                 title="Buscar lentes — copiloto de cotação"
               >
                 <Glasses className="h-4 w-4" />
-
+              </Button>
             </>
+
           )}
           <Button
             onClick={handleSend}
