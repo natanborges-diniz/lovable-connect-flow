@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
+import { BuscarLentesSheet } from "@/components/atendimentos/BuscarLentesSheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
