@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
@@ -58,7 +58,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 
-import { useRef } from "react";
+
 
 export default function Pipeline() {
   const [search, setSearch] = useState("");
@@ -803,6 +803,7 @@ function ConversationPanel({
   const [transferColunaId, setTransferColunaId] = useState("");
   const [transferColunaNome, setTransferColunaNome] = useState("");
   const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
+  const chatViewRef = useRef<ChatViewHandle>(null);
 
   // Known setor name mappings
   const SETOR_MAP: Record<string, "lojas" | "financeiro" | "ti"> = {
@@ -1001,7 +1002,7 @@ function ConversationPanel({
         </div>
       </div>
 
-      <ChatView atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />
+      <ChatView ref={chatViewRef} atendimentoId={atendimentoId} contatoNome={contato?.nome ?? "Contato"} />
 
       <TransferPipelineDialog
         open={transferOpen}
@@ -1021,8 +1022,8 @@ function ConversationPanel({
           atendimentoId={atendimentoId}
           atendimentoMetadata={(atendimentoData as any)?.metadata}
           contatoMetadata={(contato as any)?.metadata}
-          onInsertComposer={() => {
-            toast.info("Use o botão Copiar e cole no campo de envio do chat");
+          onInsertComposer={(text) => {
+            chatViewRef.current?.insertComposerText(text);
           }}
         />
       )}
@@ -1030,7 +1031,11 @@ function ConversationPanel({
   );
 }
 
-function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId: string; contatoNome: string }) {
+export interface ChatViewHandle {
+  insertComposerText: (texto: string) => void;
+}
+
+const ChatView = forwardRef<ChatViewHandle, { atendimentoId: string; contatoNome: string }>(function ChatView({ atendimentoId, contatoNome: _contatoNome }, ref) {
   const { data: mensagens, refetch } = useMensagens(atendimentoId);
   const createMensagem = useCreateMensagem();
   const queryClient = useQueryClient();
@@ -1043,6 +1048,22 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    insertComposerText: (texto: string) => {
+      setMsgDirecao("outbound");
+      setMsgText((prev) => (prev?.trim() ? prev + "\n\n" + texto : texto));
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+          el.scrollTop = el.scrollHeight;
+        }
+      });
+    },
+  }), []);
 
   const handlePickAttachment = (file: File | null) => {
     if (!file) return;
@@ -1344,6 +1365,7 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
               <Button variant={msgDirecao === "internal" ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setMsgDirecao("internal")}>Nota Interna</Button>
             </div>
             <Textarea
+              ref={textareaRef}
               value={msgText}
               onChange={(e) => setMsgText(e.target.value)}
               placeholder={
@@ -1392,4 +1414,4 @@ function ChatView({ atendimentoId, contatoNome: _contatoNome }: { atendimentoId:
       </div>
     </>
   );
-}
+});
