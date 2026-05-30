@@ -945,7 +945,23 @@ function ConversationPanel({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base pr-8">
             <MessageSquare className="h-4 w-4 shrink-0" />
-            <span className="truncate">{contato?.nome ?? "Contato"}</span>
+            <span className="truncate flex-1">{contato?.nome ?? "Contato"}</span>
+            {atendimentoId && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-8 gap-1.5 shrink-0 shadow-sm"
+                onClick={() => {
+                  console.info("[BuscarLentes] aberto (CRM)", { atendimentoId });
+                  setBuscarLentesOpen(true);
+                }}
+                aria-label="Buscar lentes (copiloto de cotação)"
+                title="Copiloto de cotação de lentes (tom Gael / Óticas Diniz)"
+              >
+                <Glasses className="h-4 w-4" />
+                <span className="hidden sm:inline">Buscar lentes</span>
+              </Button>
+            )}
           </DialogTitle>
         </DialogHeader>
         <div className="flex items-center gap-2 flex-wrap">
