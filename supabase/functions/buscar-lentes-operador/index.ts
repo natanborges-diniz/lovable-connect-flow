@@ -142,7 +142,7 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
 
   // Formata mensagem no estilo Gael.
   const od = s.od, oe = s.oe;
-  let msg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${s.hasAdd ? ` | Ad: +${s.maxAdd}` : ""}\n\n`;
+  const header = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${s.hasAdd ? ` | Ad: +${s.maxAdd}` : ""}\n\n`;
   const renderFaixa = (label: string, itens: any[]) => {
     if (!itens.length) return "";
     const linhas = itens
@@ -151,10 +151,18 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
       .join("\n");
     return `${label}\n${linhas}\n\n`;
   };
-  msg += renderFaixa("🟢 *Econômica:*", eco);
-  msg += renderFaixa("🟡 *Intermediária:*", inter);
-  msg += renderFaixa("💎 *Premium:*", prem);
+  const blocoEco = renderFaixa("🟢 *Econômica:*", eco);
+  const blocoInter = renderFaixa("🟡 *Intermediária:*", inter);
+  const blocoPrem = renderFaixa("💎 *Premium:*", prem);
+
+  let msg = header + blocoEco + blocoInter + blocoPrem;
   msg = msg.replace(/\n{3,}$/, "\n\n").trimEnd() + "\n\n" + MSG_CTA_AGENDAMENTO;
+
+  const buildSolo = (bloco: string) => bloco ? (header + bloco).trimEnd() + "\n\n" + MSG_CTA_AGENDAMENTO : "";
+  const mensagens_por_faixa: Record<string, string> = {};
+  if (blocoEco) mensagens_por_faixa.economica = buildSolo(blocoEco);
+  if (blocoInter) mensagens_por_faixa.intermediaria = buildSolo(blocoInter);
+  if (blocoPrem) mensagens_por_faixa.premium = buildSolo(blocoPrem);
 
   const tier = (arr: any[]) => arr.map((l) => ({
     id: l.id, brand: brandDisplay(l.brand), family: l.family, index_name: l.index_name,
@@ -168,6 +176,7 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
       blue: !!l.blue, photo: !!l.photo, price_brl: Number(l.price_brl),
     })),
     mensagem_formatada_cliente: msg,
+    mensagens_por_faixa,
     debug: { rx_type: s.rxType, sphere: s.worstSphere, cylinder: s.worstCyl, add: s.maxAdd, total: lenses.length },
   };
 }
