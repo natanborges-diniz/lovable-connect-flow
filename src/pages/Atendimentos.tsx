@@ -23,7 +23,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { RevisaoHumanaBadge, traduzirMotivos } from "@/components/shared/RevisaoHumanaBadge";
 import { ReceitaValidacaoPopover } from "@/components/atendimentos/ReceitaValidacaoPopover";
-import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban, CheckCircle2 } from "lucide-react";
+import { BuscarLentesSheet } from "@/components/atendimentos/BuscarLentesSheet";
+import { Search, MessageSquare, Send, Eye, Sparkles, Loader2, FileText, Pin, Image as ImageIcon, ExternalLink, Paperclip, X as XIcon, Ban, CheckCircle2, Glasses } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -195,6 +196,7 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
 
   // Realtime subscription (INSERT + UPDATE para refletir edições/exclusões)
   useEffect(() => {
@@ -359,6 +361,9 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                 />
               </>
             )}
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => setBuscarLentesOpen(true)}>
+              <Glasses className="h-3 w-3" /> Buscar lentes
+            </Button>
             <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>
             {atendimento.canal_provedor && (
               <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-muted-foreground/40 text-muted-foreground")}>
@@ -484,6 +489,16 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             atendimentoId={id}
             onCreated={() => setDemandasOpen(true)}
           />
+
+          <BuscarLentesSheet
+            open={buscarLentesOpen}
+            onOpenChange={setBuscarLentesOpen}
+            atendimentoId={id}
+            atendimentoMetadata={atendimento?.metadata}
+            contatoMetadata={(atendimento?.contato as any)?.metadata}
+            onInsertComposer={(text) => setMsgText((prev) => prev ? prev + "\n\n" + text : text)}
+          />
+
 
           {atendimento?.canal === "whatsapp" && atendimento?.contato_id && (
             <>

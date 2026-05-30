@@ -1,31 +1,75 @@
-# Fix: IA silencia após correção de receita por texto (caso Eduardo)
+# Copiloto de Cotação de Lentes no Chat (uso humano)
 
-## Causa raiz
+## Premissas
+- **Fluxo automático da IA não muda.** `runConsultarLentes`, `runConsultarLentesEstimativa` e `runConsultarLentesContato` em `ai-triage` continuam intactos.
+- O painel aparece em **todo atendimento** aberto (inclusive os que seguem só na IA), como ferramenta do operador para conferir/complementar/preparar resposta.
+- O texto final montado pelo painel sai **na mesma linguagem do Gael / Óticas Diniz** já usada pela IA — mesmas faixas 🟢🟡💎, mesmas regras de marca, mesmo tom curto e consultivo.
 
-No gate 6.4 do `ai-triage/index.ts` (linhas 4840-5040), quando o cliente clica em ✏️ Corrigir e digita a receita:
+## UX no chat (`/atendimentos`)
 
-- Se a correção é **alto impacto** (Δsphere≥0.75D ou |sphere|≥8D), o código envia `buildMsgConfirmarReceita` deterministicamente e dá `return` antes do LLM. ✅
-- Se a correção é **igual ou de baixo impacto** (caso do Eduardo: digitou os mesmos valores do OCR), o código só marca `confirmed_by_client_at=null`, monta `receitaCtx` com hint "vá DIRETO para consultar_lentes" e devolve ao LLM. ❌
+Botão **🔍 Buscar lentes** no header do painel de conversa, ao lado do `ReceitaValidacaoPopover`. Sempre visível quando há atendimento aberto, independente do modo (IA, humano, ponte).
 
-O LLM frequentemente não dispara a tool nessa situação e cai em fallback genérico ("Conta pra mim com mais detalhes…"). O safety-net pós-LLM só intercepta saídas contendo `R$` — uma resposta genérica passa.
+Abre **Sheet lateral** (~520px) com 3 abas:
 
-## Mudança
+1. **Óculos (visão simples / multifocal)**
+   - Receita pré-carregada de `atendimento.metadata.receitas[ultimo]` com OD/OE/ADD editáveis inline (override só da consulta, **não persiste**).
+   - Toggle multifocal / visão simples (auto-detectado por ADD).
+   - Chips de filtro: marca preferida, antirreflexo (Crizal/blue/Prevencia), material (policarbonato / 3 peças), photo.
+   - Campo "instrução em linguagem natural" (ex.: "Varilux pra 3 peças com Crizal Sapphire").
 
-No gate 6.4, tratar **toda correção textual** (qualquer magnitude, inclusive valores idênticos aos da última leitura) como determinística:
+2. **Lentes de contato**
+   - Mesma receita; toggle tórica (auto se |cyl|≥0.75).
+   - Filtros: descarte (diária/quinzenal/mensal), marca, uso (natação, etc).
 
-1. Após persistir a receita corrigida (`merged` com `confirmed_by_client_at=null`), **sempre** chamar `sendReceitaConfirmInteractive(...)` com `buildMsgConfirmarReceita(merged, true)` e dar `return` antes do LLM.
-2. Setar `metadata.receita_confirmacao = { pending:true, rx_index, asked_at, correction_count:+1, reason: isHighImpact ? "high_impact_correction" : "low_impact_correction" }`.
-3. Limpar `ia_lock` (igual ao ramo atual de alto impacto).
-4. Evento `receita_corrigida_pelo_cliente` (já existe) com `confirmacao_enviada:true`.
-5. **Manter** a escalada após 3 correções consecutivas sem confirmação (já existe).
-6. **Manter** o ramo standalone-typed (receita digitada do zero sem pedido prévio) intacto.
+3. **Estimativa / Catálogo livre**
+   - Quando não tem receita ou cliente só passou esférico+tipo.
+   - Busca estruturada direta no catálogo (marca, faixa de preço, tratamento) sem LLM — atende perguntas avulsas tipo "vocês têm Zeiss Drivesafe?".
 
-Resultado: Eduardo verá a mesma mensagem "Li sua receita assim, confere? OD … / OE …" com botões ✅ Tá certo / ✏️ Corrigir após qualquer redigitação. Ao clicar ✅, gate `isReceitaPending` marca `confirmed_by_client_at` e libera cotação.
+### Resultados
 
-## Arquivo
+- 3 faixas **🟢 Econômica / 🟡 Intermediária / 💎 Premium** no mesmo formato visual da IA.
+- Cada linha: marca · família · tratamento · **R$ valor** · badges (DNZ, 3 peças OK, sob encomenda, Kodak→escala humano).
+- Validador anti-inversão (Eco ≤ Inter ≤ Prem) já aplicado.
+- Bloco **"Mensagem pronta"** abaixo, no tom Gael / Óticas Diniz, igual ao que a IA enviaria. Dois botões:
+  - **📋 Copiar**
+  - **✍️ Inserir no composer** — preenche o campo de mensagem do chat; operador revisa e envia normalmente (sem auto-envio).
+- Botão **Ver alternativas** abre lista plana ordenada por preço puro ou filtrada por marca.
 
-- `supabase/functions/ai-triage/index.ts` — gate 6.4 (~linhas 4910-5014). Mover o bloco `sendReceitaConfirmInteractive + return` para fora do `if (isHighImpact)`, mantendo a escalada em `corrCount>=3` dentro dele.
+## Backend
+
+Nova edge function **`buscar-lentes-operador`** (`verify_jwt = true`):
+
+- Input: `{ atendimento_id, modo: "oculos" | "lc" | "estimativa" | "catalogo_livre", query_natural?, filtros?, receita_override? }`.
+- Resolve receita: `receita_override` > `metadata.receitas[ultimo]` > vazio.
+- `query_natural`: 1 chamada Lovable AI Gateway (`google/gemini-3-flash-preview`, temp 0) com tool calling restrito às mesmas três tools que a IA usa — só pra escolher tool e extrair filtros. A EF executa localmente.
+- `catalogo_livre`: SQL direto em `pricing_table_lentes` / `pricing_lentes_contato`.
+- **Reaproveita** a lógica dos três `runConsultarLentes*` extraindo para `supabase/functions/_shared/lentes-engine.ts`. `ai-triage` passa a importar do shared (refator puro, **zero mudança de comportamento da IA**) e a nova EF também importa.
+- Síntese da mensagem final usa as mesmas funções `buildMsgCotacao…` que a IA já tem em `_shared/mensagens-gael.ts` (extrair se ainda inline) — garante mesma linguagem.
+- Output: `{ faixas, alternativas, mensagem_formatada_cliente, debug }`.
+- **Nunca escreve**: não envia mensagem ao cliente, não toca em `metadata`, não emite evento, não muda modo do atendimento. Read + síntese puros.
+
+## Frontend
+
+- `src/components/atendimentos/BuscarLentesSheet.tsx` (Sheet shadcn lateral, 3 abas com Tabs).
+- `src/hooks/useBuscarLentes(atendimentoId)` chamando `supabase.functions.invoke("buscar-lentes-operador", ...)`.
+- Integração em `src/pages/Atendimentos.tsx`: botão no header, sempre visível com atendimento selecionado.
+- "Inserir no composer" via mesmo estado do campo de mensagem já existente (`useState` da página).
+- Funciona em qualquer modo (IA / humano / ponte) — UI não distingue.
+
+## Permissões e segurança
+
+- EF autenticada — qualquer operador logado usa. Sem roles novos.
+- Sem novas tabelas, sem migrations, sem novas policies (catálogos já legíveis por autenticado).
+- Tom/regras (Kodak, Varilux Premium, "provar armações" não "experimentar lentes", DNZ-first) herdadas direto do `_shared/mensagens-gael.ts`.
 
 ## Memória
 
-Atualizar `mem://ia/correcao-receita-por-texto.md`: "Toda correção textual reenvia confirmação determinística com os valores merge (mesmo se idênticos à última leitura). Sem confirmação implícita."
+Criar `mem://ia/copiloto-cotacao-operador.md`: painel humano paralelo, motor compartilhado em `_shared/lentes-engine.ts`, mesma linguagem da IA, nunca escreve no chat.
+
+## Fora de escopo
+
+- Alterar comportamento da IA automática.
+- Persistir receita editada no sheet (continua em `ReceitaValidacaoPopover`).
+- Marcas fora do catálogo (Kodak: só sinaliza badge "escalar humano").
+- Histórico/favoritos de busca do operador.
+- Auto-envio da mensagem (sempre passa pelo composer).
