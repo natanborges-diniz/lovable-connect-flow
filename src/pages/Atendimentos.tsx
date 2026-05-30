@@ -343,9 +343,26 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base pr-8">
             <MessageSquare className="h-4 w-4 shrink-0" />
-            <span className="truncate">{atendimento?.solicitacao?.assunto ?? "Atendimento"}</span>
+            <span className="truncate flex-1">{atendimento?.solicitacao?.assunto ?? "Atendimento"}</span>
+            {atendimento && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-8 gap-1.5 shrink-0 shadow-sm"
+                onClick={() => {
+                  console.info("[BuscarLentes] aberto", { atendimentoId: id });
+                  setBuscarLentesOpen(true);
+                }}
+                aria-label="Buscar lentes (copiloto de cotação)"
+                title="Copiloto de cotação de lentes (tom Gael / Óticas Diniz)"
+              >
+                <Glasses className="h-4 w-4" />
+                <span className="hidden sm:inline">Buscar lentes</span>
+              </Button>
+            )}
           </DialogTitle>
         </DialogHeader>
+
 
         {atendimento && (
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
@@ -361,9 +378,6 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                 />
               </>
             )}
-            <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => setBuscarLentesOpen(true)}>
-              <Glasses className="h-3 w-3" /> Buscar lentes
-            </Button>
             <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>
             {atendimento.canal_provedor && (
               <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-muted-foreground/40 text-muted-foreground")}>
@@ -686,7 +700,21 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
               >
                 <Paperclip className="h-4 w-4" />
               </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => {
+                  console.info("[BuscarLentes] aberto (composer)", { atendimentoId: id });
+                  setBuscarLentesOpen(true);
+                }}
+                aria-label="Buscar lentes (copiloto)"
+                title="Buscar lentes — copiloto de cotação"
+              >
+                <Glasses className="h-4 w-4" />
+              </Button>
             </>
+
           )}
           <Button
             onClick={handleSend}
