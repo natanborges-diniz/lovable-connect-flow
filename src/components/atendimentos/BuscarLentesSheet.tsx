@@ -138,7 +138,7 @@ export function BuscarLentesSheet({ open, onOpenChange, atendimentoId, atendimen
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="flex items-center gap-2"><Search className="h-4 w-4" /> Buscar lentes (copiloto)</SheetTitle>
+          <SheetTitle className="flex items-center gap-2"><Search className="h-4 w-4" /> Buscar produto (copiloto)</SheetTitle>
         </SheetHeader>
 
         <Tabs value={modo} onValueChange={(v) => setModo(v as Modo)} className="mt-4">
