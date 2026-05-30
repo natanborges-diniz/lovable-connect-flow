@@ -1,37 +1,51 @@
-## Problema
+## Objetivo
 
-O botão **🔍 Buscar lentes** já existe em `src/pages/Atendimentos.tsx:364`, dentro da faixa de badges do header (status, canal, Oficial, modo IA/Humano, Acionar loja). Em telas estreitas (~875px) ele se mistura visualmente aos badges e não tem destaque — por isso "não aparece".
+Disponibilizar o botão **🔍 Buscar lentes** (copiloto de cotação) também dentro do diálogo de detalhe do card aberto pelo Kanban do CRM, com o mesmo comportamento de `/atendimentos`.
 
-## Solução
+## Onde adicionar
 
-Reposicionar e dar destaque visual, sem mudar comportamento.
+Componente `ContatoDetalhe` em `src/pages/Pipeline.tsx` (header do `Dialog` aberto via `setSelectedContatoId`, linhas ~939–984). O header é fixo acima do `ChatView`, então cobre operador conversando e visualizando histórico.
 
-### 1. Tirar o botão da linha de badges
+## Mudanças
 
-Em `src/pages/Atendimentos.tsx`, remover o `<Button>` "Buscar lentes" do bloco de badges (linhas 364–366).
+1. **Imports** em `src/pages/Pipeline.tsx`:
+   - `import { BuscarLentesSheet } from "@/components/atendimentos/BuscarLentesSheet";`
+   - Acrescentar `Glasses` aos imports de `lucide-react`.
 
-### 2. Adicionar ao lado do título, sempre visível
+2. **Fetch de metadata do atendimento** — ampliar o `select` em `useQuery(["atendimento_contato", contatoId])` (linha 819) para incluir `metadata`:
+   ```ts
+   .select("id, modo, status, canal, canal_provedor, solicitacao_id, metadata")
+   ```
 
-Colocar como **ação fixa no `DialogHeader`** (linha 343), alinhada à direita do título, na mesma linha do `MessageSquare` e do nome do atendimento:
+3. **State** em `ContatoDetalhe`:
+   ```ts
+   const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
+   ```
 
-```text
-[💬 Assunto do atendimento ............]  [🔍 Buscar lentes]
-[badge status][canal][modo][acionar loja]
-```
+4. **Botão no header** — dentro do `DialogTitle` (linha 944), seguindo o mesmo padrão já aplicado em `Atendimentos.tsx`: variant `default`, ícone `Glasses`, texto oculto em `<sm`. Renderiza apenas quando `atendimentoId` está presente. Inclui `console.info("[BuscarLentes] aberto (CRM)", ...)` para telemetria leve.
 
-- Variant `default` (cor primária) em vez de `outline`, para se diferenciar dos badges
-- Tamanho `sm`, ícone `Glasses`, texto "Buscar lentes" sempre visível em ≥sm; em mobile (`<sm`) só ícone com `aria-label`
-- Tooltip "Copiloto de cotação de lentes (Gael)" para reforçar a função
+5. **Sheet** — renderizar ao fim do `return` do `ContatoDetalhe` (ao lado do `TransferPipelineDialog`):
+   ```tsx
+   {atendimentoId && (
+     <BuscarLentesSheet
+       open={buscarLentesOpen}
+       onOpenChange={setBuscarLentesOpen}
+       atendimentoId={atendimentoId}
+       atendimentoMetadata={atendimentoData?.metadata}
+       contatoMetadata={(contato as any)?.metadata}
+       onInsertComposer={() => {
+         // ChatView do CRM não compartilha msgText state com ContatoDetalhe.
+         // Por ora, o operador usa "Copiar" e cola no composer.
+         toast.info("Mensagem copiada — cole no campo de envio");
+       }}
+     />
+   )}
+   ```
 
-### 3. Atalho no composer (segundo ponto de entrada)
-
-Adicionar um botão-ícone discreto `Glasses` na barra de ações do composer (perto de Paperclip/anexos), para o operador que já está digitando a resposta. Mesmo `onClick={() => setBuscarLentesOpen(true)}`.
-
-### 4. Telemetria leve
-
-`console.info("[BuscarLentes] aberto", { atendimentoId: id })` no click, para confirmar via logs se for reportado de novo.
+   > Observação: como `msgText` vive isolado dentro de `ChatView`, "Inserir no composer" no card do CRM apenas avisa o operador. O botão "Copiar" do `BuscarLentesSheet` continua funcionando normalmente. Plumbing de `setMsgText` cross-componente fica fora deste escopo (refactor maior).
 
 ## Fora de escopo
 
-- Mudar a lógica do `BuscarLentesSheet`, do edge function `buscar-lentes-operador`, ou do fluxo da IA
-- Adicionar o botão em outras telas (CRM/Lojas/etc.) — confirmado que o chat só vive em `/atendimentos`
+- Adicionar o botão dentro do `ChatView` do CRM (composer).
+- Refatorar `ChatView` para expor `setMsgText` ao pai.
+- Replicar em outras telas (`/lojas`, `/financeiro`, `/ti`, `/interno`) — pode vir num próximo passo se houver demanda.
