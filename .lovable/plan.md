@@ -1,51 +1,47 @@
 ## Objetivo
-
-Disponibilizar o botão **🔍 Buscar lentes** (copiloto de cotação) também dentro do diálogo de detalhe do card aberto pelo Kanban do CRM, com o mesmo comportamento de `/atendimentos`.
-
-## Onde adicionar
-
-Componente `ContatoDetalhe` em `src/pages/Pipeline.tsx` (header do `Dialog` aberto via `setSelectedContatoId`, linhas ~939–984). O header é fixo acima do `ChatView`, então cobre operador conversando e visualizando histórico.
+No copiloto "Buscar lentes", além da mensagem combinada que já existe, oferecer **três variantes prontas para envio** — Econômica, Intermediária e Premium — espelhando o formato que a IA usa, para que o operador escolha qual faixa enviar ao cliente.
 
 ## Mudanças
 
-1. **Imports** em `src/pages/Pipeline.tsx`:
-   - `import { BuscarLentesSheet } from "@/components/atendimentos/BuscarLentesSheet";`
-   - Acrescentar `Glasses` aos imports de `lucide-react`.
+### 1. Edge function `buscar-lentes-operador`
+Em `buscarOculos` (e por reflexo `estimativa`) e `buscarLC`, além de `mensagem_formatada_cliente` (já existente, com as 3 faixas juntas), retornar também:
 
-2. **Fetch de metadata do atendimento** — ampliar o `select` em `useQuery(["atendimento_contato", contatoId])` (linha 819) para incluir `metadata`:
-   ```ts
-   .select("id, modo, status, canal, canal_provedor, solicitacao_id, metadata")
-   ```
+```ts
+mensagens_por_faixa: {
+  economica?: string,
+  intermediaria?: string,
+  premium?: string,
+}
+```
 
-3. **State** em `ContatoDetalhe`:
-   ```ts
-   const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
-   ```
+Cada string segue o mesmo cabeçalho/rodapé da combinada, mas contém só o bloco da faixa correspondente:
 
-4. **Botão no header** — dentro do `DialogTitle` (linha 944), seguindo o mesmo padrão já aplicado em `Atendimentos.tsx`: variant `default`, ícone `Glasses`, texto oculto em `<sm`. Renderiza apenas quando `atendimentoId` está presente. Inclui `console.info("[BuscarLentes] aberto (CRM)", ...)` para telemetria leve.
+- Cabeçalho do grau (igual ao já existente): `🔍 Opções de lentes para o seu grau:` + linha OD/OE.
+- Bloco único: `🟢 Econômica:` **ou** `🟡 Intermediária:` **ou** `💎 Premium:` com seus itens.
+- Rodapé: `MSG_CTA_AGENDAMENTO`.
 
-5. **Sheet** — renderizar ao fim do `return` do `ContatoDetalhe` (ao lado do `TransferPipelineDialog`):
-   ```tsx
-   {atendimentoId && (
-     <BuscarLentesSheet
-       open={buscarLentesOpen}
-       onOpenChange={setBuscarLentesOpen}
-       atendimentoId={atendimentoId}
-       atendimentoMetadata={atendimentoData?.metadata}
-       contatoMetadata={(contato as any)?.metadata}
-       onInsertComposer={() => {
-         // ChatView do CRM não compartilha msgText state com ContatoDetalhe.
-         // Por ora, o operador usa "Copiar" e cola no composer.
-         toast.info("Mensagem copiada — cole no campo de envio");
-       }}
-     />
-   )}
-   ```
+Para LC, mesma ideia: cabeçalho `👁️ Lentes de contato — opções:` + a única opção da faixa + a pergunta final sobre descarte.
 
-   > Observação: como `msgText` vive isolado dentro de `ChatView`, "Inserir no composer" no card do CRM apenas avisa o operador. O botão "Copiar" do `BuscarLentesSheet` continua funcionando normalmente. Plumbing de `setMsgText` cross-componente fica fora deste escopo (refactor maior).
+Faixas vazias não aparecem em `mensagens_por_faixa`.
 
-## Fora de escopo
+### 2. `BuscarLentesSheet.tsx`
+Na seção de resultado, abaixo do textarea da mensagem combinada (que continua existindo como "Mensagem completa — 3 faixas"), adicionar um bloco **"Enviar por faixa"** com até 3 cards (um por faixa retornada):
 
-- Adicionar o botão dentro do `ChatView` do CRM (composer).
-- Refatorar `ChatView` para expor `setMsgText` ao pai.
-- Replicar em outras telas (`/lojas`, `/financeiro`, `/ti`, `/interno`) — pode vir num próximo passo se houver demanda.
+```
+[🟢 Econômica]   [Copiar] [Inserir no campo de envio]
+[🟡 Intermediária]   [Copiar] [Inserir no campo de envio]
+[💎 Premium]   [Copiar] [Inserir no campo de envio]
+```
+
+Cada card mostra um `Textarea` somente-leitura compacto (4–6 linhas) com a mensagem da faixa, e dois botões que reutilizam `copiarMsg`/`inserirNoComposer` parametrizados por texto.
+
+Refatorar `copiarMsg`/`inserirNoComposer` para aceitar `(texto: string)` em vez de ler `result.mensagem_formatada_cliente` fixo. Os botões existentes da mensagem combinada passam a chamar com `result.mensagem_formatada_cliente`.
+
+### Fora do escopo
+- Mudar a lógica de particionamento das faixas (continua igual ao mirror do `runConsultarLentes`).
+- Alterar o modo Catálogo (não tem faixas).
+- Tocar no chat/composer ou na lógica de envio em si — segue tudo via `onInsertComposer` já existente.
+
+## Arquivos
+- `supabase/functions/buscar-lentes-operador/index.ts`
+- `src/components/atendimentos/BuscarLentesSheet.tsx`

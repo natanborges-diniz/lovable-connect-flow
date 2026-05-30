@@ -121,15 +121,15 @@ export function BuscarLentesSheet({ open, onOpenChange, atendimentoId, atendimen
     }
   };
 
-  const copiarMsg = async () => {
-    if (!result?.mensagem_formatada_cliente) return;
-    await navigator.clipboard.writeText(result.mensagem_formatada_cliente);
+  const copiarTexto = async (texto: string) => {
+    if (!texto) return;
+    await navigator.clipboard.writeText(texto);
     toast.success("Mensagem copiada");
   };
 
-  const inserirNoComposer = () => {
-    if (!result?.mensagem_formatada_cliente) return;
-    onInsertComposer(result.mensagem_formatada_cliente);
+  const inserirTexto = (texto: string) => {
+    if (!texto) return;
+    onInsertComposer(texto);
     toast.success("Mensagem inserida no campo de envio — revise e envie");
     onOpenChange(false);
   };
@@ -225,7 +225,7 @@ export function BuscarLentesSheet({ open, onOpenChange, atendimentoId, atendimen
 
               {result.mensagem_formatada_cliente && (
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase text-muted-foreground">Mensagem pronta (tom Gael / Óticas Diniz)</Label>
+                  <Label className="text-xs uppercase text-muted-foreground">Mensagem completa — 3 faixas (tom Gael / Óticas Diniz)</Label>
                   <Textarea
                     value={result.mensagem_formatada_cliente}
                     onChange={(e) => setResult({ ...result, mensagem_formatada_cliente: e.target.value })}
@@ -233,9 +233,43 @@ export function BuscarLentesSheet({ open, onOpenChange, atendimentoId, atendimen
                     className="text-sm font-mono"
                   />
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={copiarMsg}><Copy className="h-3 w-3 mr-1" /> Copiar</Button>
-                    <Button size="sm" onClick={inserirNoComposer}><ArrowDownToLine className="h-3 w-3 mr-1" /> Inserir no campo de envio</Button>
+                    <Button size="sm" variant="outline" onClick={() => copiarTexto(result.mensagem_formatada_cliente)}><Copy className="h-3 w-3 mr-1" /> Copiar</Button>
+                    <Button size="sm" onClick={() => inserirTexto(result.mensagem_formatada_cliente)}><ArrowDownToLine className="h-3 w-3 mr-1" /> Inserir no campo de envio</Button>
                   </div>
+                </div>
+              )}
+
+              {result.mensagens_por_faixa && Object.keys(result.mensagens_por_faixa).length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase text-muted-foreground">Enviar por faixa</Label>
+                  {([
+                    ["economica", "🟢 Econômica"],
+                    ["intermediaria", "🟡 Intermediária"],
+                    ["premium", "💎 Premium"],
+                  ] as const).map(([key, label]) => {
+                    const texto = result.mensagens_por_faixa?.[key];
+                    if (!texto) return null;
+                    return (
+                      <div key={key} className="border rounded-md p-2 space-y-2 bg-muted/30">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium">{label}</span>
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="outline" onClick={() => copiarTexto(texto)}><Copy className="h-3 w-3 mr-1" /> Copiar</Button>
+                            <Button size="sm" onClick={() => inserirTexto(texto)}><ArrowDownToLine className="h-3 w-3 mr-1" /> Inserir</Button>
+                          </div>
+                        </div>
+                        <Textarea
+                          value={texto}
+                          onChange={(e) => setResult({
+                            ...result,
+                            mensagens_por_faixa: { ...result.mensagens_por_faixa, [key]: e.target.value },
+                          })}
+                          rows={Math.min(10, Math.max(4, texto.split("\n").length))}
+                          className="text-xs font-mono"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 

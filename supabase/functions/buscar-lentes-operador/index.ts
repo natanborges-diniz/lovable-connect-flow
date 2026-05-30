@@ -142,7 +142,7 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
 
   // Formata mensagem no estilo Gael.
   const od = s.od, oe = s.oe;
-  let msg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${s.hasAdd ? ` | Ad: +${s.maxAdd}` : ""}\n\n`;
+  const header = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${s.hasAdd ? ` | Ad: +${s.maxAdd}` : ""}\n\n`;
   const renderFaixa = (label: string, itens: any[]) => {
     if (!itens.length) return "";
     const linhas = itens
@@ -151,10 +151,18 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
       .join("\n");
     return `${label}\n${linhas}\n\n`;
   };
-  msg += renderFaixa("🟢 *Econômica:*", eco);
-  msg += renderFaixa("🟡 *Intermediária:*", inter);
-  msg += renderFaixa("💎 *Premium:*", prem);
+  const blocoEco = renderFaixa("🟢 *Econômica:*", eco);
+  const blocoInter = renderFaixa("🟡 *Intermediária:*", inter);
+  const blocoPrem = renderFaixa("💎 *Premium:*", prem);
+
+  let msg = header + blocoEco + blocoInter + blocoPrem;
   msg = msg.replace(/\n{3,}$/, "\n\n").trimEnd() + "\n\n" + MSG_CTA_AGENDAMENTO;
+
+  const buildSolo = (bloco: string) => bloco ? (header + bloco).trimEnd() + "\n\n" + MSG_CTA_AGENDAMENTO : "";
+  const mensagens_por_faixa: Record<string, string> = {};
+  if (blocoEco) mensagens_por_faixa.economica = buildSolo(blocoEco);
+  if (blocoInter) mensagens_por_faixa.intermediaria = buildSolo(blocoInter);
+  if (blocoPrem) mensagens_por_faixa.premium = buildSolo(blocoPrem);
 
   const tier = (arr: any[]) => arr.map((l) => ({
     id: l.id, brand: brandDisplay(l.brand), family: l.family, index_name: l.index_name,
@@ -168,6 +176,7 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
       blue: !!l.blue, photo: !!l.photo, price_brl: Number(l.price_brl),
     })),
     mensagem_formatada_cliente: msg,
+    mensagens_por_faixa,
     debug: { rx_type: s.rxType, sphere: s.worstSphere, cylinder: s.worstCyl, add: s.maxAdd, total: lenses.length },
   };
 }
@@ -200,16 +209,24 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"]) {
   });
 
   const top = itens.slice(0, 3);
-  let msg = `👁️ *Lentes de contato — opções:*\n${forceToric ? "_⚠️ Tórica (sob encomenda — cyl ≥ 0,75)_\n" : ""}\n`;
-  for (const it of top) {
-    msg += `• *${it.fornecedor} ${it.produto}* (${it.descarte}${it.is_dnz ? " · DNZ" : ""}${it.combo ? " · combo 3+1" : ""}) — ${brl(it.price_caixa)} a caixa\n  Plano anual (2 olhos): ~${brl(it.total_ano)} (${it.caixas_ano_2olhos} cx)\n`;
-  }
-  msg += `\nQual descarte combina mais com a sua rotina? Te indico a loja mais próxima pra finalizar 😊`;
+  const headerLC = `👁️ *Lentes de contato — opções:*\n${forceToric ? "_⚠️ Tórica (sob encomenda — cyl ≥ 0,75)_\n" : ""}\n`;
+  const ctaLC = `\nQual descarte combina mais com a sua rotina? Te indico a loja mais próxima pra finalizar 😊`;
+  const lineLC = (it: any) => `• *${it.fornecedor} ${it.produto}* (${it.descarte}${it.is_dnz ? " · DNZ" : ""}${it.combo ? " · combo 3+1" : ""}) — ${brl(it.price_caixa)} a caixa\n  Plano anual (2 olhos): ~${brl(it.total_ano)} (${it.caixas_ano_2olhos} cx)\n`;
+
+  let msg = headerLC + top.map(lineLC).join("") + ctaLC;
+
+  const labels = ["🟢 *Econômica:*", "🟡 *Intermediária:*", "💎 *Premium:*"];
+  const keys = ["economica", "intermediaria", "premium"] as const;
+  const mensagens_por_faixa: Record<string, string> = {};
+  top.forEach((it, i) => {
+    mensagens_por_faixa[keys[i]] = headerLC + labels[i] + "\n" + lineLC(it) + ctaLC;
+  });
 
   return {
     faixas: { economica: top.slice(0, 1), intermediaria: top.slice(1, 2), premium: top.slice(2, 3) },
     alternativas: itens,
     mensagem_formatada_cliente: msg,
+    mensagens_por_faixa,
     debug: { tórica: forceToric, total: lc.length, cyl: s.worstCyl },
   };
 }
