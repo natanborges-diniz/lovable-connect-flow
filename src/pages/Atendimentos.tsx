@@ -490,6 +490,16 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
             onCreated={() => setDemandasOpen(true)}
           />
 
+          <BuscarLentesSheet
+            open={buscarLentesOpen}
+            onOpenChange={setBuscarLentesOpen}
+            atendimentoId={id}
+            atendimentoMetadata={atendimento?.metadata}
+            contatoMetadata={(atendimento?.contato as any)?.metadata}
+            onInsertComposer={(text) => setMsgText((prev) => prev ? prev + "\n\n" + text : text)}
+          />
+
+
           {atendimento?.canal === "whatsapp" && atendimento?.contato_id && (
             <>
               <ReconectarTemplateButton
