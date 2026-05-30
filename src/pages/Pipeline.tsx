@@ -817,7 +817,7 @@ function ConversationPanel({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("atendimentos")
-        .select("id, modo, status, canal, canal_provedor, solicitacao_id")
+        .select("id, modo, status, canal, canal_provedor, solicitacao_id, metadata")
         .eq("contato_id", contatoId)
         .neq("status", "encerrado")
         .order("created_at", { ascending: false })
