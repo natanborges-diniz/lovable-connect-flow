@@ -32,7 +32,7 @@ import {
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
   MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw, Image as ImageIcon, ExternalLink,
-  Pin, Paperclip,
+  Pin, Paperclip, Glasses,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
