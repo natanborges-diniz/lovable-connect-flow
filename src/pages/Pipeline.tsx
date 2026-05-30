@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { DemandaLojaPanel } from "@/components/atendimentos/DemandaLojaPanel";
+import { BuscarLentesSheet } from "@/components/atendimentos/BuscarLentesSheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -31,7 +32,7 @@ import {
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
   MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw, Image as ImageIcon, ExternalLink,
-  Pin, Paperclip,
+  Pin, Paperclip, Glasses,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -801,6 +802,7 @@ function ConversationPanel({
   const [transferDestino, setTransferDestino] = useState<"lojas" | "financeiro" | "ti">("lojas");
   const [transferColunaId, setTransferColunaId] = useState("");
   const [transferColunaNome, setTransferColunaNome] = useState("");
+  const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
 
   // Known setor name mappings
   const SETOR_MAP: Record<string, "lojas" | "financeiro" | "ti"> = {
@@ -816,7 +818,7 @@ function ConversationPanel({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("atendimentos")
-        .select("id, modo, status, canal, canal_provedor, solicitacao_id")
+        .select("id, modo, status, canal, canal_provedor, solicitacao_id, metadata")
         .eq("contato_id", contatoId)
         .neq("status", "encerrado")
         .order("created_at", { ascending: false })
@@ -943,7 +945,23 @@ function ConversationPanel({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base pr-8">
             <MessageSquare className="h-4 w-4 shrink-0" />
-            <span className="truncate">{contato?.nome ?? "Contato"}</span>
+            <span className="truncate flex-1">{contato?.nome ?? "Contato"}</span>
+            {atendimentoId && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-8 gap-1.5 shrink-0 shadow-sm"
+                onClick={() => {
+                  console.info("[BuscarLentes] aberto (CRM)", { atendimentoId });
+                  setBuscarLentesOpen(true);
+                }}
+                aria-label="Buscar lentes (copiloto de cotação)"
+                title="Copiloto de cotação de lentes (tom Gael / Óticas Diniz)"
+              >
+                <Glasses className="h-4 w-4" />
+                <span className="hidden sm:inline">Buscar lentes</span>
+              </Button>
+            )}
           </DialogTitle>
         </DialogHeader>
         <div className="flex items-center gap-2 flex-wrap">
@@ -995,6 +1013,19 @@ function ConversationPanel({
         colunaDestinoNome={transferColunaNome}
         onSuccess={handleTransferSuccess}
       />
+
+      {atendimentoId && (
+        <BuscarLentesSheet
+          open={buscarLentesOpen}
+          onOpenChange={setBuscarLentesOpen}
+          atendimentoId={atendimentoId}
+          atendimentoMetadata={(atendimentoData as any)?.metadata}
+          contatoMetadata={(contato as any)?.metadata}
+          onInsertComposer={() => {
+            toast.info("Use o botão Copiar e cole no campo de envio do chat");
+          }}
+        />
+      )}
     </>
   );
 }
