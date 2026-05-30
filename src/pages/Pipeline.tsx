@@ -1013,6 +1013,19 @@ function ConversationPanel({
         colunaDestinoNome={transferColunaNome}
         onSuccess={handleTransferSuccess}
       />
+
+      {atendimentoId && (
+        <BuscarLentesSheet
+          open={buscarLentesOpen}
+          onOpenChange={setBuscarLentesOpen}
+          atendimentoId={atendimentoId}
+          atendimentoMetadata={(atendimentoData as any)?.metadata}
+          contatoMetadata={(contato as any)?.metadata}
+          onInsertComposer={() => {
+            toast.info("Use o botão Copiar e cole no campo de envio do chat");
+          }}
+        />
+      )}
     </>
   );
 }
