@@ -378,9 +378,6 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
                 />
               </>
             )}
-            <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => setBuscarLentesOpen(true)}>
-              <Glasses className="h-3 w-3" /> Buscar lentes
-            </Button>
             <Badge variant="outline" className="capitalize text-[10px]">{atendimento.canal}</Badge>
             {atendimento.canal_provedor && (
               <Badge variant="outline" className={cn("text-[10px]", atendimento.canal_provedor === "meta_official" ? "border-emerald-500/50 text-emerald-600" : "border-muted-foreground/40 text-muted-foreground")}>
