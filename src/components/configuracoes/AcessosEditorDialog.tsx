@@ -251,13 +251,14 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
   const setoresResumo = todosSetores ? "Todos" : `${setoresSel.length} setor(es)`;
 
   return (
+    <TooltipProvider delayDuration={300}>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>Editar usuário e acessos</DialogTitle>
+          <DialogTitle>{isCreate ? "Novo usuário" : "Editar usuário e acessos"}</DialogTitle>
           <DialogDescription>
-            Identidade • Acesso a módulos • Escopo (lojas / setores). Quem cuida do
-            <span className="font-medium"> InFoco Messenger</span> também é configurado aqui.
+            Identidade • Acesso a módulos • Escopo (lojas / setores). Inclui o app
+            <span className="font-medium"> InFoco Messenger</span> (celular).
           </DialogDescription>
         </DialogHeader>
 
