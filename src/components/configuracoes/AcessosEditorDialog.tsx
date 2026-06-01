@@ -11,8 +11,9 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Loader2, Shield, KeySquare, MapPin, Sparkles } from "lucide-react";
+import { Loader2, Shield, KeySquare, MapPin, Sparkles, Info, Globe, Smartphone } from "lucide-react";
 import {
   type Acessos,
   type ModuloKey,
@@ -23,10 +24,12 @@ import {
 } from "@/lib/acessos";
 
 interface Props {
+  /** null + mode="create" cria novo. uuid + mode="edit" edita. */
   userId: string | null;
+  mode?: "edit" | "create";
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved?: () => void;
+  onSaved?: (createdUserId?: string, inviteUrl?: string | null) => void;
 }
 
 interface ProfileRow {
@@ -36,11 +39,13 @@ interface ProfileRow {
   cargo: string | null;
 }
 
-export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Props) {
+export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange, onSaved }: Props) {
   const queryClient = useQueryClient();
+  const isCreate = mode === "create";
   const [tab, setTab] = useState("identidade");
 
   const [nome, setNome] = useState("");
+  const [email, setEmail] = useState("");
   const [cargo, setCargo] = useState("");
   const [modulos, setModulos] = useState<Partial<Record<ModuloKey, Poder>>>({});
   const [lojas, setLojas] = useState<string[]>([]);
@@ -52,7 +57,7 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
   // ---- queries
   const profileQ = useQuery({
     queryKey: ["editor-profile", userId],
-    enabled: !!userId && open,
+    enabled: !!userId && !isCreate && open,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
@@ -66,7 +71,7 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
 
   const acessosQ = useQuery({
     queryKey: ["editor-acessos", userId],
-    enabled: !!userId && open,
+    enabled: !!userId && !isCreate && open,
     queryFn: async (): Promise<Acessos | null> => {
       const { data, error } = await supabase
         .from("user_acessos")
@@ -112,11 +117,25 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
     },
   });
 
-  // ---- hydrate form when data arrives
+  // ---- hydrate form when data arrives (ou reset em modo criação)
   useEffect(() => {
     if (!open) return;
+    if (isCreate) {
+      setNome("");
+      setEmail("");
+      setCargo("");
+      setModulos({});
+      setAcessoTotal(false);
+      setLojas([]);
+      setTodasLojas(false);
+      setSetoresSel([]);
+      setTodosSetores(false);
+      setTab("identidade");
+      return;
+    }
     if (profileQ.data) {
       setNome(profileQ.data.nome || "");
+      setEmail(profileQ.data.email || "");
       setCargo(profileQ.data.cargo || "");
     }
     const a = acessosQ.data;
@@ -136,7 +155,7 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
       setSetoresSel([]);
       setTodosSetores(false);
     }
-  }, [open, profileQ.data, acessosQ.data, acessosQ.isFetched]);
+  }, [open, isCreate, profileQ.data, acessosQ.data, acessosQ.isFetched]);
 
   const toggleModulo = (k: ModuloKey, checked: boolean) => {
     setModulos((prev) => {
@@ -160,23 +179,44 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
     toast.success(`Perfil "${perfil.label}" aplicado — ajuste o escopo se precisar.`);
   };
 
-  // ---- save
+  // ---- save (cria ou atualiza)
   const save = useMutation({
     mutationFn: async () => {
-      if (!userId) throw new Error("Sem usuário");
-      // 1) profile (identidade)
-      const profileUpdates: { nome: string; cargo?: string } = { nome: nome.trim() };
-      if (cargo.trim()) profileUpdates.cargo = cargo.trim();
-      const { error: pErr } = await supabase
-        .from("profiles")
-        .update(profileUpdates)
-        .eq("id", userId);
-      if (pErr) throw pErr;
+      let targetUserId = userId;
+      let inviteUrl: string | null = null;
 
+      if (isCreate) {
+        if (!nome.trim() || !email.trim()) {
+          throw new Error("Informe nome e e-mail.");
+        }
+        const payload: Record<string, unknown> = {
+          nome: nome.trim(),
+          email: email.trim(),
+          // role legado p/ compat (será sobrescrito pelo trigger de user_acessos)
+          role: acessoTotal ? "admin" : "setor_usuario",
+        };
+        if (cargo.trim()) payload.cargo = cargo.trim();
+        const { data, error } = await supabase.functions.invoke("admin-create-user", { body: payload });
+        if (error) throw error;
+        if ((data as any)?.error) throw new Error((data as any).error);
+        targetUserId = (data as any).user_id;
+        inviteUrl = (data as any).invite_url ?? null;
+      } else {
+        // edit: salva identidade
+        const profileUpdates: { nome: string; cargo?: string } = { nome: nome.trim() };
+        if (cargo.trim()) profileUpdates.cargo = cargo.trim();
+        const { error: pErr } = await supabase
+          .from("profiles")
+          .update(profileUpdates)
+          .eq("id", userId!);
+        if (pErr) throw pErr;
+      }
 
-      // 2) user_acessos (upsert) — trigger se encarrega de profiles.tipo + user_roles
+      if (!targetUserId) throw new Error("Sem user_id após criação");
+
+      // user_acessos (upsert) — trigger se encarrega de profiles.tipo + user_roles
       const payload = {
-        user_id: userId,
+        user_id: targetUserId,
         modulos: acessoTotal
           ? Object.fromEntries(
               [...MODULOS_ATRIUM, ...MODULOS_MESSENGER].map((m) => [m.key, "agir"])
@@ -188,33 +228,37 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
       };
       const { error: aErr } = await supabase.from("user_acessos").upsert(payload);
       if (aErr) throw aErr;
+
+      return { userId: targetUserId, inviteUrl };
     },
-    onSuccess: () => {
-      toast.success("Acessos salvos");
+    onSuccess: (result) => {
+      toast.success(isCreate ? "Usuário criado e acessos configurados" : "Acessos salvos");
       queryClient.invalidateQueries({ queryKey: ["admin-profiles"] });
       queryClient.invalidateQueries({ queryKey: ["admin-user-roles"] });
       queryClient.invalidateQueries({ queryKey: ["editor-acessos", userId] });
       queryClient.invalidateQueries({ queryKey: ["admin-user-acessos"] });
-      onSaved?.();
+      queryClient.invalidateQueries({ queryKey: ["profiles-ativos"] });
+      onSaved?.(result.userId, result.inviteUrl);
       onOpenChange(false);
     },
     onError: (e: any) => toast.error(e.message ?? "Falha ao salvar"),
   });
 
-  const isLoading = profileQ.isLoading || acessosQ.isLoading;
+  const isLoading = !isCreate && (profileQ.isLoading || acessosQ.isLoading);
 
   const moduloCount = useMemo(() => Object.keys(modulos).length, [modulos]);
   const lojasResumo = todasLojas ? "Todas" : `${lojas.length} loja(s)`;
   const setoresResumo = todosSetores ? "Todos" : `${setoresSel.length} setor(es)`;
 
   return (
+    <TooltipProvider delayDuration={300}>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>Editar usuário e acessos</DialogTitle>
+          <DialogTitle>{isCreate ? "Novo usuário" : "Editar usuário e acessos"}</DialogTitle>
           <DialogDescription>
-            Identidade • Acesso a módulos • Escopo (lojas / setores). Quem cuida do
-            <span className="font-medium"> InFoco Messenger</span> também é configurado aqui.
+            Identidade • Acesso a módulos • Escopo (lojas / setores). Inclui o app
+            <span className="font-medium"> InFoco Messenger</span> (celular).
           </DialogDescription>
         </DialogHeader>
 
@@ -276,9 +320,16 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
                   </div>
                   <div className="space-y-2">
                     <Label>E-mail</Label>
-                    <Input value={profileQ.data?.email || ""} disabled />
+                    <Input
+                      value={isCreate ? email : (profileQ.data?.email || "")}
+                      disabled={!isCreate}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={isCreate ? "usuario@empresa.com" : undefined}
+                    />
                     <p className="text-xs text-muted-foreground">
-                      E-mail é o identificador de login e não pode ser alterado aqui.
+                      {isCreate
+                        ? "Será o identificador de login. Um link de acesso é gerado após salvar."
+                        : "E-mail é o identificador de login e não pode ser alterado aqui."}
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -310,14 +361,18 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
                   {!acessoTotal && (
                     <>
                       <ModulosSection
-                        titulo="Módulos do Atrium (web)"
+                        titulo="Atrium (uso na web — computador)"
+                        descricao="Páginas que a pessoa abre no navegador. Para operadores internos."
+                        icone={<Globe className="h-4 w-4 text-blue-600" />}
                         modulos={MODULOS_ATRIUM}
                         selecao={modulos}
                         onToggle={toggleModulo}
                         onPoder={setPoder}
                       />
                       <ModulosSection
-                        titulo="Módulos do InFoco Messenger"
+                        titulo="InFoco Messenger (app no celular)"
+                        descricao="O que a pessoa enxerga ao abrir o app. Para lojas, supervisores e equipes em campo. Os menus específicos (lojista, supervisor) são filtrados pelo escopo abaixo."
+                        icone={<Smartphone className="h-4 w-4 text-emerald-600" />}
                         modulos={MODULOS_MESSENGER}
                         selecao={modulos}
                         onToggle={toggleModulo}
@@ -407,25 +462,36 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
         )}
       </DialogContent>
     </Dialog>
+    </TooltipProvider>
   );
 }
 
 function ModulosSection({
   titulo,
+  descricao,
+  icone,
   modulos,
   selecao,
   onToggle,
   onPoder,
 }: {
   titulo: string;
-  modulos: { key: ModuloKey; label: string }[];
+  descricao?: string;
+  icone?: React.ReactNode;
+  modulos: { key: ModuloKey; label: string; descricao?: string }[];
   selecao: Partial<Record<ModuloKey, Poder>>;
   onToggle: (k: ModuloKey, checked: boolean) => void;
   onPoder: (k: ModuloKey, p: Poder) => void;
 }) {
   return (
     <div>
-      <div className="text-sm font-medium mb-2">{titulo}</div>
+      <div className="flex items-center gap-2 mb-1">
+        {icone}
+        <div className="text-sm font-medium">{titulo}</div>
+      </div>
+      {descricao && (
+        <div className="text-xs text-muted-foreground mb-2">{descricao}</div>
+      )}
       <div className="border rounded-md divide-y">
         {modulos.map((m) => {
           const checked = selecao[m.key] != null;
@@ -437,6 +503,16 @@ function ModulosSection({
                   onCheckedChange={(c) => onToggle(m.key, !!c)}
                 />
                 <span>{m.label}</span>
+                {m.descricao && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs text-xs">
+                      {m.descricao}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
               </label>
               {checked && (
                 <Select
