@@ -143,7 +143,13 @@ export default function Atendimentos() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{a.atendente_nome ?? "Não atribuído"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {a.atendente_nome ? (
+                        <span className="text-foreground">{a.atendente_nome}</span>
+                      ) : (
+                        <span className="italic">Não atribuído</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {format(new Date(a.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}
                     </TableCell>
