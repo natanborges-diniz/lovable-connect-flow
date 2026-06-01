@@ -532,14 +532,14 @@ export function GestaoUsuariosCard() {
         </CardContent>
       </Card>
 
-      {/* Diálogo unificado de edição */}
-      <EditarUsuarioDialog
-        target={editTarget}
-        setores={setores || []}
-        lojas={lojas || []}
-        onClose={() => setEditTarget(null)}
+      {/* Novo editor modular (Identidade / Acesso / Escopo) */}
+      <AcessosEditorDialog
+        userId={editTarget?.id ?? null}
+        open={!!editTarget}
+        onOpenChange={(o) => !o && setEditTarget(null)}
         onSaved={invalidateAll}
       />
+
 
       <Dialog open={!!resetTarget} onOpenChange={(o) => !o && setResetTarget(null)}>
         <DialogContent className="sm:max-w-md">
