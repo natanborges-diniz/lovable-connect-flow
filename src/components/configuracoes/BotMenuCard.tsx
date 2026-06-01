@@ -598,6 +598,8 @@ function EditOpcaoForm({ item, allOpcoes, onSubmit }: { item: MenuOpcao; allOpco
           descricao: descricao || null,
           parent_id: parentId === "_none" ? null : parentId,
           setor_id: setorId === "_none" ? null : setorId,
+          cargos_visiveis: cargosVisiveis,
+          usuarios_visiveis: usuariosVisiveis,
         })
         .eq("id", item.id);
       if (error) throw error;
