@@ -72,8 +72,24 @@ Deno.serve(async (req) => {
       password: new_password,
     });
     if (updErr) {
-      return new Response(JSON.stringify({ error: updErr.message }), {
-        status: 500,
+      const raw = (updErr.message ?? "").toLowerCase();
+      let friendly = updErr.message;
+      let status = 500;
+
+      if (raw.includes("weak") || raw.includes("pwned") || raw.includes("known to be")) {
+        friendly =
+          "Essa senha aparece em listas públicas de senhas vazadas e foi bloqueada. Escolha uma combinação mais forte (use letras, números e símbolos, evite sequências comuns).";
+        status = 400;
+      } else if (raw.includes("password should be at least") || raw.includes("at least")) {
+        friendly = "A senha precisa atender ao tamanho mínimo exigido.";
+        status = 400;
+      } else if (raw.includes("same as the old")) {
+        friendly = "A nova senha não pode ser igual à anterior.";
+        status = 400;
+      }
+
+      return new Response(JSON.stringify({ error: friendly }), {
+        status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
