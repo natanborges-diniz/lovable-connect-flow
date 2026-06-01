@@ -39,11 +39,13 @@ interface ProfileRow {
   cargo: string | null;
 }
 
-export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Props) {
+export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange, onSaved }: Props) {
   const queryClient = useQueryClient();
+  const isCreate = mode === "create";
   const [tab, setTab] = useState("identidade");
 
   const [nome, setNome] = useState("");
+  const [email, setEmail] = useState("");
   const [cargo, setCargo] = useState("");
   const [modulos, setModulos] = useState<Partial<Record<ModuloKey, Poder>>>({});
   const [lojas, setLojas] = useState<string[]>([]);
