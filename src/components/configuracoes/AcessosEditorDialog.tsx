@@ -311,7 +311,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                 </TabsTrigger>
               </TabsList>
 
-              <ScrollArea className="flex-1 mt-3 pr-3">
+              <div className="flex-1 mt-3 pr-2 overflow-y-auto">
                 {/* ---- IDENTIDADE ---- */}
                 <TabsContent value="identidade" className="space-y-4">
                   <div className="space-y-2">
@@ -450,7 +450,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                     </>
                   )}
                 </TabsContent>
-              </ScrollArea>
+              </div>
             </Tabs>
 
             <DialogFooter className="mt-4">
