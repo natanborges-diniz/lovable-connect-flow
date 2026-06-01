@@ -3095,10 +3095,6 @@ export type Database = {
         Args: { cron_expression: string; job_name: string; sql_command: string }
         Returns: number
       }
-      set_bot_menu_visibility_for_user: {
-        Args: { _opcao_ids: string[]; _user_id: string }
-        Returns: undefined
-      }
       setup_contato_ponte: { Args: { _contato_id: string }; Returns: string }
       unique_responsavel_setor: { Args: { _setor_id: string }; Returns: string }
       unschedule_cron_job: { Args: { job_name: string }; Returns: undefined }
