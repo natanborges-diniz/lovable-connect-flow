@@ -457,6 +457,8 @@ function CreateOpcaoForm({ nextOrdem, allOpcoes, onSubmit }: { nextOrdem: number
           tipo,
           parent_id: parentId === "_none" ? null : parentId,
           setor_id: setorId === "_none" ? null : setorId,
+          cargos_visiveis: cargosVisiveis,
+          usuarios_visiveis: usuariosVisiveis,
         });
       if (error) throw error;
       toast.success("Opção criada");
