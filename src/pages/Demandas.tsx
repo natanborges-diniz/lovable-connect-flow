@@ -187,18 +187,37 @@ function DemandaListItem({ d, active, onSelect }: { d: DemandaRow; active: boole
             </span>
           ) : d.loja_nome}
         </span>
-        <Badge
-          variant="outline"
-          className={cn(
-            "h-4 shrink-0 px-1 text-[9px]",
-            d.status === "aberta" && "border-amber-500/50 text-amber-600",
-            d.status === "respondida" && "border-emerald-500/50 text-emerald-600",
-            d.status === "encerrada" && "border-muted-foreground/30 text-muted-foreground",
-          )}
-        >
-          {d.status}
-        </Badge>
-      </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {(() => {
+            const sla = getSLA(d);
+            if (sla.level === "no_response") {
+              return <Badge variant="destructive" className="h-4 px-1 text-[9px] animate-pulse">SEM RESPOSTA</Badge>;
+            }
+            if (sla.level === "critical") {
+              return <Badge variant="destructive" className="h-4 px-1 text-[9px]">{sla.label}</Badge>;
+            }
+            if (sla.level === "late") {
+              return <Badge className="h-4 bg-orange-500 px-1 text-[9px] text-white hover:bg-orange-500">{sla.label}</Badge>;
+            }
+            if (sla.level === "warn") {
+              return <Badge className="h-4 bg-amber-500 px-1 text-[9px] text-white hover:bg-amber-500">{sla.label}</Badge>;
+            }
+            return null;
+          })()}
+          <Badge
+            variant="outline"
+            className={cn(
+              "h-4 px-1 text-[9px]",
+              d.status === "aberta" && "border-amber-500/50 text-amber-600",
+              d.status === "respondida" && "border-emerald-500/50 text-emerald-600",
+              d.status === "encerrada" && "border-muted-foreground/30 text-muted-foreground",
+              d.status === "sem_resposta" && "border-destructive/50 text-destructive",
+            )}
+          >
+            {d.status}
+          </Badge>
+        </div>
+
       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{d.assunto || d.pergunta}</p>
       <p className="mt-0.5 text-[10px] text-muted-foreground/70">
         {format(new Date(d.created_at), "dd/MM HH:mm", { locale: ptBR })}
