@@ -179,23 +179,44 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
     toast.success(`Perfil "${perfil.label}" aplicado — ajuste o escopo se precisar.`);
   };
 
-  // ---- save
+  // ---- save (cria ou atualiza)
   const save = useMutation({
     mutationFn: async () => {
-      if (!userId) throw new Error("Sem usuário");
-      // 1) profile (identidade)
-      const profileUpdates: { nome: string; cargo?: string } = { nome: nome.trim() };
-      if (cargo.trim()) profileUpdates.cargo = cargo.trim();
-      const { error: pErr } = await supabase
-        .from("profiles")
-        .update(profileUpdates)
-        .eq("id", userId);
-      if (pErr) throw pErr;
+      let targetUserId = userId;
+      let inviteUrl: string | null = null;
 
+      if (isCreate) {
+        if (!nome.trim() || !email.trim()) {
+          throw new Error("Informe nome e e-mail.");
+        }
+        const payload: Record<string, unknown> = {
+          nome: nome.trim(),
+          email: email.trim(),
+          // role legado p/ compat (será sobrescrito pelo trigger de user_acessos)
+          role: acessoTotal ? "admin" : "setor_usuario",
+        };
+        if (cargo.trim()) payload.cargo = cargo.trim();
+        const { data, error } = await supabase.functions.invoke("admin-create-user", { body: payload });
+        if (error) throw error;
+        if ((data as any)?.error) throw new Error((data as any).error);
+        targetUserId = (data as any).user_id;
+        inviteUrl = (data as any).invite_url ?? null;
+      } else {
+        // edit: salva identidade
+        const profileUpdates: { nome: string; cargo?: string } = { nome: nome.trim() };
+        if (cargo.trim()) profileUpdates.cargo = cargo.trim();
+        const { error: pErr } = await supabase
+          .from("profiles")
+          .update(profileUpdates)
+          .eq("id", userId!);
+        if (pErr) throw pErr;
+      }
 
-      // 2) user_acessos (upsert) — trigger se encarrega de profiles.tipo + user_roles
+      if (!targetUserId) throw new Error("Sem user_id após criação");
+
+      // user_acessos (upsert) — trigger se encarrega de profiles.tipo + user_roles
       const payload = {
-        user_id: userId,
+        user_id: targetUserId,
         modulos: acessoTotal
           ? Object.fromEntries(
               [...MODULOS_ATRIUM, ...MODULOS_MESSENGER].map((m) => [m.key, "agir"])
@@ -207,20 +228,23 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       };
       const { error: aErr } = await supabase.from("user_acessos").upsert(payload);
       if (aErr) throw aErr;
+
+      return { userId: targetUserId, inviteUrl };
     },
-    onSuccess: () => {
-      toast.success("Acessos salvos");
+    onSuccess: (result) => {
+      toast.success(isCreate ? "Usuário criado e acessos configurados" : "Acessos salvos");
       queryClient.invalidateQueries({ queryKey: ["admin-profiles"] });
       queryClient.invalidateQueries({ queryKey: ["admin-user-roles"] });
       queryClient.invalidateQueries({ queryKey: ["editor-acessos", userId] });
       queryClient.invalidateQueries({ queryKey: ["admin-user-acessos"] });
-      onSaved?.();
+      queryClient.invalidateQueries({ queryKey: ["profiles-ativos"] });
+      onSaved?.(result.userId, result.inviteUrl);
       onOpenChange(false);
     },
     onError: (e: any) => toast.error(e.message ?? "Falha ao salvar"),
   });
 
-  const isLoading = profileQ.isLoading || acessosQ.isLoading;
+  const isLoading = !isCreate && (profileQ.isLoading || acessosQ.isLoading);
 
   const moduloCount = useMemo(() => Object.keys(modulos).length, [modulos]);
   const lojasResumo = todasLojas ? "Todas" : `${lojas.length} loja(s)`;
