@@ -361,14 +361,18 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                   {!acessoTotal && (
                     <>
                       <ModulosSection
-                        titulo="Módulos do Atrium (web)"
+                        titulo="Atrium (uso na web — computador)"
+                        descricao="Páginas que a pessoa abre no navegador. Para operadores internos."
+                        icone={<Globe className="h-4 w-4 text-blue-600" />}
                         modulos={MODULOS_ATRIUM}
                         selecao={modulos}
                         onToggle={toggleModulo}
                         onPoder={setPoder}
                       />
                       <ModulosSection
-                        titulo="Módulos do InFoco Messenger"
+                        titulo="InFoco Messenger (app no celular)"
+                        descricao="O que a pessoa enxerga ao abrir o app. Para lojas, supervisores e equipes em campo. Os menus específicos (lojista, supervisor) são filtrados pelo escopo abaixo."
+                        icone={<Smartphone className="h-4 w-4 text-emerald-600" />}
                         modulos={MODULOS_MESSENGER}
                         selecao={modulos}
                         onToggle={toggleModulo}
