@@ -700,19 +700,6 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
               >
                 <Paperclip className="h-4 w-4" />
               </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-10 w-10 shrink-0"
-                onClick={() => {
-                  console.info("[BuscarLentes] aberto (composer)", { atendimentoId: id });
-                  setBuscarLentesOpen(true);
-                }}
-                aria-label="Buscar produto (copiloto)"
-                title="Buscar produto — copiloto de cotação"
-              >
-                <Glasses className="h-4 w-4" />
-              </Button>
             </>
 
           )}
