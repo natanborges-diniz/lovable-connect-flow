@@ -425,6 +425,8 @@ function CreateOpcaoForm({ nextOrdem, allOpcoes, onSubmit }: { nextOrdem: number
   const [fluxo, setFluxo] = useState("");
   const [parentId, setParentId] = useState<string>("_none");
   const [setorId, setSetorId] = useState<string>("_none");
+  const [cargosVisiveis, setCargosVisiveis] = useState<string[]>([]);
+  const [usuariosVisiveis, setUsuariosVisiveis] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const { data: fluxos } = useFluxosForSelect(tipoBot);
   const { data: setores } = useSetores();
