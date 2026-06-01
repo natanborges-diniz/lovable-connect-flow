@@ -343,6 +343,7 @@ export function BotMenuCard() {
                 <TableHead>Tipo</TableHead>
                 <TableHead>Fluxo</TableHead>
                 <TableHead>Bot</TableHead>
+                <TableHead>Visibilidade</TableHead>
                 <TableHead className="w-20">Ativo</TableHead>
                 <TableHead className="w-24"></TableHead>
               </TableRow>
