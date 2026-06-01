@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2 } from "lucide-react";
+import { hasModulo, moduloFromRoute } from "@/lib/acessos";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -8,7 +9,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, loading, roles, isAdmin, profile } = useAuth();
+  const { user, loading, roles, isAdmin, profile, acessos } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -24,8 +25,10 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   }
 
   // tipo=loja só usa o InFoco Messenger; bloqueia Atrium web inteiro.
+  // Exceção: Diretor (acesso_total) entra em qualquer rota.
   if (
     profile?.tipo_usuario === "loja" &&
+    !acessos?.acessoTotal &&
     !location.pathname.startsWith("/somente-messenger")
   ) {
     return <Navigate to="/somente-messenger" replace />;
@@ -35,6 +38,15 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   if (allowedRoles && !isAdmin && roles.length > 0) {
     const hasAccess = roles.some((r) => allowedRoles.includes(r.role));
     if (!hasAccess) {
+      return <Navigate to="/" replace />;
+    }
+  }
+
+  // Bloqueio por módulo (só quando user_acessos existe).
+  // Sem user_acessos cai no modelo antigo (AppLayout/role).
+  if (acessos && !acessos.acessoTotal) {
+    const mod = moduloFromRoute(location.pathname);
+    if (mod && !hasModulo(acessos, mod)) {
       return <Navigate to="/" replace />;
     }
   }

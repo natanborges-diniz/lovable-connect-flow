@@ -23,6 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
+import { AcessosEditorDialog } from "./AcessosEditorDialog";
 
 // URL pública do app InFoco Messenger (mesmo backend Supabase, app distinto).
 // Magic links gerados aqui devem redirecionar para esse domínio.
@@ -532,14 +533,14 @@ export function GestaoUsuariosCard() {
         </CardContent>
       </Card>
 
-      {/* Diálogo unificado de edição */}
-      <EditarUsuarioDialog
-        target={editTarget}
-        setores={setores || []}
-        lojas={lojas || []}
-        onClose={() => setEditTarget(null)}
+      {/* Novo editor modular (Identidade / Acesso / Escopo) */}
+      <AcessosEditorDialog
+        userId={editTarget?.id ?? null}
+        open={!!editTarget}
+        onOpenChange={(o) => !o && setEditTarget(null)}
         onSaved={invalidateAll}
       />
+
 
       <Dialog open={!!resetTarget} onOpenChange={(o) => !o && setResetTarget(null)}>
         <DialogContent className="sm:max-w-md">
