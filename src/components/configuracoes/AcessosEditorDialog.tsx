@@ -57,7 +57,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
   // ---- queries
   const profileQ = useQuery({
     queryKey: ["editor-profile", userId],
-    enabled: !!userId && open,
+    enabled: !!userId && !isCreate && open,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
@@ -71,7 +71,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
 
   const acessosQ = useQuery({
     queryKey: ["editor-acessos", userId],
-    enabled: !!userId && open,
+    enabled: !!userId && !isCreate && open,
     queryFn: async (): Promise<Acessos | null> => {
       const { data, error } = await supabase
         .from("user_acessos")
