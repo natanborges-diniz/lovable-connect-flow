@@ -249,6 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setRoles([]);
     setSetores([]);
+    setAcessos(null);
   };
 
   return (
@@ -259,6 +260,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         roles,
         setores,
+        acessos,
+        loading,
+        isAuthReady,
+        isAdmin,
+        isOperador,
+        hasRole,
+        getUserSetorIds,
+        getEffectiveSetorIds,
+        getUserLojaNames,
+        signOut,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
         loading,
         isAuthReady,
         isAdmin,
