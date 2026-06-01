@@ -275,22 +275,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
 
-        loading,
-        isAuthReady,
-        isAdmin,
-        isOperador,
-        hasRole,
-        getUserSetorIds,
-        getEffectiveSetorIds,
-        getUserLojaNames,
-        signOut,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
-}
+export const useAuth = () => useContext(AuthContext);
+
 
 export const useAuth = () => useContext(AuthContext);
