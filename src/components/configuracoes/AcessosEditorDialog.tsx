@@ -320,9 +320,16 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                   </div>
                   <div className="space-y-2">
                     <Label>E-mail</Label>
-                    <Input value={profileQ.data?.email || ""} disabled />
+                    <Input
+                      value={isCreate ? email : (profileQ.data?.email || "")}
+                      disabled={!isCreate}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={isCreate ? "usuario@empresa.com" : undefined}
+                    />
                     <p className="text-xs text-muted-foreground">
-                      E-mail é o identificador de login e não pode ser alterado aqui.
+                      {isCreate
+                        ? "Será o identificador de login. Um link de acesso é gerado após salvar."
+                        : "E-mail é o identificador de login e não pode ser alterado aqui."}
                     </p>
                   </div>
                   <div className="space-y-2">
