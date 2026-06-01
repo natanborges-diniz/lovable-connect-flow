@@ -117,11 +117,25 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
     },
   });
 
-  // ---- hydrate form when data arrives
+  // ---- hydrate form when data arrives (ou reset em modo criação)
   useEffect(() => {
     if (!open) return;
+    if (isCreate) {
+      setNome("");
+      setEmail("");
+      setCargo("");
+      setModulos({});
+      setAcessoTotal(false);
+      setLojas([]);
+      setTodasLojas(false);
+      setSetoresSel([]);
+      setTodosSetores(false);
+      setTab("identidade");
+      return;
+    }
     if (profileQ.data) {
       setNome(profileQ.data.nome || "");
+      setEmail(profileQ.data.email || "");
       setCargo(profileQ.data.cargo || "");
     }
     const a = acessosQ.data;
@@ -141,7 +155,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       setSetoresSel([]);
       setTodosSetores(false);
     }
-  }, [open, profileQ.data, acessosQ.data, acessosQ.isFetched]);
+  }, [open, isCreate, profileQ.data, acessosQ.data, acessosQ.isFetched]);
 
   const toggleModulo = (k: ModuloKey, checked: boolean) => {
     setModulos((prev) => {
