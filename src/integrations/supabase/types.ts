@@ -2805,6 +2805,36 @@ export type Database = {
         }
         Relationships: []
       }
+      user_acessos: {
+        Row: {
+          acesso_total: boolean
+          created_at: string
+          lojas: string[] | null
+          modulos: Json
+          setores: string[] | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          acesso_total?: boolean
+          created_at?: string
+          lojas?: string[] | null
+          modulos?: Json
+          setores?: string[] | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          acesso_total?: boolean
+          created_at?: string
+          lojas?: string[] | null
+          modulos?: Json
+          setores?: string[] | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -2951,6 +2981,10 @@ export type Database = {
       grupo_id_from_conversa: {
         Args: { _conversa_id: string }
         Returns: string
+      }
+      has_modulo: {
+        Args: { _modulo: string; _user_id: string }
+        Returns: boolean
       }
       has_role: {
         Args: {
