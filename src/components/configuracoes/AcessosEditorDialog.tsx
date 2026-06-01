@@ -450,7 +450,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                     </>
                   )}
                 </TabsContent>
-              </ScrollArea>
+              </div>
             </Tabs>
 
             <DialogFooter className="mt-4">
