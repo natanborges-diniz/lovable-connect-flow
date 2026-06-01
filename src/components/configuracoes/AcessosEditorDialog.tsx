@@ -472,31 +472,52 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
 
 function ModulosSection({
   titulo,
+  subtitulo,
   descricao,
   icone,
+  accent = "blue",
   modulos,
   selecao,
   onToggle,
   onPoder,
 }: {
   titulo: string;
+  subtitulo?: string;
   descricao?: string;
   icone?: React.ReactNode;
+  accent?: "blue" | "emerald";
   modulos: { key: ModuloKey; label: string; descricao?: string }[];
   selecao: Partial<Record<ModuloKey, Poder>>;
   onToggle: (k: ModuloKey, checked: boolean) => void;
   onPoder: (k: ModuloKey, p: Poder) => void;
 }) {
+  const accentStyles =
+    accent === "emerald"
+      ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200"
+      : "border-blue-300 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200";
+  const selecionados = modulos.filter((m) => selecao[m.key] != null).length;
   return (
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        {icone}
-        <div className="text-sm font-medium">{titulo}</div>
+    <div className="border-2 rounded-lg overflow-hidden">
+      <div className={`flex items-start gap-3 p-3 border-b-2 ${accentStyles}`}>
+        <div className="mt-0.5">{icone}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-sm font-bold">{titulo}</div>
+            <Badge variant="secondary" className="text-[10px]">
+              {selecionados}/{modulos.length}
+            </Badge>
+          </div>
+          {subtitulo && (
+            <div className="text-[11px] uppercase tracking-wide opacity-70 font-medium">
+              {subtitulo}
+            </div>
+          )}
+          {descricao && (
+            <div className="text-xs mt-1 opacity-90">{descricao}</div>
+          )}
+        </div>
       </div>
-      {descricao && (
-        <div className="text-xs text-muted-foreground mb-2">{descricao}</div>
-      )}
-      <div className="border rounded-md divide-y">
+      <div className="divide-y bg-background">
         {modulos.map((m) => {
           const checked = selecao[m.key] != null;
           return (
