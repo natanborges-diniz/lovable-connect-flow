@@ -338,7 +338,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
             </div>
 
             <Tabs value={tab} onValueChange={setTab} className="flex-1 overflow-hidden flex flex-col">
-              <TabsList className="grid grid-cols-3">
+              <TabsList className="grid grid-cols-4">
                 <TabsTrigger value="identidade">
                   <Shield className="h-4 w-4 mr-1" /> Identidade
                 </TabsTrigger>
@@ -352,6 +352,12 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                   <MapPin className="h-4 w-4 mr-1" /> Escopo{" "}
                   <Badge variant="secondary" className="ml-2">
                     {acessoTotal ? "TUDO" : `${lojasResumo} / ${setoresResumo}`}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="bot" disabled={isCreate}>
+                  <Bot className="h-4 w-4 mr-1" /> Bot Lojas{" "}
+                  <Badge variant="secondary" className="ml-2">
+                    {botOpcoesSel.size}
                   </Badge>
                 </TabsTrigger>
               </TabsList>
