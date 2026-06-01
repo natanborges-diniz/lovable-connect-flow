@@ -10,8 +10,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Bot, GripVertical, Trash2, Loader2, Pencil, ChevronRight, FolderOpen, MessageSquare, Zap } from "lucide-react";
+import { Plus, Bot, GripVertical, Trash2, Loader2, Pencil, ChevronRight, FolderOpen, MessageSquare, Zap, Users } from "lucide-react";
 import { toast } from "sonner";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface MenuOpcao {
   id: string;
