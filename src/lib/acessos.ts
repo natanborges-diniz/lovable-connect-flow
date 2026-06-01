@@ -31,25 +31,25 @@ export interface Acessos {
   acessoTotal: boolean;
 }
 
-export const MODULOS_ATRIUM: { key: ModuloKey; label: string; rota?: string }[] = [
-  { key: "dashboard", label: "Dashboard", rota: "/" },
-  { key: "crm", label: "CRM (Vendas)", rota: "/crm" },
-  { key: "lojas", label: "Lojas (Agendamentos)", rota: "/lojas" },
-  { key: "financeiro", label: "Financeiro", rota: "/financeiro" },
-  { key: "ti", label: "TI", rota: "/ti" },
-  { key: "interno", label: "Interno", rota: "/interno" },
-  { key: "estoque", label: "Estoque", rota: "/estoque" },
-  { key: "tarefas", label: "Tarefas", rota: "/tarefas" },
-  { key: "mensagens", label: "Mensagens", rota: "/mensagens" },
-  { key: "demandas", label: "Demandas", rota: "/demandas" },
-  { key: "configuracoes", label: "Configurações", rota: "/configuracoes" },
+export const MODULOS_ATRIUM: { key: ModuloKey; label: string; rota?: string; descricao: string }[] = [
+  { key: "dashboard", label: "Dashboard", rota: "/", descricao: "Painel inicial com indicadores gerais." },
+  { key: "crm", label: "CRM (Vendas)", rota: "/crm", descricao: "Pipeline de vendas: leads, atendimentos do consultor e funil comercial." },
+  { key: "lojas", label: "Lojas (Agendamentos)", rota: "/lojas", descricao: "Pipeline de agendamentos por loja (confirmação, no-show, venda)." },
+  { key: "financeiro", label: "Financeiro", rota: "/financeiro", descricao: "Links de pagamento, boletos, comprovantes e aprovações de CPF." },
+  { key: "ti", label: "TI", rota: "/ti", descricao: "Pipeline de chamados internos de TI." },
+  { key: "interno", label: "Interno", rota: "/interno", descricao: "Pipeline corporativo (conversas entre lojas, colaboradores e setores)." },
+  { key: "estoque", label: "Estoque", rota: "/estoque", descricao: "Confirmação de peças/lentes e movimentação entre lojas." },
+  { key: "tarefas", label: "Tarefas", rota: "/tarefas", descricao: "Lista de tarefas executáveis (kanban operacional)." },
+  { key: "mensagens", label: "Mensagens (chat interno web)", rota: "/mensagens", descricao: "Chat interno entre operadores DENTRO do Atrium web. Não é o app do celular." },
+  { key: "demandas", label: "Demandas", rota: "/demandas", descricao: "Caixa de demandas tipadas (estoque, financeiro, etc.) que chegam dos setores." },
+  { key: "configuracoes", label: "Configurações", rota: "/configuracoes", descricao: "Painel de admin. Só Admins/Diretor devem ter." },
 ];
 
-export const MODULOS_MESSENGER: { key: ModuloKey; label: string }[] = [
-  { key: "chat_1a1", label: "Chat 1:1" },
-  { key: "chat_grupo", label: "Grupos" },
-  { key: "demandas_minhas_lojas", label: "Demandas das minhas lojas" },
-  { key: "menu_loja", label: "Menu de loja (fluxos do bot)" },
+export const MODULOS_MESSENGER: { key: ModuloKey; label: string; descricao: string }[] = [
+  { key: "chat_1a1", label: "Chat 1:1", descricao: "Habilita conversas individuais no app do celular (colaborador↔colaborador, loja↔colaborador)." },
+  { key: "chat_grupo", label: "Grupos", descricao: "Habilita conversas em grupo no app." },
+  { key: "demandas_minhas_lojas", label: "Demandas das minhas lojas", descricao: "Caixa do supervisor: vê e responde demandas das lojas no escopo dele." },
+  { key: "menu_loja", label: "Menu de loja (fluxos do bot)", descricao: "Habilita o menu interativo do bot no app — Solicitar link, Pedir boleto, Falar com setor, etc. Tipicamente para usuários da loja." },
 ];
 
 export function hasModulo(a: Acessos | null | undefined, m: ModuloKey): boolean {
