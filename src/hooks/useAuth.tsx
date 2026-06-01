@@ -116,6 +116,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return (data || []) as SetorInfo[];
   }, []);
 
+  const fetchAcessos = useCallback(async (userId: string): Promise<Acessos | null> => {
+    const { data, error } = await supabase
+      .from("user_acessos")
+      .select("modulos, lojas, setores, acesso_total")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) {
+      console.warn("[useAuth] fetchAcessos error", error);
+      return null;
+    }
+    if (!data) return null;
+    return {
+      modulos: (data.modulos as ModulosMap) || {},
+      lojas: data.lojas,
+      setores: data.setores,
+      acessoTotal: !!data.acesso_total,
+    };
+  }, []);
+
   const hydrateAuthState = useCallback(async (nextSession: Session | null) => {
     setSession(nextSession);
     setUser(nextSession?.user ?? null);
@@ -124,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
       setRoles([]);
       setSetores([]);
+      setAcessos(null);
       setLoading(false);
       setIsAuthReady(true); // anônimo já está "pronto"
       return;
@@ -133,9 +153,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthReady(false);
 
     try {
-      const [nextProfile, nextRoles] = await Promise.all([
+      const [nextProfile, nextRoles, nextAcessos] = await Promise.all([
         fetchProfile(nextSession.user.id),
         fetchRoles(nextSession.user.id),
+        fetchAcessos(nextSession.user.id),
       ]);
 
       // Setor efetivo: roles primeiro, depois profile como fallback
@@ -155,21 +176,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile: nextProfile,
         roles: nextRoles,
         setores: nextSetores,
+        acessos: nextAcessos,
       });
 
       setProfile(nextProfile);
       setRoles(nextRoles);
       setSetores(nextSetores);
+      setAcessos(nextAcessos);
     } catch (err) {
       console.error("[useAuth] hydrate error", err);
       setProfile(null);
       setRoles([]);
       setSetores([]);
+      setAcessos(null);
     } finally {
       setLoading(false);
       setIsAuthReady(true);
     }
-  }, [fetchProfile, fetchRoles, fetchSetoresByIds]);
+  }, [fetchProfile, fetchRoles, fetchSetoresByIds, fetchAcessos]);
+
 
   useEffect(() => {
     setLoading(true);
