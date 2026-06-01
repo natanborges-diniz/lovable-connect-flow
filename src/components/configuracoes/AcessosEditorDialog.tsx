@@ -265,6 +265,13 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       const { error: aErr } = await supabase.from("user_acessos").upsert(payload);
       if (aErr) throw aErr;
 
+      // Visibilidade do bot de lojas por usuário (whitelist em bot_menu_opcoes.usuarios_visiveis)
+      const { error: bErr } = await supabase.rpc("set_bot_menu_visibility_for_user", {
+        _user_id: targetUserId,
+        _opcao_ids: Array.from(botOpcoesSel),
+      });
+      if (bErr) throw bErr;
+
       return { userId: targetUserId, inviteUrl };
     },
     onSuccess: (result) => {
