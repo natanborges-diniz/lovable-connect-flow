@@ -2265,6 +2265,7 @@ export type Database = {
           email: string | null
           id: string
           lojas: string[]
+          lojas_responsaveis: string[]
           metadata: Json
           nome: string
           setor_id: string | null
@@ -2280,6 +2281,7 @@ export type Database = {
           email?: string | null
           id: string
           lojas?: string[]
+          lojas_responsaveis?: string[]
           metadata?: Json
           nome: string
           setor_id?: string | null
@@ -2295,6 +2297,7 @@ export type Database = {
           email?: string | null
           id?: string
           lojas?: string[]
+          lojas_responsaveis?: string[]
           metadata?: Json
           nome?: string
           setor_id?: string | null
@@ -2980,6 +2983,12 @@ export type Database = {
         Args: { _loja_nome: string }
         Returns: {
           setor_id: string
+          user_id: string
+        }[]
+      }
+      resolver_destinatarios_loja_por_nivel: {
+        Args: { _loja_nome: string; _nivel: string }
+        Returns: {
           user_id: string
         }[]
       }
