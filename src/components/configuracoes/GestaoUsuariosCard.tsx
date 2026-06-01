@@ -23,6 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
+import { AcessosEditorDialog } from "./AcessosEditorDialog";
 
 // URL pública do app InFoco Messenger (mesmo backend Supabase, app distinto).
 // Magic links gerados aqui devem redirecionar para esse domínio.
