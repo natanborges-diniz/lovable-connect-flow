@@ -685,6 +685,17 @@ function EditOpcaoForm({ item, allOpcoes, onSubmit }: { item: MenuOpcao; allOpco
         <Label>Descrição (opcional)</Label>
         <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Texto auxiliar" />
       </div>
+      <div className="space-y-1.5">
+        <Label>Visibilidade</Label>
+        <VisibilidadePicker
+          cargos={cargosVisiveis}
+          usuarios={usuariosVisiveis}
+          onChange={({ cargos, usuarios }) => {
+            setCargosVisiveis(cargos);
+            setUsuariosVisiveis(usuarios);
+          }}
+        />
+      </div>
       <Button onClick={handleSave} disabled={loading || !titulo.trim() || (tipo === "fluxo" && !fluxo)} className="w-full">
         {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
         Salvar Alterações
