@@ -567,6 +567,8 @@ function EditOpcaoForm({ item, allOpcoes, onSubmit }: { item: MenuOpcao; allOpco
   const [parentId, setParentId] = useState<string>(item.parent_id || "_none");
   const [setorId, setSetorId] = useState<string>(item.setor_id || "_none");
   const [descricao, setDescricao] = useState(item.descricao || "");
+  const [cargosVisiveis, setCargosVisiveis] = useState<string[]>(item.cargos_visiveis || []);
+  const [usuariosVisiveis, setUsuariosVisiveis] = useState<string[]>(item.usuarios_visiveis || []);
   const [loading, setLoading] = useState(false);
   const { data: fluxos } = useFluxosForSelect(tipoBot);
   const { data: setores } = useSetores();
