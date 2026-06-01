@@ -11,8 +11,9 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Loader2, Shield, KeySquare, MapPin, Sparkles } from "lucide-react";
+import { Loader2, Shield, KeySquare, MapPin, Sparkles, Info, Globe, Smartphone } from "lucide-react";
 import {
   type Acessos,
   type ModuloKey,
@@ -23,10 +24,12 @@ import {
 } from "@/lib/acessos";
 
 interface Props {
+  /** null + mode="create" cria novo. uuid + mode="edit" edita. */
   userId: string | null;
+  mode?: "edit" | "create";
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved?: () => void;
+  onSaved?: (createdUserId?: string, inviteUrl?: string | null) => void;
 }
 
 interface ProfileRow {
