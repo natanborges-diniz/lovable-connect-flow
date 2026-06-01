@@ -325,6 +325,7 @@ export type Database = {
           tipo_bot: string
           titulo: string
           updated_at: string
+          usuarios_visiveis: string[]
         }
         Insert: {
           ativo?: boolean
@@ -342,6 +343,7 @@ export type Database = {
           tipo_bot?: string
           titulo: string
           updated_at?: string
+          usuarios_visiveis?: string[]
         }
         Update: {
           ativo?: boolean
@@ -359,6 +361,7 @@ export type Database = {
           tipo_bot?: string
           titulo?: string
           updated_at?: string
+          usuarios_visiveis?: string[]
         }
         Relationships: [
           {
@@ -2950,8 +2953,68 @@ export type Database = {
         }
         Returns: undefined
       }
-      get_menu_opcoes_para_cargo: {
-        Args: { _cargo: string; _parent_id: string; _tipo_bot: string }
+      get_menu_opcoes_para_cargo:
+        | {
+            Args: { _cargo: string; _parent_id: string; _tipo_bot: string }
+            Returns: {
+              ativo: boolean
+              cargos_visiveis: string[]
+              chave: string
+              created_at: string
+              descricao: string | null
+              emoji: string
+              fluxo: string
+              id: string
+              ordem: number
+              parent_id: string | null
+              setor_id: string | null
+              tipo: string
+              tipo_bot: string
+              titulo: string
+              updated_at: string
+              usuarios_visiveis: string[]
+            }[]
+            SetofOptions: {
+              from: "*"
+              to: "bot_menu_opcoes"
+              isOneToOne: false
+              isSetofReturn: true
+            }
+          }
+        | {
+            Args: {
+              _cargo: string
+              _parent_id: string
+              _tipo_bot: string
+              _user_id?: string
+            }
+            Returns: {
+              ativo: boolean
+              cargos_visiveis: string[]
+              chave: string
+              created_at: string
+              descricao: string | null
+              emoji: string
+              fluxo: string
+              id: string
+              ordem: number
+              parent_id: string | null
+              setor_id: string | null
+              tipo: string
+              tipo_bot: string
+              titulo: string
+              updated_at: string
+              usuarios_visiveis: string[]
+            }[]
+            SetofOptions: {
+              from: "*"
+              to: "bot_menu_opcoes"
+              isOneToOne: false
+              isSetofReturn: true
+            }
+          }
+      get_menu_opcoes_para_usuario: {
+        Args: { _parent_id: string; _tipo_bot: string; _user_id: string }
         Returns: {
           ativo: boolean
           cargos_visiveis: string[]
@@ -2968,6 +3031,7 @@ export type Database = {
           tipo_bot: string
           titulo: string
           updated_at: string
+          usuarios_visiveis: string[]
         }[]
         SetofOptions: {
           from: "*"

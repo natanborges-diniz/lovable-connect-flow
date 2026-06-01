@@ -10,8 +10,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Bot, GripVertical, Trash2, Loader2, Pencil, ChevronRight, FolderOpen, MessageSquare, Zap } from "lucide-react";
+import { Plus, Bot, GripVertical, Trash2, Loader2, Pencil, ChevronRight, FolderOpen, MessageSquare, Zap, Users } from "lucide-react";
 import { toast } from "sonner";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface MenuOpcao {
   id: string;
@@ -26,7 +29,23 @@ interface MenuOpcao {
   tipo: string;
   parent_id: string | null;
   setor_id: string | null;
+  cargos_visiveis: string[];
+  usuarios_visiveis: string[];
 }
+
+interface ProfileLite {
+  id: string;
+  nome: string;
+  email: string | null;
+  tipo_usuario: string | null;
+  cargo_loja: string | null;
+}
+
+const CARGOS_LOJA = [
+  { value: "supervisor", label: "Supervisor" },
+  { value: "gerente", label: "Gerente" },
+  { value: "operador", label: "Operador" },
+];
 
 interface Fluxo {
   id: string;
@@ -90,6 +109,135 @@ function useSetores() {
       return data || [];
     },
   });
+}
+
+function useProfilesAtivos() {
+  return useQuery({
+    queryKey: ["profiles_ativos_bot_menu"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, nome, email, tipo_usuario, cargo_loja")
+        .eq("ativo", true)
+        .order("nome");
+      if (error) throw error;
+      return (data || []) as ProfileLite[];
+    },
+  });
+}
+
+function VisibilidadePicker({
+  cargos,
+  usuarios,
+  onChange,
+}: {
+  cargos: string[];
+  usuarios: string[];
+  onChange: (next: { cargos: string[]; usuarios: string[] }) => void;
+}) {
+  const { data: profiles } = useProfilesAtivos();
+  const [busca, setBusca] = useState("");
+
+  const toggleCargo = (c: string) => {
+    const next = cargos.includes(c) ? cargos.filter((x) => x !== c) : [...cargos, c];
+    onChange({ cargos: next, usuarios });
+  };
+  const toggleUser = (id: string) => {
+    const next = usuarios.includes(id) ? usuarios.filter((x) => x !== id) : [...usuarios, id];
+    onChange({ cargos, usuarios: next });
+  };
+
+  const lista = (profiles || []).filter((p) => {
+    if (!busca.trim()) return true;
+    const q = busca.toLowerCase();
+    return (
+      (p.nome || "").toLowerCase().includes(q) ||
+      (p.email || "").toLowerCase().includes(q)
+    );
+  });
+
+  const resumo =
+    usuarios.length > 0
+      ? `${usuarios.length} usuário(s) específicos`
+      : cargos.length > 0
+      ? `Cargos: ${cargos.join(", ")}`
+      : "Todos (sem restrição)";
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-start font-normal">
+          <Users className="h-3.5 w-3.5 mr-2" /> {resumo}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[360px] p-0" align="start">
+        <div className="p-3 border-b">
+          <p className="text-xs font-medium mb-2">Cargos (loja)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {CARGOS_LOJA.map((c) => (
+              <Badge
+                key={c.value}
+                variant={cargos.includes(c.value) ? "default" : "outline"}
+                className="cursor-pointer text-xs"
+                onClick={() => toggleCargo(c.value)}
+              >
+                {c.label}
+              </Badge>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1.5">
+            Vazio = todos os cargos. Ignorado se houver whitelist de usuários abaixo.
+          </p>
+        </div>
+        <div className="p-3 border-b space-y-2">
+          <p className="text-xs font-medium">Whitelist por usuário (sobrescreve cargos)</p>
+          <Input
+            placeholder="Buscar usuário…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            className="h-8 text-xs"
+          />
+          {usuarios.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs w-full"
+              onClick={() => onChange({ cargos, usuarios: [] })}
+            >
+              Limpar whitelist ({usuarios.length})
+            </Button>
+          )}
+        </div>
+        <ScrollArea className="h-64">
+          <div className="p-2 space-y-1">
+            {lista.length === 0 ? (
+              <p className="text-xs text-muted-foreground p-3 text-center">Nenhum usuário</p>
+            ) : (
+              lista.map((p) => {
+                const checked = usuarios.includes(p.id);
+                return (
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer text-xs"
+                  >
+                    <Checkbox checked={checked} onCheckedChange={() => toggleUser(p.id)} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{p.nome || p.email}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">
+                        {p.tipo_usuario}
+                        {p.cargo_loja ? ` · ${p.cargo_loja}` : ""}
+                        {p.email ? ` · ${p.email}` : ""}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // Build tree structure from flat list
@@ -195,6 +343,7 @@ export function BotMenuCard() {
                 <TableHead>Tipo</TableHead>
                 <TableHead>Fluxo</TableHead>
                 <TableHead>Bot</TableHead>
+                <TableHead>Visibilidade</TableHead>
                 <TableHead className="w-20">Ativo</TableHead>
                 <TableHead className="w-24"></TableHead>
               </TableRow>
@@ -228,6 +377,20 @@ export function BotMenuCard() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="text-xs">{op.tipo_bot}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      {(op.usuarios_visiveis?.length ?? 0) > 0 ? (
+                        <Badge variant="default" className="text-[10px] gap-1">
+                          <Users className="h-3 w-3" />
+                          {op.usuarios_visiveis.length} usuário(s)
+                        </Badge>
+                      ) : (op.cargos_visiveis?.length ?? 0) > 0 ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          {op.cargos_visiveis.join(", ")}
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">todos</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Switch checked={op.ativo} onCheckedChange={(v) => toggleAtivo.mutate({ id: op.id, ativo: v })} />
@@ -277,6 +440,8 @@ function CreateOpcaoForm({ nextOrdem, allOpcoes, onSubmit }: { nextOrdem: number
   const [fluxo, setFluxo] = useState("");
   const [parentId, setParentId] = useState<string>("_none");
   const [setorId, setSetorId] = useState<string>("_none");
+  const [cargosVisiveis, setCargosVisiveis] = useState<string[]>([]);
+  const [usuariosVisiveis, setUsuariosVisiveis] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const { data: fluxos } = useFluxosForSelect(tipoBot);
   const { data: setores } = useSetores();
@@ -307,6 +472,8 @@ function CreateOpcaoForm({ nextOrdem, allOpcoes, onSubmit }: { nextOrdem: number
           tipo,
           parent_id: parentId === "_none" ? null : parentId,
           setor_id: setorId === "_none" ? null : setorId,
+          cargos_visiveis: cargosVisiveis,
+          usuarios_visiveis: usuariosVisiveis,
         });
       if (error) throw error;
       toast.success("Opção criada");
@@ -383,6 +550,17 @@ function CreateOpcaoForm({ nextOrdem, allOpcoes, onSubmit }: { nextOrdem: number
           </Select>
         </div>
       )}
+      <div className="space-y-1.5">
+        <Label>Visibilidade</Label>
+        <VisibilidadePicker
+          cargos={cargosVisiveis}
+          usuarios={usuariosVisiveis}
+          onChange={({ cargos, usuarios }) => {
+            setCargosVisiveis(cargos);
+            setUsuariosVisiveis(usuarios);
+          }}
+        />
+      </div>
       {chave && (
         <p className="text-xs text-muted-foreground">Chave: <code className="bg-muted px-1 rounded">{chave}</code></p>
       )}
@@ -404,6 +582,8 @@ function EditOpcaoForm({ item, allOpcoes, onSubmit }: { item: MenuOpcao; allOpco
   const [parentId, setParentId] = useState<string>(item.parent_id || "_none");
   const [setorId, setSetorId] = useState<string>(item.setor_id || "_none");
   const [descricao, setDescricao] = useState(item.descricao || "");
+  const [cargosVisiveis, setCargosVisiveis] = useState<string[]>(item.cargos_visiveis || []);
+  const [usuariosVisiveis, setUsuariosVisiveis] = useState<string[]>(item.usuarios_visiveis || []);
   const [loading, setLoading] = useState(false);
   const { data: fluxos } = useFluxosForSelect(tipoBot);
   const { data: setores } = useSetores();
@@ -433,6 +613,8 @@ function EditOpcaoForm({ item, allOpcoes, onSubmit }: { item: MenuOpcao; allOpco
           descricao: descricao || null,
           parent_id: parentId === "_none" ? null : parentId,
           setor_id: setorId === "_none" ? null : setorId,
+          cargos_visiveis: cargosVisiveis,
+          usuarios_visiveis: usuariosVisiveis,
         })
         .eq("id", item.id);
       if (error) throw error;
@@ -517,6 +699,17 @@ function EditOpcaoForm({ item, allOpcoes, onSubmit }: { item: MenuOpcao; allOpco
       <div className="space-y-1.5">
         <Label>Descrição (opcional)</Label>
         <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Texto auxiliar" />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Visibilidade</Label>
+        <VisibilidadePicker
+          cargos={cargosVisiveis}
+          usuarios={usuariosVisiveis}
+          onChange={({ cargos, usuarios }) => {
+            setCargosVisiveis(cargos);
+            setUsuariosVisiveis(usuarios);
+          }}
+        />
       </div>
       <Button onClick={handleSave} disabled={loading || !titulo.trim() || (tipo === "fluxo" && !fluxo)} className="w-full">
         {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
