@@ -978,11 +978,38 @@ function EditarUsuarioForm(props: EditarUsuarioFormProps) {
               </div>
             </div>
 
+            {cargoLoja !== "operador" && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Lojas que {cargoLoja === "gerente" ? "gerencia" : "supervisiona"} ({lojasResponsaveis.length})
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Receberá escalonamento de SLA (T+30 supervisor / T+60 gerente) para demandas não respondidas dessas lojas.
+                </p>
+                <div className="max-h-56 overflow-auto rounded-md border p-2 grid grid-cols-2 gap-1">
+                  {lojas.length === 0 ? (
+                    <p className="text-xs text-muted-foreground p-2">Nenhuma loja cadastrada.</p>
+                  ) : (
+                    lojas.map((l) => (
+                      <label key={l} className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/40 cursor-pointer">
+                        <Checkbox
+                          checked={lojasResponsaveis.includes(l)}
+                          onCheckedChange={() => toggleLojaResp(l)}
+                        />
+                        <span className="text-sm">{l}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
               🔒 Acesso ao Atrium web: <strong>bloqueado</strong>. Usuário só usa o InFoco Messenger.
             </div>
           </>
         )}
+
 
         {/* Quando tipo = setor_operador */}
         {tipo === "setor_operador" && (
