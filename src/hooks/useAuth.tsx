@@ -58,6 +58,7 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   roles: [],
   setores: [],
+  acessos: null,
   loading: true,
   isAuthReady: false,
   isAdmin: false,
@@ -75,8 +76,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [setores, setSetores] = useState<SetorInfo[]>([]);
+  const [acessos, setAcessos] = useState<Acessos | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
+
+
 
   const fetchProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
