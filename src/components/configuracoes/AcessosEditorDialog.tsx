@@ -286,9 +286,6 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       onSaved?.(result.userId, result.inviteUrl);
       onOpenChange(false);
     },
-      onSaved?.(result.userId, result.inviteUrl);
-      onOpenChange(false);
-    },
     onError: (e: any) => toast.error(e.message ?? "Falha ao salvar"),
   });
 
