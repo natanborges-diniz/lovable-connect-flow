@@ -195,3 +195,47 @@ export function useCreateMensagem() {
     },
   });
 }
+
+export function useClaimAtendimento() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, userId, nome }: { id: string; userId: string; nome: string }) => {
+      // Só assume se ainda não tiver atendente atribuído (claim idempotente)
+      const { data, error } = await supabase
+        .from("atendimentos")
+        .update({ atendente_user_id: userId, atendente_nome: nome } as any)
+        .eq("id", id)
+        .is("atendente_user_id" as any, null)
+        .select()
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      if (!data) return;
+      queryClient.invalidateQueries({ queryKey: ["atendimentos"] });
+      queryClient.invalidateQueries({ queryKey: ["atendimento", (data as any).id] });
+    },
+  });
+}
+
+export function useLiberarAtendimento() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase
+        .from("atendimentos")
+        .update({ atendente_user_id: null, atendente_nome: null } as any)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["atendimentos"] });
+      toast.success("Atendimento liberado para a fila");
+    },
+    onError: (e) => toast.error("Erro ao liberar: " + (e as Error).message),
+  });
+}
