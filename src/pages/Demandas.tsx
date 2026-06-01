@@ -116,11 +116,18 @@ export default function Demandas() {
       <Tabs value={statusTab} onValueChange={setStatusTab}>
         <TabsList className="h-8">
           <TabsTrigger value="aberta" className="text-xs">Abertas</TabsTrigger>
+          <TabsTrigger value="atrasadas" className="text-xs gap-1">
+            <AlertTriangle className="h-3 w-3" /> Atrasadas
+            {atrasadasCount > 0 && (
+              <Badge variant="destructive" className="ml-1 h-4 px-1 text-[9px]">{atrasadasCount}</Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="respondida" className="text-xs">Respondidas</TabsTrigger>
           <TabsTrigger value="encerrada" className="text-xs">Encerradas</TabsTrigger>
           <TabsTrigger value="all" className="text-xs">Todas</TabsTrigger>
         </TabsList>
       </Tabs>
+
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[360px_1fr]">
         <Card className="flex min-h-0 flex-col overflow-hidden">
