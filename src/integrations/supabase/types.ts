@@ -673,6 +673,7 @@ export type Database = {
           ativo: boolean
           ciclo_funil: number
           created_at: string
+          data_nascimento: string | null
           documento: string | null
           email: string | null
           estagio: Database["public"]["Enums"]["estagio_funil"]
@@ -691,6 +692,7 @@ export type Database = {
           ativo?: boolean
           ciclo_funil?: number
           created_at?: string
+          data_nascimento?: string | null
           documento?: string | null
           email?: string | null
           estagio?: Database["public"]["Enums"]["estagio_funil"]
@@ -709,6 +711,7 @@ export type Database = {
           ativo?: boolean
           ciclo_funil?: number
           created_at?: string
+          data_nascimento?: string | null
           documento?: string | null
           email?: string | null
           estagio?: Database["public"]["Enums"]["estagio_funil"]
@@ -2356,60 +2359,60 @@ export type Database = {
       regua_inscricao: {
         Row: {
           canal_consentimento: string | null
-          cod_cliente: string
-          cod_empresa: string
+          cod_empresa: string | null
           consentimento_at: string | null
           consentimento_status: string
           contato_id: string | null
+          cpf: string | null
           criado_em: string
-          data_entrega: string
-          data_nascimento: string | null
           id: string
-          match_status: string
-          nome_bridge: string | null
-          numero_venda: string | null
-          origem: string
-          telefone_bridge: string | null
-          updated_at: string
-          whatsapp_bridge: string | null
+          nome_cliente: string | null
+          numero_venda: string
+          origem: string | null
+          status: string
+          usuario_lancamento: string | null
+          valor_status: string
+          valor_total_informado: number | null
+          valor_total_validado: number | null
+          whatsapp: string | null
         }
         Insert: {
           canal_consentimento?: string | null
-          cod_cliente: string
-          cod_empresa: string
+          cod_empresa?: string | null
           consentimento_at?: string | null
           consentimento_status?: string
           contato_id?: string | null
+          cpf?: string | null
           criado_em?: string
-          data_entrega: string
-          data_nascimento?: string | null
           id?: string
-          match_status?: string
-          nome_bridge?: string | null
-          numero_venda?: string | null
-          origem?: string
-          telefone_bridge?: string | null
-          updated_at?: string
-          whatsapp_bridge?: string | null
+          nome_cliente?: string | null
+          numero_venda: string
+          origem?: string | null
+          status?: string
+          usuario_lancamento?: string | null
+          valor_status?: string
+          valor_total_informado?: number | null
+          valor_total_validado?: number | null
+          whatsapp?: string | null
         }
         Update: {
           canal_consentimento?: string | null
-          cod_cliente?: string
-          cod_empresa?: string
+          cod_empresa?: string | null
           consentimento_at?: string | null
           consentimento_status?: string
           contato_id?: string | null
+          cpf?: string | null
           criado_em?: string
-          data_entrega?: string
-          data_nascimento?: string | null
           id?: string
-          match_status?: string
-          nome_bridge?: string | null
-          numero_venda?: string | null
-          origem?: string
-          telefone_bridge?: string | null
-          updated_at?: string
-          whatsapp_bridge?: string | null
+          nome_cliente?: string | null
+          numero_venda?: string
+          origem?: string | null
+          status?: string
+          usuario_lancamento?: string | null
+          valor_status?: string
+          valor_total_informado?: number | null
+          valor_total_validado?: number | null
+          whatsapp?: string | null
         }
         Relationships: [
           {
@@ -2421,51 +2424,74 @@ export type Database = {
           },
         ]
       }
+      regua_os: {
+        Row: {
+          classificacao: string
+          data_entrega: string | null
+          id: string
+          inscricao_id: string
+          os_numero: string
+          reconciliado_at: string | null
+        }
+        Insert: {
+          classificacao?: string
+          data_entrega?: string | null
+          id?: string
+          inscricao_id: string
+          os_numero: string
+          reconciliado_at?: string | null
+        }
+        Update: {
+          classificacao?: string
+          data_entrega?: string | null
+          id?: string
+          inscricao_id?: string
+          os_numero?: string
+          reconciliado_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regua_os_inscricao_id_fkey"
+            columns: ["inscricao_id"]
+            isOneToOne: false
+            referencedRelation: "regua_inscricao"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       regua_touchpoint: {
         Row: {
           canal: string | null
-          created_at: string
           data_prevista: string
           enviado_at: string | null
           id: string
           inscricao_id: string
-          mensagem_id: string | null
-          metadata: Json | null
           status: string
           status_entrega: string | null
           template_key: string | null
           tipo: string
-          updated_at: string
         }
         Insert: {
           canal?: string | null
-          created_at?: string
           data_prevista: string
           enviado_at?: string | null
           id?: string
           inscricao_id: string
-          mensagem_id?: string | null
-          metadata?: Json | null
           status?: string
           status_entrega?: string | null
           template_key?: string | null
           tipo: string
-          updated_at?: string
         }
         Update: {
           canal?: string | null
-          created_at?: string
           data_prevista?: string
           enviado_at?: string | null
           id?: string
           inscricao_id?: string
-          mensagem_id?: string | null
-          metadata?: Json | null
           status?: string
           status_entrega?: string | null
           template_key?: string | null
           tipo?: string
-          updated_at?: string
         }
         Relationships: [
           {
