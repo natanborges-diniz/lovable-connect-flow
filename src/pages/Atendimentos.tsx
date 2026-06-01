@@ -8,7 +8,7 @@ import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 import { ReconectarTemplateButton } from "@/components/atendimentos/ReconectarTemplateButton";
 import { JanelaFechadaDialog } from "@/components/atendimentos/JanelaFechadaDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
+import { useAtendimentos, useUpdateAtendimentoStatus, useMensagens, useCreateMensagem, useClaimAtendimento, useLiberarAtendimento } from "@/hooks/useAtendimentos";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusBadge, PrioridadeBadge } from "@/components/shared/StatusBadge";
 import { AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
@@ -143,7 +143,13 @@ export default function Atendimentos() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{a.atendente_nome ?? "Não atribuído"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {a.atendente_nome ? (
+                        <span className="text-foreground">{a.atendente_nome}</span>
+                      ) : (
+                        <span className="italic">Não atribuído</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {format(new Date(a.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}
                     </TableCell>
@@ -211,6 +217,20 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [id, refetch]);
+
+  // Auto-claim: ao abrir um atendimento em modo humano sem operador atribuído, assume automaticamente.
+  // Isso garante que as notificações push de novas mensagens inbound venham direto para este operador.
+  const claim = useClaimAtendimento();
+  const liberar = useLiberarAtendimento();
+  const claimedRef = useRef(false);
+  useEffect(() => {
+    if (claimedRef.current) return;
+    if (!atendimento || !uid) return;
+    if (atendimento.modo === "humano" && atendimento.status !== "encerrado" && !atendimento.atendente_user_id) {
+      claimedRef.current = true;
+      claim.mutate({ id, userId: uid, nome: profile?.nome || "Operador" });
+    }
+  }, [atendimento, uid, id, profile?.nome, claim]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });

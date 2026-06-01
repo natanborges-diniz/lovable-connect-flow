@@ -1,107 +1,50 @@
-# Refatorar Gestão de Usuários — modelo modular
+## Objetivo
 
-## Diagnóstico
+Notificar via Web Push (com som padrão do sistema) o operador atribuído ao atendimento sempre que:
+1. O atendimento for direcionado para humano (`modo='humano'`, escalada da IA ou transferência manual de coluna);
+2. Chegar uma nova mensagem inbound do cliente enquanto o atendimento estiver em modo humano;
+3. O card for movido manualmente para uma coluna do setor do operador.
 
-Hoje conflitam 4 conceitos sobrepostos: `profiles.tipo_usuario`, `profiles.cargo_loja`, `user_roles.role` e `profiles.lojas[]`. O formulário pede tudo isso de uma vez sem deixar claro o que é **identidade** (quem é a pessoa), o que é **acesso** (o que ela vê) e o que é **escopo** (sobre qual fatia da operação). Resultado: supervisor sem como cobrir grupo de lojas, diretor sem como abrir todos os menus de loja, "cargo" opcional sem efeito real.
+Reaproveita a infra existente (`push_subscriptions` + edge `send-push` + `sw.js` + `fn_send_push`).
 
-## Modelo novo (3 perguntas, nessa ordem)
+## Gap atual
 
-```text
-1) IDENTIDADE      → Nome, e-mail, foto
-2) ACESSO          → Quais MÓDULOS vê + quais PODERES tem em cada um
-3) ESCOPO          → Sobre QUAIS lojas e QUAIS setores ele age
-```
+`atendimentos` só tem `atendente_nome` (texto). Não há FK para o usuário — impossível resolver "operador atribuído" sem ajuste. Vou adicionar `atendente_user_id uuid` e preenchê-lo automaticamente quando o operador "assumir" o card (primeira resposta humana / abertura do drawer / drag para coluna de humano).
 
-Cada usuário tem **N módulos** × **M lojas/setores**. Sem perfis travados. Sem `cargo_loja` opcional confuso.
+## Mudanças
 
-### Módulos (checkboxes)
+### 1. Banco
 
-Atrium web: `dashboard`, `crm`, `lojas`, `financeiro`, `ti`, `interno`, `estoque`, `tarefas`, `mensagens`, `demandas`, `configuracoes`.
-InFoco Messenger: `chat_1a1`, `chat_grupo`, `demandas_minhas_lojas`, `menu_loja` (os fluxos do bot).
+- Adicionar coluna `atendimentos.atendente_user_id uuid` (nullable, índice).
+- Trigger `trg_atendimento_modo_humano` (AFTER UPDATE em `atendimentos`):
+  - Quando `modo` mudar para `humano` OU `pipeline_coluna_id` mudar para coluna de setor humano, e houver `atendente_user_id`: `INSERT` em `public.notificacoes` (`tipo='atendimento_humano'`, `usuario_id=atendente_user_id`, título "Atendimento aguardando você", mensagem com nome do contato e snippet, `referencia_id=atendimento.id`).
+  - Sem atendente atribuído → notifica todos os operadores ativos do setor (`setor_id` via `pipeline_coluna_id → pipeline_colunas.setor_id`).
+- Trigger `trg_inbound_humano_push` (AFTER INSERT em `public.mensagens`):
+  - Se `direcao='inbound'` e o atendimento estiver em `modo='humano'` e `status<>'encerrado'`: `INSERT` em `notificacoes` para `atendente_user_id` (fallback: setor). Título "Nova mensagem de {contato}", mensagem = primeiros 100 chars do `conteudo`, `url=/atendimentos?atendimento={id}`, `tag=at_{id}` (renotify=true colapsa).
+- O trigger existente `trg_push_nova_notificacao` já dispara `fn_send_push` → `send-push` (Web Push com VAPID) automaticamente. Som = padrão do sistema (já configurado em `sw.js` via `vibrate` + notificação nativa).
 
-Para cada módulo marcado, um seletor de **poder**: `ver` / `agir` / `encerrar`.
+### 2. Edge function `pipeline-automations`
 
-### Escopo
+Já recebe eventos de mudança de coluna. Adicionar bloco: quando `entity_type='atendimento'` (ou via lookup do atendimento ligado ao contato/solicitação) e a coluna nova pertence a setor humano, marcar `atendente_user_id` apenas se houver claim manual — caso contrário deixa null para notificar setor inteiro.
 
-- **Lojas**: checklist multi (todas / seleção). Vazio = nenhuma.
-- **Setores**: checklist multi. Vazio = nenhum.
-- Atalho "Acesso total" marca todas as lojas + todos os setores + todos os módulos com poder `agir` (exceto Configurações, que continua restrita a Admin).
+### 3. Frontend
 
-## Telas
+- `useAtendimentos`: ao abrir um atendimento em modo humano (drawer/click), chamar mutation `claimAtendimento(id)` que faz `UPDATE atendimentos SET atendente_user_id=auth.uid(), atendente_nome=profile.nome WHERE id=? AND atendente_user_id IS NULL`.
+- Em `src/pages/Atendimentos.tsx`: exibir "Atribuído a {nome}" e botão "Liberar" para devolver à fila.
+- Garantir que `PushNotificationsButton` esteja visível em `/atendimentos` (já está no layout).
 
-**Diálogo de edição reorganizado em 3 abas:**
+### 4. RLS / Grants
 
-```text
-┌─ Identidade ──┬─ Acesso ──┬─ Escopo ─┐
-│ Nome          │ Módulos   │ Lojas    │
-│ E-mail        │ + poder   │ Setores  │
-│ Foto          │ por módulo│          │
-└───────────────┴───────────┴──────────┘
-```
+- `atendentes` já tem RLS; adicionar policy `UPDATE` para `setor_usuario`/`operador` poderem setar `atendente_user_id` no próprio setor.
+- Conceder `GRANT UPDATE (atendente_user_id, atendente_nome) ON public.atendimentos TO authenticated`.
 
-**Tabela de usuários** ganha colunas: `Módulos` (chips), `Lojas` (N selecionadas / "todas"), `Setores` (N), com tooltip mostrando o detalhe.
+## Som
 
-**Atalhos rápidos** (botões no topo do diálogo) que pré-marcam o checklist — você ainda pode ajustar depois:
-- Diretor → todos módulos (poder `agir`), todas lojas, todos setores, exceto Configurações
-- Supervisor de lojas → módulos `lojas` + `demandas` + `mensagens` + `tarefas` (poder `agir`), você escolhe quais lojas
-- Operador de loja → mesmos módulos, poder `ver`+`agir`, 1 loja
-- Op. de setor → módulos do setor + `mensagens`, escopo = 1 setor
-- Admin → tudo
+Usa o som nativo do device entregue pelo Web Push (iOS PWA 16.4+ e Android Chrome). Nada extra precisa ser feito no `sw.js` — `showNotification` já toca o som padrão. Sem áudio customizado in-app.
 
-Atalho é só preenchimento — não vira um "tipo" gravado.
+## Critério de aceite
 
-## Banco
-
-Nova tabela `user_acessos` (uma linha por usuário, JSON):
-
-```text
-user_acessos
-├─ user_id (PK)
-├─ modulos jsonb       — { "crm":"agir", "lojas":"ver", ... }
-├─ lojas text[]        — nomes (vazio = nenhuma; null = todas)
-├─ setores uuid[]      — ids (vazio = nenhum; null = todos)
-├─ acesso_total bool   — flag para Diretor (bypassa filtros)
-└─ updated_at
-```
-
-`profiles.tipo_usuario` permanece (define onde a pessoa vive: Atrium web vs Messenger), mas vira **derivado** automático:
-- tem módulo `menu_loja`+escopo de loja sem nenhum módulo web → `loja`
-- tem só módulos web → `colaborador` ou `setor_operador`
-- `acesso_total=true` → `admin`
-
-Trigger preenche `tipo_usuario` e mantém `user_roles` em sincronia para não quebrar o resto do app.
-
-`cargo_loja` é **descontinuado** (mantém coluna por compatibilidade, deixa de ser editável). `profiles.lojas` e `lojas_responsaveis` (criado na conversa anterior) se fundem em `user_acessos.lojas` — uma fonte só.
-
-## Impacto no resto
-
-- `ProtectedRoute` / `AppLayout` passam a ler `user_acessos.modulos` em vez de inferir por `setores`/`role`.
-- Watchdog T+30/T+60: passa a buscar destinatários por `user_acessos.lojas` (mesma fonte que o operador de T+15), sem precisar dos campos paralelos.
-- `pode_conversar_1a1` continua valendo (loja↔setor proibido em chat livre), mas o "Diretor" entra como exceção via `acesso_total`.
-- InFoco Messenger lê `user_acessos.modulos` para decidir se mostra "Demandas das minhas lojas" e o menu de loja.
-
-## Migração de dados
-
-Script de mutirão único que lê cada `profile` atual e popula `user_acessos`:
-- `admin` → acesso_total
-- `setor_operador` → módulos do setor + mensagens, escopo = setor atual
-- `loja` + `cargo_loja=operador` → módulos lojas/mensagens/tarefas, 1 loja
-- `loja` + `cargo_loja in (supervisor,gerente)` → mesmos módulos, lojas = `profiles.lojas ∪ lojas_responsaveis`
-- `colaborador` → conforme `user_roles` atuais
-
-Você revisa caso a caso na nova UI depois.
-
-## Entregáveis
-
-1. Migration: tabela `user_acessos`, trigger de sync com `profiles.tipo_usuario`+`user_roles`, RLS (admin lê/escreve tudo; cada um lê o próprio).
-2. Script de migração de dados (1 vez, idempotente).
-3. Refator `GestaoUsuariosCard.tsx`: diálogo em 3 abas, tabela com colunas novas, atalhos de perfil.
-4. `useAuth` expõe `acessos: { modulos, lojas, setores, acessoTotal }`.
-5. `ProtectedRoute` + `AppLayout` consomem `acessos.modulos` para liberar rotas.
-6. Edge function `watchdog-demandas-loja` lê `user_acessos.lojas` para escalar T+30/T+60.
-7. Instruções para colar no InFoco Messenger (leitura de `user_acessos` no app).
-
-## Fora deste plano
-
-- Não mexo em IA, pipelines, automações, WhatsApp.
-- Configurações continua exclusiva de Admin (mesmo Diretor não entra) — se você quiser mudar, é 1 linha depois.
+- IA escala um atendimento → operador do setor (ou atribuído) recebe push imediato com som.
+- Cliente responde → operador atribuído recebe push (tag colapsa para não empilhar).
+- Card movido manualmente para coluna humana → push para usuários elegíveis.
+- Clique na notificação abre `/atendimentos?atendimento={id}` focando o card.

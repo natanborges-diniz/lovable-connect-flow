@@ -131,6 +131,7 @@ export type Database = {
       atendimentos: {
         Row: {
           atendente_nome: string | null
+          atendente_user_id: string | null
           canal: Database["public"]["Enums"]["tipo_canal"]
           canal_provedor: string | null
           contato_id: string
@@ -147,6 +148,7 @@ export type Database = {
         }
         Insert: {
           atendente_nome?: string | null
+          atendente_user_id?: string | null
           canal?: Database["public"]["Enums"]["tipo_canal"]
           canal_provedor?: string | null
           contato_id: string
@@ -163,6 +165,7 @@ export type Database = {
         }
         Update: {
           atendente_nome?: string | null
+          atendente_user_id?: string | null
           canal?: Database["public"]["Enums"]["tipo_canal"]
           canal_provedor?: string | null
           contato_id?: string
@@ -3076,6 +3079,10 @@ export type Database = {
       resolve_responsavel_setor: {
         Args: { _setor_id: string }
         Returns: string
+      }
+      resolver_destinatarios_atendimento: {
+        Args: { _atendimento_id: string }
+        Returns: string[]
       }
       resolver_destinatarios_loja: {
         Args: { _loja_nome: string }
