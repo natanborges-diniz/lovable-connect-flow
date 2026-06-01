@@ -38,6 +38,7 @@ interface AuthContextType {
   profile: Profile | null;
   roles: UserRole[];
   setores: SetorInfo[];
+  acessos: Acessos | null;
   loading: boolean;
   /** True quando a sessão está restaurada E perfil/roles/setores foram hidratados (ou não há usuário logado). */
   isAuthReady: boolean;
@@ -49,6 +50,7 @@ interface AuthContextType {
   getUserLojaNames: () => string[];
   signOut: () => Promise<void>;
 }
+
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
