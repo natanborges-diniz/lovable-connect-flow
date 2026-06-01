@@ -218,6 +218,20 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
     return () => { supabase.removeChannel(channel); };
   }, [id, refetch]);
 
+  // Auto-claim: ao abrir um atendimento em modo humano sem operador atribuído, assume automaticamente.
+  // Isso garante que as notificações push de novas mensagens inbound venham direto para este operador.
+  const claim = useClaimAtendimento();
+  const liberar = useLiberarAtendimento();
+  const claimedRef = useRef(false);
+  useEffect(() => {
+    if (claimedRef.current) return;
+    if (!atendimento || !uid) return;
+    if (atendimento.modo === "humano" && atendimento.status !== "encerrado" && !atendimento.atendente_user_id) {
+      claimedRef.current = true;
+      claim.mutate({ id, userId: uid, nome: profile?.nome || "Operador" });
+    }
+  }, [atendimento, uid, id, profile?.nome, claim]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [mensagens]);
