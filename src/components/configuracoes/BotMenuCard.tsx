@@ -111,6 +111,21 @@ function useSetores() {
   });
 }
 
+function useProfilesAtivos() {
+  return useQuery({
+    queryKey: ["profiles_ativos_bot_menu"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, nome, email, tipo_usuario, cargo_loja")
+        .eq("ativo", true)
+        .order("nome");
+      if (error) throw error;
+      return (data || []) as ProfileLite[];
+    },
+  });
+}
+
 // Build tree structure from flat list
 function buildTree(opcoes: MenuOpcao[], parentId: string | null = null, depth = 0): Array<MenuOpcao & { depth: number }> {
   const result: Array<MenuOpcao & { depth: number }> = [];
