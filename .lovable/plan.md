@@ -1,76 +1,107 @@
+# Refatorar Gestão de Usuários — modelo modular
 
-## Objetivo
-Resolver baixa reatividade das lojas às demandas disparadas pelo CRM, criando hierarquia (operador → supervisor → gerente), watchdog de SLA com escalonamento progressivo, e garantindo que cada usuário-loja tenha push ativo no InFoco Messenger.
+## Diagnóstico
 
-## 1. Hierarquia de lojas (Atrium — DB)
+Hoje conflitam 4 conceitos sobrepostos: `profiles.tipo_usuario`, `profiles.cargo_loja`, `user_roles.role` e `profiles.lojas[]`. O formulário pede tudo isso de uma vez sem deixar claro o que é **identidade** (quem é a pessoa), o que é **acesso** (o que ela vê) e o que é **escopo** (sobre qual fatia da operação). Resultado: supervisor sem como cobrir grupo de lojas, diretor sem como abrir todos os menus de loja, "cargo" opcional sem efeito real.
 
-Migração:
-- `profiles.cargo_loja` já existe (`operador|supervisor|gerente`) — reaproveitar.
-- Adicionar coluna `profiles.lojas_responsaveis text[]` (default `'{}'`) para supervisor/gerente cobrirem N lojas além das próprias.
-- Função `resolver_destinatarios_loja(_loja_nome, _nivel)` aceitando `_nivel ∈ ('operador','supervisor','gerente','todos')`:
-  - `operador` → `tipo_usuario='loja'` com a loja em `lojas[]` e `cargo_loja='operador'` (ou null = operador).
-  - `supervisor` → cargo `supervisor` com a loja em `lojas[]` OU `lojas_responsaveis[]`.
-  - `gerente` → cargo `gerente` com a loja em `lojas[]` OU `lojas_responsaveis[]`.
-  - `todos` → união (comportamento atual).
-- Default da criação de demanda continua `operador`.
+## Modelo novo (3 perguntas, nessa ordem)
 
-## 2. SLA escalonado — novo cron `watchdog-demandas-loja`
-
-Nova edge function (1×/min), payload em `cron_jobs` para thresholds editáveis (memória `watchdog/thresholds-editaveis`):
-
-```
-T+15min  → 1º lembrete push aos operadores da loja
-T+30min  → 2º lembrete push + escala para supervisor (notificação + push + entra em demanda_destinatarios)
-T+60min  → escala para gerente regional + cria Tarefa em "Cobranças loja" (pipeline TI ou Interno) com link da demanda
-T+120min → status='sem_resposta' (novo enum), notifica solicitante original no Atrium
+```text
+1) IDENTIDADE      → Nome, e-mail, foto
+2) ACESSO          → Quais MÓDULOS vê + quais PODERES tem em cada um
+3) ESCOPO          → Sobre QUAIS lojas e QUAIS setores ele age
 ```
 
-Idempotência via `metadata.escalonamentos: { t15_at, t30_at, t60_at, t120_at }` — cada nível dispara só uma vez. Escalonamento envia mensagem no canal `demanda_<id>` (visível no thread), não cria conversa nova.
+Cada usuário tem **N módulos** × **M lojas/setores**. Sem perfis travados. Sem `cargo_loja` opcional confuso.
 
-## 3. Substituir `auto-encerrar-demandas`
+### Módulos (checkboxes)
 
-Hoje fecha qualquer demanda com 30min sem atividade — inclusive não respondidas. Mudar para:
-- Só fecha automaticamente demandas com `status='respondida'` (loja já respondeu) inativas >30min.
-- Demandas `aberta` nunca são auto-encerradas — ficam para o watchdog de SLA tratar.
+Atrium web: `dashboard`, `crm`, `lojas`, `financeiro`, `ti`, `interno`, `estoque`, `tarefas`, `mensagens`, `demandas`, `configuracoes`.
+InFoco Messenger: `chat_1a1`, `chat_grupo`, `demandas_minhas_lojas`, `menu_loja` (os fluxos do bot).
 
-## 4. Novo status `sem_resposta`
+Para cada módulo marcado, um seletor de **poder**: `ver` / `agir` / `encerrar`.
 
-- Adicionar ao enum `demandas_loja.status`.
-- Aparece em aba dedicada em `/demandas` (Atrium) e badge vermelho em `/demandas` do Messenger.
-- Não bloqueia loja de ainda responder; ao responder, volta para `respondida`.
+### Escopo
 
-## 5. Onboarding push obrigatório (InFoco Messenger)
+- **Lojas**: checklist multi (todas / seleção). Vazio = nenhuma.
+- **Setores**: checklist multi. Vazio = nenhum.
+- Atalho "Acesso total" marca todas as lojas + todos os setores + todos os módulos com poder `agir` (exceto Configurações, que continua restrita a Admin).
 
-Mudanças no projeto `desktop-joy-app`:
-- Banner persistente no topo enquanto `getSubscription() === null` para `tipo_usuario='loja'`: "Ative as notificações para receber demandas urgentes."
-- Bloquear `/demandas` com modal-gate se push não estiver ativo (botão único "Ativar agora").
-- Tela `/demandas`: badge "ATRASADA" pulsante + som curto quando demanda da loja do usuário tem `metadata.escalonamentos.t30_at` setado.
-- Nova aba "Demandas das minhas lojas" para `cargo_loja ∈ ('supervisor','gerente')` — lista demandas de todas as lojas em `lojas[] ∪ lojas_responsaveis[]` com coluna SLA.
+## Telas
 
-## 6. UI Atrium (`/demandas`)
+**Diálogo de edição reorganizado em 3 abas:**
 
-- Nova aba "Atrasadas" (filtra demandas com `t15_at` ou `t30_at` setado e ainda `aberta`).
-- Coluna SLA na lista: chip verde (<15min), amarelo (15–30), laranja (30–60), vermelho (>60).
-- No `DemandaThreadView`: linha do tempo dos escalonamentos ("Supervisor notificado às 14:32", "Gerente regional notificado às 15:02").
-- Em `/configuracoes` → Gestão de Usuários: ao editar usuário `cargo_loja='supervisor'|'gerente'`, mostrar checklist "Lojas que supervisiona" gravando em `lojas_responsaveis[]`.
+```text
+┌─ Identidade ──┬─ Acesso ──┬─ Escopo ─┐
+│ Nome          │ Módulos   │ Lojas    │
+│ E-mail        │ + poder   │ Setores  │
+│ Foto          │ por módulo│          │
+└───────────────┴───────────┴──────────┘
+```
 
-## Detalhes técnicos
+**Tabela de usuários** ganha colunas: `Módulos` (chips), `Lojas` (N selecionadas / "todas"), `Setores` (N), com tooltip mostrando o detalhe.
 
-- **Cron:** registrar `watchdog-demandas-loja` em `cron_jobs` com `payload.thresholds = {t15:15, t30:30, t60:60, t120:120}` (minutos, editáveis pela UI).
-- **Push:** reutiliza `send-push` do Messenger via `fn_send_push(user_ids, title, body, url='/demandas?demanda=<id>')`. Sem mudança na infraestrutura VAPID.
-- **Tarefa em cobrança:** insert em `tarefas` com `setor_id` do solicitante original e `metadata.demanda_id`.
-- **Memória nova:** `mem://demandas/sla-escalonado` documentando os 4 níveis e a regra de não auto-fechar `aberta`.
+**Atalhos rápidos** (botões no topo do diálogo) que pré-marcam o checklist — você ainda pode ajustar depois:
+- Diretor → todos módulos (poder `agir`), todas lojas, todos setores, exceto Configurações
+- Supervisor de lojas → módulos `lojas` + `demandas` + `mensagens` + `tarefas` (poder `agir`), você escolhe quais lojas
+- Operador de loja → mesmos módulos, poder `ver`+`agir`, 1 loja
+- Op. de setor → módulos do setor + `mensagens`, escopo = 1 setor
+- Admin → tudo
 
-## Fora de escopo
+Atalho é só preenchimento — não vira um "tipo" gravado.
 
-- Trocar canal para WhatsApp (Canal Único Meta é só cliente final).
-- Mexer em `confirmacoes_estoque` (já tem watchdog próprio).
-- Dashboard agregado de SLA por loja/região (próxima iteração).
-- Configurar VAPID/FCM — já funciona.
+## Banco
 
-## Aprovação necessária para entrar em build
+Nova tabela `user_acessos` (uma linha por usuário, JSON):
 
-Confirmar:
-1. Thresholds 15/30/60/120 min ok? (editáveis depois)
-2. Tarefa de cobrança vai no pipeline **TI** ou **Interno**? Coluna "Cobranças loja" nova.
-3. Demanda nunca auto-encerrar se `aberta` — supervisor/gerente fecham manualmente quando resolverem fora do sistema?
+```text
+user_acessos
+├─ user_id (PK)
+├─ modulos jsonb       — { "crm":"agir", "lojas":"ver", ... }
+├─ lojas text[]        — nomes (vazio = nenhuma; null = todas)
+├─ setores uuid[]      — ids (vazio = nenhum; null = todos)
+├─ acesso_total bool   — flag para Diretor (bypassa filtros)
+└─ updated_at
+```
+
+`profiles.tipo_usuario` permanece (define onde a pessoa vive: Atrium web vs Messenger), mas vira **derivado** automático:
+- tem módulo `menu_loja`+escopo de loja sem nenhum módulo web → `loja`
+- tem só módulos web → `colaborador` ou `setor_operador`
+- `acesso_total=true` → `admin`
+
+Trigger preenche `tipo_usuario` e mantém `user_roles` em sincronia para não quebrar o resto do app.
+
+`cargo_loja` é **descontinuado** (mantém coluna por compatibilidade, deixa de ser editável). `profiles.lojas` e `lojas_responsaveis` (criado na conversa anterior) se fundem em `user_acessos.lojas` — uma fonte só.
+
+## Impacto no resto
+
+- `ProtectedRoute` / `AppLayout` passam a ler `user_acessos.modulos` em vez de inferir por `setores`/`role`.
+- Watchdog T+30/T+60: passa a buscar destinatários por `user_acessos.lojas` (mesma fonte que o operador de T+15), sem precisar dos campos paralelos.
+- `pode_conversar_1a1` continua valendo (loja↔setor proibido em chat livre), mas o "Diretor" entra como exceção via `acesso_total`.
+- InFoco Messenger lê `user_acessos.modulos` para decidir se mostra "Demandas das minhas lojas" e o menu de loja.
+
+## Migração de dados
+
+Script de mutirão único que lê cada `profile` atual e popula `user_acessos`:
+- `admin` → acesso_total
+- `setor_operador` → módulos do setor + mensagens, escopo = setor atual
+- `loja` + `cargo_loja=operador` → módulos lojas/mensagens/tarefas, 1 loja
+- `loja` + `cargo_loja in (supervisor,gerente)` → mesmos módulos, lojas = `profiles.lojas ∪ lojas_responsaveis`
+- `colaborador` → conforme `user_roles` atuais
+
+Você revisa caso a caso na nova UI depois.
+
+## Entregáveis
+
+1. Migration: tabela `user_acessos`, trigger de sync com `profiles.tipo_usuario`+`user_roles`, RLS (admin lê/escreve tudo; cada um lê o próprio).
+2. Script de migração de dados (1 vez, idempotente).
+3. Refator `GestaoUsuariosCard.tsx`: diálogo em 3 abas, tabela com colunas novas, atalhos de perfil.
+4. `useAuth` expõe `acessos: { modulos, lojas, setores, acessoTotal }`.
+5. `ProtectedRoute` + `AppLayout` consomem `acessos.modulos` para liberar rotas.
+6. Edge function `watchdog-demandas-loja` lê `user_acessos.lojas` para escalar T+30/T+60.
+7. Instruções para colar no InFoco Messenger (leitura de `user_acessos` no app).
+
+## Fora deste plano
+
+- Não mexo em IA, pipelines, automações, WhatsApp.
+- Configurações continua exclusiva de Admin (mesmo Diretor não entra) — se você quiser mudar, é 1 linha depois.
