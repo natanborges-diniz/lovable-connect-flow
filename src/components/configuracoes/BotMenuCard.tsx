@@ -379,6 +379,20 @@ export function BotMenuCard() {
                       <Badge variant="secondary" className="text-xs">{op.tipo_bot}</Badge>
                     </TableCell>
                     <TableCell>
+                      {(op.usuarios_visiveis?.length ?? 0) > 0 ? (
+                        <Badge variant="default" className="text-[10px] gap-1">
+                          <Users className="h-3 w-3" />
+                          {op.usuarios_visiveis.length} usuário(s)
+                        </Badge>
+                      ) : (op.cargos_visiveis?.length ?? 0) > 0 ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          {op.cargos_visiveis.join(", ")}
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">todos</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <Switch checked={op.ativo} onCheckedChange={(v) => toggleAtivo.mutate({ id: op.id, ativo: v })} />
                     </TableCell>
                     <TableCell>
