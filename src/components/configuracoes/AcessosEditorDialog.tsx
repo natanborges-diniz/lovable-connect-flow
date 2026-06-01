@@ -501,6 +501,88 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                     </>
                   )}
                 </TabsContent>
+
+                {/* ---- BOT LOJAS (visibilidade por usuário) ---- */}
+                <TabsContent value="bot" className="space-y-3">
+                  {isCreate ? (
+                    <div className="text-sm text-muted-foreground italic border rounded-md p-4">
+                      Salve o usuário primeiro para liberar as opções do bot.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-xs text-muted-foreground">
+                        Marque as opções do menu do bot que <span className="font-medium">este usuário</span> deve enxergar
+                        no Messenger. Quando marcado, a opção fica visível apenas para os usuários selecionados,
+                        ignorando o filtro por cargo.
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setBotOpcoesSel(new Set((botOpcoesQ.data || []).map((o) => o.id)))}
+                        >
+                          Selecionar tudo
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setBotOpcoesSel(new Set())}
+                        >
+                          Limpar tudo
+                        </Button>
+                      </div>
+                      {botOpcoesQ.isLoading ? (
+                        <div className="flex justify-center py-6">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : (
+                        Object.entries(
+                          (botOpcoesQ.data || []).reduce<Record<string, typeof botOpcoesQ.data>>(
+                            (acc, o) => {
+                              (acc[o.tipo_bot] = acc[o.tipo_bot] || []).push(o);
+                              return acc;
+                            },
+                            {} as any
+                          )
+                        ).map(([tipoBot, opcoes]) => (
+                          <div key={tipoBot} className="border rounded-md overflow-hidden">
+                            <div className="px-3 py-2 bg-muted/40 text-xs font-medium uppercase tracking-wide">
+                              {tipoBot}
+                            </div>
+                            <div className="divide-y">
+                              {(opcoes || []).map((o) => {
+                                const isChild = !!o.parent_id;
+                                const checked = botOpcoesSel.has(o.id);
+                                return (
+                                  <label
+                                    key={o.id}
+                                    className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-muted/30 ${
+                                      isChild ? "pl-8" : ""
+                                    }`}
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(c) => {
+                                        setBotOpcoesSel((prev) => {
+                                          const next = new Set(prev);
+                                          if (c) next.add(o.id);
+                                          else next.delete(o.id);
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                    <span>{o.emoji}</span>
+                                    <span className="flex-1 truncate">{o.titulo}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </>
+                  )}
+                </TabsContent>
               </div>
             </Tabs>
 
