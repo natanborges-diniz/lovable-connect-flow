@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Pin, Search, Users, Plus } from "lucide-react";
+import { Pin, Search, Users, Plus, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,26 @@ import { useDemandas, useUserContext, type DemandaRow } from "@/hooks/useDemanda
 import { DemandaThreadView } from "@/components/atendimentos/DemandaThreadView";
 import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
 
+type SLALevel = "ok" | "warn" | "late" | "critical" | "no_response";
+
+function getSLA(d: DemandaRow): { level: SLALevel; label: string; minutes: number } {
+  if (d.status === "sem_resposta") return { level: "no_response", label: "SEM RESPOSTA", minutes: 0 };
+  if (d.status !== "aberta") return { level: "ok", label: "", minutes: 0 };
+  const minutes = Math.floor((Date.now() - new Date(d.created_at).getTime()) / 60_000);
+  if (minutes >= 60) return { level: "critical", label: `${minutes}min`, minutes };
+  if (minutes >= 30) return { level: "late", label: `${minutes}min`, minutes };
+  if (minutes >= 15) return { level: "warn", label: `${minutes}min`, minutes };
+  return { level: "ok", label: `${minutes}min`, minutes };
+}
+
+function isAtrasada(d: DemandaRow): boolean {
+  if (d.status === "sem_resposta") return true;
+  if (d.status !== "aberta") return false;
+  const esc = (d.metadata?.escalonamentos || {}) as Record<string, string>;
+  return !!(esc.t15_at || esc.t30_at || esc.t60_at || esc.t120_at);
+}
+
+
 export default function Demandas() {
   const [params, setParams] = useSearchParams();
   const initialId = params.get("demanda");
@@ -22,19 +42,33 @@ export default function Demandas() {
   const [search, setSearch] = useState("");
   const [acionarOpen, setAcionarOpen] = useState(false);
   const { isAdmin } = useUserContext();
-  const { data: demandas = [], isLoading } = useDemandas({ status: statusTab });
+  // Para a aba "Atrasadas" queremos TODAS as 'aberta' + 'sem_resposta' (não filtra por status no hook)
+  const isAtrasadasTab = statusTab === "atrasadas";
+  const { data: demandas = [], isLoading } = useDemandas({
+    status: isAtrasadasTab ? "all" : statusTab,
+  });
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return demandas;
+    let base = demandas;
+    if (isAtrasadasTab) {
+      base = base.filter((d) => d.status === "sem_resposta" || (d.status === "aberta" && isAtrasada(d)));
+    }
+    if (!search.trim()) return base;
     const s = search.toLowerCase();
-    return demandas.filter(
+    return base.filter(
       (d) =>
         (d.protocolo ?? "").toLowerCase().includes(s) ||
         d.loja_nome.toLowerCase().includes(s) ||
         d.pergunta.toLowerCase().includes(s) ||
         (d.assunto ?? "").toLowerCase().includes(s),
     );
-  }, [demandas, search]);
+  }, [demandas, search, isAtrasadasTab]);
+
+  const atrasadasCount = useMemo(
+    () => demandas.filter((d) => d.status === "sem_resposta" || (d.status === "aberta" && isAtrasada(d))).length,
+    [demandas],
+  );
+
 
   const selected = filtered.find((d) => d.id === selectedId) ?? demandas.find((d) => d.id === selectedId) ?? null;
 
@@ -82,11 +116,18 @@ export default function Demandas() {
       <Tabs value={statusTab} onValueChange={setStatusTab}>
         <TabsList className="h-8">
           <TabsTrigger value="aberta" className="text-xs">Abertas</TabsTrigger>
+          <TabsTrigger value="atrasadas" className="text-xs gap-1">
+            <AlertTriangle className="h-3 w-3" /> Atrasadas
+            {atrasadasCount > 0 && (
+              <Badge variant="destructive" className="ml-1 h-4 px-1 text-[9px]">{atrasadasCount}</Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="respondida" className="text-xs">Respondidas</TabsTrigger>
           <TabsTrigger value="encerrada" className="text-xs">Encerradas</TabsTrigger>
           <TabsTrigger value="all" className="text-xs">Todas</TabsTrigger>
         </TabsList>
       </Tabs>
+
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[360px_1fr]">
         <Card className="flex min-h-0 flex-col overflow-hidden">
@@ -146,18 +187,39 @@ function DemandaListItem({ d, active, onSelect }: { d: DemandaRow; active: boole
             </span>
           ) : d.loja_nome}
         </span>
-        <Badge
-          variant="outline"
-          className={cn(
-            "h-4 shrink-0 px-1 text-[9px]",
-            d.status === "aberta" && "border-amber-500/50 text-amber-600",
-            d.status === "respondida" && "border-emerald-500/50 text-emerald-600",
-            d.status === "encerrada" && "border-muted-foreground/30 text-muted-foreground",
-          )}
-        >
-          {d.status}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-1">
+          {(() => {
+            const sla = getSLA(d);
+            if (sla.level === "no_response") {
+              return <Badge variant="destructive" className="h-4 px-1 text-[9px] animate-pulse">SEM RESPOSTA</Badge>;
+            }
+            if (sla.level === "critical") {
+              return <Badge variant="destructive" className="h-4 px-1 text-[9px]">{sla.label}</Badge>;
+            }
+            if (sla.level === "late") {
+              return <Badge className="h-4 bg-orange-500 px-1 text-[9px] text-white hover:bg-orange-500">{sla.label}</Badge>;
+            }
+            if (sla.level === "warn") {
+              return <Badge className="h-4 bg-amber-500 px-1 text-[9px] text-white hover:bg-amber-500">{sla.label}</Badge>;
+            }
+            return null;
+          })()}
+          <Badge
+            variant="outline"
+            className={cn(
+              "h-4 px-1 text-[9px]",
+              d.status === "aberta" && "border-amber-500/50 text-amber-600",
+              d.status === "respondida" && "border-emerald-500/50 text-emerald-600",
+              d.status === "encerrada" && "border-muted-foreground/30 text-muted-foreground",
+              d.status === "sem_resposta" && "border-destructive/50 text-destructive",
+            )}
+          >
+            {d.status}
+          </Badge>
+        </div>
       </div>
+
+
       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{d.assunto || d.pergunta}</p>
       <p className="mt-0.5 text-[10px] text-muted-foreground/70">
         {format(new Date(d.created_at), "dd/MM HH:mm", { locale: ptBR })}

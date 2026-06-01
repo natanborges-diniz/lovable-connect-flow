@@ -18,10 +18,13 @@ serve(async (req) => {
 
     const cutoff = new Date(Date.now() - INACTIVITY_MINUTES * 60_000).toISOString();
 
+    // Só fecha automaticamente demandas que a loja JÁ respondeu e ficaram inativas.
+    // Demandas em 'aberta' ou 'sem_resposta' nunca são auto-encerradas — o watchdog
+    // de SLA (watchdog-demandas-loja) cuida do escalonamento e do solicitante decide encerrar.
     const { data: stale, error } = await supabase
       .from("demandas_loja")
       .select("id, protocolo, numero_curto, updated_at, status")
-      .in("status", ["aberta", "respondida"])
+      .eq("status", "respondida")
       .lt("updated_at", cutoff)
       .order("updated_at", { ascending: true })
       .limit(50);
