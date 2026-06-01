@@ -126,6 +126,120 @@ function useProfilesAtivos() {
   });
 }
 
+function VisibilidadePicker({
+  cargos,
+  usuarios,
+  onChange,
+}: {
+  cargos: string[];
+  usuarios: string[];
+  onChange: (next: { cargos: string[]; usuarios: string[] }) => void;
+}) {
+  const { data: profiles } = useProfilesAtivos();
+  const [busca, setBusca] = useState("");
+
+  const toggleCargo = (c: string) => {
+    const next = cargos.includes(c) ? cargos.filter((x) => x !== c) : [...cargos, c];
+    onChange({ cargos: next, usuarios });
+  };
+  const toggleUser = (id: string) => {
+    const next = usuarios.includes(id) ? usuarios.filter((x) => x !== id) : [...usuarios, id];
+    onChange({ cargos, usuarios: next });
+  };
+
+  const lista = (profiles || []).filter((p) => {
+    if (!busca.trim()) return true;
+    const q = busca.toLowerCase();
+    return (
+      (p.nome || "").toLowerCase().includes(q) ||
+      (p.email || "").toLowerCase().includes(q)
+    );
+  });
+
+  const resumo =
+    usuarios.length > 0
+      ? `${usuarios.length} usuário(s) específicos`
+      : cargos.length > 0
+      ? `Cargos: ${cargos.join(", ")}`
+      : "Todos (sem restrição)";
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full justify-start font-normal">
+          <Users className="h-3.5 w-3.5 mr-2" /> {resumo}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[360px] p-0" align="start">
+        <div className="p-3 border-b">
+          <p className="text-xs font-medium mb-2">Cargos (loja)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {CARGOS_LOJA.map((c) => (
+              <Badge
+                key={c.value}
+                variant={cargos.includes(c.value) ? "default" : "outline"}
+                className="cursor-pointer text-xs"
+                onClick={() => toggleCargo(c.value)}
+              >
+                {c.label}
+              </Badge>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1.5">
+            Vazio = todos os cargos. Ignorado se houver whitelist de usuários abaixo.
+          </p>
+        </div>
+        <div className="p-3 border-b space-y-2">
+          <p className="text-xs font-medium">Whitelist por usuário (sobrescreve cargos)</p>
+          <Input
+            placeholder="Buscar usuário…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            className="h-8 text-xs"
+          />
+          {usuarios.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs w-full"
+              onClick={() => onChange({ cargos, usuarios: [] })}
+            >
+              Limpar whitelist ({usuarios.length})
+            </Button>
+          )}
+        </div>
+        <ScrollArea className="h-64">
+          <div className="p-2 space-y-1">
+            {lista.length === 0 ? (
+              <p className="text-xs text-muted-foreground p-3 text-center">Nenhum usuário</p>
+            ) : (
+              lista.map((p) => {
+                const checked = usuarios.includes(p.id);
+                return (
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer text-xs"
+                  >
+                    <Checkbox checked={checked} onCheckedChange={() => toggleUser(p.id)} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{p.nome || p.email}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">
+                        {p.tipo_usuario}
+                        {p.cargo_loja ? ` · ${p.cargo_loja}` : ""}
+                        {p.email ? ` · ${p.email}` : ""}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // Build tree structure from flat list
 function buildTree(opcoes: MenuOpcao[], parentId: string | null = null, depth = 0): Array<MenuOpcao & { depth: number }> {
   const result: Array<MenuOpcao & { depth: number }> = [];
