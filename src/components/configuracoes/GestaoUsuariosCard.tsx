@@ -773,15 +773,16 @@ function EditarUsuarioDialog({ target, setores, lojas, onClose, onSaved }: Edita
   const [tipo, setTipo] = useState<TipoUsuario>("setor_operador");
   const [cargoLoja, setCargoLoja] = useState<"supervisor" | "gerente" | "operador">("operador");
   const [lojasSelected, setLojasSelected] = useState<string[]>([]);
+  const [lojasResponsaveis, setLojasResponsaveis] = useState<string[]>([]);
   const [setorId, setSetorId] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
-  // Hidrata sempre que abrir um novo target
   useEffect(() => {
     if (!target) return;
     setTipo(((target.tipo_usuario as TipoUsuario) || "setor_operador"));
     setCargoLoja((target.cargo_loja as any) || "operador");
     setLojasSelected(Array.isArray(target.lojas) ? target.lojas : []);
+    setLojasResponsaveis(Array.isArray(target.lojas_responsaveis) ? target.lojas_responsaveis : []);
     setSetorId(target.setor_id || "");
   }, [target?.id]);
 
@@ -795,14 +796,17 @@ function EditarUsuarioDialog({ target, setores, lojas, onClose, onSaved }: Edita
       if (tipo === "loja") {
         update.cargo_loja = cargoLoja;
         update.lojas = lojasSelected;
+        update.lojas_responsaveis = cargoLoja === "operador" ? [] : lojasResponsaveis;
         update.setor_id = null;
       } else if (tipo === "setor_operador") {
         update.cargo_loja = null;
         update.lojas = [];
+        update.lojas_responsaveis = [];
         update.setor_id = setorId || null;
       } else {
         update.cargo_loja = null;
         update.lojas = [];
+        update.lojas_responsaveis = [];
         update.setor_id = null;
       }
       const { error } = await supabase.from("profiles").update(update).eq("id", target.id);
@@ -816,6 +820,7 @@ function EditarUsuarioDialog({ target, setores, lojas, onClose, onSaved }: Edita
       setSaving(false);
     }
   };
+
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
