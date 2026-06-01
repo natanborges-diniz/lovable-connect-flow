@@ -462,25 +462,36 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
         )}
       </DialogContent>
     </Dialog>
+    </TooltipProvider>
   );
 }
 
 function ModulosSection({
   titulo,
+  descricao,
+  icone,
   modulos,
   selecao,
   onToggle,
   onPoder,
 }: {
   titulo: string;
-  modulos: { key: ModuloKey; label: string }[];
+  descricao?: string;
+  icone?: React.ReactNode;
+  modulos: { key: ModuloKey; label: string; descricao?: string }[];
   selecao: Partial<Record<ModuloKey, Poder>>;
   onToggle: (k: ModuloKey, checked: boolean) => void;
   onPoder: (k: ModuloKey, p: Poder) => void;
 }) {
   return (
     <div>
-      <div className="text-sm font-medium mb-2">{titulo}</div>
+      <div className="flex items-center gap-2 mb-1">
+        {icone}
+        <div className="text-sm font-medium">{titulo}</div>
+      </div>
+      {descricao && (
+        <div className="text-xs text-muted-foreground mb-2">{descricao}</div>
+      )}
       <div className="border rounded-md divide-y">
         {modulos.map((m) => {
           const checked = selecao[m.key] != null;
@@ -492,6 +503,16 @@ function ModulosSection({
                   onCheckedChange={(c) => onToggle(m.key, !!c)}
                 />
                 <span>{m.label}</span>
+                {m.descricao && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs text-xs">
+                      {m.descricao}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
               </label>
               {checked && (
                 <Select
