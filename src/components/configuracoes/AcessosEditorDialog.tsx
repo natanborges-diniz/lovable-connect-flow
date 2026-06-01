@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Loader2, Shield, KeySquare, MapPin, Sparkles, Info, Globe, Smartphone } from "lucide-react";
+import { Loader2, Shield, KeySquare, MapPin, Sparkles, Info, Globe, Smartphone, Bot } from "lucide-react";
 import {
   type Acessos,
   type ModuloKey,
