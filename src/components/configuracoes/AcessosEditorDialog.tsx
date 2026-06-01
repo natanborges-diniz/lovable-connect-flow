@@ -104,6 +104,22 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
     },
   });
 
+  const setoresQ = useQuery({
+    queryKey: ["editor-setores-disponiveis"],
+    enabled: open,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("setores")
+        .select("id, nome")
+        .eq("ativo", true)
+        .order("nome");
+      if (error) throw error;
+      return data as { id: string; nome: string }[];
+    },
+  });
+
+
+
   const botOpcoesQ = useQuery({
     queryKey: ["editor-bot-opcoes"],
     enabled: open,
