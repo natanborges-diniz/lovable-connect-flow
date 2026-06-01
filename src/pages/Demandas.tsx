@@ -217,6 +217,8 @@ function DemandaListItem({ d, active, onSelect }: { d: DemandaRow; active: boole
             {d.status}
           </Badge>
         </div>
+      </div>
+
 
       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{d.assunto || d.pergunta}</p>
       <p className="mt-0.5 text-[10px] text-muted-foreground/70">
