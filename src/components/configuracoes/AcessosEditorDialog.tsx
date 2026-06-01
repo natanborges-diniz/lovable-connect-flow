@@ -361,18 +361,22 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                   {!acessoTotal && (
                     <>
                       <ModulosSection
-                        titulo="Atrium (uso na web — computador)"
-                        descricao="Páginas que a pessoa abre no navegador. Para operadores internos."
-                        icone={<Globe className="h-4 w-4 text-blue-600" />}
+                        titulo="Atrium — este sistema (web no computador)"
+                        subtitulo="Projeto: Lovable Connect & Flow"
+                        descricao="Páginas que a pessoa abre aqui no navegador. Use para operadores internos: CRM, financeiro, TI, configurações."
+                        icone={<Globe className="h-5 w-5" />}
+                        accent="blue"
                         modulos={MODULOS_ATRIUM}
                         selecao={modulos}
                         onToggle={toggleModulo}
                         onPoder={setPoder}
                       />
                       <ModulosSection
-                        titulo="InFoco Messenger (app no celular)"
-                        descricao="O que a pessoa enxerga ao abrir o app. Para lojas, supervisores e equipes em campo. Os menus específicos (lojista, supervisor) são filtrados pelo escopo abaixo."
-                        icone={<Smartphone className="h-4 w-4 text-emerald-600" />}
+                        titulo="InFoco Messenger — app no celular"
+                        subtitulo="Projeto: Infoco Optical Business"
+                        descricao="O que a pessoa enxerga ao abrir o app no celular. Use para lojas, supervisores e equipes em campo. Os menus específicos (lojista, supervisor) são filtrados pelo escopo da próxima aba."
+                        icone={<Smartphone className="h-5 w-5" />}
+                        accent="emerald"
                         modulos={MODULOS_MESSENGER}
                         selecao={modulos}
                         onToggle={toggleModulo}
