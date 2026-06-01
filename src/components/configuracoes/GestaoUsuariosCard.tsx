@@ -862,6 +862,8 @@ interface EditarUsuarioFormProps {
   setCargoLoja: (c: "supervisor" | "gerente" | "operador") => void;
   lojasSelected: string[];
   setLojasSelected: (l: string[]) => void;
+  lojasResponsaveis: string[];
+  setLojasResponsaveis: (l: string[]) => void;
   setorId: string;
   setSetorId: (id: string) => void;
   saving: boolean;
@@ -871,9 +873,8 @@ interface EditarUsuarioFormProps {
 
 function EditarUsuarioForm(props: EditarUsuarioFormProps) {
   const { target, setores, lojas, tipo, setTipo, cargoLoja, setCargoLoja,
-    lojasSelected, setLojasSelected, setorId, setSetorId, saving, onCancel, onSave } = props;
-
-  // (Hidratação acontece no Dialog pai via useEffect)
+    lojasSelected, setLojasSelected, lojasResponsaveis, setLojasResponsaveis,
+    setorId, setSetorId, saving, onCancel, onSave } = props;
 
   const toggleLoja = (loja: string) => {
     if (lojasSelected.includes(loja)) {
@@ -882,6 +883,15 @@ function EditarUsuarioForm(props: EditarUsuarioFormProps) {
       setLojasSelected([...lojasSelected, loja]);
     }
   };
+
+  const toggleLojaResp = (loja: string) => {
+    if (lojasResponsaveis.includes(loja)) {
+      setLojasResponsaveis(lojasResponsaveis.filter((l) => l !== loja));
+    } else {
+      setLojasResponsaveis([...lojasResponsaveis, loja]);
+    }
+  };
+
 
   const canSave =
     (tipo === "admin" || tipo === "colaborador") ||
