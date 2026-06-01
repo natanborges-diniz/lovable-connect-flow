@@ -535,6 +535,17 @@ function CreateOpcaoForm({ nextOrdem, allOpcoes, onSubmit }: { nextOrdem: number
           </Select>
         </div>
       )}
+      <div className="space-y-1.5">
+        <Label>Visibilidade</Label>
+        <VisibilidadePicker
+          cargos={cargosVisiveis}
+          usuarios={usuariosVisiveis}
+          onChange={({ cargos, usuarios }) => {
+            setCargosVisiveis(cargos);
+            setUsuariosVisiveis(usuarios);
+          }}
+        />
+      </div>
       {chave && (
         <p className="text-xs text-muted-foreground">Chave: <code className="bg-muted px-1 rounded">{chave}</code></p>
       )}
