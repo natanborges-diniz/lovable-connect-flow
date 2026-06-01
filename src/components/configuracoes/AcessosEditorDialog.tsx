@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Loader2, Shield, KeySquare, MapPin, Sparkles, Info, Globe, Smartphone } from "lucide-react";
+import { Loader2, Shield, KeySquare, MapPin, Sparkles, Info, Globe, Smartphone, Bot } from "lucide-react";
 import {
   type Acessos,
   type ModuloKey,
@@ -53,6 +53,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
   const [setoresSel, setSetoresSel] = useState<string[]>([]);
   const [todosSetores, setTodosSetores] = useState(false);
   const [acessoTotal, setAcessoTotal] = useState(false);
+  const [botOpcoesSel, setBotOpcoesSel] = useState<Set<string>>(new Set());
 
   // ---- queries
   const profileQ = useQuery({
@@ -117,6 +118,32 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
     },
   });
 
+
+
+  const botOpcoesQ = useQuery({
+    queryKey: ["editor-bot-opcoes"],
+    enabled: open,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bot_menu_opcoes")
+        .select("id, titulo, emoji, tipo_bot, parent_id, ordem, ativo, usuarios_visiveis")
+        .eq("ativo", true)
+        .order("tipo_bot")
+        .order("ordem");
+      if (error) throw error;
+      return data as Array<{
+        id: string;
+        titulo: string;
+        emoji: string;
+        tipo_bot: string;
+        parent_id: string | null;
+        ordem: number;
+        ativo: boolean;
+        usuarios_visiveis: string[] | null;
+      }>;
+    },
+  });
+
   // ---- hydrate form when data arrives (ou reset em modo criação)
   useEffect(() => {
     if (!open) return;
@@ -130,6 +157,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       setTodasLojas(false);
       setSetoresSel([]);
       setTodosSetores(false);
+      setBotOpcoesSel(new Set());
       setTab("identidade");
       return;
     }
@@ -155,7 +183,15 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       setSetoresSel([]);
       setTodosSetores(false);
     }
-  }, [open, isCreate, profileQ.data, acessosQ.data, acessosQ.isFetched]);
+    if (botOpcoesQ.data && userId) {
+      const sel = new Set<string>();
+      for (const o of botOpcoesQ.data) {
+        if ((o.usuarios_visiveis || []).includes(userId)) sel.add(o.id);
+      }
+      setBotOpcoesSel(sel);
+    }
+  }, [open, isCreate, userId, profileQ.data, acessosQ.data, acessosQ.isFetched, botOpcoesQ.data]);
+
 
   const toggleModulo = (k: ModuloKey, checked: boolean) => {
     setModulos((prev) => {
@@ -229,6 +265,13 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       const { error: aErr } = await supabase.from("user_acessos").upsert(payload);
       if (aErr) throw aErr;
 
+      // Visibilidade do bot de lojas por usuário (whitelist em bot_menu_opcoes.usuarios_visiveis)
+      const { error: bErr } = await supabase.rpc("set_bot_menu_visibility_for_user", {
+        _user_id: targetUserId,
+        _opcao_ids: Array.from(botOpcoesSel),
+      });
+      if (bErr) throw bErr;
+
       return { userId: targetUserId, inviteUrl };
     },
     onSuccess: (result) => {
@@ -238,6 +281,8 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       queryClient.invalidateQueries({ queryKey: ["editor-acessos", userId] });
       queryClient.invalidateQueries({ queryKey: ["admin-user-acessos"] });
       queryClient.invalidateQueries({ queryKey: ["profiles-ativos"] });
+      queryClient.invalidateQueries({ queryKey: ["editor-bot-opcoes"] });
+      queryClient.invalidateQueries({ queryKey: ["bot-menu-opcoes"] });
       onSaved?.(result.userId, result.inviteUrl);
       onOpenChange(false);
     },
@@ -293,7 +338,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
             </div>
 
             <Tabs value={tab} onValueChange={setTab} className="flex-1 overflow-hidden flex flex-col">
-              <TabsList className="grid grid-cols-3">
+              <TabsList className="grid grid-cols-4">
                 <TabsTrigger value="identidade">
                   <Shield className="h-4 w-4 mr-1" /> Identidade
                 </TabsTrigger>
@@ -307,6 +352,12 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                   <MapPin className="h-4 w-4 mr-1" /> Escopo{" "}
                   <Badge variant="secondary" className="ml-2">
                     {acessoTotal ? "TUDO" : `${lojasResumo} / ${setoresResumo}`}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="bot" disabled={isCreate}>
+                  <Bot className="h-4 w-4 mr-1" /> Bot Lojas{" "}
+                  <Badge variant="secondary" className="ml-2">
+                    {botOpcoesSel.size}
                   </Badge>
                 </TabsTrigger>
               </TabsList>
@@ -447,6 +498,88 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                           </div>
                         )}
                       </div>
+                    </>
+                  )}
+                </TabsContent>
+
+                {/* ---- BOT LOJAS (visibilidade por usuário) ---- */}
+                <TabsContent value="bot" className="space-y-3">
+                  {isCreate ? (
+                    <div className="text-sm text-muted-foreground italic border rounded-md p-4">
+                      Salve o usuário primeiro para liberar as opções do bot.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-xs text-muted-foreground">
+                        Marque as opções do menu do bot que <span className="font-medium">este usuário</span> deve enxergar
+                        no Messenger. Quando marcado, a opção fica visível apenas para os usuários selecionados,
+                        ignorando o filtro por cargo.
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setBotOpcoesSel(new Set((botOpcoesQ.data || []).map((o) => o.id)))}
+                        >
+                          Selecionar tudo
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setBotOpcoesSel(new Set())}
+                        >
+                          Limpar tudo
+                        </Button>
+                      </div>
+                      {botOpcoesQ.isLoading ? (
+                        <div className="flex justify-center py-6">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : (
+                        Object.entries(
+                          (botOpcoesQ.data || []).reduce<Record<string, typeof botOpcoesQ.data>>(
+                            (acc, o) => {
+                              (acc[o.tipo_bot] = acc[o.tipo_bot] || []).push(o);
+                              return acc;
+                            },
+                            {} as any
+                          )
+                        ).map(([tipoBot, opcoes]) => (
+                          <div key={tipoBot} className="border rounded-md overflow-hidden">
+                            <div className="px-3 py-2 bg-muted/40 text-xs font-medium uppercase tracking-wide">
+                              {tipoBot}
+                            </div>
+                            <div className="divide-y">
+                              {(opcoes || []).map((o) => {
+                                const isChild = !!o.parent_id;
+                                const checked = botOpcoesSel.has(o.id);
+                                return (
+                                  <label
+                                    key={o.id}
+                                    className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-muted/30 ${
+                                      isChild ? "pl-8" : ""
+                                    }`}
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(c) => {
+                                        setBotOpcoesSel((prev) => {
+                                          const next = new Set(prev);
+                                          if (c) next.add(o.id);
+                                          else next.delete(o.id);
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                    <span>{o.emoji}</span>
+                                    <span className="flex-1 truncate">{o.titulo}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </>
                   )}
                 </TabsContent>
