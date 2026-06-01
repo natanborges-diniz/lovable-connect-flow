@@ -281,6 +281,11 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       queryClient.invalidateQueries({ queryKey: ["editor-acessos", userId] });
       queryClient.invalidateQueries({ queryKey: ["admin-user-acessos"] });
       queryClient.invalidateQueries({ queryKey: ["profiles-ativos"] });
+      queryClient.invalidateQueries({ queryKey: ["editor-bot-opcoes"] });
+      queryClient.invalidateQueries({ queryKey: ["bot-menu-opcoes"] });
+      onSaved?.(result.userId, result.inviteUrl);
+      onOpenChange(false);
+    },
       onSaved?.(result.userId, result.inviteUrl);
       onOpenChange(false);
     },
