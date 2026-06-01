@@ -29,7 +29,23 @@ interface MenuOpcao {
   tipo: string;
   parent_id: string | null;
   setor_id: string | null;
+  cargos_visiveis: string[];
+  usuarios_visiveis: string[];
 }
+
+interface ProfileLite {
+  id: string;
+  nome: string;
+  email: string | null;
+  tipo_usuario: string | null;
+  cargo_loja: string | null;
+}
+
+const CARGOS_LOJA = [
+  { value: "supervisor", label: "Supervisor" },
+  { value: "gerente", label: "Gerente" },
+  { value: "operador", label: "Operador" },
+];
 
 interface Fluxo {
   id: string;
