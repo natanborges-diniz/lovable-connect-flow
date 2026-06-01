@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Pin, Search, Users, Plus } from "lucide-react";
+import { Pin, Search, Users, Plus, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,26 @@ import { cn } from "@/lib/utils";
 import { useDemandas, useUserContext, type DemandaRow } from "@/hooks/useDemandas";
 import { DemandaThreadView } from "@/components/atendimentos/DemandaThreadView";
 import { AcionarLojaDialog } from "@/components/atendimentos/AcionarLojaDialog";
+
+type SLALevel = "ok" | "warn" | "late" | "critical" | "no_response";
+
+function getSLA(d: DemandaRow): { level: SLALevel; label: string; minutes: number } {
+  if (d.status === "sem_resposta") return { level: "no_response", label: "SEM RESPOSTA", minutes: 0 };
+  if (d.status !== "aberta") return { level: "ok", label: "", minutes: 0 };
+  const minutes = Math.floor((Date.now() - new Date(d.created_at).getTime()) / 60_000);
+  if (minutes >= 60) return { level: "critical", label: `${minutes}min`, minutes };
+  if (minutes >= 30) return { level: "late", label: `${minutes}min`, minutes };
+  if (minutes >= 15) return { level: "warn", label: `${minutes}min`, minutes };
+  return { level: "ok", label: `${minutes}min`, minutes };
+}
+
+function isAtrasada(d: DemandaRow): boolean {
+  if (d.status === "sem_resposta") return true;
+  if (d.status !== "aberta") return false;
+  const esc = (d.metadata?.escalonamentos || {}) as Record<string, string>;
+  return !!(esc.t15_at || esc.t30_at || esc.t60_at || esc.t120_at);
+}
+
 
 export default function Demandas() {
   const [params, setParams] = useSearchParams();
