@@ -105,10 +105,11 @@ export default function ReguaNovaVenda() {
 
       if (contatoId) {
         const existing = contatosCpf!.find((c: any) => c.id === contatoId)!;
-        const patch: Record<string, any> = {};
-        if (!existing.telefone && whatsDigits) patch.telefone = whatsDigits;
-        if (Object.keys(patch).length > 0) {
-          const { error: errUpd } = await supabase.from("contatos").update(patch).eq("id", contatoId);
+        if (!existing.telefone && whatsDigits) {
+          const { error: errUpd } = await supabase
+            .from("contatos")
+            .update({ telefone: whatsDigits })
+            .eq("id", contatoId);
           if (errUpd) throw errUpd;
         }
       } else {
