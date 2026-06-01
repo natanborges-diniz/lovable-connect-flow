@@ -53,6 +53,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
   const [setoresSel, setSetoresSel] = useState<string[]>([]);
   const [todosSetores, setTodosSetores] = useState(false);
   const [acessoTotal, setAcessoTotal] = useState(false);
+  const [botOpcoesSel, setBotOpcoesSel] = useState<Set<string>>(new Set());
 
   // ---- queries
   const profileQ = useQuery({
