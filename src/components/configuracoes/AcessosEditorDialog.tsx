@@ -104,17 +104,27 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
     },
   });
 
-  const setoresQ = useQuery({
-    queryKey: ["editor-setores-disponiveis"],
+  const botOpcoesQ = useQuery({
+    queryKey: ["editor-bot-opcoes"],
     enabled: open,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("setores")
-        .select("id, nome")
+        .from("bot_menu_opcoes")
+        .select("id, titulo, emoji, tipo_bot, parent_id, ordem, ativo, usuarios_visiveis")
         .eq("ativo", true)
-        .order("nome");
+        .order("tipo_bot")
+        .order("ordem");
       if (error) throw error;
-      return data as { id: string; nome: string }[];
+      return data as Array<{
+        id: string;
+        titulo: string;
+        emoji: string;
+        tipo_bot: string;
+        parent_id: string | null;
+        ordem: number;
+        ativo: boolean;
+        usuarios_visiveis: string[] | null;
+      }>;
     },
   });
 
@@ -131,6 +141,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       setTodasLojas(false);
       setSetoresSel([]);
       setTodosSetores(false);
+      setBotOpcoesSel(new Set());
       setTab("identidade");
       return;
     }
@@ -156,7 +167,15 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
       setSetoresSel([]);
       setTodosSetores(false);
     }
-  }, [open, isCreate, profileQ.data, acessosQ.data, acessosQ.isFetched]);
+    if (botOpcoesQ.data && userId) {
+      const sel = new Set<string>();
+      for (const o of botOpcoesQ.data) {
+        if ((o.usuarios_visiveis || []).includes(userId)) sel.add(o.id);
+      }
+      setBotOpcoesSel(sel);
+    }
+  }, [open, isCreate, userId, profileQ.data, acessosQ.data, acessosQ.isFetched, botOpcoesQ.data]);
+
 
   const toggleModulo = (k: ModuloKey, checked: boolean) => {
     setModulos((prev) => {
