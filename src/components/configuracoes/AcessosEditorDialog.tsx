@@ -165,13 +165,14 @@ export function AcessosEditorDialog({ userId, open, onOpenChange, onSaved }: Pro
     mutationFn: async () => {
       if (!userId) throw new Error("Sem usuário");
       // 1) profile (identidade)
-      const profileUpdates: Record<string, unknown> = { nome: nome.trim() };
+      const profileUpdates: { nome: string; cargo?: string } = { nome: nome.trim() };
       if (cargo.trim()) profileUpdates.cargo = cargo.trim();
       const { error: pErr } = await supabase
         .from("profiles")
         .update(profileUpdates)
         .eq("id", userId);
       if (pErr) throw pErr;
+
 
       // 2) user_acessos (upsert) — trigger se encarrega de profiles.tipo + user_roles
       const payload = {
