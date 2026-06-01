@@ -837,6 +837,8 @@ function EditarUsuarioDialog({ target, setores, lojas, onClose, onSaved }: Edita
             setCargoLoja={setCargoLoja}
             lojasSelected={lojasSelected}
             setLojasSelected={setLojasSelected}
+            lojasResponsaveis={lojasResponsaveis}
+            setLojasResponsaveis={setLojasResponsaveis}
             setorId={setorId}
             setSetorId={setSetorId}
             saving={saving}
@@ -848,6 +850,7 @@ function EditarUsuarioDialog({ target, setores, lojas, onClose, onSaved }: Edita
     </Dialog>
   );
 }
+
 
 interface EditarUsuarioFormProps {
   target: any;
