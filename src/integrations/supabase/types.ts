@@ -2344,6 +2344,130 @@ export type Database = {
         }
         Relationships: []
       }
+      regua_inscricao: {
+        Row: {
+          canal_consentimento: string | null
+          cod_cliente: string
+          cod_empresa: string
+          consentimento_at: string | null
+          consentimento_status: string
+          contato_id: string | null
+          criado_em: string
+          data_entrega: string
+          data_nascimento: string | null
+          id: string
+          match_status: string
+          nome_bridge: string | null
+          numero_venda: string | null
+          origem: string
+          telefone_bridge: string | null
+          updated_at: string
+          whatsapp_bridge: string | null
+        }
+        Insert: {
+          canal_consentimento?: string | null
+          cod_cliente: string
+          cod_empresa: string
+          consentimento_at?: string | null
+          consentimento_status?: string
+          contato_id?: string | null
+          criado_em?: string
+          data_entrega: string
+          data_nascimento?: string | null
+          id?: string
+          match_status?: string
+          nome_bridge?: string | null
+          numero_venda?: string | null
+          origem?: string
+          telefone_bridge?: string | null
+          updated_at?: string
+          whatsapp_bridge?: string | null
+        }
+        Update: {
+          canal_consentimento?: string | null
+          cod_cliente?: string
+          cod_empresa?: string
+          consentimento_at?: string | null
+          consentimento_status?: string
+          contato_id?: string | null
+          criado_em?: string
+          data_entrega?: string
+          data_nascimento?: string | null
+          id?: string
+          match_status?: string
+          nome_bridge?: string | null
+          numero_venda?: string | null
+          origem?: string
+          telefone_bridge?: string | null
+          updated_at?: string
+          whatsapp_bridge?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regua_inscricao_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      regua_touchpoint: {
+        Row: {
+          canal: string | null
+          created_at: string
+          data_prevista: string
+          enviado_at: string | null
+          id: string
+          inscricao_id: string
+          mensagem_id: string | null
+          metadata: Json | null
+          status: string
+          status_entrega: string | null
+          template_key: string | null
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          canal?: string | null
+          created_at?: string
+          data_prevista: string
+          enviado_at?: string | null
+          id?: string
+          inscricao_id: string
+          mensagem_id?: string | null
+          metadata?: Json | null
+          status?: string
+          status_entrega?: string | null
+          template_key?: string | null
+          tipo: string
+          updated_at?: string
+        }
+        Update: {
+          canal?: string | null
+          created_at?: string
+          data_prevista?: string
+          enviado_at?: string | null
+          id?: string
+          inscricao_id?: string
+          mensagem_id?: string | null
+          metadata?: Json | null
+          status?: string
+          status_entrega?: string | null
+          template_key?: string | null
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regua_touchpoint_inscricao_id_fkey"
+            columns: ["inscricao_id"]
+            isOneToOne: false
+            referencedRelation: "regua_inscricao"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       setores: {
         Row: {
           ativo: boolean
