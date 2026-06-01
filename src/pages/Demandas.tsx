@@ -42,19 +42,33 @@ export default function Demandas() {
   const [search, setSearch] = useState("");
   const [acionarOpen, setAcionarOpen] = useState(false);
   const { isAdmin } = useUserContext();
-  const { data: demandas = [], isLoading } = useDemandas({ status: statusTab });
+  // Para a aba "Atrasadas" queremos TODAS as 'aberta' + 'sem_resposta' (não filtra por status no hook)
+  const isAtrasadasTab = statusTab === "atrasadas";
+  const { data: demandas = [], isLoading } = useDemandas({
+    status: isAtrasadasTab ? "all" : statusTab,
+  });
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return demandas;
+    let base = demandas;
+    if (isAtrasadasTab) {
+      base = base.filter((d) => d.status === "sem_resposta" || (d.status === "aberta" && isAtrasada(d)));
+    }
+    if (!search.trim()) return base;
     const s = search.toLowerCase();
-    return demandas.filter(
+    return base.filter(
       (d) =>
         (d.protocolo ?? "").toLowerCase().includes(s) ||
         d.loja_nome.toLowerCase().includes(s) ||
         d.pergunta.toLowerCase().includes(s) ||
         (d.assunto ?? "").toLowerCase().includes(s),
     );
-  }, [demandas, search]);
+  }, [demandas, search, isAtrasadasTab]);
+
+  const atrasadasCount = useMemo(
+    () => demandas.filter((d) => d.status === "sem_resposta" || (d.status === "aberta" && isAtrasada(d))).length,
+    [demandas],
+  );
+
 
   const selected = filtered.find((d) => d.id === selectedId) ?? demandas.find((d) => d.id === selectedId) ?? null;
 
