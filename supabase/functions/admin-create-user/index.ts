@@ -89,17 +89,12 @@ Deno.serve(async (req) => {
       await admin.from("profiles").update(profileUpdates).eq("id", newUserId);
     }
 
-    // 2) Garante role (limpa qualquer role default e insere a desejada)
+    // 2) NÃO insere mais user_roles direto. A fonte de verdade é user_acessos,
+    // que o frontend grava em seguida (AcessosEditorDialog) e dispara o trigger
+    // sync_from_user_acessos para criar/atualizar user_roles automaticamente.
+    // Apenas limpa qualquer role default deixada pelo handle_new_user trigger,
+    // para evitar estado parcial até o upsert de user_acessos chegar.
     await admin.from("user_roles").delete().eq("user_id", newUserId);
-    const roleRow: Record<string, unknown> = { user_id: newUserId, role: finalRole };
-    if (finalRole === "setor_usuario") {
-      if (setor_id) roleRow.setor_id = setor_id;
-      if (loja_nome) roleRow.loja_nome = loja_nome;
-    }
-    const { error: roleErr } = await admin.from("user_roles").insert(roleRow);
-    if (roleErr) {
-      console.error("[admin-create-user] insert role error:", roleErr.message);
-    }
 
     // 3) Gera link de convite para o usuário definir a senha / acessar
     let invite_url: string | undefined;
