@@ -1,50 +1,49 @@
-## Objetivo
+## Diagnóstico
 
-Notificar via Web Push (com som padrão do sistema) o operador atribuído ao atendimento sempre que:
-1. O atendimento for direcionado para humano (`modo='humano'`, escalada da IA ou transferência manual de coluna);
-2. Chegar uma nova mensagem inbound do cliente enquanto o atendimento estiver em modo humano;
-3. O card for movido manualmente para uma coluna do setor do operador.
+O trigger de banco está ativo e disparando, mas **nenhuma notificação é inserida** — logo o `send-push` nunca é chamado.
 
-Reaproveita a infra existente (`push_subscriptions` + edge `send-push` + `sw.js` + `fn_send_push`).
+A função `resolver_destinatarios_atendimento(id)` segue esta lógica:
+1. Se o atendimento tem `atendente_user_id` → notifica esse usuário.
+2. Senão → busca `setor_id` da `pipeline_colunas` ligada ao contato e notifica todos os `profiles` daquele setor.
 
-## Gap atual
+Verificado no banco real:
+- Os 5 atendimentos abertos em `modo='humano'` têm `atendente_user_id = NULL` (auto-claim do frontend não está marcando).
+- As colunas do pipeline humano (`Novo Contato`, `Atendimento Humano`, `Retorno`, etc.) têm todas `setor_id = NULL`.
+- Os operadores reais (admin/colaborador como Clemerson, Natan, Fran, ops@teste) **não têm setor_id** em `profiles` nem entrada em `user_roles` com setor.
 
-`atendimentos` só tem `atendente_nome` (texto). Não há FK para o usuário — impossível resolver "operador atribuído" sem ajuste. Vou adicionar `atendente_user_id uuid` e preenchê-lo automaticamente quando o operador "assumir" o card (primeira resposta humana / abertura do drawer / drag para coluna de humano).
+Resultado: a função retorna `{}` e nenhuma notificação é criada.
 
-## Mudanças
+## Correção
 
-### 1. Banco
+### 1. Banco — ampliar fallback de `resolver_destinatarios_atendimento`
 
-- Adicionar coluna `atendimentos.atendente_user_id uuid` (nullable, índice).
-- Trigger `trg_atendimento_modo_humano` (AFTER UPDATE em `atendimentos`):
-  - Quando `modo` mudar para `humano` OU `pipeline_coluna_id` mudar para coluna de setor humano, e houver `atendente_user_id`: `INSERT` em `public.notificacoes` (`tipo='atendimento_humano'`, `usuario_id=atendente_user_id`, título "Atendimento aguardando você", mensagem com nome do contato e snippet, `referencia_id=atendimento.id`).
-  - Sem atendente atribuído → notifica todos os operadores ativos do setor (`setor_id` via `pipeline_coluna_id → pipeline_colunas.setor_id`).
-- Trigger `trg_inbound_humano_push` (AFTER INSERT em `public.mensagens`):
-  - Se `direcao='inbound'` e o atendimento estiver em `modo='humano'` e `status<>'encerrado'`: `INSERT` em `notificacoes` para `atendente_user_id` (fallback: setor). Título "Nova mensagem de {contato}", mensagem = primeiros 100 chars do `conteudo`, `url=/atendimentos?atendimento={id}`, `tag=at_{id}` (renotify=true colapsa).
-- O trigger existente `trg_push_nova_notificacao` já dispara `fn_send_push` → `send-push` (Web Push com VAPID) automaticamente. Som = padrão do sistema (já configurado em `sw.js` via `vibrate` + notificação nativa).
+Acrescentar um terceiro nível de fallback: quando não há atendente atribuído **e** a coluna do contato não tem setor (ou o setor não tem profiles ativos), notificar todos os perfis ativos com `tipo_usuario IN ('admin','colaborador')` — esses são os operadores corporativos de atendimento humano.
 
-### 2. Edge function `pipeline-automations`
+Ordem final:
+```
+1. atendente_user_id (se setado)
+2. profiles ativos do setor_id da coluna do contato
+3. profiles ativos com tipo_usuario IN ('admin','colaborador')
+```
 
-Já recebe eventos de mudança de coluna. Adicionar bloco: quando `entity_type='atendimento'` (ou via lookup do atendimento ligado ao contato/solicitação) e a coluna nova pertence a setor humano, marcar `atendente_user_id` apenas se houver claim manual — caso contrário deixa null para notificar setor inteiro.
+### 2. Frontend — garantir que o auto-claim funciona
 
-### 3. Frontend
+Revisar `useClaimAtendimento` em `src/hooks/useAtendimentos.ts` e o ponto de chamada em `src/pages/Atendimentos.tsx` (abertura do drawer). Adicionar `console.log` no sucesso/erro para confirmar que o `UPDATE atendimentos SET atendente_user_id` está rodando quando o operador abre um atendimento em modo humano. Conferir que a RLS de UPDATE permite o claim (a policy adicionada na migration de ontem).
 
-- `useAtendimentos`: ao abrir um atendimento em modo humano (drawer/click), chamar mutation `claimAtendimento(id)` que faz `UPDATE atendimentos SET atendente_user_id=auth.uid(), atendente_nome=profile.nome WHERE id=? AND atendente_user_id IS NULL`.
-- Em `src/pages/Atendimentos.tsx`: exibir "Atribuído a {nome}" e botão "Liberar" para devolver à fila.
-- Garantir que `PushNotificationsButton` esteja visível em `/atendimentos` (já está no layout).
+Se descobrirmos que o claim está bloqueado por RLS, ajustar a policy.
 
-### 4. RLS / Grants
+### 3. Validação
 
-- `atendentes` já tem RLS; adicionar policy `UPDATE` para `setor_usuario`/`operador` poderem setar `atendente_user_id` no próprio setor.
-- Conceder `GRANT UPDATE (atendente_user_id, atendente_nome) ON public.atendimentos TO authenticated`.
+- Após o deploy, executar manualmente:
+  ```sql
+  SELECT public.resolver_destinatarios_atendimento('e06c024c-c9bb-4ba0-8875-7e0b47ce355b');
+  ```
+  para confirmar que retorna usuários.
+- Forçar um inbound de teste no atendimento e verificar:
+  - linha em `public.notificacoes` (tipo `atendimento_inbound`);
+  - log da Edge Function `send-push` (`sent>0`).
+- Abrir o drawer com a Fran logada e confirmar que `atendimentos.atendente_user_id` passa a ser o user dela.
 
-## Som
+## Escopo fora desta correção
 
-Usa o som nativo do device entregue pelo Web Push (iOS PWA 16.4+ e Android Chrome). Nada extra precisa ser feito no `sw.js` — `showNotification` já toca o som padrão. Sem áudio customizado in-app.
-
-## Critério de aceite
-
-- IA escala um atendimento → operador do setor (ou atribuído) recebe push imediato com som.
-- Cliente responde → operador atribuído recebe push (tag colapsa para não empilhar).
-- Card movido manualmente para coluna humana → push para usuários elegíveis.
-- Clique na notificação abre `/atendimentos?atendimento={id}` focando o card.
+Não vou criar setores novos nem reorganizar os profiles — apenas o fallback "admin/colaborador" para destravar push agora. Se depois quisermos restringir a um grupo menor (ex.: só "operadores de atendimento"), criamos uma flag explícita.
