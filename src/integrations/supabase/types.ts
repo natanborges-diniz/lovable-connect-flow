@@ -2365,6 +2365,7 @@ export type Database = {
           contato_id: string | null
           cpf: string | null
           criado_em: string
+          data_entrega_ancora: string | null
           id: string
           nome_cliente: string | null
           numero_venda: string
@@ -2384,6 +2385,7 @@ export type Database = {
           contato_id?: string | null
           cpf?: string | null
           criado_em?: string
+          data_entrega_ancora?: string | null
           id?: string
           nome_cliente?: string | null
           numero_venda: string
@@ -2403,6 +2405,7 @@ export type Database = {
           contato_id?: string | null
           cpf?: string | null
           criado_em?: string
+          data_entrega_ancora?: string | null
           id?: string
           nome_cliente?: string | null
           numero_venda?: string

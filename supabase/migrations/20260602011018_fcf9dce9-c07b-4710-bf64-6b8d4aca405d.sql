@@ -1,0 +1,1 @@
+ALTER TABLE public.regua_inscricao ADD COLUMN IF NOT EXISTS data_entrega_ancora date;
