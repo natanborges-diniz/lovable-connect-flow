@@ -19,6 +19,7 @@ import { TelefonesLojasCard } from "@/components/configuracoes/TelefonesLojasCar
 import { BotMenuCard } from "@/components/configuracoes/BotMenuCard";
 import { BotFluxosCard } from "@/components/configuracoes/BotFluxosCard";
 import { WhatsAppTemplatesCard } from "@/components/configuracoes/WhatsAppTemplatesCard";
+import { SaudeNumeroWhatsAppCard } from "@/components/configuracoes/SaudeNumeroWhatsAppCard";
 import { AutomacoesCard } from "@/components/configuracoes/AutomacoesCard";
 import { GestaoUsuariosCard } from "@/components/configuracoes/GestaoUsuariosCard";
 import { CronJobsCard } from "@/components/configuracoes/CronJobsCard";
@@ -137,6 +138,7 @@ export default function Configuracoes() {
         {/* ─── WhatsApp ─── */}
         <TabsContent value="whatsapp">
           <div className="grid gap-6">
+            <SaudeNumeroWhatsAppCard />
             <WhatsAppTemplatesCard />
             <HomologacaoCard />
             <WhatsAppIntegrationCard />
