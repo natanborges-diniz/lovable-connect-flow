@@ -82,67 +82,23 @@ export default function ReguaNovaVenda() {
       if (!numeroVenda.trim()) throw new Error("Informe o número da venda");
       if (!Number.isFinite(valorNum) || valorNum <= 0) throw new Error("Valor inválido");
 
-      // Duplicata por numero_venda
-      const { data: existente, error: errEx } = await supabase
-        .from("regua_inscricao")
-        .select("id, nome_cliente")
-        .eq("numero_venda", numeroVenda.trim())
-        .maybeSingle();
-      if (errEx) throw errEx;
-      if (existente) {
-        throw new Error(`Já existe inscrição para a venda ${numeroVenda.trim()} (${existente.nome_cliente || "sem nome"})`);
-      }
-
-      // Buscar contato por CPF (comparando dígitos)
-      const { data: contatosCpf, error: errCpf } = await supabase
-        .from("contatos")
-        .select("id, nome, telefone, documento")
-        .not("documento", "is", null);
-      if (errCpf) throw errCpf;
-
-      let contatoId: string | null =
-        contatosCpf?.find((c: any) => onlyDigits(c.documento || "") === cpfDigits)?.id ?? null;
-
-      if (contatoId) {
-        const existing = contatosCpf!.find((c: any) => c.id === contatoId)!;
-        if (!existing.telefone && whatsDigits) {
-          const { error: errUpd } = await supabase
-            .from("contatos")
-            .update({ telefone: whatsDigits })
-            .eq("id", contatoId);
-          if (errUpd) throw errUpd;
-        }
-      } else {
-        const { data: novo, error: errNovo } = await supabase
-          .from("contatos")
-          .insert({
-            nome: nome.trim(),
-            tipo: "cliente",
-            documento: cpfDigits,
-            telefone: whatsDigits,
-          })
-          .select("id")
-          .single();
-        if (errNovo) throw errNovo;
-        contatoId = novo.id;
-      }
-
-      const { error: errIns } = await supabase.from("regua_inscricao").insert({
-        contato_id: contatoId,
-        cpf: cpfDigits,
-        nome_cliente: nome.trim(),
-        whatsapp: whatsDigits,
-        numero_venda: numeroVenda.trim(),
-        valor_total_informado: valorNum,
-        origem: "VENDA_LOJA",
-        cod_empresa: lojaUsuario,
-        usuario_lancamento: profile?.nome || user?.email || null,
-        consentimento_status: "pendente",
-        status: "aguardando_entrega",
+      const { data, error } = await supabase.rpc("regua_registrar_venda", {
+        p_nome: nome.trim(),
+        p_whatsapp_digits: whatsDigits,
+        p_cpf_digits: cpfDigits,
+        p_numero_venda: numeroVenda.trim(),
+        p_valor: valorNum,
+        p_cod_empresa: lojaUsuario,
+        p_usuario_lancamento: profile?.nome || user?.email || null,
       });
-      if (errIns) throw errIns;
+      if (error) throw error;
+      return data as unknown as { ja_existia: boolean; inscricao_id: string; contato_id: string };
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
+      if (res?.ja_existia) {
+        toast.warning(`Já existe inscrição para a venda ${numeroVenda.trim()}`);
+        return;
+      }
       toast.success("Venda cadastrada na régua");
       setNome("");
       setWhatsapp("");

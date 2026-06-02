@@ -3105,6 +3105,18 @@ export type Database = {
         Args: { _destinatario: string; _remetente: string }
         Returns: boolean
       }
+      regua_registrar_venda: {
+        Args: {
+          p_cod_empresa: string
+          p_cpf_digits: string
+          p_nome: string
+          p_numero_venda: string
+          p_usuario_lancamento: string
+          p_valor: number
+          p_whatsapp_digits: string
+        }
+        Returns: Json
+      }
       resolve_responsavel_setor: {
         Args: { _setor_id: string }
         Returns: string
