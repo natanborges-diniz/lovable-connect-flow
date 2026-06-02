@@ -4,6 +4,7 @@ import { TopNavigation } from "./TopNavigation";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { useAtendimentoNotifier } from "@/hooks/useAtendimentoNotifier";
 
 export type ModuleKey = "dashboard" | "crm" | "financeiro" | "lojas" | "ti" | "interno" | "estoque" | "tarefas" | "mensagens" | "configuracoes";
 
@@ -49,6 +50,9 @@ export function AppLayout() {
   const location = useLocation();
   const activeModule = useMemo(() => moduleFromPath(location.pathname), [location.pathname]);
   const { isAdmin, isOperador, roles, profile, isAuthReady, setores } = useAuth();
+
+  // Toast + bipe in-app para novas mensagens em atendimento humano (push de background é tratado pelo SW).
+  useAtendimentoNotifier();
 
   // Setor "efetivo": user_roles OU profile.setor_id (fallback p/ SSO/cross-login).
   const hasEffectiveSetor =
