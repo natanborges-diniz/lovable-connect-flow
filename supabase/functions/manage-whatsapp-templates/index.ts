@@ -131,16 +131,16 @@ serve(async (req) => {
         return jsonRes({ error: "WHATSAPP_PHONE_NUMBER_ID not configured" }, 500);
       }
       const res = await fetch(
-        `https://graph.facebook.com/v21.0/${phoneNumberId}?fields=quality_rating,messaging_limit_tier,display_phone_number,verified_name`,
+        `https://graph.facebook.com/v23.0/${phoneNumberId}?fields=quality_rating,whatsapp_business_manager_messaging_limit,display_phone_number,verified_name`,
         { headers: { Authorization: `Bearer ${accessToken}` } },
       );
       const data = await res.json();
       if (!res.ok) throw new Error(JSON.stringify(data.error || data));
       return jsonRes({
-        quality_rating:        data.quality_rating        ?? null,
-        messaging_limit_tier:  data.messaging_limit_tier  ?? null,
-        display_phone_number:  data.display_phone_number  ?? null,
-        verified_name:         data.verified_name         ?? null,
+        quality_rating:        data.quality_rating                                    ?? null,
+        messaging_limit_tier:  data.whatsapp_business_manager_messaging_limit         ?? null,
+        display_phone_number:  data.display_phone_number                              ?? null,
+        verified_name:         data.verified_name                                     ?? null,
       });
     }
 
