@@ -3231,6 +3231,7 @@ export type Database = {
         Args: { _destinatario: string; _remetente: string }
         Returns: boolean
       }
+      pode_gerenciar_usuarios: { Args: { _uid: string }; Returns: boolean }
       regua_registrar_venda: {
         Args: {
           p_cod_empresa: string
