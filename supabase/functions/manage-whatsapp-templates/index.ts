@@ -124,7 +124,27 @@ serve(async (req) => {
       return jsonRes({ status: "deleted", data });
     }
 
-    throw new Error("Invalid action. Use: list, status, create, delete");
+    // QUALITY — qualidade e tier do número
+    if (action === "quality") {
+      const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+      if (!phoneNumberId) {
+        return jsonRes({ error: "WHATSAPP_PHONE_NUMBER_ID not configured" }, 500);
+      }
+      const res = await fetch(
+        `https://graph.facebook.com/v21.0/${phoneNumberId}?fields=quality_rating,messaging_limit_tier,display_phone_number,verified_name`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(JSON.stringify(data.error || data));
+      return jsonRes({
+        quality_rating:        data.quality_rating        ?? null,
+        messaging_limit_tier:  data.messaging_limit_tier  ?? null,
+        display_phone_number:  data.display_phone_number  ?? null,
+        verified_name:         data.verified_name         ?? null,
+      });
+    }
+
+    throw new Error("Invalid action. Use: list, status, create, delete, quality");
   } catch (e) {
     console.error("manage-whatsapp-templates error:", e);
     return jsonRes({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
