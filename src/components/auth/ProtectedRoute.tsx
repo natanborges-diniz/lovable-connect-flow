@@ -34,10 +34,15 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     return <Navigate to="/somente-messenger" replace />;
   }
 
-  // If roles are specified, check access (admins always pass)
+  // If roles are specified, check access (admins always pass).
+  // Modelo novo de acessos: se user_acessos concede o módulo da rota, libera
+  // mesmo sem o role legado.
   if (allowedRoles && !isAdmin && roles.length > 0) {
-    const hasAccess = roles.some((r) => allowedRoles.includes(r.role));
-    if (!hasAccess) {
+    const hasRoleAccess = roles.some((r) => allowedRoles.includes(r.role));
+    const mod = moduloFromRoute(location.pathname);
+    const hasModuloAccess =
+      acessos?.acessoTotal || (mod ? hasModulo(acessos, mod) : false);
+    if (!hasRoleAccess && !hasModuloAccess) {
       return <Navigate to="/" replace />;
     }
   }
