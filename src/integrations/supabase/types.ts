@@ -460,6 +460,132 @@ export type Database = {
           },
         ]
       }
+      cashback_config: {
+        Row: {
+          atualizado_em: string
+          fator_resgate: number
+          id: string
+          percentual: number
+          prorrogacao_dias: number
+          validade_dias: number
+        }
+        Insert: {
+          atualizado_em?: string
+          fator_resgate?: number
+          id?: string
+          percentual?: number
+          prorrogacao_dias?: number
+          validade_dias?: number
+        }
+        Update: {
+          atualizado_em?: string
+          fator_resgate?: number
+          id?: string
+          percentual?: number
+          prorrogacao_dias?: number
+          validade_dias?: number
+        }
+        Relationships: []
+      }
+      cashback_credito: {
+        Row: {
+          contato_id: string | null
+          criado_em: string
+          data_expiracao: string | null
+          data_geracao: string | null
+          id: string
+          inscricao_id: string | null
+          prorrogado: boolean
+          saldo: number | null
+          status: string
+          valor_base: number | null
+          valor_gerado: number | null
+        }
+        Insert: {
+          contato_id?: string | null
+          criado_em?: string
+          data_expiracao?: string | null
+          data_geracao?: string | null
+          id?: string
+          inscricao_id?: string | null
+          prorrogado?: boolean
+          saldo?: number | null
+          status?: string
+          valor_base?: number | null
+          valor_gerado?: number | null
+        }
+        Update: {
+          contato_id?: string | null
+          criado_em?: string
+          data_expiracao?: string | null
+          data_geracao?: string | null
+          id?: string
+          inscricao_id?: string | null
+          prorrogado?: boolean
+          saldo?: number | null
+          status?: string
+          valor_base?: number | null
+          valor_gerado?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cashback_credito_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cashback_credito_inscricao_id_fkey"
+            columns: ["inscricao_id"]
+            isOneToOne: false
+            referencedRelation: "regua_inscricao"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cashback_resgate: {
+        Row: {
+          contato_id: string | null
+          credito_id: string | null
+          data_uso: string
+          id: string
+          numero_venda_uso: string | null
+          valor_usado: number | null
+        }
+        Insert: {
+          contato_id?: string | null
+          credito_id?: string | null
+          data_uso?: string
+          id?: string
+          numero_venda_uso?: string | null
+          valor_usado?: number | null
+        }
+        Update: {
+          contato_id?: string | null
+          credito_id?: string | null
+          data_uso?: string
+          id?: string
+          numero_venda_uso?: string | null
+          valor_usado?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cashback_resgate_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cashback_resgate_credito_id_fkey"
+            columns: ["credito_id"]
+            isOneToOne: false
+            referencedRelation: "cashback_credito"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       checklist_items: {
         Row: {
           concluido: boolean
