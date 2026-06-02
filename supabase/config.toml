@@ -81,3 +81,5 @@ verify_jwt = false
 [functions.watchdog-demandas-loja]
 verify_jwt = false
 
+[functions.regua-reconciliacao]
+verify_jwt = false
