@@ -79,7 +79,7 @@ function computeValorStatus(
 function computeAncora(os: OsRow[]): string | null {
   if (os.length === 0) return null;
 
-  const osProducao = os.filter((o) => o.classificacao === "producao");
+  const osProducao = os.filter((o) => o.classificacao?.trim() === "producao");
 
   if (osProducao.length === 0) {
     // Venda apenas imediata: ancora = max(data_entrega) das imediatas
@@ -155,7 +155,7 @@ async function processarInscricao(
         os.map((o) => ({
           inscricao_id:    insc.id,
           os_numero:       String(o.os_numero),
-          classificacao:   o.classificacao ?? "desconhecida",
+          classificacao:   (o.classificacao ?? "desconhecida").trim(),
           data_entrega:    o.data_entrega  ?? null,
           reconciliado_at: new Date().toISOString(),
         })),
@@ -308,7 +308,7 @@ serve(async (req) => {
         valor_status:          valorStatus,
         os: os.map((o) => ({
           os_numero:      o.os_numero,
-          classificacao:  o.classificacao,
+          classificacao:  o.classificacao?.trim(),
           data_entrega:   o.data_entrega,
           entrega_valida: o.entrega_valida,
           devolvida:      o.devolvida,
