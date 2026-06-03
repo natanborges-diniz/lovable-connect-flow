@@ -495,6 +495,7 @@ export type Database = {
           data_geracao: string | null
           id: string
           inscricao_id: string | null
+          liberado_em: string | null
           prorrogado: boolean
           saldo: number | null
           status: string
@@ -508,6 +509,7 @@ export type Database = {
           data_geracao?: string | null
           id?: string
           inscricao_id?: string | null
+          liberado_em?: string | null
           prorrogado?: boolean
           saldo?: number | null
           status?: string
@@ -521,6 +523,7 @@ export type Database = {
           data_geracao?: string | null
           id?: string
           inscricao_id?: string | null
+          liberado_em?: string | null
           prorrogado?: boolean
           saldo?: number | null
           status?: string
@@ -3096,6 +3099,17 @@ export type Database = {
       calcular_membros_grupo: {
         Args: { _ref: string; _tipo: string }
         Returns: string[]
+      }
+      cashback_registrar_resgate: {
+        Args: {
+          _cashback_usado: number
+          _cod_empresa: string
+          _contato_id: string
+          _numero_venda: string
+          _usuario_lancamento?: string
+          _valor_informado: number
+        }
+        Returns: Json
       }
       desanitize_corporate_contact: {
         Args: { _telefone: string }
