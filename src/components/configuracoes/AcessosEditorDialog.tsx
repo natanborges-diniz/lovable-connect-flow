@@ -113,7 +113,10 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
         .eq("ativo", true)
         .order("nome");
       if (error) throw error;
-      return data as { id: string; nome: string }[];
+      // Esconde o setor legado "Loja" — escopo de loja se faz pelo campo Lojas.
+      return (data as { id: string; nome: string }[]).filter(
+        (s) => s.nome.trim().toLowerCase() !== "loja"
+      );
     },
   });
 
@@ -174,8 +177,18 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
     const patch = perfil.apply();
     if (patch.modulos) setModulos(patch.modulos as any);
     if (patch.acessoTotal !== undefined) setAcessoTotal(patch.acessoTotal);
-    if (patch.lojas === null) setTodasLojas(true);
-    if (patch.setores === null) setTodosSetores(true);
+    if (patch.lojas === null) {
+      setTodasLojas(true);
+    } else if (Array.isArray(patch.lojas)) {
+      setTodasLojas(false);
+      setLojas(patch.lojas);
+    }
+    if (patch.setores === null) {
+      setTodosSetores(true);
+    } else if (Array.isArray(patch.setores)) {
+      setTodosSetores(false);
+      setSetoresSel(patch.setores);
+    }
     toast.success(`Perfil "${perfil.label}" aplicado — ajuste o escopo se precisar.`);
   };
 
@@ -249,6 +262,15 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
   const moduloCount = useMemo(() => Object.keys(modulos).length, [modulos]);
   const lojasResumo = todasLojas ? "Todas" : `${lojas.length} loja(s)`;
   const setoresResumo = todosSetores ? "Todos" : `${setoresSel.length} setor(es)`;
+  const escopoChip = (() => {
+    if (acessoTotal) return "TUDO";
+    const temLoja = todasLojas || lojas.length > 0;
+    const temSetor = todosSetores || setoresSel.length > 0;
+    if (!temLoja && !temSetor) return "⚠ sem escopo";
+    if (temLoja && !temSetor) return `Loja: ${lojasResumo}`;
+    if (!temLoja && temSetor) return `Setor: ${setoresResumo}`;
+    return `${lojasResumo} + ${setoresResumo}`;
+  })();
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -306,7 +328,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                 <TabsTrigger value="escopo">
                   <MapPin className="h-4 w-4 mr-1" /> Escopo{" "}
                   <Badge variant="secondary" className="ml-2">
-                    {acessoTotal ? "TUDO" : `${lojasResumo} / ${setoresResumo}`}
+                    {escopoChip}
                   </Badge>
                 </TabsTrigger>
               </TabsList>
@@ -394,6 +416,50 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                     </div>
                   ) : (
                     <>
+                      <div className="border rounded-md p-3 bg-blue-50/60 dark:bg-blue-950/30 text-xs text-blue-900 dark:text-blue-200 space-y-1">
+                        <div className="font-semibold flex items-center gap-1">
+                          <Info className="h-3.5 w-3.5" /> Escolha <span className="underline">um</span> dos dois escopos abaixo — não os dois.
+                        </div>
+                        <div>
+                          • <b>Lojas</b> — para quem trabalha <i>para</i> uma unidade física
+                          (operador de loja, supervisor regional). Recebe agendamentos,
+                          demandas e push das lojas marcadas.
+                        </div>
+                        <div>
+                          • <b>Setores</b> — para quem trabalha <i>para</i> uma fila interna
+                          (Financeiro, TI, Comercial, Estoque). Recebe as demandas roteadas
+                          para esse setor.
+                        </div>
+                        <div className="opacity-80">
+                          A maioria dos usuários marca <b>só um lado</b>. Diretor/admin usa "Acesso total".
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const temLoja = todasLojas || lojas.length > 0;
+                        const temSetor = todosSetores || setoresSel.length > 0;
+                        const conflito = temLoja && temSetor;
+                        const vazio = !temLoja && !temSetor;
+                        return (
+                          <>
+                            {conflito && (
+                              <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 rounded-md p-2 text-xs">
+                                ⚠ Você marcou <b>Lojas</b> e <b>Setores</b> ao mesmo tempo.
+                                Isso só faz sentido em casos raros (ex.: diretor regional).
+                                Se for operador de loja, deixe Setores vazio. Se for de
+                                setor interno, deixe Lojas vazio.
+                              </div>
+                            )}
+                            {vazio && (
+                              <div className="border border-destructive/40 bg-destructive/5 text-destructive rounded-md p-2 text-xs">
+                                ⚠ Nenhum escopo definido. O usuário não vai receber nada.
+                                Marque ao menos uma loja <b>ou</b> um setor (ou ative "Acesso total").
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <Label className="text-sm font-medium">Lojas</Label>
@@ -429,6 +495,11 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                             <Switch checked={todosSetores} onCheckedChange={setTodosSetores} />
                           </div>
                         </div>
+                        <p className="text-[11px] text-muted-foreground mb-2">
+                          Apenas filas internas por especialidade (Financeiro, TI, Comercial,
+                          Estoque). <b>Não existe setor "Loja" aqui</b> — para vincular
+                          alguém a uma unidade, use o campo Lojas acima.
+                        </p>
                         {!todosSetores && (
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 border rounded-md p-3 max-h-60 overflow-auto">
                             {(setoresQ.data || []).map((s) => (
