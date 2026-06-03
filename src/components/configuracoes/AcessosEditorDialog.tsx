@@ -252,6 +252,15 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
   const moduloCount = useMemo(() => Object.keys(modulos).length, [modulos]);
   const lojasResumo = todasLojas ? "Todas" : `${lojas.length} loja(s)`;
   const setoresResumo = todosSetores ? "Todos" : `${setoresSel.length} setor(es)`;
+  const escopoChip = (() => {
+    if (acessoTotal) return "TUDO";
+    const temLoja = todasLojas || lojas.length > 0;
+    const temSetor = todosSetores || setoresSel.length > 0;
+    if (!temLoja && !temSetor) return "⚠ sem escopo";
+    if (temLoja && !temSetor) return `Loja: ${lojasResumo}`;
+    if (!temLoja && temSetor) return `Setor: ${setoresResumo}`;
+    return `${lojasResumo} + ${setoresResumo}`;
+  })();
 
   return (
     <TooltipProvider delayDuration={300}>
