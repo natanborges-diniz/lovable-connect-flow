@@ -1,0 +1,1 @@
+UPDATE public.user_acessos SET modulos = modulos;
