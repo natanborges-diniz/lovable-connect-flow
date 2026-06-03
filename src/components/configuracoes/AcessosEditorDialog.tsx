@@ -318,7 +318,7 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
                 <TabsTrigger value="escopo">
                   <MapPin className="h-4 w-4 mr-1" /> Escopo{" "}
                   <Badge variant="secondary" className="ml-2">
-                    {acessoTotal ? "TUDO" : `${lojasResumo} / ${setoresResumo}`}
+                    {escopoChip}
                   </Badge>
                 </TabsTrigger>
               </TabsList>
