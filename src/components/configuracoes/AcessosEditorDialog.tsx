@@ -177,8 +177,18 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
     const patch = perfil.apply();
     if (patch.modulos) setModulos(patch.modulos as any);
     if (patch.acessoTotal !== undefined) setAcessoTotal(patch.acessoTotal);
-    if (patch.lojas === null) setTodasLojas(true);
-    if (patch.setores === null) setTodosSetores(true);
+    if (patch.lojas === null) {
+      setTodasLojas(true);
+    } else if (Array.isArray(patch.lojas)) {
+      setTodasLojas(false);
+      setLojas(patch.lojas);
+    }
+    if (patch.setores === null) {
+      setTodosSetores(true);
+    } else if (Array.isArray(patch.setores)) {
+      setTodosSetores(false);
+      setSetoresSel(patch.setores);
+    }
     toast.success(`Perfil "${perfil.label}" aplicado — ajuste o escopo se precisar.`);
   };
 
