@@ -90,9 +90,10 @@ export const PERFIS_RAPIDOS: {
   {
     id: "supervisor",
     label: "Supervisor de lojas",
-    descricao: "Lojas, Demandas, Mensagens, Tarefas. Escopo: lojas selecionadas.",
+    descricao: "Lojas, Demandas, Mensagens, Tarefas. Escopo: lojas selecionadas. Setores: vazio.",
     apply: () => ({
       acessoTotal: false,
+      setores: [], // supervisor opera por loja, não por setor
       modulos: {
         lojas: "agir",
         demandas: "agir",
@@ -106,9 +107,10 @@ export const PERFIS_RAPIDOS: {
   {
     id: "operador_loja",
     label: "Operador de loja",
-    descricao: "1 loja, módulos básicos + menu_loja no Messenger.",
+    descricao: "1 loja + módulos básicos + menu_loja no Messenger. Setores: vazio.",
     apply: () => ({
       acessoTotal: false,
+      setores: [], // operador de loja NÃO marca setor — escopo é só por loja
       modulos: {
         lojas: "agir",
         mensagens: "agir",
@@ -122,9 +124,10 @@ export const PERFIS_RAPIDOS: {
   {
     id: "setor",
     label: "Operador de setor",
-    descricao: "Módulo do setor + Mensagens. Escopo: setor.",
+    descricao: "Módulo do setor + Mensagens. Escopo: setor. Lojas: vazio.",
     apply: () => ({
       acessoTotal: false,
+      lojas: [], // operador de setor não tem escopo por loja
       modulos: {
         interno: "agir",
         mensagens: "agir",
