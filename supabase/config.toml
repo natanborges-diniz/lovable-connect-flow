@@ -83,3 +83,6 @@ verify_jwt = false
 
 [functions.regua-reconciliacao]
 verify_jwt = false
+
+[functions.smoke-cashback]
+verify_jwt = false
