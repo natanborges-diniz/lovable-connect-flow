@@ -113,7 +113,10 @@ export function AcessosEditorDialog({ userId, mode = "edit", open, onOpenChange,
         .eq("ativo", true)
         .order("nome");
       if (error) throw error;
-      return data as { id: string; nome: string }[];
+      // Esconde o setor legado "Loja" — escopo de loja se faz pelo campo Lojas.
+      return (data as { id: string; nome: string }[]).filter(
+        (s) => s.nome.trim().toLowerCase() !== "loja"
+      );
     },
   });
 
