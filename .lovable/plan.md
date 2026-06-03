@@ -1,114 +1,63 @@
-## Problema encontrado
-
-Hoje a administração de usuários mistura **dois modelos ao mesmo tempo**:
-
-1. **Modelo novo (fonte desejada):** `user_acessos`
-   - guarda módulos, escopo, `acesso_total`
-   - dispara trigger que sincroniza `profiles.tipo_usuario` e `user_roles`
-
-2. **Modelo antigo / legado ainda ativo na UI e backend:** `profiles.tipo_usuario` + `user_roles`
-   - várias consultas e labels ainda leem isso diretamente
-   - a edge function `admin-create-user` ainda cria `user_roles` direto
-   - a tela lista usuários por `profiles`, mas mostra “nível” por `user_roles`
-
-Isso gera exatamente o sintoma que você descreveu: um usuário pode abrir com sinais contraditórios como “campos vazios”, “Admin” e “acesso total” ao mesmo tempo, porque cada pedaço da tela está olhando para uma fonte diferente.
-
 ## Objetivo
 
-Fazer o admin trabalhar com **uma única fonte de verdade real** para permissões e escopo:
-- `user_acessos` = verdade para permissões
-- `profiles` = identidade e classificação derivada
-- `user_roles` = espelho técnico para compatibilidade/RLS, não mais fonte de edição
+Tornar inequívoco no editor de usuário que **Lojas** e **Setores** são dois escopos alternativos (não complementares), e impedir que alguém marque o setor legado "Loja" pensando que precisa duplicar a vinculação.
 
-## Plano de unificação
+## O que muda na tela `AcessosEditorDialog.tsx` (aba Escopo)
 
-### 1. Definir a regra oficial do modelo
-Padronizar a semântica para o admin:
-- **Identidade:** `profiles` (`nome`, `email`, `cargo`)
-- **Permissões e escopo:** `user_acessos`
-- **Tipo exibido na UI:** derivado de `user_acessos` / `profiles.tipo_usuario`
-- **`user_roles`:** apenas espelho automático, nunca editado manualmente pela tela
+### 1. Cabeçalho explicativo no topo da aba Escopo
 
-### 2. Refatorar a tela de Gestão de Usuários para um único fluxo
-Na aba Usuários:
-- manter **um único editor** para criar/editar usuário
-- esse editor passa a carregar e salvar a partir de:
-  - `profiles` para identidade
-  - `user_acessos` para acesso total, módulos, lojas e setores
-- remover da UI ativa os fluxos antigos que ainda manipulam `user_roles` ou `profiles.tipo_usuario` como se fossem fonte principal
+Adicionar um bloco informativo curto antes dos dois campos:
 
-### 3. Corrigir a listagem para mostrar estado coerente
-A grade de usuários deve ser montada com dados consistentes:
-- buscar `profiles`
-- buscar `user_acessos`
-- usar `user_roles` só se realmente necessário para compatibilidade visual, nunca para decidir o “tipo principal” do usuário
+> **Escolha um dos dois escopos abaixo, não os dois.**  
+> • **Lojas** — se a pessoa trabalha *para* uma unidade física (operador de loja, supervisor regional). Ela vai receber agendamentos, demandas e push da(s) loja(s) marcada(s).  
+> • **Setores** — se a pessoa trabalha *para* uma fila interna por especialidade (Financeiro, TI, Comercial, Estoque). Ela vai receber as demandas roteadas para esse setor.  
+> A maioria dos usuários marca **só um lado**.
 
-Exibição proposta:
-- **Tipo**: derivado de `profiles.tipo_usuario` sincronizado pelo trigger
-- **Escopo**: vindo de `user_acessos.lojas` / `user_acessos.setores`
-- **Acesso total**: vindo exclusivamente de `user_acessos.acesso_total`
-- badges e textos devem parar de inferir “admin” por caminhos paralelos
+### 2. Travas visuais (sem bloquear o save)
 
-### 4. Revisar a criação de usuário
-A edge function `admin-create-user` hoje ainda cria `user_roles` direto.
+- Quando o usuário começa a marcar lojas, exibir um aviso amarelo discreto na seção Setores: "Você já definiu escopo por loja — normalmente não precisa marcar setores aqui."
+- Quando marca setores, espelhar o aviso no bloco Lojas.
+- Os campos continuam editáveis (para casos híbridos raros como diretor regional), só ganham o aviso.
 
-Ajuste proposto:
-- ela cria o usuário e o profile base
-- a configuração de permissões passa a ser feita pela gravação em `user_acessos`
-- o trigger continua sincronizando `profiles.tipo_usuario` e `user_roles`
+### 3. Esconder o setor legado "Loja" da lista de setores selecionáveis
 
-Assim o fluxo de criação fica igual ao de edição, sem bifurcação.
+O setor `277307f3-…` chamado **"Loja"** não deve aparecer no checklist de Setores do editor. Ele é semanticamente o mesmo que "marcar uma loja em Lojas" e só causa erro humano. Filtro client-side por nome (`nome ILIKE 'loja'`) na query `editor-setores-disponiveis`.
 
-### 5. Corrigir a autorização do admin moderno
-As RLS de escrita em gestão de usuários devem reconhecer o modelo novo:
-- usuários com `acesso_total = true`, ou
-- módulo `configuracoes` com poder de agir
+(Não removemos do banco — outras partes do sistema podem ainda referenciar. Só sumimos da UI de edição.)
 
-Isso vale para as tabelas do fluxo:
-- `user_acessos`
-- `profiles`
-- `user_roles`
+### 4. Resumo no chip da aba
 
-Sem isso, o frontend pode estar correto e ainda assim o banco barrar com “row-level security policy”.
+O badge da aba Escopo hoje diz `"1 loja(s) / 0 setor(es)"`. Trocar para algo legível:
+- só lojas marcadas → `"Loja: DINIZ SUPER SHOPPING"`
+- só setores → `"Setor: Financeiro"`
+- ambos → `"1 loja + 1 setor"` (com warning)
+- nenhum (e não é acesso total) → `"⚠ sem escopo"` em vermelho.
 
-### 6. Simplificar o conceito para o administrador
-Na UX do editor:
-- parar de expor conceitos duplicados como se fossem independentes
-- deixar claro que:
-  - “Acesso total” controla tudo
-  - módulos definem permissões finas
-  - lojas/setores definem escopo
-  - tipo do usuário é consequência da configuração, não uma segunda configuração paralela
+### 5. Ajuste no atalho "Operador de loja" em `src/lib/acessos.ts`
 
-Ou seja: o admin não deveria precisar pensar em “tipo + role + acesso + escopo” como quatro coisas diferentes quando na prática são duas camadas: identidade e permissão.
-
-## Resultado esperado
-
-Depois dessa unificação:
-- ao abrir Fran Borges, a tela mostrará um estado único e coerente
-- não haverá mais “Admin” por um lado e campos vazios por outro
-- salvar usuário deixará de depender de duas estruturas competindo entre si
-- o administrador passa a entender a lógica sem ambiguidade
-
-## Detalhes técnicos
-
-Arquivos mais impactados:
-- `src/components/configuracoes/GestaoUsuariosCard.tsx`
-- `src/components/configuracoes/AcessosEditorDialog.tsx`
-- `src/hooks/useAuth.tsx`
-- `supabase/functions/admin-create-user/index.ts`
-- nova migration para ajustar RLS e, se necessário, funções auxiliares de permissão
-
-Direção técnica:
-```text
-profiles         = identidade
-user_acessos     = fonte única de permissões/escopo
-user_roles       = espelho automático para compatibilidade
+O perfil rápido `operador_loja` hoje só preenche módulos. Acrescentar no `apply()`:
+```ts
+setores: [],          // explicitamente vazio
+todosSetores: false,
 ```
+para que quem clica no atalho já saia com setores zerados e não fique tentado a marcar "Loja".
 
-Critérios de validação:
-- abrir usuário sem contradições visuais
-- editar e salvar sem erro de RLS
-- criar novo usuário pelo mesmo modelo
-- admin e operador com Configurações autorizado funcionam
-- usuário sem permissão continua bloqueado
+Idem para `supervisor` (setores vazio) e `setor` (lojas vazio).
+
+## O que NÃO muda
+
+- Schema do banco: nada. `user_acessos.lojas` e `user_acessos.setores` continuam como hoje, o trigger `sync_from_user_acessos` continua derivando `user_roles` corretamente quando os dois campos são usados de forma mutuamente exclusiva.
+- Edge function `admin-create-user`: nenhuma alteração.
+- Para o usuário diniz.super especificamente: o reparo pontual (limpar `setores`, deixar só `lojas=['DINIZ SUPER SHOPPING']`) continua sendo necessário e segue na próxima etapa, em paralelo a este plano de UI.
+
+## Arquivos afetados
+
+- `src/components/configuracoes/AcessosEditorDialog.tsx` — aba Escopo, query de setores, badge da aba.
+- `src/lib/acessos.ts` — `apply()` dos perfis rápidos `operador_loja`, `supervisor`, `setor`.
+
+## Critério de aceite
+
+- Ao abrir um operador de loja, fica óbvio na tela que ele deve marcar **só** a loja, sem nada em Setores.
+- O setor "Loja" não aparece mais no checklist.
+- Atalho "Operador de loja" já deixa Setores vazio.
+- Salvar sem nenhum escopo e sem acesso total mostra aviso visível antes do submit.
