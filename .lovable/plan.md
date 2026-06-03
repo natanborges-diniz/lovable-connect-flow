@@ -1,63 +1,67 @@
-## Objetivo
+# Plano
 
-Tornar inequívoco no editor de usuário que **Lojas** e **Setores** são dois escopos alternativos (não complementares), e impedir que alguém marque o setor legado "Loja" pensando que precisa duplicar a vinculação.
+## O que aconteceu
+O vazamento veio de uma combinação de duas regras:
 
-## O que muda na tela `AcessosEditorDialog.tsx` (aba Escopo)
+1. O usuário `diniz.super` está hoje no banco como `profiles.tipo_usuario = 'colaborador'` e com `user_roles.role = 'operador'`, mesmo tendo `user_acessos.lojas = ['DINIZ SUPER SHOPPING']` e `user_acessos.setores = []`.
+2. O resolvedor de notificações humanas do CRM envia `atendimento_inbound` para todos os `tipo_usuario IN ('admin', 'colaborador')` quando a conversa está sem atendente atribuído e sem fallback de setor.
 
-### 1. Cabeçalho explicativo no topo da aba Escopo
+Resultado: como a conta da loja ficou classificada como `colaborador`, ela entrou no fallback corporativo e recebeu notificação de conversa do CRM.
 
-Adicionar um bloco informativo curto antes dos dois campos:
+## Evidência já confirmada
+Estado atual de `diniz.super` no banco:
+- `tipo_usuario = colaborador`
+- `ua_lojas = ['DINIZ SUPER SHOPPING']`
+- `ua_setores = []`
+- `user_roles = [{ role: 'operador' }]`
 
-> **Escolha um dos dois escopos abaixo, não os dois.**  
-> • **Lojas** — se a pessoa trabalha *para* uma unidade física (operador de loja, supervisor regional). Ela vai receber agendamentos, demandas e push da(s) loja(s) marcada(s).  
-> • **Setores** — se a pessoa trabalha *para* uma fila interna por especialidade (Financeiro, TI, Comercial, Estoque). Ela vai receber as demandas roteadas para esse setor.  
-> A maioria dos usuários marca **só um lado**.
+Ou seja: o dado de escopo da loja está certo, mas a derivação do tipo/role ficou errada para esse usuário.
 
-### 2. Travas visuais (sem bloquear o save)
+## Causa raiz
+A regra antiga de `sync_from_user_acessos()` classificava como `colaborador` quando o usuário tinha módulos web ativos (`lojas`, `mensagens`, `tarefas`, `demandas`), mesmo sendo operador de loja.
 
-- Quando o usuário começa a marcar lojas, exibir um aviso amarelo discreto na seção Setores: "Você já definiu escopo por loja — normalmente não precisa marcar setores aqui."
-- Quando marca setores, espelhar o aviso no bloco Lojas.
-- Os campos continuam editáveis (para casos híbridos raros como diretor regional), só ganham o aviso.
+Isso bate exatamente com o perfil rápido atual de “Operador de loja”, que marca esses módulos web junto com a loja. Então:
+- o escopo dizia “loja”
+- mas a derivação antiga dizia “colaborador”
 
-### 3. Esconder o setor legado "Loja" da lista de setores selecionáveis
+Depois disso, o fallback de `resolver_destinatarios_atendimento()` puxou esse usuário por ser `colaborador`.
 
-O setor `277307f3-…` chamado **"Loja"** não deve aparecer no checklist de Setores do editor. Ele é semanticamente o mesmo que "marcar uma loja em Lojas" e só causa erro humano. Filtro client-side por nome (`nome ILIKE 'loja'`) na query `editor-setores-disponiveis`.
+## Correção proposta
+### 1) Reaplicar a sincronização dos acessos
+Criar uma migration de correção para recalcular todos os usuários com a regra nova já desejada:
+- se `user_acessos.lojas` tiver valor e `user_acessos.setores` estiver vazio, o usuário vira `tipo_usuario = 'loja'`
+- nesse mesmo caso, `user_roles` deve virar `role = 'setor_usuario'` com `loja_nome` preenchido
 
-(Não removemos do banco — outras partes do sistema podem ainda referenciar. Só sumimos da UI de edição.)
+Isso corrige `diniz.super` e todas as demais lojas que ficaram presas como `colaborador`.
 
-### 4. Resumo no chip da aba
+### 2) Blindar o resolvedor de notificações do CRM
+Ajustar `resolver_destinatarios_atendimento()` para nunca incluir usuários de loja nos destinatários de `atendimento_inbound` humano:
+- no fallback por setor, excluir `profiles.tipo_usuario = 'loja'`
+- no fallback final, manter somente operadores corporativos (`admin`, `colaborador`)
 
-O badge da aba Escopo hoje diz `"1 loja(s) / 0 setor(es)"`. Trocar para algo legível:
-- só lojas marcadas → `"Loja: DINIZ SUPER SHOPPING"`
-- só setores → `"Setor: Financeiro"`
-- ambos → `"1 loja + 1 setor"` (com warning)
-- nenhum (e não é acesso total) → `"⚠ sem escopo"` em vermelho.
+Assim, mesmo se algum dado voltar a ficar inconsistente no futuro, a notificação humana do CRM não vaza para contas de loja.
 
-### 5. Ajuste no atalho "Operador de loja" em `src/lib/acessos.ts`
+### 3) Limpar ruído já criado
+Remover notificações antigas do tipo `atendimento_inbound` que foram gravadas para usuários de loja, para o Messenger parar de exibir esse histórico indevido.
 
-O perfil rápido `operador_loja` hoje só preenche módulos. Acrescentar no `apply()`:
-```ts
-setores: [],          // explicitamente vazio
-todosSetores: false,
-```
-para que quem clica no atalho já saia com setores zerados e não fique tentado a marcar "Loja".
+## Impacto esperado
+Depois da correção:
+- contas de loja continuam recebendo o que é delas (agendamentos, demandas, fluxo da loja)
+- deixam de receber notificações humanas do CRM
+- o perfil “Operador de loja” pode continuar usando módulos web operacionais sem ser tratado como corporativo
 
-Idem para `supervisor` (setores vazio) e `setor` (lojas vazio).
+## Detalhes técnicos
+- Fonte do problema: derivação de `profiles.tipo_usuario` e `user_roles` a partir de `user_acessos`
+- Funções envolvidas:
+  - `public.sync_from_user_acessos()`
+  - `public.resolver_destinatarios_atendimento(uuid)`
+- Ajuste de dados necessário:
+  - backfill para recalcular `profiles` e `user_roles`
+  - limpeza de `notificacoes.tipo = 'atendimento_inbound'` para `profiles.tipo_usuario = 'loja'`
 
-## O que NÃO muda
-
-- Schema do banco: nada. `user_acessos.lojas` e `user_acessos.setores` continuam como hoje, o trigger `sync_from_user_acessos` continua derivando `user_roles` corretamente quando os dois campos são usados de forma mutuamente exclusiva.
-- Edge function `admin-create-user`: nenhuma alteração.
-- Para o usuário diniz.super especificamente: o reparo pontual (limpar `setores`, deixar só `lojas=['DINIZ SUPER SHOPPING']`) continua sendo necessário e segue na próxima etapa, em paralelo a este plano de UI.
-
-## Arquivos afetados
-
-- `src/components/configuracoes/AcessosEditorDialog.tsx` — aba Escopo, query de setores, badge da aba.
-- `src/lib/acessos.ts` — `apply()` dos perfis rápidos `operador_loja`, `supervisor`, `setor`.
-
-## Critério de aceite
-
-- Ao abrir um operador de loja, fica óbvio na tela que ele deve marcar **só** a loja, sem nada em Setores.
-- O setor "Loja" não aparece mais no checklist.
-- Atalho "Operador de loja" já deixa Setores vazio.
-- Salvar sem nenhum escopo e sem acesso total mostra aviso visível antes do submit.
+## Validação após implementar
+Vou validar com consultas no banco que:
+- `diniz.super` passa para `tipo_usuario = 'loja'`
+- `user_roles` desse usuário passa a conter `loja_nome = 'DINIZ SUPER SHOPPING'`
+- não existem mais `atendimento_inbound` para usuários `tipo_usuario = 'loja'`
+- novas notificações humanas do CRM deixam de cair em contas de loja
