@@ -517,7 +517,10 @@ serve(async (req) => {
           const selectedFluxo = selectedOption.fluxo;
           const fluxoDef = await loadFluxo(selectedFluxo);
 
-          if (!fluxoDef) {
+          if (selectedFluxo === "cashback") {
+            resposta = CASHBACK_MENU_MSG;
+            updateSessao = { fluxo: "cashback", etapa: "escolher", dados: {} };
+          } else if (!fluxoDef) {
             const rootOpcoes = await loadMenuOpcoes(tipoBot, currentParentId);
             resposta = `⚠️ Fluxo "${selectedFluxo}" não encontrado. ${buildMenuDynamic(nomeLoja, rootOpcoes, !!currentParentId)}`;
           } else if (fluxoDef.acao_final?.tipo === "fluxo_especial" && fluxoDef.acao_final?.fluxo_especial === "confirmar_comparecimento") {
@@ -598,6 +601,147 @@ serve(async (req) => {
       } else {
         resposta = "⚠️ Etapa não reconhecida. Digite *menu* para recomeçar.";
         updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+      }
+    }
+    // ─── Fluxo Cashback ───
+    else if (fluxo === "cashback") {
+      if (etapa === "escolher") {
+        if (texto === "0") {
+          const rootOpcoes = await loadMenuOpcoes(tipoBot, null);
+          resposta = buildMenuDynamic(nomeLoja, rootOpcoes, false);
+          updateSessao = { fluxo: "menu_principal", etapa: "inicio", dados: {} };
+        } else if (texto === "1") {
+          resposta = "Informe o CPF ou telefone do cliente:";
+          updateSessao = { etapa: "consultar_id" };
+        } else if (texto === "2") {
+          resposta = "Informe o CPF ou telefone do cliente:";
+          updateSessao = { etapa: "registrar_id" };
+        } else {
+          resposta = CASHBACK_MENU_MSG;
+        }
+      } else if (etapa === "consultar_id") {
+        if (texto === "0") {
+          resposta = CASHBACK_MENU_MSG;
+          updateSessao = { etapa: "escolher", dados: {} };
+        } else {
+          const contato = await resolverContato(supabase, texto);
+          if (!contato) {
+            resposta = "❌ Cliente não encontrado. Tente com outro CPF/telefone ou *0* para voltar.";
+          } else {
+            const { data: saldo } = await supabase.rpc("cashback_consultar_saldo", { p_contato_id: contato.id });
+            const dispBRL = fmtBRL((saldo as any)?.saldo_disponivel ?? 0);
+            const totBRL  = fmtBRL((saldo as any)?.saldo_total ?? 0);
+            const libDia  = fmtDia((saldo as any)?.proximo_liberado_em);
+            resposta =
+              `💳 *Cashback — ${contato.nome}*\n\n` +
+              `Saldo disponível: *${dispBRL}*\n` +
+              `Saldo total (pendente): ${totBRL}\n` +
+              (libDia ? `Próxima liberação: ${libDia}\n` : "") +
+              `\nDigite *menu* para nova operação.`;
+            updateSessao = { fluxo: "cashback", etapa: "escolher", dados: {} };
+          }
+        }
+      } else if (etapa === "registrar_id") {
+        if (texto === "0") {
+          resposta = CASHBACK_MENU_MSG;
+          updateSessao = { etapa: "escolher", dados: {} };
+        } else {
+          const contato = await resolverContato(supabase, texto);
+          if (!contato) {
+            resposta = "❌ Cliente não encontrado. Tente com outro CPF/telefone ou *0* para voltar.";
+          } else {
+            resposta = "Número da venda:";
+            updateSessao = { etapa: "registrar_venda", dados: { contato_id: contato.id, contato_nome: contato.nome } };
+          }
+        }
+      } else if (etapa === "registrar_venda") {
+        if (texto === "0") {
+          resposta = "Informe o CPF ou telefone do cliente:";
+          updateSessao = { etapa: "registrar_id", dados: {} };
+        } else {
+          resposta = "Valor total da venda (ex: 250,90):";
+          updateSessao = { etapa: "registrar_valor", dados: { ...dados, numero_venda: texto } };
+        }
+      } else if (etapa === "registrar_valor") {
+        if (texto === "0") {
+          resposta = "Número da venda:";
+          updateSessao = { etapa: "registrar_venda" };
+        } else {
+          const valorRaw = parseFloat(texto.replace(",", "."));
+          if (isNaN(valorRaw) || valorRaw <= 0) {
+            resposta = "⚠️ Valor inválido. Digite o valor total (ex: 250,90):";
+          } else {
+            const contatoId = (dados as any).contato_id;
+            const { data: saldo } = await supabase.rpc("cashback_consultar_saldo", { p_contato_id: contatoId });
+            const saldoDisp = (saldo as any)?.saldo_disponivel ?? 0;
+            resposta =
+              `Saldo cashback disponível: *${fmtBRL(saldoDisp)}*\n\n` +
+              `Deseja aplicar desconto nesta venda?\n` +
+              `1️⃣ Sim (descontar ${fmtBRL(Math.min(saldoDisp, valorRaw))})\n` +
+              `2️⃣ Não usar cashback\n\n_*0* para voltar_`;
+            updateSessao = {
+              etapa: "registrar_uso",
+              dados: { ...dados, valor_total: valorRaw, saldo_disponivel: saldoDisp },
+            };
+          }
+        }
+      } else if (etapa === "registrar_uso") {
+        if (texto === "0") {
+          resposta = "Valor total da venda (ex: 250,90):";
+          updateSessao = { etapa: "registrar_valor" };
+        } else if (texto === "1" || texto === "2") {
+          const d = dados as any;
+          const valorDesconto = texto === "1" ? Math.min(d.saldo_disponivel ?? 0, d.valor_total ?? 0) : 0;
+          const cashbackPreview = (d.valor_total ?? 0) * 0.15;
+          resposta =
+            `📋 *Confirmar registro*\n\n` +
+            `Cliente: *${d.contato_nome}*\n` +
+            `Venda: ${d.numero_venda}\n` +
+            `Valor: ${fmtBRL(d.valor_total ?? 0)}\n` +
+            `Desconto cashback: ${fmtBRL(valorDesconto)}\n` +
+            `Cashback a gerar (~15%): ${fmtBRL(cashbackPreview)}\n\n` +
+            `1️⃣ Confirmar\n2️⃣ Cancelar`;
+          updateSessao = {
+            etapa: "registrar_confirmar",
+            dados: { ...dados, valor_desconto: valorDesconto },
+          };
+        } else {
+          resposta = "⚠️ Digite *1* para aplicar desconto, *2* para não usar, ou *0* para voltar.";
+        }
+      } else if (etapa === "registrar_confirmar") {
+        if (texto === "2" || texto === "0") {
+          resposta = CASHBACK_MENU_MSG;
+          updateSessao = { etapa: "escolher", dados: {} };
+        } else if (texto === "1") {
+          const d = dados as any;
+          const { data: resgate, error: errResgate } = await supabase.rpc("cashback_registrar_resgate", {
+            p_contato_id:     d.contato_id,
+            p_numero_venda:   d.numero_venda,
+            p_valor_total:    d.valor_total,
+            p_valor_desconto: d.valor_desconto ?? 0,
+            p_cod_empresa:    loja_info?.cod_empresa ?? null,
+            p_cpf:            null,
+          });
+          if (errResgate) {
+            console.error("[cashback] cashback_registrar_resgate error:", errResgate);
+            resposta = `❌ Erro ao registrar cashback: ${errResgate.message}\n\nDigite *menu* para recomeçar.`;
+          } else {
+            const creditoBRL = fmtBRL((resgate as any)?.credito_gerado ?? 0);
+            const libDia    = fmtDia((resgate as any)?.liberado_em);
+            resposta =
+              `✅ *Cashback registrado!*\n\n` +
+              `Cliente: *${d.contato_nome}*\n` +
+              `Crédito gerado: *${creditoBRL}*\n` +
+              (libDia ? `Disponível a partir de: ${libDia}\n` : "") +
+              `\nDigite *menu* para nova operação.`;
+          }
+          updateSessao = { fluxo: "cashback", etapa: "escolher", dados: {} };
+        } else {
+          resposta = "Responda *1* para confirmar ou *2* para cancelar.";
+        }
+      } else {
+        resposta = CASHBACK_MENU_MSG;
+        updateSessao = { etapa: "escolher", dados: {} };
       }
     }
     // ─── Store selection for non-loja bots ───
@@ -930,6 +1074,56 @@ async function handleConfirmarComparecimento(supabase: any, loja_info: any, dado
     resposta: lista,
     update: { fluxo: "confirmar_comparecimento", etapa: "selecionar", dados: { agendamentos: agMap } },
   };
+}
+
+// ─── Cashback helpers ───
+
+const CASHBACK_MENU_MSG =
+  "💳 *Cashback*\n\n1️⃣ Consultar saldo\n2️⃣ Registrar venda / usar cashback\n\n0️⃣ Voltar";
+
+function fmtBRL(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function fmtDia(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("T")[0].split("-");
+  return `${d}/${m}/${y}`;
+}
+
+async function resolverContato(
+  supabase: ReturnType<typeof createClient>,
+  input: string,
+): Promise<{ id: string; nome: string } | null> {
+  const digits = input.replace(/\D/g, "");
+  const phones = new Set([digits]);
+  if (digits.startsWith("55") && digits.length > 11) phones.add(digits.slice(2));
+  else if (digits.length <= 11) phones.add("55" + digits);
+
+  for (const phone of phones) {
+    const { data } = await supabase
+      .from("contatos")
+      .select("id, nome")
+      .eq("telefone", phone)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  if (digits.length >= 11) {
+    const { data } = await supabase
+      .from("contatos")
+      .select("id, nome")
+      .eq("documento", digits)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  const { data } = await supabase
+    .from("contatos")
+    .select("id, nome")
+    .eq("metadata->>cpf", digits)
+    .maybeSingle();
+  return data ?? null;
 }
 
 // ─── Unified solicitação creator ───
