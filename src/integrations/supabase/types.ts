@@ -3100,6 +3100,10 @@ export type Database = {
         Args: { _ref: string; _tipo: string }
         Returns: string[]
       }
+      cashback_confirmar_credito: {
+        Args: { _inscricao_id: string; _valor_validado: number }
+        Returns: Json
+      }
       cashback_consultar_saldo: { Args: { _contato_id: string }; Returns: Json }
       cashback_registrar_resgate: {
         Args: {
