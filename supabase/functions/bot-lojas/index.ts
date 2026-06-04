@@ -686,12 +686,10 @@ serve(async (req) => {
           }
         }
       } else if (etapa === "registrar_uso") {
-        if (texto === "0") {
-          resposta = "Valor total da venda (ex: 250,90):";
-          updateSessao = { etapa: "registrar_valor" };
-        } else if (texto === "1" || texto === "2") {
+        if (texto === "0" || texto === "1" || texto === "2") {
           const d = dados as any;
-          const valorDesconto = texto === "1" ? Math.min(d.saldo_disponivel ?? 0, d.valor_total ?? 0) : 0;
+          const valorDesconto =
+            texto === "1" ? Math.min(d.saldo_disponivel ?? 0, d.valor_total ?? 0) : 0;
           const cashbackPreview = (d.valor_total ?? 0) * 0.15;
           resposta =
             `📋 *Confirmar registro*\n\n` +
@@ -706,36 +704,63 @@ serve(async (req) => {
             dados: { ...dados, valor_desconto: valorDesconto },
           };
         } else {
-          resposta = "⚠️ Digite *1* para aplicar desconto, *2* para não usar, ou *0* para voltar.";
+          resposta = "⚠️ Digite *1* para aplicar desconto, *2* para não usar, ou *0* para nenhum desconto.";
         }
       } else if (etapa === "registrar_confirmar") {
-        if (texto === "2" || texto === "0") {
+        if (texto === "2") {
           resposta = CASHBACK_MENU_MSG;
           updateSessao = { etapa: "escolher", dados: {} };
         } else if (texto === "1") {
           const d = dados as any;
           const { data: resgate, error: errResgate } = await supabase.rpc("cashback_registrar_resgate", {
-            p_contato_id:     d.contato_id,
-            p_numero_venda:   d.numero_venda,
-            p_valor_total:    d.valor_total,
-            p_valor_desconto: d.valor_desconto ?? 0,
-            p_cod_empresa:    loja_info?.cod_empresa ?? null,
-            p_cpf:            null,
+            _contato_id:      d.contato_id,
+            _numero_venda:    d.numero_venda,
+            _valor_informado: d.valor_total,
+            _cashback_usado:  d.valor_desconto ?? 0,
+            _cod_empresa:     loja_info?.cod_empresa ?? null,
           });
           if (errResgate) {
             console.error("[cashback] cashback_registrar_resgate error:", errResgate);
-            resposta = `❌ Erro ao registrar cashback: ${errResgate.message}\n\nDigite *menu* para recomeçar.`;
+            const msg = errResgate.message ?? "";
+            if (msg.includes("trava_3x")) {
+              const usado    = d.valor_desconto ?? 0;
+              const minVenda = usado * 3;
+              resposta =
+                `⚠️ A compra precisa ser de pelo menos 3× o cashback usado.\n` +
+                `Pra usar ${fmtBRL(usado)}, a venda tem que ser de no mínimo ${fmtBRL(minVenda)}.\n\n` +
+                `Quanto de cashback usar? (0 p/ nenhum)\n` +
+                `1️⃣ Usar ${fmtBRL(Math.min(d.saldo_disponivel ?? 0, d.valor_total ?? 0))}\n` +
+                `2️⃣ Não usar cashback`;
+              updateSessao = { etapa: "registrar_uso" };
+            } else if (msg.includes("saldo_insuficiente")) {
+              const disp = d.saldo_disponivel ?? 0;
+              resposta =
+                `⚠️ O cliente só tem ${fmtBRL(disp)} disponível agora. Quanto usar?\n\n` +
+                `1️⃣ Usar ${fmtBRL(disp)}\n` +
+                `2️⃣ Não usar cashback`;
+              updateSessao = { etapa: "registrar_uso" };
+            } else if (msg.includes("valor_invalido")) {
+              resposta = "⚠️ Valor inválido. Qual o valor total da venda? (R$)";
+              updateSessao = {
+                etapa: "registrar_valor",
+                dados: { contato_id: d.contato_id, contato_nome: d.contato_nome, numero_venda: d.numero_venda },
+              };
+            } else {
+              resposta = `❌ Erro ao registrar cashback: ${msg}\n\nDigite *menu* para recomeçar.`;
+              updateSessao = { fluxo: "cashback", etapa: "escolher", dados: {} };
+            }
           } else {
-            const creditoBRL = fmtBRL((resgate as any)?.credito_gerado ?? 0);
-            const libDia    = fmtDia((resgate as any)?.liberado_em);
+            const cred      = (resgate as any)?.credito_gerado;
+            const creditoBRL = fmtBRL(cred?.valor ?? 0);
+            const libDia    = fmtDia(cred?.liberado_em);
             resposta =
               `✅ *Cashback registrado!*\n\n` +
               `Cliente: *${d.contato_nome}*\n` +
               `Crédito gerado: *${creditoBRL}*\n` +
               (libDia ? `Disponível a partir de: ${libDia}\n` : "") +
               `\nDigite *menu* para nova operação.`;
+            updateSessao = { fluxo: "cashback", etapa: "escolher", dados: {} };
           }
-          updateSessao = { fluxo: "cashback", etapa: "escolher", dados: {} };
         } else {
           resposta = "Responda *1* para confirmar ou *2* para cancelar.";
         }
