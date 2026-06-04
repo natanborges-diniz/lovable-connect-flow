@@ -3111,6 +3111,112 @@ serve(async (req) => {
 
     const atendimentoMeta = (atendimento.metadata as Record<string, any>) || {};
 
+    // ── PRE-LLM ROUTER: Cashback Diniz (BLOCOs 2 e 3) ──
+    // Posicionado antes de routeExpectedTypedReply para preemptar o fast-path de saudação.
+    // BLOCO 3: return fora do try — se sendInteractive falhar, ainda retorna cashback (nunca cai no fast-path).
+    {
+      const _cbMeta   = (atendimento.metadata as Record<string, any>) || {};
+      const _fmtBRL   = (n: number) => Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const _fmtDia   = (iso: string | null | undefined): string | null => {
+        if (!iso) return null;
+        const d = String(iso).slice(0, 10);
+        return d.slice(8) + "/" + d.slice(5, 7);
+      };
+
+      // BLOCO 2 — resposta à confirmação pendente (roda antes do gatilho)
+      if (_cbMeta.expected_reply === "cashback_confirmacao" && !isHibrido) {
+        try {
+          const _cbBtn = incomingButtonId ?? "";
+          const _cbN   = norm(currentMsg);
+          const isSim  = _cbBtn === "cashback_ver"
+            || /\b(sim|quero|pode|claro|aham|isso|manda|ver|ok|s|ss)\b/.test(_cbN)
+            || /[👍✅]/.test(currentMsg);
+          const isNao  = _cbBtn === "cashback_nao"
+            || /\b(nao|agora nao|depois|deixa)\b/.test(_cbN);
+
+          if (isSim) {
+            await supabase.from("atendimentos")
+              .update({ metadata: { ..._cbMeta, expected_reply: null } })
+              .eq("id", atendimento_id);
+
+            const { data: _cbS } = await supabase.rpc("cashback_consultar_saldo", { _contato_id: contatoId });
+            const usavel   = Number((_cbS as any)?.saldo_usavel       ?? 0);
+            const carencia = Number((_cbS as any)?.saldo_em_carencia  ?? 0);
+            const proxVenc = _fmtDia((_cbS as any)?.proximo_vencimento);
+            const proxLib  = _fmtDia((_cbS as any)?.proxima_liberacao);
+
+            let _cbMsg: string;
+            if (usavel > 0 && carencia === 0) {
+              _cbMsg = `Seu cashback de R$ ${_fmtBRL(usavel)} já está liberado pra usar` +
+                (proxVenc ? `, e vale até ${proxVenc} 💚` : " 💚");
+            } else if (usavel === 0 && carencia > 0) {
+              _cbMsg = `Seu cashback de R$ ${_fmtBRL(carencia)} já está garantido e libera dia ${proxLib} 💚`;
+            } else if (usavel > 0 && carencia > 0) {
+              _cbMsg = `Você tem R$ ${_fmtBRL(usavel)} liberado pra usar e mais R$ ${_fmtBRL(carencia)} que libera dia ${proxLib} 💚`;
+            } else {
+              _cbMsg = "Você ainda não tem cashback acumulado — mas a cada compra você ganha 15% de volta pra usar na próxima 💚";
+            }
+
+            if (usavel > 0 || carencia > 0) {
+              await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+                type: "button",
+                texto: _cbMsg,
+                botoes: [{ id: "cashback_como_funciona", titulo: "💳 Como funciona?" }],
+              });
+            } else {
+              await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, _cbMsg);
+            }
+
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId,
+              tipo: "cashback_consulta_cliente",
+              descricao: "Cliente confirmou e consultou saldo cashback",
+              referencia_tipo: "atendimento",
+              referencia_id: atendimento_id,
+            });
+            return jsonResponse({ status: "ok", tools_used: ["router_cashback_saldo"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
+
+          } else if (isNao) {
+            await supabase.from("atendimentos")
+              .update({ metadata: { ..._cbMeta, expected_reply: null } })
+              .eq("id", atendimento_id);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, "Tranquilo! Qualquer coisa é só chamar 💚");
+            return jsonResponse({ status: "ok", tools_used: ["router_cashback_nao"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
+
+          } else {
+            // Mudou de assunto: limpa expected_reply e segue fluxo normal (NÃO dá return)
+            await supabase.from("atendimentos")
+              .update({ metadata: { ..._cbMeta, expected_reply: null } })
+              .eq("id", atendimento_id);
+          }
+        } catch (e) {
+          console.warn("[ROUTER-CASHBACK-B2] falhou:", (e as Error)?.message);
+        }
+      }
+
+      // BLOCO 3 — gatilho cashdiniz (passo 1)
+      if (matchesCashdiniz(currentMsg) && !isHibrido && _cbMeta.expected_reply !== "cashback_confirmacao") {
+        const _cbPrimeiroNome = contatoNomeAtual.split(/\s+/)[0] || "tudo bem";
+        try {
+          await supabase.from("atendimentos")
+            .update({ metadata: { ..._cbMeta, expected_reply: "cashback_confirmacao", cashback_prompt_at: new Date().toISOString() } })
+            .eq("id", atendimento_id);
+          await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+            type: "button",
+            texto: `Oi ${_cbPrimeiroNome}! 💚 Vi que você quer falar do seu cashback Diniz. Posso te mostrar como está?`,
+            botoes: [
+              { id: "cashback_ver",  titulo: "💳 Ver meu saldo" },
+              { id: "cashback_nao",  titulo: "Agora não"        },
+            ],
+          });
+        } catch (e) {
+          console.warn("[ROUTER-CASHBACK-B3] falhou:", (e as Error)?.message);
+        }
+        // Return fora do try: cashdiniz detectado → sempre retorna cashback, nunca cai no fast-path.
+        return jsonResponse({ status: "ok", tools_used: ["router_cashback_gatilho"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
+      }
+    }
+
     // ── PRE-LLM ROUTER: cliente digitou a resposta esperada para uma etapa determinística ──
     try {
       const handledTypedReply = await routeExpectedTypedReply({
@@ -3219,103 +3325,6 @@ serve(async (req) => {
       }
     } catch (e) {
       console.warn("[ROUTER-INVERSAO] preskip falhou:", (e as Error)?.message);
-    }
-
-    // ── PRE-LLM ROUTER: Cashback Diniz (BLOCOs 2 e 3) ──
-    try {
-      const _cbMeta   = (atendimento.metadata as Record<string, any>) || {};
-      const _fmtBRL   = (n: number) => Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const _fmtDia   = (iso: string | null | undefined): string | null => {
-        if (!iso) return null;
-        const d = String(iso).slice(0, 10);
-        return d.slice(8) + "/" + d.slice(5, 7);
-      };
-
-      // BLOCO 2 — resposta à confirmação pendente (roda antes do gatilho)
-      if (_cbMeta.expected_reply === "cashback_confirmacao" && !isHibrido) {
-        const _cbBtn = incomingButtonId ?? "";
-        const _cbN   = norm(currentMsg);
-        const isSim  = _cbBtn === "cashback_ver"
-          || /\b(sim|quero|pode|claro|aham|isso|manda|ver|ok|s|ss)\b/.test(_cbN)
-          || /[👍✅]/.test(currentMsg);
-        const isNao  = _cbBtn === "cashback_nao"
-          || /\b(nao|agora nao|depois|deixa)\b/.test(_cbN);
-
-        if (isSim) {
-          await supabase.from("atendimentos")
-            .update({ metadata: { ..._cbMeta, expected_reply: null } })
-            .eq("id", atendimento_id);
-
-          const { data: _cbS } = await supabase.rpc("cashback_consultar_saldo", { _contato_id: contatoId });
-          const usavel   = Number((_cbS as any)?.saldo_usavel       ?? 0);
-          const carencia = Number((_cbS as any)?.saldo_em_carencia  ?? 0);
-          const proxVenc = _fmtDia((_cbS as any)?.proximo_vencimento);
-          const proxLib  = _fmtDia((_cbS as any)?.proxima_liberacao);
-
-          let _cbMsg: string;
-          if (usavel > 0 && carencia === 0) {
-            _cbMsg = `Seu cashback de R$ ${_fmtBRL(usavel)} já está liberado pra usar` +
-              (proxVenc ? `, e vale até ${proxVenc} 💚` : " 💚");
-          } else if (usavel === 0 && carencia > 0) {
-            _cbMsg = `Seu cashback de R$ ${_fmtBRL(carencia)} já está garantido e libera dia ${proxLib} 💚`;
-          } else if (usavel > 0 && carencia > 0) {
-            _cbMsg = `Você tem R$ ${_fmtBRL(usavel)} liberado pra usar e mais R$ ${_fmtBRL(carencia)} que libera dia ${proxLib} 💚`;
-          } else {
-            _cbMsg = "Você ainda não tem cashback acumulado — mas a cada compra você ganha 15% de volta pra usar na próxima 💚";
-          }
-
-          if (usavel > 0 || carencia > 0) {
-            await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
-              type: "button",
-              texto: _cbMsg,
-              botoes: [{ id: "cashback_como_funciona", titulo: "💳 Como funciona?" }],
-            });
-          } else {
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, _cbMsg);
-          }
-
-          await supabase.from("eventos_crm").insert({
-            contato_id: contatoId,
-            tipo: "cashback_consulta_cliente",
-            descricao: "Cliente confirmou e consultou saldo cashback",
-            referencia_tipo: "atendimento",
-            referencia_id: atendimento_id,
-          });
-          return jsonResponse({ status: "ok", tools_used: ["router_cashback_saldo"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
-
-        } else if (isNao) {
-          await supabase.from("atendimentos")
-            .update({ metadata: { ..._cbMeta, expected_reply: null } })
-            .eq("id", atendimento_id);
-          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, "Tranquilo! Qualquer coisa é só chamar 💚");
-          return jsonResponse({ status: "ok", tools_used: ["router_cashback_nao"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
-
-        } else {
-          // Mudou de assunto: limpa expected_reply e segue fluxo normal (NÃO dá return)
-          await supabase.from("atendimentos")
-            .update({ metadata: { ..._cbMeta, expected_reply: null } })
-            .eq("id", atendimento_id);
-        }
-      }
-
-      // BLOCO 3 — gatilho cashdiniz (passo 1)
-      if (matchesCashdiniz(currentMsg) && !isHibrido && _cbMeta.expected_reply !== "cashback_confirmacao") {
-        const _cbPrimeiroNome = contatoNomeAtual.split(/\s+/)[0] || "tudo bem";
-        await supabase.from("atendimentos")
-          .update({ metadata: { ..._cbMeta, expected_reply: "cashback_confirmacao", cashback_prompt_at: new Date().toISOString() } })
-          .eq("id", atendimento_id);
-        await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
-          type: "button",
-          texto: `Oi ${_cbPrimeiroNome}! 💚 Vi que você quer falar do seu cashback Diniz. Posso te mostrar como está?`,
-          botoes: [
-            { id: "cashback_ver",  titulo: "💳 Ver meu saldo" },
-            { id: "cashback_nao",  titulo: "Agora não"        },
-          ],
-        });
-        return jsonResponse({ status: "ok", tools_used: ["router_cashback_gatilho"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
-      }
-    } catch (e) {
-      console.warn("[ROUTER-CASHBACK] falhou:", (e as Error)?.message);
     }
 
     // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA + AUTO-PERSISTÊNCIA DE NOME ──
