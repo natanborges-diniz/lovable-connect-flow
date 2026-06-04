@@ -735,6 +735,11 @@ function norm(t: string): string {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
+// Reconhece "cashback / cashdiniz" e variantes tolerantes (pr\u00e9-LLM)
+function matchesCashdiniz(texto: string): boolean {
+  return /\bca[xs]h?\s?(back|dini[sz])\b/.test(norm(texto));
+}
+
 function hasSupportedImageSignature(bytes: Uint8Array): boolean {
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true; // jpeg
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return true; // png
@@ -3214,6 +3219,103 @@ serve(async (req) => {
       }
     } catch (e) {
       console.warn("[ROUTER-INVERSAO] preskip falhou:", (e as Error)?.message);
+    }
+
+    // ── PRE-LLM ROUTER: Cashback Diniz (BLOCOs 2 e 3) ──
+    try {
+      const _cbMeta   = (atendimento.metadata as Record<string, any>) || {};
+      const _fmtBRL   = (n: number) => Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const _fmtDia   = (iso: string | null | undefined): string | null => {
+        if (!iso) return null;
+        const d = String(iso).slice(0, 10);
+        return d.slice(8) + "/" + d.slice(5, 7);
+      };
+
+      // BLOCO 2 — resposta à confirmação pendente (roda antes do gatilho)
+      if (_cbMeta.expected_reply === "cashback_confirmacao" && !isHibrido) {
+        const _cbBtn = incomingButtonId ?? "";
+        const _cbN   = norm(currentMsg);
+        const isSim  = _cbBtn === "cashback_ver"
+          || /\b(sim|quero|pode|claro|aham|isso|manda|ver|ok|s|ss)\b/.test(_cbN)
+          || /[👍✅]/.test(currentMsg);
+        const isNao  = _cbBtn === "cashback_nao"
+          || /\b(nao|agora nao|depois|deixa)\b/.test(_cbN);
+
+        if (isSim) {
+          await supabase.from("atendimentos")
+            .update({ metadata: { ..._cbMeta, expected_reply: null } })
+            .eq("id", atendimento_id);
+
+          const { data: _cbS } = await supabase.rpc("cashback_consultar_saldo", { _contato_id: contatoId });
+          const usavel   = Number((_cbS as any)?.saldo_usavel       ?? 0);
+          const carencia = Number((_cbS as any)?.saldo_em_carencia  ?? 0);
+          const proxVenc = _fmtDia((_cbS as any)?.proximo_vencimento);
+          const proxLib  = _fmtDia((_cbS as any)?.proxima_liberacao);
+
+          let _cbMsg: string;
+          if (usavel > 0 && carencia === 0) {
+            _cbMsg = `Seu cashback de R$ ${_fmtBRL(usavel)} já está liberado pra usar` +
+              (proxVenc ? `, e vale até ${proxVenc} 💚` : " 💚");
+          } else if (usavel === 0 && carencia > 0) {
+            _cbMsg = `Seu cashback de R$ ${_fmtBRL(carencia)} já está garantido e libera dia ${proxLib} 💚`;
+          } else if (usavel > 0 && carencia > 0) {
+            _cbMsg = `Você tem R$ ${_fmtBRL(usavel)} liberado pra usar e mais R$ ${_fmtBRL(carencia)} que libera dia ${proxLib} 💚`;
+          } else {
+            _cbMsg = "Você ainda não tem cashback acumulado — mas a cada compra você ganha 15% de volta pra usar na próxima 💚";
+          }
+
+          if (usavel > 0 || carencia > 0) {
+            await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+              type: "button",
+              texto: _cbMsg,
+              botoes: [{ id: "cashback_como_funciona", titulo: "💳 Como funciona?" }],
+            });
+          } else {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, _cbMsg);
+          }
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "cashback_consulta_cliente",
+            descricao: "Cliente confirmou e consultou saldo cashback",
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          return jsonResponse({ status: "ok", tools_used: ["router_cashback_saldo"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
+
+        } else if (isNao) {
+          await supabase.from("atendimentos")
+            .update({ metadata: { ..._cbMeta, expected_reply: null } })
+            .eq("id", atendimento_id);
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, "Tranquilo! Qualquer coisa é só chamar 💚");
+          return jsonResponse({ status: "ok", tools_used: ["router_cashback_nao"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
+
+        } else {
+          // Mudou de assunto: limpa expected_reply e segue fluxo normal (NÃO dá return)
+          await supabase.from("atendimentos")
+            .update({ metadata: { ..._cbMeta, expected_reply: null } })
+            .eq("id", atendimento_id);
+        }
+      }
+
+      // BLOCO 3 — gatilho cashdiniz (passo 1)
+      if (matchesCashdiniz(currentMsg) && !isHibrido && _cbMeta.expected_reply !== "cashback_confirmacao") {
+        const _cbPrimeiroNome = contatoNomeAtual.split(/\s+/)[0] || "tudo bem";
+        await supabase.from("atendimentos")
+          .update({ metadata: { ..._cbMeta, expected_reply: "cashback_confirmacao", cashback_prompt_at: new Date().toISOString() } })
+          .eq("id", atendimento_id);
+        await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+          type: "button",
+          texto: `Oi ${_cbPrimeiroNome}! 💚 Vi que você quer falar do seu cashback Diniz. Posso te mostrar como está?`,
+          botoes: [
+            { id: "cashback_ver",  titulo: "💳 Ver meu saldo" },
+            { id: "cashback_nao",  titulo: "Agora não"        },
+          ],
+        });
+        return jsonResponse({ status: "ok", tools_used: ["router_cashback_gatilho"], intencao: "cashback", precisa_humano: false, modo: atendimento.modo });
+      }
+    } catch (e) {
+      console.warn("[ROUTER-CASHBACK] falhou:", (e as Error)?.message);
     }
 
     // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA + AUTO-PERSISTÊNCIA DE NOME ──
@@ -8953,6 +9055,14 @@ async function routeButtonClick(args: {
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Compreendo! Obrigado pelo retorno. Quando precisar, estaremos por aqui 😊");
       return true;
   }
+
+  // BLOCO 1 — "Como funciona o cashback?" (stateless, não precisa de dados do contato)
+  if (buttonId === "cashback_como_funciona") {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId,
+      "A cada compra você ganha 15% de volta. Pra usar, é só numa nova compra de pelo menos 3× o valor do cashback, e ele vale por 90 dias 💚");
+    return true;
+  }
+
   return false;
 }
 
