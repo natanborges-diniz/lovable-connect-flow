@@ -672,24 +672,28 @@ serve(async (req) => {
             resposta = "⚠️ Valor inválido. Digite o valor total (ex: 250,90):";
           } else {
             const contatoId = (dados as any).contato_id;
-            const { data: saldo } = await supabase.rpc("cashback_consultar_saldo", { p_contato_id: contatoId });
-            const saldoDisp = (saldo as any)?.saldo_disponivel ?? 0;
+            const [{ data: saldo }, { data: cfgRow }] = await Promise.all([
+              supabase.rpc("cashback_consultar_saldo", { p_contato_id: contatoId }),
+              supabase.from("cashback_config").select("fator_resgate").order("atualizado_em", { ascending: false }).limit(1).maybeSingle(),
+            ]);
+            const saldoDisp    = (saldo as any)?.saldo_disponivel ?? 0;
+            const fatorResgate = (cfgRow as any)?.fator_resgate ?? 3;
+            const maxDesconto  = Math.floor(Math.min(saldoDisp, valorRaw / fatorResgate) * 100) / 100;
             resposta =
               `Saldo cashback disponível: *${fmtBRL(saldoDisp)}*\n\n` +
               `Deseja aplicar desconto nesta venda?\n` +
-              `1️⃣ Sim (descontar ${fmtBRL(Math.min(saldoDisp, valorRaw))})\n` +
-              `2️⃣ Não usar cashback\n\n_*0* para voltar_`;
+              `1️⃣ Sim (descontar ${fmtBRL(maxDesconto)})\n` +
+              `2️⃣ Não usar cashback\n\n_*0* para nenhum desconto_`;
             updateSessao = {
               etapa: "registrar_uso",
-              dados: { ...dados, valor_total: valorRaw, saldo_disponivel: saldoDisp },
+              dados: { ...dados, valor_total: valorRaw, saldo_disponivel: saldoDisp, max_desconto: maxDesconto },
             };
           }
         }
       } else if (etapa === "registrar_uso") {
         if (texto === "0" || texto === "1" || texto === "2") {
           const d = dados as any;
-          const valorDesconto =
-            texto === "1" ? Math.min(d.saldo_disponivel ?? 0, d.valor_total ?? 0) : 0;
+          const valorDesconto = texto === "1" ? (d.max_desconto ?? 0) : 0;
           const cashbackPreview = (d.valor_total ?? 0) * 0.15;
           resposta =
             `📋 *Confirmar registro*\n\n` +
@@ -729,14 +733,14 @@ serve(async (req) => {
                 `⚠️ A compra precisa ser de pelo menos 3× o cashback usado.\n` +
                 `Pra usar ${fmtBRL(usado)}, a venda tem que ser de no mínimo ${fmtBRL(minVenda)}.\n\n` +
                 `Quanto de cashback usar? (0 p/ nenhum)\n` +
-                `1️⃣ Usar ${fmtBRL(Math.min(d.saldo_disponivel ?? 0, d.valor_total ?? 0))}\n` +
+                `1️⃣ Usar ${fmtBRL(d.max_desconto ?? 0)}\n` +
                 `2️⃣ Não usar cashback`;
               updateSessao = { etapa: "registrar_uso" };
             } else if (msg.includes("saldo_insuficiente")) {
               const disp = d.saldo_disponivel ?? 0;
               resposta =
                 `⚠️ O cliente só tem ${fmtBRL(disp)} disponível agora. Quanto usar?\n\n` +
-                `1️⃣ Usar ${fmtBRL(disp)}\n` +
+                `1️⃣ Usar ${fmtBRL(d.max_desconto ?? disp)}\n` +
                 `2️⃣ Não usar cashback`;
               updateSessao = { etapa: "registrar_uso" };
             } else if (msg.includes("valor_invalido")) {
