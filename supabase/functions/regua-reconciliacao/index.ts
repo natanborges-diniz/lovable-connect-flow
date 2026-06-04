@@ -172,6 +172,20 @@ async function processarInscricao(
   const valorValidado = venda.valor_total ?? null;
   const valorStatus   = computeValorStatus(insc.valor_total_informado, valorValidado);
 
+  // 2.5 Confirmação de cashback no D+1
+  // Só chama quando temos valor_validado (ok ou divergente). 'sem_referencia' deixa
+  // o crédito provisório sem tocar — a RPC é idempotente com o mesmo valor_validado.
+  if (valorStatus !== "sem_referencia" && valorValidado !== null) {
+    const { data: cbResult, error: cbErr } = await supabase.rpc(
+      "cashback_confirmar_credito",
+      { _inscricao_id: insc.id, _valor_validado: valorValidado },
+    );
+    console.info(
+      `[RECONCIL] cashback_confirmar_credito insc=${insc.id} valor_status=${valorStatus}:`,
+      cbErr ? cbErr.message : cbResult,
+    );
+  }
+
   // 3. Verificação de CPF (log divergência, sem sobrescrever)
   const cpfBridgeRaw = os.find((o) => o.cpf)?.cpf ?? null;
   const cpfBridge    = normalizarCpf(cpfBridgeRaw);
@@ -300,6 +314,13 @@ serve(async (req) => {
       const valorStatus   = computeValorStatus(insc.valor_total_informado, valorValidado);
       const ancora        = computeAncora(os);
 
+      const cashbackWouldCall = valorStatus !== "sem_referencia" && valorValidado !== null;
+      if (cashbackWouldCall) {
+        console.info(
+          `[RECONCIL] dry_run — CHAMARIA cashback_confirmar_credito insc=${insc.id} valor_validado=${valorValidado}`,
+        );
+      }
+
       detalhes.push({
         id:                    insc.id,
         numero_venda:          insc.numero_venda,
@@ -315,6 +336,7 @@ serve(async (req) => {
           is_garantia:    o.is_garantia,
         })),
         ancora,
+        cashback_would_call: cashbackWouldCall,
         resultado: ancora ? "anchorada" : "aguardando",
       });
     }
