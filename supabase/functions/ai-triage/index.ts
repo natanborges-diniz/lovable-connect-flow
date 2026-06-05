@@ -279,6 +279,10 @@ async function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): P
 }
 
 function fmtRxLine(eye: any, name: string): { line: string; missing: string[] } {
+  // Visão monocular: olho sem lente. Não é "faltando dado" — é declaração do cliente.
+  if (eye?.blind === true) {
+    return { line: `👁️ *${name}*: _visão monocular (sem lente)_`, missing: [] };
+  }
   const esf = (eye?.sphere ?? null);
   const cil = (eye?.cylinder ?? null);
   const eixo = (eye?.axis ?? null);
@@ -295,6 +299,42 @@ function fmtRxLine(eye: any, name: string): { line: string; missing: string[] } 
   if (addVal != null) parts.push(`ADD +${addVal}`);
   const body = parts.length ? parts.join(" ") : "(não consegui ler)";
   return { line: `👁️ *${name}*: ${body}`, missing };
+}
+
+// ── Detecção de visão monocular ──
+// Retorna { blind_eye: 'od' | 'oe' | null, signal: boolean }.
+// `signal=true` significa que o cliente mencionou monocular/sem visão; quando blind_eye=null
+// não conseguimos identificar o lado e precisamos perguntar.
+function detectMonocular(text: string): { blind_eye: "od" | "oe" | null; signal: boolean } | null {
+  if (!text) return null;
+  const t = String(text).toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // remove acentos
+  const hasMono = /\bmonocul[ao]r?\b|\bvisao monocul/i.test(t)
+    || /\b(uma|so uma|so 1|apenas uma|so um)\s+(lente|olho)\b/.test(t)
+    || /\b(olho|vista)\s+(direito|esquerdo|od|oe)\s+(sem\s+visao|nao\s+(enxergo|vejo|ve)|cego|prote(se|tico)|tampado|coberto|fechado)\b/.test(t)
+    || /\b(s[oó]\s+enxergo|enxergo\s+s[oó]|s[oó]\s+vejo|vejo\s+s[oó]|enxergo\s+apenas|vejo\s+apenas)\s+(do|com|pelo|no|com o|do olho)?\s*(olho\s+)?(direito|esquerdo|od|oe)\b/.test(t)
+    || /\bperdi\s+(a\s+visao|visao)\s+(do|no)\s+(olho\s+)?(direito|esquerdo|od|oe)\b/.test(t);
+  if (!hasMono) return null;
+
+  // Determina qual olho ENXERGA → o outro é o blind.
+  // 1) "sem visão / não enxergo OX" → blind = OX
+  const blindMatch = t.match(/\b(olho|vista)\s+(direito|esquerdo|od|oe)\s+(sem\s+visao|nao\s+(enxergo|vejo|ve)|cego|prote|tampado|coberto|fechado)\b/)
+    || t.match(/\b(direito|esquerdo|od|oe)\s+(sem\s+visao|cego)\b/)
+    || t.match(/\bperdi\s+(?:a\s+)?visao\s+(?:do|no)\s+(?:olho\s+)?(direito|esquerdo|od|oe)\b/);
+  if (blindMatch) {
+    const side = blindMatch[2] || blindMatch[1];
+    if (/direito|^od$/.test(side)) return { blind_eye: "od", signal: true };
+    if (/esquerdo|^oe$/.test(side)) return { blind_eye: "oe", signal: true };
+  }
+  // 2) "só enxergo do OX" → blind = oposto
+  const seeingMatch = t.match(/\b(s[oó]\s+enxergo|enxergo\s+s[oó]|s[oó]\s+vejo|vejo\s+s[oó]|enxergo\s+apenas|vejo\s+apenas)\s+(?:do|com|pelo|no|com\s+o|do\s+olho)?\s*(?:olho\s+)?(direito|esquerdo|od|oe)\b/);
+  if (seeingMatch) {
+    const side = seeingMatch[2];
+    if (/direito|^od$/.test(side)) return { blind_eye: "oe", signal: true };
+    if (/esquerdo|^oe$/.test(side)) return { blind_eye: "od", signal: true };
+  }
+  // Sem lado identificável.
+  return { blind_eye: null, signal: true };
 }
 
 function buildMsgConfirmarReceita(rx: any, isCorrection: boolean): string {
