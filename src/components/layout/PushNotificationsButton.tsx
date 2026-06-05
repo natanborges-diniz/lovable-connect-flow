@@ -34,9 +34,11 @@ type Status =
 
 export function PushNotificationsButton() {
   const { toast } = useToast();
+  const { profile } = useAuth();
   const [status, setStatus] = useState<Status>("loading");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const contaInativa = profile && profile.ativo === false;
 
   async function refresh() {
     if (isInIframe()) return setStatus("iframe");
