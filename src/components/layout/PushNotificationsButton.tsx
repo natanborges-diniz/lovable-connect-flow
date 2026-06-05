@@ -116,6 +116,14 @@ export function PushNotificationsButton() {
             </p>
           </div>
 
+          {contaInativa && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+              <strong>Sua conta está inativa.</strong> Mesmo com push ativado, você não recebe
+              notificações de atendimento. Peça a um administrador para reativar seu acesso em
+              Configurações → Gestão de Usuários.
+            </div>
+          )}
+
           {status === "loading" && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" /> Verificando…
