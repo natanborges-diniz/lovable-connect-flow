@@ -8223,6 +8223,17 @@ async function runConsultarLentesEstimativa(
     }
   }
 
+  // Visão monocular: divide preços por 2 (1 lente).
+  let isMonoEst = false;
+  if (contatoId) {
+    try {
+      const { data: cMono } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+      const cMetaMono = (cMono?.metadata as Record<string, any>) || {};
+      isMonoEst = !!cMetaMono?.receita_monocular;
+    } catch (_) { /* noop */ }
+  }
+  const priceOf = (l: any) => isMonoEst ? Number(l.price_brl) / 2 : Number(l.price_brl);
+
   const fmt = (v: number) =>
     `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -8232,12 +8243,13 @@ async function runConsultarLentesEstimativa(
     : `${sphereCandidates[0]}`;
 
   let msg = `Com o que você passou (${sphereDisp}${typeof args?.cylinder_hint === "number" ? ` + cil ${args.cylinder_hint}` : " com astigmatismo"}), uma estimativa de ${tipoLabel} com antirreflexo:\n\n`;
-  msg += `🟢 *Econômica* — ${economy.brand} ${economy.family}: a partir de ${fmt(Number(economy.price_brl))}\n`;
+  if (isMonoEst) msg += `_💡 Valores já considerando apenas 1 lente (visão monocular)._\n\n`;
+  msg += `🟢 *Econômica* — ${economy.brand} ${economy.family}: a partir de ${fmt(priceOf(economy))}\n`;
   if (mid && mid !== economy && mid !== premium) {
-    msg += `🟡 *Intermediária* — ${mid.brand} ${mid.family}: a partir de ${fmt(Number(mid.price_brl))}\n`;
+    msg += `🟡 *Intermediária* — ${mid.brand} ${mid.family}: a partir de ${fmt(priceOf(mid))}\n`;
   }
   if (premium !== economy) {
-    msg += `💎 *Premium* — ${premium.brand} ${premium.family}: a partir de ${fmt(Number(premium.price_brl))}\n`;
+    msg += `💎 *Premium* — ${premium.brand} ${premium.family}: a partir de ${fmt(priceOf(premium))}\n`;
   }
   msg += `\n_Valores estimativos — com a ${rxType === "progressive" ? "ADIÇÃO e o cilindro/eixo" : "receita"} exatos eu fecho o orçamento certinho._\n\n`;
   if (args?.rx_ja_confirmada) {
