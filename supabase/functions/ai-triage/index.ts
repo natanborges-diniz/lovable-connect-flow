@@ -9442,7 +9442,11 @@ async function runConsultarLentesContato(
   const fmtBRL = (n: number) =>
     Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  let msg = `🔎 *Lentes de contato compatíveis com sua receita:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"}${od.axis ? `x${od.axis}` : ""} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${oe.axis ? `x${oe.axis}` : ""}\n`;
+  const isMonoLC = rxMeta?.monocular === true;
+  const odDispLC = od?.blind ? "—" : `${od.sphere ?? "—"}/${od.cylinder ?? "—"}${od.axis ? `x${od.axis}` : ""}`;
+  const oeDispLC = oe?.blind ? "—" : `${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${oe.axis ? `x${oe.axis}` : ""}`;
+  let msg = `🔎 *Lentes de contato compatíveis com sua receita:*\nOD ${odDispLC} | OE ${oeDispLC}\n`;
+  if (isMonoLC) msg += `\n_💡 Plano calculado para 1 olho apenas (visão monocular)._\n`;
   if (needsToric) {
     msg += `\n⚠️ *Lente TÓRICA* (astigmatismo ≥ 0.75) — sob encomenda. Pagamento confirma o pedido.\n`;
   }
@@ -9456,7 +9460,15 @@ async function runConsultarLentesContato(
     const preco = fmtBRL(Number(l.price_brl));
 
     let plano = "";
-    if (l.descarte === "diario") {
+    if (isMonoLC) {
+      if (l.descarte === "diario") {
+        plano = `Plano (1 olho): 1 caixa dura ~${unidades} dias.`;
+      } else {
+        const meses1cx = Math.round((unidades * dias) / 30);
+        const meses4cx = Math.round((4 * unidades * dias) / 30);
+        plano = `Plano (1 olho): 1 caixa dura ~${meses1cx} meses. 🎁 *Combo 3+1*: 4 caixas = ~${meses4cx} meses.`;
+      }
+    } else if (l.descarte === "diario") {
       const dias_cx_um_olho = unidades;
       if (mesmaDioptria) {
         plano = `Plano: 1 caixa atende os 2 olhos por ~${Math.floor(dias_cx_um_olho / 2)} dias.`;
