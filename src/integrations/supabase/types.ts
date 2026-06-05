@@ -1889,6 +1889,50 @@ export type Database = {
           },
         ]
       }
+      notificacao_preferencias: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          escopo: string
+          id: string
+          setor_ids: string[]
+          tipo: string
+          updated_at: string
+          updated_by: string | null
+          user_id: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          escopo?: string
+          id?: string
+          setor_ids?: string[]
+          tipo: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          escopo?: string
+          id?: string
+          setor_ids?: string[]
+          tipo?: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notificacao_preferencias_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notificacoes: {
         Row: {
           created_at: string
@@ -3267,10 +3311,12 @@ export type Database = {
         Args: { _setor_id: string }
         Returns: string
       }
-      resolver_destinatarios_atendimento: {
-        Args: { _atendimento_id: string }
-        Returns: string[]
-      }
+      resolver_destinatarios_atendimento:
+        | { Args: { _atendimento_id: string }; Returns: string[] }
+        | {
+            Args: { _atendimento_id: string; _tipo: string }
+            Returns: string[]
+          }
       resolver_destinatarios_loja: {
         Args: { _loja_nome: string }
         Returns: {

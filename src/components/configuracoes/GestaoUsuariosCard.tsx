@@ -17,11 +17,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Users, Plus, Loader2, KeyRound, Wand2, Link2, Pencil, ShieldCheck } from "lucide-react";
+import { Users, Plus, Loader2, KeyRound, Wand2, Link2, Pencil, ShieldCheck, Bell } from "lucide-react";
 import { toast } from "sonner";
 import { DefaultUsuarioConfig } from "./DefaultUsuarioConfig";
 import { BulkUserProvisioningWizard } from "./BulkUserProvisioningWizard";
 import { AcessosEditorDialog } from "./AcessosEditorDialog";
+import { NotificacaoPrefsDialog } from "./NotificacaoPrefsDialog";
 
 // URL pública do app InFoco Messenger
 const INFOCO_MESSENGER_URL = "https://desktop-joy-app.lovable.app";
@@ -97,6 +98,7 @@ export function GestaoUsuariosCard() {
   const [createOpen, setCreateOpen] = useState(false);
   const [bulkWizardOpen, setBulkWizardOpen] = useState(false);
   const [magicLinkDialog, setMagicLinkDialog] = useState<{ url: string; email: string } | null>(null);
+  const [notifTarget, setNotifTarget] = useState<{ id: string; nome: string } | null>(null);
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["admin-profiles"] });
@@ -375,6 +377,21 @@ export function GestaoUsuariosCard() {
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 w-7 p-0"
+                                onClick={() => setNotifTarget({ id: p.id, nome: p.nome })}
+                              >
+                                <Bell className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="text-xs">
+                              Preferências de notificação
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
                                 onClick={() => {
                                   setResetTarget({ id: p.id, nome: p.nome });
                                   setNewPassword("");
@@ -416,6 +433,15 @@ export function GestaoUsuariosCard() {
           if (url) setMagicLinkDialog({ url, email: "novo usuário" });
         }}
       />
+
+      <NotificacaoPrefsDialog
+        userId={notifTarget?.id ?? null}
+        userName={notifTarget?.nome}
+        open={!!notifTarget}
+        onOpenChange={(o) => !o && setNotifTarget(null)}
+      />
+
+
 
       <Dialog open={!!resetTarget} onOpenChange={(o) => !o && setResetTarget(null)}>
         <DialogContent className="sm:max-w-md">

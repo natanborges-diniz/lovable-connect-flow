@@ -22,6 +22,7 @@ import { WhatsAppTemplatesCard } from "@/components/configuracoes/WhatsAppTempla
 import { SaudeNumeroWhatsAppCard } from "@/components/configuracoes/SaudeNumeroWhatsAppCard";
 import { AutomacoesCard } from "@/components/configuracoes/AutomacoesCard";
 import { GestaoUsuariosCard } from "@/components/configuracoes/GestaoUsuariosCard";
+import { FallbackNotificacoesCard } from "@/components/configuracoes/FallbackNotificacoesCard";
 import { CronJobsCard } from "@/components/configuracoes/CronJobsCard";
 import { RecuperacaoCard } from "@/components/configuracoes/RecuperacaoCard";
 import { FeriadosCard } from "@/components/configuracoes/FeriadosCard";
@@ -122,6 +123,7 @@ export default function Configuracoes() {
         <TabsContent value="usuarios">
           <div className="grid gap-6">
             <GestaoUsuariosCard />
+            <FallbackNotificacoesCard />
           </div>
         </TabsContent>
 
