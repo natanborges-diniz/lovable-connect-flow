@@ -279,6 +279,10 @@ async function matchLojaEscolhida(text: string, cidade: string, lojas: any[]): P
 }
 
 function fmtRxLine(eye: any, name: string): { line: string; missing: string[] } {
+  // Visão monocular: olho sem lente. Não é "faltando dado" — é declaração do cliente.
+  if (eye?.blind === true) {
+    return { line: `👁️ *${name}*: _visão monocular (sem lente)_`, missing: [] };
+  }
   const esf = (eye?.sphere ?? null);
   const cil = (eye?.cylinder ?? null);
   const eixo = (eye?.axis ?? null);
@@ -295,6 +299,42 @@ function fmtRxLine(eye: any, name: string): { line: string; missing: string[] } 
   if (addVal != null) parts.push(`ADD +${addVal}`);
   const body = parts.length ? parts.join(" ") : "(não consegui ler)";
   return { line: `👁️ *${name}*: ${body}`, missing };
+}
+
+// ── Detecção de visão monocular ──
+// Retorna { blind_eye: 'od' | 'oe' | null, signal: boolean }.
+// `signal=true` significa que o cliente mencionou monocular/sem visão; quando blind_eye=null
+// não conseguimos identificar o lado e precisamos perguntar.
+function detectMonocular(text: string): { blind_eye: "od" | "oe" | null; signal: boolean } | null {
+  if (!text) return null;
+  const t = String(text).toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // remove acentos
+  const hasMono = /\bmonocul[ao]r?\b|\bvisao monocul/i.test(t)
+    || /\b(uma|so uma|so 1|apenas uma|so um)\s+(lente|olho)\b/.test(t)
+    || /\b(olho|vista)\s+(direito|esquerdo|od|oe)\s+(sem\s+visao|nao\s+(enxergo|vejo|ve)|cego|prote(se|tico)|tampado|coberto|fechado)\b/.test(t)
+    || /\b(s[oó]\s+enxergo|enxergo\s+s[oó]|s[oó]\s+vejo|vejo\s+s[oó]|enxergo\s+apenas|vejo\s+apenas)\s+(do|com|pelo|no|com o|do olho)?\s*(olho\s+)?(direito|esquerdo|od|oe)\b/.test(t)
+    || /\bperdi\s+(a\s+visao|visao)\s+(do|no)\s+(olho\s+)?(direito|esquerdo|od|oe)\b/.test(t);
+  if (!hasMono) return null;
+
+  // Determina qual olho ENXERGA → o outro é o blind.
+  // 1) "sem visão / não enxergo OX" → blind = OX
+  const blindMatch = t.match(/\b(olho|vista)\s+(direito|esquerdo|od|oe)\s+(sem\s+visao|nao\s+(enxergo|vejo|ve)|cego|prote|tampado|coberto|fechado)\b/)
+    || t.match(/\b(direito|esquerdo|od|oe)\s+(sem\s+visao|cego)\b/)
+    || t.match(/\bperdi\s+(?:a\s+)?visao\s+(?:do|no)\s+(?:olho\s+)?(direito|esquerdo|od|oe)\b/);
+  if (blindMatch) {
+    const side = blindMatch[2] || blindMatch[1];
+    if (/direito|^od$/.test(side)) return { blind_eye: "od", signal: true };
+    if (/esquerdo|^oe$/.test(side)) return { blind_eye: "oe", signal: true };
+  }
+  // 2) "só enxergo do OX" → blind = oposto
+  const seeingMatch = t.match(/\b(s[oó]\s+enxergo|enxergo\s+s[oó]|s[oó]\s+vejo|vejo\s+s[oó]|enxergo\s+apenas|vejo\s+apenas)\s+(?:do|com|pelo|no|com\s+o|do\s+olho)?\s*(?:olho\s+)?(direito|esquerdo|od|oe)\b/);
+  if (seeingMatch) {
+    const side = seeingMatch[2];
+    if (/direito|^od$/.test(side)) return { blind_eye: "oe", signal: true };
+    if (/esquerdo|^oe$/.test(side)) return { blind_eye: "od", signal: true };
+  }
+  // Sem lado identificável.
+  return { blind_eye: null, signal: true };
 }
 
 function buildMsgConfirmarReceita(rx: any, isCorrection: boolean): string {
@@ -4958,6 +4998,78 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // nas últimas 2 outbound para que o parser entre em modo "first".
     let correctionApplied = false;
     let correctionIsFirst = false;
+
+    // ── DETECÇÃO DE VISÃO MONOCULAR ──
+    // Cliente declara "olho direito sem visão" / "tenho visão monocular" / "só enxergo do OE".
+    // Marca a receita corrente como monocular (price/2 nas cotações; olho cego = { blind: true })
+    // e responde com a confirmação determinística antes de ir pro LLM.
+    try {
+      const mono = detectMonocular(lastInboundText);
+      if (mono?.signal) {
+        const alreadyMono = !!contatoMeta?.receita_monocular || (receitas.length > 0 && receitas[receitas.length - 1]?.monocular === true);
+        if (mono.blind_eye) {
+          const eyeUsed = mono.blind_eye === "od" ? "oe" : "od";
+          // Atualiza receita pendente (ou cria uma vazia se nada existir ainda).
+          let idx = receitas.length - 1;
+          if (idx < 0) {
+            receitas.push({ eyes: { od: {}, oe: {} }, rx_type: "unknown", confidence: 0.5, data_leitura: new Date().toISOString(), source: "monocular_declared", label: "monocular" });
+            idx = 0;
+          }
+          const rxMono = receitas[idx] || { eyes: { od: {}, oe: {} } };
+          rxMono.eyes = rxMono.eyes || { od: {}, oe: {} };
+          rxMono.eyes[mono.blind_eye] = { blind: true };
+          rxMono.eyes[eyeUsed] = rxMono.eyes[eyeUsed] || {};
+          rxMono.monocular = true;
+          rxMono.eye_used = eyeUsed;
+          rxMono.confirmed_by_client_at = null;
+          receitas[idx] = rxMono;
+
+          const newMeta: any = {
+            ...contatoMeta,
+            receitas,
+            receita_monocular: { eye_used: eyeUsed, blind_eye: mono.blind_eye, set_at: new Date().toISOString(), source: "client_typed" },
+            receita_confirmacao: {
+              pending: true,
+              rx_index: idx,
+              rx_label: rxMono.label || `receita_${idx + 1}`,
+              asked_at: new Date().toISOString(),
+              reason: "monocular_confirm",
+            },
+          };
+          await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contatoId);
+          contatoMeta = newMeta;
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_monocular_detectada",
+            descricao: `Cliente declarou visão monocular — olho cego: ${mono.blind_eye.toUpperCase()}, olho ativo: ${eyeUsed.toUpperCase()}`,
+            metadata: { blind_eye: mono.blind_eye, eye_used: eyeUsed, raw: lastInboundText.slice(0, 200), already_mono: alreadyMono },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+
+          // Anti-loop: se as últimas 2 outbounds já são a mesma confirmação, não reenvia.
+          const confMsg = buildMsgConfirmarReceita(rxMono, false);
+          const recentNorm = (recentOutbound || []).slice(-2).map(norm);
+          const jaPediu = recentNorm.some((p) => p && p.includes(norm("visão monocular (sem lente)")) && p.includes(norm("Está certinho?")));
+          if (!jaPediu) {
+            await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, confMsg);
+          }
+          return jsonResponse({ status: "ok", tools_used: ["receita_monocular_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+        } else if (!alreadyMono) {
+          // Ambíguo — pergunta UMA vez qual olho tem visão.
+          const askMsg = "Entendi! Pra te passar o orçamento certinho, qual olho você usa pra enxergar — *direito (OD)* ou *esquerdo (OE)*?";
+          const recentNorm = (recentOutbound || []).slice(-3).map(norm);
+          const jaPerguntou = recentNorm.some((p) => p && p.includes(norm("qual olho você usa")));
+          if (!jaPerguntou) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, askMsg);
+            return jsonResponse({ status: "ok", tools_used: ["receita_monocular_pergunta_lado"], intencao: "receita_oftalmologica", precisa_humano: false, modo: atendimento.modo });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[MONOCULAR] detection failed", e);
+    }
+
     const correction = detectPrescriptionCorrection(lastInboundText);
     if (correction) {
       const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
@@ -7508,7 +7620,11 @@ async function runConsultarLentes(
   if (args?.filtro_photo === true) query = query.eq("photo", true);
   if (args?.preferencia_marca) query = query.ilike("brand", `%${args.preferencia_marca}%`);
 
-  const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(60);
+  const { data: lensesRaw } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(60);
+
+  // ── Visão monocular: 1 lente apenas → divide preços por 2 ──
+  const isMonocular = rxMeta?.monocular === true;
+  const lenses = (lensesRaw || []).map((l: any) => isMonocular ? { ...l, price_brl: Number(l.price_brl) / 2 } : l);
 
   if (!lenses || lenses.length === 0) {
     const filtrosAplicados = {
@@ -7708,7 +7824,10 @@ async function runConsultarLentes(
   const formatLens = (l: any, label: string) =>
     `${label}: *${brandDisplay(l.brand)} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
 
-  let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
+  const odDisp = od?.blind ? "—" : `${od.sphere ?? "—"}/${od.cylinder ?? "—"}`;
+  const oeDisp = oe?.blind ? "—" : `${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}`;
+  const monoNota = isMonocular ? `_💡 Valores já considerando apenas 1 lente (visão monocular — ${rxMeta.eye_used === "od" ? "OD" : "OE"})._\n\n` : "";
+  let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${odDisp} | OE ${oeDisp}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n${monoNota}`;
 
   // ---- Diversificação por marca + 3 faixas ----
   // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar)
@@ -8104,6 +8223,17 @@ async function runConsultarLentesEstimativa(
     }
   }
 
+  // Visão monocular: divide preços por 2 (1 lente).
+  let isMonoEst = false;
+  if (contatoId) {
+    try {
+      const { data: cMono } = await supabase.from("contatos").select("metadata").eq("id", contatoId).single();
+      const cMetaMono = (cMono?.metadata as Record<string, any>) || {};
+      isMonoEst = !!cMetaMono?.receita_monocular;
+    } catch (_) { /* noop */ }
+  }
+  const priceOf = (l: any) => isMonoEst ? Number(l.price_brl) / 2 : Number(l.price_brl);
+
   const fmt = (v: number) =>
     `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -8113,12 +8243,13 @@ async function runConsultarLentesEstimativa(
     : `${sphereCandidates[0]}`;
 
   let msg = `Com o que você passou (${sphereDisp}${typeof args?.cylinder_hint === "number" ? ` + cil ${args.cylinder_hint}` : " com astigmatismo"}), uma estimativa de ${tipoLabel} com antirreflexo:\n\n`;
-  msg += `🟢 *Econômica* — ${economy.brand} ${economy.family}: a partir de ${fmt(Number(economy.price_brl))}\n`;
+  if (isMonoEst) msg += `_💡 Valores já considerando apenas 1 lente (visão monocular)._\n\n`;
+  msg += `🟢 *Econômica* — ${economy.brand} ${economy.family}: a partir de ${fmt(priceOf(economy))}\n`;
   if (mid && mid !== economy && mid !== premium) {
-    msg += `🟡 *Intermediária* — ${mid.brand} ${mid.family}: a partir de ${fmt(Number(mid.price_brl))}\n`;
+    msg += `🟡 *Intermediária* — ${mid.brand} ${mid.family}: a partir de ${fmt(priceOf(mid))}\n`;
   }
   if (premium !== economy) {
-    msg += `💎 *Premium* — ${premium.brand} ${premium.family}: a partir de ${fmt(Number(premium.price_brl))}\n`;
+    msg += `💎 *Premium* — ${premium.brand} ${premium.family}: a partir de ${fmt(priceOf(premium))}\n`;
   }
   msg += `\n_Valores estimativos — com a ${rxType === "progressive" ? "ADIÇÃO e o cilindro/eixo" : "receita"} exatos eu fecho o orçamento certinho._\n\n`;
   if (args?.rx_ja_confirmada) {
@@ -9311,7 +9442,11 @@ async function runConsultarLentesContato(
   const fmtBRL = (n: number) =>
     Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  let msg = `🔎 *Lentes de contato compatíveis com sua receita:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"}${od.axis ? `x${od.axis}` : ""} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${oe.axis ? `x${oe.axis}` : ""}\n`;
+  const isMonoLC = rxMeta?.monocular === true;
+  const odDispLC = od?.blind ? "—" : `${od.sphere ?? "—"}/${od.cylinder ?? "—"}${od.axis ? `x${od.axis}` : ""}`;
+  const oeDispLC = oe?.blind ? "—" : `${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${oe.axis ? `x${oe.axis}` : ""}`;
+  let msg = `🔎 *Lentes de contato compatíveis com sua receita:*\nOD ${odDispLC} | OE ${oeDispLC}\n`;
+  if (isMonoLC) msg += `\n_💡 Plano calculado para 1 olho apenas (visão monocular)._\n`;
   if (needsToric) {
     msg += `\n⚠️ *Lente TÓRICA* (astigmatismo ≥ 0.75) — sob encomenda. Pagamento confirma o pedido.\n`;
   }
@@ -9325,7 +9460,15 @@ async function runConsultarLentesContato(
     const preco = fmtBRL(Number(l.price_brl));
 
     let plano = "";
-    if (l.descarte === "diario") {
+    if (isMonoLC) {
+      if (l.descarte === "diario") {
+        plano = `Plano (1 olho): 1 caixa dura ~${unidades} dias.`;
+      } else {
+        const meses1cx = Math.round((unidades * dias) / 30);
+        const meses4cx = Math.round((4 * unidades * dias) / 30);
+        plano = `Plano (1 olho): 1 caixa dura ~${meses1cx} meses. 🎁 *Combo 3+1*: 4 caixas = ~${meses4cx} meses.`;
+      }
+    } else if (l.descarte === "diario") {
       const dias_cx_um_olho = unidades;
       if (mesmaDioptria) {
         plano = `Plano: 1 caixa atende os 2 olhos por ~${Math.floor(dias_cx_um_olho / 2)} dias.`;

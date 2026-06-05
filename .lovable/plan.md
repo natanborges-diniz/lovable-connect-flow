@@ -1,45 +1,79 @@
-## Diagnóstico
 
-Confirmado no banco: existem 7 produtos Acuvue ativos (Acuvue 2, 1-Day Acuvue Moist, Oasys 1-Day HydraLuxe, Oasys Hydraclear Plus, e tóricas) — fornecedor "Johnson & Johnson", produto "Acuvue ...".
+# Visão Monocular — Detecção e Cotação Pela Metade
 
-A `BuscarLentesSheet` chama `buscar-lentes-operador` → `buscarLC` (linhas 184-232). Três bugs fazem Acuvue sumir do top 3:
+## Problema observado (conversa Thaires)
+- Cliente disse "Olho direito sem visao", "Tenho visão monocula" — IA repetiu 3× "Li sua receita assim, confere? OD (não consegui ler)" e acabou escalando.
+- Cotação inexistente para esse perfil: o orçamento de monocular é **metade do preço de tabela** (uma lente só).
 
-### Bug 1 — filtro por marca só olha `fornecedor`
-```ts
-if (filtros?.preferencia_marca) q = q.ilike("fornecedor", `%${filtros.preferencia_marca}%`);
+## Causa raíz
+1. `detectPrescriptionCorrection` não reconhece "monocular" / "sem visão em OX" como informação válida → fica eternamente esperando o esférico do OD.
+2. `buildMsgConfirmarReceita` mostra `(não consegui ler)` para o olho faltante mesmo quando o cliente já declarou que não há lente.
+3. `runConsultarLentes` / `runConsultarLentesContato` / `buscar-lentes-operador` sempre cotam par (price_brl). Não existe modificador `÷2`.
+
+## Plano
+
+### 1. Detecção (ai-triage)
+Adicionar helper `detectMonocular(text)` antes do bloco de correção textual (lá pelas linhas 4960). Regex cobre:
+- `monocul[ao]r?`
+- `(s[oó]\s+enxergo|enxergo s[oó]|s[oó]\s+vejo|vejo s[oó])\s+(do|com|pelo)?\s*(olho)?\s*(direito|esquerdo|od|oe)`
+- `(olho)?\s*(direito|esquerdo|od|oe)\s+(sem\s+vis[aã]o|n[ãa]o\s+enxergo|n[ãa]o\s+vejo|cego|protese|pr[oó]tese|tampado)`
+- `uma?\s+lente\s+(s[oó]|apenas)`
+
+Devolve `{ blind_eye: 'od' | 'oe' | null }`. Quando ambíguo (só "monocular" sem lado), pergunta UMA vez: "Qual olho você usa, OD (direito) ou OE (esquerdo)?".
+
+### 2. Persistência
+Quando detectado, gravar em `contato.metadata.receita_monocular = { eye_used: 'oe', set_at, source: 'client_typed' }` **e** marcar a receita corrente:
+- `rx.monocular = true`
+- `rx.eye_used = 'oe'`
+- Para o olho cego, salvar `{ blind: true }` no slot (sem esfera/cilindro).
+
+Isso desbloqueia o gate de confirmação (`fmtRxLine` passa a renderizar "👁️ *OD*: _visão monocular (sem lente)_" em vez de "(não consegui ler)"; missing[] não inclui esse olho).
+
+### 3. Confirmação visual
+Atualizar `buildMsgConfirmarReceita`:
 ```
-Se o operador digita "Acuvue", a query vira `fornecedor ILIKE '%Acuvue%'` → zero resultados (Acuvue está em `produto`; fornecedor é "Johnson & Johnson"). Mesma coisa pra "Oasys", "Biofinity", "Air Optix", "Hidrocor", "DNZ" — todas marcas-família que vivem na coluna `produto`.
+Li sua receita assim, confere? 😊
+👁️ *OD*: _visão monocular (sem lente)_
+👁️ *OE*: ESF -0,75 CIL -0,25 EIXO 25°
 
-### Bug 2 — top 3 puro por preço, sem separar clear de colorida/cosmética
-Todas as linhas têm `priority=10`, então a ordenação efetiva é só `price_brl asc`. Resultado: as 3 mais baratas hoje são **Solótica Hidrocor Mensal**, **Solflex Natural Colors** e **Hidrocor anual** — todas coloridas/cosméticas. Acuvue 2 (R$ 219,90, transparente) cai pra 18ª posição e nunca aparece no top 3 nem nas 3 faixas.
+Está certinho?
+```
 
-Não há nenhuma coluna marcando "cosmética vs visão" — `Hidrocor`, `Natural Colors`, `Color Hype`, `FreshLook COLORBLENDS`, `Air Optix Colors` são lentes de uso estético e estão misturadas com lentes de visão sem distinção.
+### 4. Cotação — óculos (`runConsultarLentes`, `runConsultarLentesEstimativa`)
+Quando `rx.monocular === true`:
+- Usar só os valores do olho ativo para filtrar catálogo (já é o que o código faz quando só um olho tem grau, mas confirmar).
+- Multiplicar `price_brl` por `0.5` em **todas** as faixas exibidas (eco/inter/prem) e nas alternativas.
+- Adicionar nota no cabeçalho da mensagem: `_💡 Valores já considerando apenas 1 lente (visão monocular)._`
+- Manter ordenação/anti-inversão como hoje (proporção preserva ordem).
 
-### Bug 3 — sem diversificação por descarte
-`top.slice(0, 3)` pega as 3 primeiras puro preço. A memória `lentes-de-contato-orcamento` exige "2-3 descartes VARIADOS" (mín. 2 categorias entre diária / quinzenal / mensal). Hoje pode sair 3 mensais ou 3 do mesmo fornecedor.
+### 5. Cotação — lentes de contato (`runConsultarLentesContato`)
+- Reduz `caixasTotal` para `caixasPorOlhoAno` (1 olho, não 2).
+- Recalcula `total_ano` com o novo número de caixas (combo 3+1 mantém regra).
+- Texto: `Plano anual (1 olho): ~R$ X (Y cx)` em vez de "(2 olhos)".
 
-## Plano de correção (escopo: `supabase/functions/buscar-lentes-operador/index.ts`)
+### 6. Copiloto do operador (`buscar-lentes-operador`)
+- Aceitar `body.monocular?: boolean` (sobrepõe receita).
+- `BuscarLentesSheet`: checkbox "Visão monocular (cota 1 lente / metade do preço)" no painel de receita. Quando marcado, envia `monocular=true`.
+- EF aplica mesma lógica de ÷2 (óculos) e 1 olho (LC).
+- Mensagem formatada inclui a nota da metade.
 
-1. **Filtro de marca em `fornecedor` OU `produto`**
-   Trocar o `ilike("fornecedor", …)` por `or('fornecedor.ilike.%X%,produto.ilike.%X%')`. Cobre Acuvue, Oasys, Biofinity, Hidrocor, DNZ, Air Optix etc. de um golpe só.
+### 7. Guardrails anti-loop
+- Em `ai-triage`, quando `rx.monocular === true` e único olho ativo está completo (esférico definido), **bloquear** novo pedido "me passa por texto" e re-disparo de `buildMsgConfirmarReceita` repetidamente (já existe contador `≥3 confirmações em 60min` → escalar; adicionar bypass para confirmar de imediato e seguir para cotação).
 
-2. **Heurística pra esconder lentes cosméticas/coloridas no top 3**
-   Não dá pra alterar schema agora, então classificar in-code por regex no `produto` (`color|natural colors|hidrocor|hydrocor|freshlook|colorblends|air optix colors|solflex (color|natural)|aquarella|hidroblue|hidrosoft`). Quando o operador NÃO pediu marca cosmética explicitamente (`preferencia_marca` casa o regex) E não digitou "colorida/cor/estética" em `query_natural`, filtrar essas linhas **antes** de montar o top 3. Mantê-las só em `alternativas` (catálogo completo continua acessível pelo expand).
+### 8. Memória de projeto
+Criar `mem://ia/visao-monocular` resumindo: detecção, half-price, 1 caixa LC, flag persistida em contato.
 
-3. **Diversificação por descarte no top 3**
-   Após filtrar cosméticas, montar `top` com no máx. 1 por `descarte` na primeira passada (diária → quinzenal → mensal nessa ordem por preço), depois completar até 3 com as próximas mais baratas se sobrar slot. Garante variedade pedida pela memória.
+## Out of scope
+- Não criar coluna `is_monocular` em `pricing_table_lentes` (cálculo é puramente runtime).
+- Não alterar templates WhatsApp.
+- Não tocar em `interpretar_receita` (OCR continua tentando ler; monocular vem do texto do cliente).
 
-4. **Pequeno ajuste de UX**: quando o operador digita marca-família reconhecida (Acuvue/Oasys/Biofinity/etc.), pular a diversificação por descarte — ele quer ver opções **daquela marca**, então mostrar top 3 dessa marca por preço.
+## Arquivos afetados
+- `supabase/functions/ai-triage/index.ts` (detecção, persistência, confirmação, cotações óculos+LC, guardrail).
+- `supabase/functions/buscar-lentes-operador/index.ts` (param `monocular`, ÷2 óculos, 1 olho LC).
+- `src/components/atendimentos/BuscarLentesSheet.tsx` (checkbox monocular).
+- Memória nova: `.lovable/memory/ia/visao-monocular.md` + entrada no index.
 
-## Fora de escopo (não mexer agora)
-
-- Não vou adicionar coluna `is_cosmetica` no schema nem rodar migration — filtro por regex resolve sem risco.
-- Não vou mexer na tool `consultar_lentes_contato` do `ai-triage` (a IA já prioriza DNZ por design; bug é só no copiloto do operador). Se quiser estender a mesma correção pra IA, me avisa que faço em seguida.
-- Não vou tocar UI da `BuscarLentesSheet.tsx` — input "Marca" já existe e funciona.
-
-## Verificação
-
-Após o patch, vou simular 3 chamadas via `curl_edge_functions`:
-- marca="Acuvue" → top 3 deve trazer Acuvue 2 / 1-Day Acuvue Moist / Oasys 1-Day.
-- sem marca, receita esférica simples → top 3 sem Hidrocor/Natural Colors/FreshLook, com mix de descartes.
-- marca="Hidrocor" → mantém Hidrocor (operador pediu explicitamente).
+## Validação
+- Re-simular conversa Thaires: cliente diz "olho direito sem visão" → IA confirma "👁️ OD: visão monocular (sem lente) / OE: ESF -0,75 …", cliente "Sim" → IA cota Eco/Inter/Prem com preços /2 e oferece visita.
+- Copiloto: marcar checkbox → mensagem ao cliente sai com nota da metade e valores corretos.
