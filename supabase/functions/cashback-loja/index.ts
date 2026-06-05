@@ -64,12 +64,27 @@ serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase     = createClient(SUPABASE_URL, SERVICE);
 
     // ── Auth ──
     const auth  = req.headers.get("Authorization") || "";
     const token = auth.replace("Bearer ", "").trim();
-    const { data: userData } = await supabase.auth.getUser(token);
+
+    // Client admin: bypassa RLS, sem identidade (auth.uid() = null).
+    // Usado para validar JWT, leituras e inserts que NÃO dependem de auth.uid().
+    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // Client autenticado como a loja: service-role + Authorization do usuário.
+    // auth.uid() = user.id dentro das RPCs (necessário p/ regua_registrar_venda).
+    const supabaseAsUser = createClient(SUPABASE_URL, SERVICE, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const supabase = supabaseAdmin; // alias para manter o resto do arquivo intacto
+
+    const { data: userData } = await supabaseAdmin.auth.getUser(token);
     const user = userData?.user;
     if (!user) return jsonResp({ error: "Unauthorized" }, 401);
 
