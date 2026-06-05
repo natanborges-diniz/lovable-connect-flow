@@ -7620,7 +7620,11 @@ async function runConsultarLentes(
   if (args?.filtro_photo === true) query = query.eq("photo", true);
   if (args?.preferencia_marca) query = query.ilike("brand", `%${args.preferencia_marca}%`);
 
-  const { data: lenses } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(60);
+  const { data: lensesRaw } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(60);
+
+  // ── Visão monocular: 1 lente apenas → divide preços por 2 ──
+  const isMonocular = rxMeta?.monocular === true;
+  const lenses = (lensesRaw || []).map((l: any) => isMonocular ? { ...l, price_brl: Number(l.price_brl) / 2 } : l);
 
   if (!lenses || lenses.length === 0) {
     const filtrosAplicados = {
