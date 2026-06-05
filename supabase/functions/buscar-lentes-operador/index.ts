@@ -59,7 +59,7 @@ function deriveRxStats(rx?: Rx) {
   return { od, oe, sph, cyl, add, worstSphere, worstCyl, maxAdd, rxType, hasAdd: add.length > 0 };
 }
 
-async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
+async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], monocular = false) {
   const s = deriveRxStats(rx);
   if (!s.sph.length) return { erro: "Receita sem esférico. Edite os valores no painel pra buscar." };
 
