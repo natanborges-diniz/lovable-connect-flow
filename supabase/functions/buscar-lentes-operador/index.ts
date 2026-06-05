@@ -29,6 +29,7 @@ interface Body {
     preco_max?: number;
   };
   receita_override?: Rx;
+  monocular?: boolean; // 1 lente apenas → preço /2 (óculos) e 1 caixa por olho (LC)
 }
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
