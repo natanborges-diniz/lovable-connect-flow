@@ -1,63 +1,80 @@
-# Continência de notificações configurável por Admin
+## Objetivo
 
-Hoje `resolver_destinatarios_atendimento` cai num fallback "todos admin/colaborador ativos" quando o atendimento não tem atendente nem `setor_id` na coluna — por isso `natanborges@icloud.com` recebe push de conversas que não atende. A correção é deixar o **admin** decidir quem recebe, sem dar essa alavanca ao próprio usuário.
+Resolver o `auth_required` ao registrar cashback. Causa: `cashback-loja` cria apenas um client com service-role, e a RPC `regua_registrar_venda` (chamada internamente por `cashback_registrar_resgate`) exige `auth.uid() IS NOT NULL`.
 
-## Escopo
+## Mudança (Opção 1)
 
-1. **Apenas admins** configuram (RLS `has_role(auth.uid(),'admin')` ou `pode_gerenciar_usuarios`).
-2. Configuração existe em dois níveis, ambos no mesmo painel:
-   - **Por usuário** — liga/desliga recebimento dos tipos `atendimento_inbound`, `atendimento_humano`, `demanda_loja`, `mensagem_interna`; e opcionalmente restringe a um conjunto de setores.
-   - **Fallback global** — quando o atendimento cai no nível 3 (sem atendente, sem setor na coluna), define **qual setor / quais usuários** recebem. Default: ninguém (vira tarefa do supervisor reatribuir).
+Em `supabase/functions/cashback-loja/index.ts`, criar **dois clients**:
 
-## Entregáveis
+1. `supabaseAdmin` — service-role puro, sem Authorization. Continua usado para:
+   - `auth.getUser(token)` (validação do JWT)
+   - leituras de `profiles`, `user_roles`, `telefones_lojas`, `cashback_config`
+   - inserts em `contatos` e `eventos_crm` (bypass de RLS)
+   - `cashback_consultar_saldo` (não depende de auth.uid)
 
-### Banco
-Tabela nova `public.notificacao_preferencias`:
-- `user_id` (FK profiles, único por tipo)
-- `tipo` text (`atendimento_inbound` | `atendimento_humano` | `demanda_loja` | `mensagem_interna` | `*`)
-- `escopo` enum `nenhum` | `meus_setores` | `setores_especificos` | `todos`
-- `setor_ids uuid[]`
-- `ativo bool default true`
-- `updated_by uuid` (quem alterou — admin)
+2. `supabaseAsUser` — service-role **com** `global.headers.Authorization: Bearer <token>` do usuário, para que `auth.uid()` propague no Postgres. Usado **apenas** em:
+   - `cashback_registrar_resgate` (que internamente invoca `regua_registrar_venda`)
 
-RLS: SELECT/INSERT/UPDATE/DELETE só para `has_role(auth.uid(),'admin')` (admin lê e escreve a preferência de qualquer usuário). Usuário não-admin **não vê** essa tabela. `service_role` ALL.
+Sem `auth.persistSession` / `autoRefreshToken` nos dois (são clients de servidor).
 
-Config global em `configuracoes_ia`:
-- `chave='fallback_destinatarios_atendimento'`, `valor` JSON `{ "setor_id": "uuid|null", "user_ids": ["uuid"], "incluir_admins": false }`.
+### Snippet alvo (criação dos dois clients)
 
-### Função `resolver_destinatarios_atendimento`
-- Mantém ordem atual (atendente → setor da coluna → fallback).
-- **Filtro novo** aplicado sobre o conjunto resolvido: remove user cuja preferência diz `escopo='nenhum'` para o tipo; mantém só os do escopo configurado (`meus_setores` / `setores_especificos`). Usuário sem registro = comportamento atual (recebe). Tipo é passado como novo parâmetro `_tipo text` (overload), com default `'atendimento_inbound'`.
-- **Nível 3 passa a ler** `fallback_destinatarios_atendimento` em vez de "todos admin/colaborador". Default vazio → ninguém é notificado (evita ruído).
-- Triggers `trg_push_inbound_humano` e `trg_atendimento_modo_humano` passam o `tipo` correto ao chamar a função.
+```ts
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-### UI — Configurações → Usuários
-- No `GestaoUsuariosCard`, nova coluna "Notificações" com badge resumindo (`Todas` / `Meus setores` / `2 setores` / `Nenhuma`).
-- Botão lápis abre dialog `NotificacaoPrefsDialog` (só renderiza se `isAdmin`): grid tipos × escopo, multiselect de setores. Persiste em `notificacao_preferencias` registrando `updated_by = auth.uid()`.
-- Card novo **Plantão / Fallback de notificações** na aba Usuários: select de setor + multiselect de usuários extras + switch "Incluir admins". Grava `configuracoes_ia.fallback_destinatarios_atendimento`.
-- **Usuário não-admin não tem UI alguma** para mudar isso — nem no perfil dele, nem em outro card. Fica oculto.
+const auth  = req.headers.get("Authorization") || "";
+const token = auth.replace("Bearer ", "").trim();
 
-### Backfill imediato
-Insert `notificacao_preferencias` `escopo='nenhum'` tipo `atendimento_inbound` e `atendimento_humano` para `420c274c-4d4a-4b22-9a22-f29d117c3c72` (Natan). Em paralelo, gravar fallback global vazio para parar o vazamento antes do admin escolher destino.
+// Client admin: bypassa RLS, sem identidade (auth.uid() = null)
+const supabaseAdmin = createClient(SUPABASE_URL, SERVICE, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
-### Memória
-- Atualizar `mem://atendimento/push-operador-humano` descrevendo os 3 níveis + filtro de preferências + fallback configurável.
-- Nova `mem://configuracoes/notificacoes-admin-only` lembrando que somente admin configura e que o nível 3 default é "ninguém".
+// Client autenticado como a loja: service-role + Authorization do usuário
+// → auth.uid() = user.id dentro das RPCs SECURITY DEFINER
+const supabaseAsUser = createClient(SUPABASE_URL, SERVICE, {
+  auth: { persistSession: false, autoRefreshToken: false },
+  global: { headers: { Authorization: `Bearer ${token}` } },
+});
+```
 
-## Fora do escopo
-- Não criar UI de preferências para o próprio usuário.
-- Não mexer no Messenger / mensagens_internas agora.
-- Não adicionar janela "Não perturbe" / horário — fica como evolução reusando a mesma tabela.
+E a única chamada que muda:
 
-## Arquivos afetados
-- Migração nova (tabela + função + grants + RLS).
-- `src/components/configuracoes/GestaoUsuariosCard.tsx` (coluna + botão).
-- Novo `src/components/configuracoes/NotificacaoPrefsDialog.tsx`.
-- Novo `src/components/configuracoes/FallbackNotificacoesCard.tsx` (montado em `Configuracoes.tsx` aba `usuarios`).
-- Memórias citadas.
+```ts
+const { data: resgate, error: errResgate } = await supabaseAsUser.rpc(
+  "cashback_registrar_resgate",
+  { ...params }
+);
+```
+
+Todo o resto (`supabase` → renomeado `supabaseAdmin`) permanece igual.
+
+## Restrições respeitadas
+
+- Nenhuma alteração de SQL / migrations.
+- Nenhuma alteração no projeto InFoco Messenger.
+- Contrato de resposta da função não muda (mesmas chaves: `status`, `cliente`, `ja_processado`, `credito_gerado`, `saldo_atual`, e mesmos `motivo` em erro).
 
 ## Validação
-- Logar como admin → ver/editar preferências de outro usuário; logar como não-admin → coluna nem botão aparecem.
-- Inserir mensagem inbound em atendimento sem atendente nem setor → ninguém é notificado (fallback vazio).
-- Configurar fallback para setor "Atendimento Corporativo" → apenas membros recebem.
-- Para Natan: nenhum push após backfill, mesmo se admin no banco.
+
+Após deploy, rodar teste como loja real autenticada via `supabase--curl_edge_functions` (usa o JWT da sessão do preview, que é uma loja):
+
+```
+POST /cashback-loja
+{ "action": "registrar",
+  "telefone": "<num teste>", "nome": "Teste Cashback",
+  "numero_venda": "TEST-<timestamp>",
+  "valor_informado": 100, "cashback_usado": 0 }
+```
+
+Critérios de sucesso:
+- Resposta `status: "ok"` com `cliente`, `credito_gerado`, `saldo_atual`.
+- `SELECT * FROM regua_inscricao WHERE numero_venda = 'TEST-<ts>'` → 1 linha.
+- `SELECT * FROM cashback_credito WHERE inscricao_id = <id>` → 1 linha.
+
+Colar no chat: trecho da criação dos dois clients + payload de resposta + linhas das 2 tabelas.
+
+## Arquivo afetado
+
+- `supabase/functions/cashback-loja/index.ts` (rename `supabase` → `supabaseAdmin`, novo `supabaseAsUser`, trocar 1 chamada de RPC).
