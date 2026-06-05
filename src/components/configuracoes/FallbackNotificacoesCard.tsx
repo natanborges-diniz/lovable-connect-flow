@@ -49,7 +49,7 @@ export function FallbackNotificacoesCard() {
     queryKey: ["cfg-fallback"],
     queryFn: async () => {
       const { data } = await supabase.from("configuracoes_ia").select("valor").eq("chave", KEY).maybeSingle();
-      return data?.valor as FallbackCfg | undefined;
+      return data?.valor as unknown as FallbackCfg | undefined;
     },
   });
 
