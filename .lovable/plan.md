@@ -1,50 +1,45 @@
-# Diagnóstico — Fran Borges sem push/som
+## Diagnóstico
 
-Verifiquei a conta da Fran (`8ca94d4c-c60f-4876-b231-1772188c70a4`) no banco e duas coisas estão impedindo as notificações:
+Confirmado no banco: existem 7 produtos Acuvue ativos (Acuvue 2, 1-Day Acuvue Moist, Oasys 1-Day HydraLuxe, Oasys Hydraclear Plus, e tóricas) — fornecedor "Johnson & Johnson", produto "Acuvue ...".
 
-## Causa 1 — `profiles.ativo = false` (bloqueia tudo)
+A `BuscarLentesSheet` chama `buscar-lentes-operador` → `buscarLC` (linhas 184-232). Três bugs fazem Acuvue sumir do top 3:
 
-A linha da Fran em `profiles` está com `ativo: false`. Isso quebra **toda** a cadeia de notificação dela:
+### Bug 1 — filtro por marca só olha `fornecedor`
+```ts
+if (filtros?.preferencia_marca) q = q.ilike("fornecedor", `%${filtros.preferencia_marca}%`);
+```
+Se o operador digita "Acuvue", a query vira `fornecedor ILIKE '%Acuvue%'` → zero resultados (Acuvue está em `produto`; fornecedor é "Johnson & Johnson"). Mesma coisa pra "Oasys", "Biofinity", "Air Optix", "Hidrocor", "DNZ" — todas marcas-família que vivem na coluna `produto`.
 
-- `resolver_destinatarios_atendimento` (fallback por setor e fallback final admin/colaborador) só considera profiles com `ativo = true` → ela é excluída quando o atendimento não tem `atendente_user_id` setado (caso CLEBER).
-- `dispatch-push` faz `.eq("ativo", true)` ao buscar push_token, então mesmo se chegasse uma notificação direcionada, o push não sairia.
-- Resultado prático: em 790 notificações de `atendimento_inbound`/`atendimento_humano` no sistema, **zero foram para a Fran**.
+### Bug 2 — top 3 puro por preço, sem separar clear de colorida/cosmética
+Todas as linhas têm `priority=10`, então a ordenação efetiva é só `price_brl asc`. Resultado: as 3 mais baratas hoje são **Solótica Hidrocor Mensal**, **Solflex Natural Colors** e **Hidrocor anual** — todas coloridas/cosméticas. Acuvue 2 (R$ 219,90, transparente) cai pra 18ª posição e nunca aparece no top 3 nem nas 3 faixas.
 
-## Causa 2 — Sem assinatura Web Push
+Não há nenhuma coluna marcando "cosmética vs visão" — `Hidrocor`, `Natural Colors`, `Color Hype`, `FreshLook COLORBLENDS`, `Air Optix Colors` são lentes de uso estético e estão misturadas com lentes de visão sem distinção.
 
-A tabela `push_subscriptions` não tem nenhuma linha para o user_id dela. Ou seja, ela nunca apertou "Ativar notificações" no botão `PushNotificationsButton` neste navegador/PWA, ou negou a permissão antes. Sem isso, `send-push` não tem endpoint pra entregar — mesmo com tudo certo no resto, push de background não chega.
+### Bug 3 — sem diversificação por descarte
+`top.slice(0, 3)` pega as 3 primeiras puro preço. A memória `lentes-de-contato-orcamento` exige "2-3 descartes VARIADOS" (mín. 2 categorias entre diária / quinzenal / mensal). Hoje pode sair 3 mensais ou 3 do mesmo fornecedor.
 
-(O som in-app via `useAtendimentoNotifier` também não dispara porque depende de a notificação ter sido criada para o `usuario_id` dela — e o item 1 impede isso.)
+## Plano de correção (escopo: `supabase/functions/buscar-lentes-operador/index.ts`)
 
-## Plano de correção
+1. **Filtro de marca em `fornecedor` OU `produto`**
+   Trocar o `ilike("fornecedor", …)` por `or('fornecedor.ilike.%X%,produto.ilike.%X%')`. Cobre Acuvue, Oasys, Biofinity, Hidrocor, DNZ, Air Optix etc. de um golpe só.
 
-1. **Reativar a conta da Fran**
-   - UPDATE em `profiles` setando `ativo = true` para o id `8ca94d4c-c60f-4876-b231-1772188c70a4`.
-   - Isso restaura o fallback de destinatários e libera o `dispatch-push`.
+2. **Heurística pra esconder lentes cosméticas/coloridas no top 3**
+   Não dá pra alterar schema agora, então classificar in-code por regex no `produto` (`color|natural colors|hidrocor|hydrocor|freshlook|colorblends|air optix colors|solflex (color|natural)|aquarella|hidroblue|hidrosoft`). Quando o operador NÃO pediu marca cosmética explicitamente (`preferencia_marca` casa o regex) E não digitou "colorida/cor/estética" em `query_natural`, filtrar essas linhas **antes** de montar o top 3. Mantê-las só em `alternativas` (catálogo completo continua acessível pelo expand).
 
-2. **Garantir que ela vire destinatária mesmo sem `atendente_user_id`**
-   - Já temos o fallback do trigger `trg_mensagem_inbound_humano` via `resolver_destinatarios_atendimento`. Com `ativo=true` ela passa a entrar no fallback final (`admin/colaborador`).
-   - O auto-claim do `Atendimentos.tsx` (já implementado em loop anterior) vai gravar `atendente_user_id` assim que ela responder, fazendo as próximas inbound notificações irem direto pra ela.
+3. **Diversificação por descarte no top 3**
+   Após filtrar cosméticas, montar `top` com no máx. 1 por `descarte` na primeira passada (diária → quinzenal → mensal nessa ordem por preço), depois completar até 3 com as próximas mais baratas se sobrar slot. Garante variedade pedida pela memória.
 
-3. **Assinar Web Push neste navegador**
-   - A Fran precisa abrir o INFOCO OPS, clicar em **PushNotificationsButton** (sininho no header) e permitir notificações.
-   - Em iPhone, precisa instalar como PWA antes (Adicionar à Tela de Início), e iOS 16.4+.
-   - Em Android/desktop, basta clicar e permitir.
-   - Sem essa ação manual dela, nenhuma migration resolve — push do navegador exige consentimento explícito.
+4. **Pequeno ajuste de UX**: quando o operador digita marca-família reconhecida (Acuvue/Oasys/Biofinity/etc.), pular a diversificação por descarte — ele quer ver opções **daquela marca**, então mostrar top 3 dessa marca por preço.
 
-4. **(Opcional) Diagnóstico exposto na UI**
-   - Adicionar no `PushNotificationsButton` um indicador visual quando `profile.ativo = false` ("Sua conta está inativa — peça ao admin pra reativar") para que situações assim sejam óbvias sem precisar abrir o banco.
+## Fora de escopo (não mexer agora)
 
-## Detalhes técnicos
+- Não vou adicionar coluna `is_cosmetica` no schema nem rodar migration — filtro por regex resolve sem risco.
+- Não vou mexer na tool `consultar_lentes_contato` do `ai-triage` (a IA já prioriza DNZ por design; bug é só no copiloto do operador). Se quiser estender a mesma correção pra IA, me avisa que faço em seguida.
+- Não vou tocar UI da `BuscarLentesSheet.tsx` — input "Marca" já existe e funciona.
 
-- Migration única para o item 1:
-  ```sql
-  UPDATE public.profiles SET ativo = true, updated_at = now()
-   WHERE id = '8ca94d4c-c60f-4876-b231-1772188c70a4';
-  ```
-- Itens 2 e 3 não exigem código novo — dependem da Fran logar e assinar push.
-- Item 4 é uma melhoria pequena em `src/components/layout/PushNotificationsButton.tsx` para evitar reincidência (posso pular se você quiser manter o escopo mínimo).
+## Verificação
 
-## Pergunta antes de implementar
-
-Quer que eu (a) só reative a conta e te oriente a pedir pra ela ativar o sininho, ou (b) reative + adicione o aviso "conta inativa" no botão de push?
+Após o patch, vou simular 3 chamadas via `curl_edge_functions`:
+- marca="Acuvue" → top 3 deve trazer Acuvue 2 / 1-Day Acuvue Moist / Oasys 1-Day.
+- sem marca, receita esférica simples → top 3 sem Hidrocor/Natural Colors/FreshLook, com mix de descartes.
+- marca="Hidrocor" → mantém Hidrocor (operador pediu explicitamente).

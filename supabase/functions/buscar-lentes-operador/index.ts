@@ -181,18 +181,30 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"]) {
   };
 }
 
-async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"]) {
+// Regex de produtos cosméticos/coloridos (uso estético, não correção visual prioritária).
+const COSMETIC_RE = /color|natural colors|hidrocor|hydrocor|freshlook|colorblends|air optix colors|solflex (color|natural)|aquarella|hidroblue|hidrosoft|aquarela/i;
+
+async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNatural?: string) {
   const s = deriveRxStats(rx);
   const forceToric = filtros?.is_toric ?? (Math.abs(s.worstCyl) >= 0.75);
+  const marca = (filtros?.preferencia_marca || "").trim();
+  const qNat = (queryNatural || "").toLowerCase();
+  const operadorPediuCosmetica =
+    /\b(colorid|cosm[eé]tic|cor|est[eé]tic|hidrocor|natural colors|freshlook|colorblends)\b/i.test(qNat) ||
+    (marca && COSMETIC_RE.test(marca));
 
   let q = supabase.from("pricing_lentes_contato").select("*").eq("active", true).gt("price_brl", 0);
   if (s.sph.length) q = q.lte("sphere_min", s.worstSphere).gte("sphere_max", s.worstSphere);
   if (forceToric) q = q.eq("is_toric", true);
   else q = q.eq("is_toric", false);
   if (filtros?.descarte) q = q.eq("descarte", filtros.descarte);
-  if (filtros?.preferencia_marca) q = q.ilike("fornecedor", `%${filtros.preferencia_marca}%`);
+  if (marca) {
+    // Marca pode estar em fornecedor (Coopervision, Alcon, J&J) OU em produto (Acuvue, Oasys, Biofinity, Hidrocor, DNZ, Air Optix…)
+    const safe = marca.replace(/[%,()]/g, "");
+    q = q.or(`fornecedor.ilike.%${safe}%,produto.ilike.%${safe}%`);
+  }
 
-  const { data: lc, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(40);
+  const { data: lc, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(80);
   if (error) return { erro: error.message };
   if (!lc?.length) return { erro: "Sem lentes de contato pra esse perfil. Verifique tórica/descarte/marca." };
 
@@ -205,10 +217,31 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"]) {
       id: l.id, fornecedor: l.fornecedor, produto: l.produto, descarte: l.descarte,
       is_toric: l.is_toric, combo: l.combo_3mais1, price_caixa: Number(l.price_brl),
       caixas_ano_2olhos: caixasTotal, total_ano: valor, is_dnz: l.is_dnz, observacoes: l.observacoes,
+      _cosmetica: COSMETIC_RE.test(`${l.fornecedor} ${l.produto}`),
     };
   });
 
-  const top = itens.slice(0, 3);
+  // Para top 3: se operador não pediu cosmética, esconde coloridas.
+  const candidatos = operadorPediuCosmetica ? itens : itens.filter((i: any) => !i._cosmetica);
+  const pool = candidatos.length ? candidatos : itens;
+
+  // Diversifica por descarte (diária → quinzenal → mensal) — pula se operador pediu marca específica.
+  let top: any[] = [];
+  if (marca) {
+    top = pool.slice(0, 3);
+  } else {
+    const ordem = ["diario", "diaria", "quinzenal", "mensal"];
+    for (const d of ordem) {
+      const it = pool.find((i: any) => i.descarte === d);
+      if (it && !top.includes(it)) top.push(it);
+      if (top.length >= 3) break;
+    }
+    for (const it of pool) {
+      if (top.length >= 3) break;
+      if (!top.includes(it)) top.push(it);
+    }
+  }
+
   const headerLC = `👁️ *Lentes de contato — opções:*\n${forceToric ? "_⚠️ Tórica (sob encomenda — cyl ≥ 0,75)_\n" : ""}\n`;
   const ctaLC = `\nQual descarte combina mais com a sua rotina? Te indico a loja mais próxima pra finalizar 😊`;
   const lineLC = (it: any) => `• *${it.fornecedor} ${it.produto}* (${it.descarte}${it.is_dnz ? " · DNZ" : ""}${it.combo ? " · combo 3+1" : ""}) — ${brl(it.price_caixa)} a caixa\n  Plano anual (2 olhos): ~${brl(it.total_ano)} (${it.caixas_ano_2olhos} cx)\n`;
@@ -227,7 +260,7 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"]) {
     alternativas: itens,
     mensagem_formatada_cliente: msg,
     mensagens_por_faixa,
-    debug: { tórica: forceToric, total: lc.length, cyl: s.worstCyl },
+    debug: { tórica: forceToric, total: lc.length, cyl: s.worstCyl, marca, operadorPediuCosmetica, cosmeticas_filtradas: itens.length - candidatos.length },
   };
 }
 
@@ -327,7 +360,7 @@ Deno.serve(async (req) => {
 
     let result: any;
     if (body.modo === "oculos") result = await buscarOculos(supabase, rx || {}, filtros);
-    else if (body.modo === "lc") result = await buscarLC(supabase, rx || {}, filtros);
+    else if (body.modo === "lc") result = await buscarLC(supabase, rx || {}, filtros, body.query_natural);
     else if (body.modo === "catalogo_livre") result = await buscarCatalogoLivre(supabase, filtros);
     else if (body.modo === "estimativa") result = await buscarOculos(supabase, rx || {}, filtros); // mesma engine; receita_override permite cenário parcial
     else result = { erro: `modo_invalido:${body.modo}` };
