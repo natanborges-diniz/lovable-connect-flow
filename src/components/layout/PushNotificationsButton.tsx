@@ -20,6 +20,7 @@ import {
   iosSupportsWebPush,
   sendTestPush,
 } from "@/lib/webPush";
+import { useAuth } from "@/hooks/useAuth";
 
 type Status =
   | "loading"
