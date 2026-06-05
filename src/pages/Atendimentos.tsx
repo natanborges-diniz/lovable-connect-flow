@@ -267,6 +267,28 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
       if (msgDirecao === "outbound" && atendimento?.canal === "whatsapp") {
         setSendingOutbound(true);
 
+        // Auto-claim fallback: se o operador respondeu sem ter sido auto-claimado
+        // (ex: modo='ia'/'hibrido' ou useEffect não disparou), registra o atendente
+        // antes de enviar. Caso CLEBER 05/06: Fran respondeu o dia todo sem ficar
+        // como atendente_nome — webhook tratou como humano órfão e reativou a IA.
+        if (uid && !atendimento?.atendente_user_id) {
+          try {
+            await claim.mutateAsync({ id, userId: uid, nome: profile?.nome || "Operador" });
+          } catch (claimErr) {
+            console.warn("[auto-claim-on-send] falhou (segue envio):", claimErr);
+          }
+        }
+        // Garante modo=humano: se ainda estiver em 'ia'/'hibrido', operador assumindo
+        // manualmente deve travar a IA até devolver explicitamente.
+        if (atendimento && (atendimento as any).modo !== "humano") {
+          try {
+            await supabase.from("atendimentos").update({ modo: "humano" } as any).eq("id", id);
+          } catch (modeErr) {
+            console.warn("[auto-modo-humano-on-send] falhou:", modeErr);
+          }
+        }
+
+
         // Upload anexo (se houver) antes de chamar send-whatsapp
         let mediaUrl: string | undefined;
         let mimeType: string | undefined;
