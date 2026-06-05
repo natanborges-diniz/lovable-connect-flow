@@ -7824,7 +7824,10 @@ async function runConsultarLentes(
   const formatLens = (l: any, label: string) =>
     `${label}: *${brandDisplay(l.brand)} ${l.family}* | Índice ${l.index_name} | ${l.treatment}${l.blue ? " + Filtro Azul" : ""}${l.photo ? " + Fotossensível" : ""} — *R$ ${Number(l.price_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*`;
 
-  let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n`;
+  const odDisp = od?.blind ? "—" : `${od.sphere ?? "—"}/${od.cylinder ?? "—"}`;
+  const oeDisp = oe?.blind ? "—" : `${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}`;
+  const monoNota = isMonocular ? `_💡 Valores já considerando apenas 1 lente (visão monocular — ${rxMeta.eye_used === "od" ? "OD" : "OE"})._\n\n` : "";
+  let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${odDisp} | OE ${oeDisp}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n${monoNota}`;
 
   // ---- Diversificação por marca + 3 faixas ----
   // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar)
