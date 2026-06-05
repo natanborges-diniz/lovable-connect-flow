@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.smoke-cashback]
 verify_jwt = false
+
+[functions.cashback-loja]
+verify_jwt = false
