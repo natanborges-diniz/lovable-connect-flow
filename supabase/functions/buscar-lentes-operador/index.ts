@@ -360,7 +360,7 @@ Deno.serve(async (req) => {
 
     let result: any;
     if (body.modo === "oculos") result = await buscarOculos(supabase, rx || {}, filtros);
-    else if (body.modo === "lc") result = await buscarLC(supabase, rx || {}, filtros);
+    else if (body.modo === "lc") result = await buscarLC(supabase, rx || {}, filtros, body.query_natural);
     else if (body.modo === "catalogo_livre") result = await buscarCatalogoLivre(supabase, filtros);
     else if (body.modo === "estimativa") result = await buscarOculos(supabase, rx || {}, filtros); // mesma engine; receita_override permite cenário parcial
     else result = { erro: `modo_invalido:${body.modo}` };
