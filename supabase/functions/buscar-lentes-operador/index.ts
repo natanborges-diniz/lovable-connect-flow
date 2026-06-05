@@ -85,9 +85,11 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], mon
   if (filtros?.material_policarbonato) q = q.or("family.ilike.%airwear%,family.ilike.%policar%,index_name.ilike.%1.59%");
   if (filtros?.preco_max) q = q.lte("price_brl", filtros.preco_max);
 
-  const { data: lenses, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(80);
+  const { data: lensesRaw, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(80);
   if (error) return { erro: error.message };
-  if (!lenses?.length) return { erro: "Nenhuma lente do catálogo cobre essa combinação. Tente afrouxar filtros ou usar estimativa." };
+  if (!lensesRaw?.length) return { erro: "Nenhuma lente do catálogo cobre essa combinação. Tente afrouxar filtros ou usar estimativa." };
+  // Visão monocular → 1 lente, divide preços por 2.
+  const lenses = monocular ? lensesRaw.map((l: any) => ({ ...l, price_brl: Number(l.price_brl) / 2 })) : lensesRaw;
 
   // Particiona em 3 faixas — mirror do runConsultarLentes.
   const sorted = [...lenses].sort((a, b) => Number(a.price_brl) - Number(b.price_brl));
