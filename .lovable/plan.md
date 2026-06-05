@@ -1,45 +1,50 @@
-## Diagnóstico — por que a IA voltou a falar no meio do atendimento humano
+# Diagnóstico — Fran Borges sem push/som
 
-Eu rastreei a conversa do CLEBER (atendimento `00859d30-…`) no banco e nos eventos. O que aconteceu:
+Verifiquei a conta da Fran (`8ca94d4c-c60f-4876-b231-1772188c70a4`) no banco e duas coisas estão impedindo as notificações:
 
-1. `consulta_os` no início escalou para humano corretamente (`modo='humano'`). ✅
-2. A operadora **Fran** conduziu o atendimento o dia todo, mas o registro do atendimento ficou com `atendente_nome = NULL` e `atendente_user_id = NULL` o tempo todo. O auto-claim do Atendimentos.tsx **não rodou** (provavelmente porque a Fran respondeu sem abrir o card no modo padrão que dispara o `useEffect` de auto-claim, ou a mutation falhou silenciosamente).
-3. Como o cliente ficou em silêncio >4h, o `vendas-recuperacao-cron` disparou `retomada_contexto_1` (cadência humano). Correto, dado o estado visível no banco.
-4. Quando o cliente respondeu ("Boa tarde / Não, tudo certo / Obrigado"), o `whatsapp-webhook` rodou o bloco **"REATIVAÇÃO IA pós-template de retomada"** (linhas 711-757 de `whatsapp-webhook/index.ts`):
-   - Condições: `modo='humano'` ✅, `atendente_nome IS NULL` ✅ (esse é o gap), `recuperacao_humano.ultima_tentativa_at` recente ✅.
-   - Resultado: flipa `modo → 'hibrido'` e libera a IA. Evento `reativacao_ia_pos_retomada` registrado às 19:20:21 e novamente 23:30 → confirmado no `eventos_crm`.
-5. Com `modo='hibrido'`, o `ai-triage` processa as inbounds normalmente — daí as 3 mensagens da IA em sequência, a despedida + saudação dupla e, no dia seguinte, as 3 mensagens da IA por cima do "Bom dia" da operadora.
+## Causa 1 — `profiles.ativo = false` (bloqueia tudo)
 
-Resumo: a IA não está ignorando o humano. Ela só "vê" um atendimento humano órfão (sem atendente_nome) que respondeu a um template de retomada, e o webhook tem uma regra explícita de reativá-la nesse caso. A regra está certa para o cenário "handoff abandonado", mas está **falhando o diagnóstico** quando o operador trabalhou sem ter ficado registrado como atendente.
+A linha da Fran em `profiles` está com `ativo: false`. Isso quebra **toda** a cadeia de notificação dela:
 
-## O que vou alterar
+- `resolver_destinatarios_atendimento` (fallback por setor e fallback final admin/colaborador) só considera profiles com `ativo = true` → ela é excluída quando o atendimento não tem `atendente_user_id` setado (caso CLEBER).
+- `dispatch-push` faz `.eq("ativo", true)` ao buscar push_token, então mesmo se chegasse uma notificação direcionada, o push não sairia.
+- Resultado prático: em 790 notificações de `atendimento_inbound`/`atendimento_humano` no sistema, **zero foram para a Fran**.
 
-### 1. `whatsapp-webhook` — endurecer a checagem de "humano órfão" antes de reativar IA
+## Causa 2 — Sem assinatura Web Push
 
-No bloco de reativação pós-retomada (linhas 711-757), além de `atendente_nome IS NULL`, exigir também que **não exista nenhuma mensagem outbound humana** no atendimento. Hoje a regra confia só no campo `atendente_nome`. Vou adicionar:
+A tabela `push_subscriptions` não tem nenhuma linha para o user_id dela. Ou seja, ela nunca apertou "Ativar notificações" no botão `PushNotificationsButton` neste navegador/PWA, ou negou a permissão antes. Sem isso, `send-push` não tem endpoint pra entregar — mesmo com tudo certo no resto, push de background não chega.
 
-- Query rápida em `mensagens` filtrando `atendimento_id`, `direcao='outbound'`, e excluindo `remetente_nome IN ('Assistente IA','Gael','Sistema','Bot Lojas','Recuperação')` (mesma lista já usada em `vendas-recuperacao-cron`).
-- Se existir qualquer outbound humano no atendimento → **NÃO reativa IA**. Apenas zera `recuperacao_humano` (como já é feito no branch `else if` da linha 747) e segue o caminho `modo humano → ai-triage skip`.
-- Loga o motivo no console para auditoria (`[REATIVACAO-IA] skip: humano já respondeu manualmente`).
+(O som in-app via `useAtendimentoNotifier` também não dispara porque depende de a notificação ter sido criada para o `usuario_id` dela — e o item 1 impede isso.)
 
-Efeito: no caso CLEBER, a Fran enviou várias mensagens como "Operador" → a IA nunca seria reativada e o `ai-triage` continuaria retornando `skipped reason modo humano`.
+## Plano de correção
 
-### 2. `Atendimentos.tsx` — auto-claim no envio (fallback para o useEffect que não rodou)
+1. **Reativar a conta da Fran**
+   - UPDATE em `profiles` setando `ativo = true` para o id `8ca94d4c-c60f-4876-b231-1772188c70a4`.
+   - Isso restaura o fallback de destinatários e libera o `dispatch-push`.
 
-No `handleSend`, antes de chamar `send-whatsapp`, se o atendimento estiver em `modo='humano'` ou `'hibrido'` e `atendente_user_id` estiver vazio, fazer o claim sincronamente (mesmo helper `useClaimAtendimento`). Isso garante que **qualquer mensagem do operador** registre `atendente_user_id` + `atendente_nome` no atendimento, eliminando o estado órfão que enganou a regra do webhook em primeiro lugar.
+2. **Garantir que ela vire destinatária mesmo sem `atendente_user_id`**
+   - Já temos o fallback do trigger `trg_mensagem_inbound_humano` via `resolver_destinatarios_atendimento`. Com `ativo=true` ela passa a entrar no fallback final (`admin/colaborador`).
+   - O auto-claim do `Atendimentos.tsx` (já implementado em loop anterior) vai gravar `atendente_user_id` assim que ela responder, fazendo as próximas inbound notificações irem direto pra ela.
 
-### 3. Memória
+3. **Assinar Web Push neste navegador**
+   - A Fran precisa abrir o INFOCO OPS, clicar em **PushNotificationsButton** (sininho no header) e permitir notificações.
+   - Em iPhone, precisa instalar como PWA antes (Adicionar à Tela de Início), e iOS 16.4+.
+   - Em Android/desktop, basta clicar e permitir.
+   - Sem essa ação manual dela, nenhuma migration resolve — push do navegador exige consentimento explícito.
 
-Atualizar `mem://atendimento/push-operador-humano.md` (ou criar `mem://watchdog/reativacao-ia-pos-retomada.md`) registrando a nova regra: "reativação IA pós-template só dispara se o atendimento não tiver NENHUM outbound humano; envio do operador faz auto-claim como fallback".
+4. **(Opcional) Diagnóstico exposto na UI**
+   - Adicionar no `PushNotificationsButton` um indicador visual quando `profile.ativo = false` ("Sua conta está inativa — peça ao admin pra reativar") para que situações assim sejam óbvias sem precisar abrir o banco.
 
-## O que **não** vou mexer
+## Detalhes técnicos
 
-- Cadência de retomada (`vendas-recuperacao-cron`) — está correta.
-- Comportamento do `ai-triage` em `modo='humano'` — já está correto (skip).
-- Bloco silencioso de "Devolver para IA" no Pipeline/Atendimentos — fora do escopo deste bug.
+- Migration única para o item 1:
+  ```sql
+  UPDATE public.profiles SET ativo = true, updated_at = now()
+   WHERE id = '8ca94d4c-c60f-4876-b231-1772188c70a4';
+  ```
+- Itens 2 e 3 não exigem código novo — dependem da Fran logar e assinar push.
+- Item 4 é uma melhoria pequena em `src/components/layout/PushNotificationsButton.tsx` para evitar reincidência (posso pular se você quiser manter o escopo mínimo).
 
-## Verificação
+## Pergunta antes de implementar
 
-- Reler `whatsapp-webhook/index.ts` após a edição.
-- Reproduzir o cenário mentalmente: com pelo menos 1 outbound do "Operador", o bloco de reativação cai no `else if` (só limpa contador) e o `ai-triage` retorna `skipped reason modo humano`. ✅
-- Conferir que o auto-claim no envio não dispara duplicado (ref `claimedRef` ou guard `if (!atendimento.atendente_user_id)`).
+Quer que eu (a) só reative a conta e te oriente a pedir pra ela ativar o sininho, ou (b) reative + adicione o aviso "conta inativa" no botão de push?
