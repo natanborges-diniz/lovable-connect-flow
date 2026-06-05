@@ -4998,6 +4998,78 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     // nas últimas 2 outbound para que o parser entre em modo "first".
     let correctionApplied = false;
     let correctionIsFirst = false;
+
+    // ── DETECÇÃO DE VISÃO MONOCULAR ──
+    // Cliente declara "olho direito sem visão" / "tenho visão monocular" / "só enxergo do OE".
+    // Marca a receita corrente como monocular (price/2 nas cotações; olho cego = { blind: true })
+    // e responde com a confirmação determinística antes de ir pro LLM.
+    try {
+      const mono = detectMonocular(lastInboundText);
+      if (mono?.signal) {
+        const alreadyMono = !!contatoMeta?.receita_monocular || (receitas.length > 0 && receitas[receitas.length - 1]?.monocular === true);
+        if (mono.blind_eye) {
+          const eyeUsed = mono.blind_eye === "od" ? "oe" : "od";
+          // Atualiza receita pendente (ou cria uma vazia se nada existir ainda).
+          let idx = receitas.length - 1;
+          if (idx < 0) {
+            receitas.push({ eyes: { od: {}, oe: {} }, rx_type: "unknown", confidence: 0.5, data_leitura: new Date().toISOString(), source: "monocular_declared", label: "monocular" });
+            idx = 0;
+          }
+          const rxMono = receitas[idx] || { eyes: { od: {}, oe: {} } };
+          rxMono.eyes = rxMono.eyes || { od: {}, oe: {} };
+          rxMono.eyes[mono.blind_eye] = { blind: true };
+          rxMono.eyes[eyeUsed] = rxMono.eyes[eyeUsed] || {};
+          rxMono.monocular = true;
+          rxMono.eye_used = eyeUsed;
+          rxMono.confirmed_by_client_at = null;
+          receitas[idx] = rxMono;
+
+          const newMeta: any = {
+            ...contatoMeta,
+            receitas,
+            receita_monocular: { eye_used: eyeUsed, blind_eye: mono.blind_eye, set_at: new Date().toISOString(), source: "client_typed" },
+            receita_confirmacao: {
+              pending: true,
+              rx_index: idx,
+              rx_label: rxMono.label || `receita_${idx + 1}`,
+              asked_at: new Date().toISOString(),
+              reason: "monocular_confirm",
+            },
+          };
+          await supabase.from("contatos").update({ metadata: newMeta }).eq("id", contatoId);
+          contatoMeta = newMeta;
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "receita_monocular_detectada",
+            descricao: `Cliente declarou visão monocular — olho cego: ${mono.blind_eye.toUpperCase()}, olho ativo: ${eyeUsed.toUpperCase()}`,
+            metadata: { blind_eye: mono.blind_eye, eye_used: eyeUsed, raw: lastInboundText.slice(0, 200), already_mono: alreadyMono },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
+
+          // Anti-loop: se as últimas 2 outbounds já são a mesma confirmação, não reenvia.
+          const confMsg = buildMsgConfirmarReceita(rxMono, false);
+          const recentNorm = (recentOutbound || []).slice(-2).map(norm);
+          const jaPediu = recentNorm.some((p) => p && p.includes(norm("visão monocular (sem lente)")) && p.includes(norm("Está certinho?")));
+          if (!jaPediu) {
+            await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, confMsg);
+          }
+          return jsonResponse({ status: "ok", tools_used: ["receita_monocular_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+        } else if (!alreadyMono) {
+          // Ambíguo — pergunta UMA vez qual olho tem visão.
+          const askMsg = "Entendi! Pra te passar o orçamento certinho, qual olho você usa pra enxergar — *direito (OD)* ou *esquerdo (OE)*?";
+          const recentNorm = (recentOutbound || []).slice(-3).map(norm);
+          const jaPerguntou = recentNorm.some((p) => p && p.includes(norm("qual olho você usa")));
+          if (!jaPerguntou) {
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, askMsg);
+            return jsonResponse({ status: "ok", tools_used: ["receita_monocular_pergunta_lado"], intencao: "receita_oftalmologica", precisa_humano: false, modo: atendimento.modo });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[MONOCULAR] detection failed", e);
+    }
+
     const correction = detectPrescriptionCorrection(lastInboundText);
     if (correction) {
       const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
