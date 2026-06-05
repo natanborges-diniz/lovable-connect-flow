@@ -721,16 +721,35 @@ serve(async (req) => {
       try {
         const { data: atFull } = await supabase
           .from("atendimentos")
-          .select("atendente_nome, metadata")
+          .select("atendente_nome, atendente_user_id, metadata")
           .eq("id", atendimentoId)
           .maybeSingle();
-        const semAtendente = !atFull?.atendente_nome;
+        const semAtendente = !atFull?.atendente_nome && !(atFull as any)?.atendente_user_id;
         const recH = (atFull?.metadata as any)?.recuperacao_humano;
         const ultTentativaAt = recH?.ultima_tentativa_at ? new Date(recH.ultima_tentativa_at).getTime() : 0;
         const teveRetomadaRecente = ultTentativaAt > 0 &&
           (Date.now() - ultTentativaAt) < 7 * 24 * 3600 * 1000;
 
+        // Reforço: mesmo sem atendente_nome registrado, se houver QUALQUER outbound
+        // humano no atendimento (operador respondeu sem ter sido auto-claimado), o
+        // handoff NÃO está abandonado. Caso CLEBER 05/06: Fran respondeu o dia todo
+        // como "Operador" mas atendente_nome ficou NULL e a IA reativou indevidamente.
+        let humanoJaRespondeu = false;
         if (semAtendente && teveRetomadaRecente) {
+          const { data: outMsgs } = await supabase
+            .from("mensagens")
+            .select("remetente_nome")
+            .eq("atendimento_id", atendimentoId)
+            .eq("direcao", "outbound")
+            .limit(50);
+          const BOTS = new Set(["Assistente IA", "Gael", "Sistema", "Bot Lojas", "Recuperação", "Recuperacao"]);
+          humanoJaRespondeu = !!(outMsgs || []).some((m: any) => {
+            const nome = String(m.remetente_nome || "").trim();
+            return nome && !BOTS.has(nome) && !/template|bot|\bia\b/i.test(nome);
+          });
+        }
+
+        if (semAtendente && teveRetomadaRecente && !humanoJaRespondeu) {
           await supabase.from("atendimentos").update({
             modo: "hibrido",
             metadata: { ...(atFull?.metadata as any || {}), recuperacao_humano: null },
@@ -745,11 +764,15 @@ serve(async (req) => {
           });
           console.log(`[REATIVACAO-IA] ${contato.id}: humano órfão → híbrido após resposta a ${recH?.template_usado || "retomada"}`);
         } else if (recH?.tentativas) {
-          // Cliente respondeu mas há atendente humano ativo: apenas zera o contador
-          // pra próxima vez que ficar em silêncio começar do zero.
+          // Cliente respondeu mas há atendente humano ativo (ou já houve resposta
+          // humana manual): apenas zera o contador pra próxima vez que ficar em
+          // silêncio começar do zero. Mantém modo=humano para o ai-triage skipar.
           await supabase.from("atendimentos").update({
             metadata: { ...(atFull?.metadata as any || {}), recuperacao_humano: null },
           }).eq("id", atendimentoId);
+          if (humanoJaRespondeu) {
+            console.log(`[REATIVACAO-IA] skip ${contato.id}: humano já respondeu manualmente — mantendo modo humano`);
+          }
         }
       } catch (reativErr) {
         console.error("[REATIVACAO-IA] erro:", reativErr);
