@@ -187,7 +187,7 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], mon
 // Regex de produtos cosméticos/coloridos (uso estético, não correção visual prioritária).
 const COSMETIC_RE = /color|natural colors|hidrocor|hydrocor|freshlook|colorblends|air optix colors|solflex (color|natural)|aquarella|hidroblue|hidrosoft|aquarela/i;
 
-async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNatural?: string) {
+async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNatural?: string, monocular = false) {
   const s = deriveRxStats(rx);
   const forceToric = filtros?.is_toric ?? (Math.abs(s.worstCyl) >= 0.75);
   const marca = (filtros?.preferencia_marca || "").trim();
@@ -202,7 +202,6 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNa
   else q = q.eq("is_toric", false);
   if (filtros?.descarte) q = q.eq("descarte", filtros.descarte);
   if (marca) {
-    // Marca pode estar em fornecedor (Coopervision, Alcon, J&J) OU em produto (Acuvue, Oasys, Biofinity, Hidrocor, DNZ, Air Optix…)
     const safe = marca.replace(/[%,()]/g, "");
     q = q.or(`fornecedor.ilike.%${safe}%,produto.ilike.%${safe}%`);
   }
@@ -212,10 +211,12 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNa
   if (!lc?.length) return { erro: "Sem lentes de contato pra esse perfil. Verifique tórica/descarte/marca." };
 
   // Combo 3+1: cada caixa cobre `unidades_por_caixa * dias_por_unidade` dias por OLHO.
+  // Monocular: cliente usa só 1 olho → metade das caixas e do valor anual.
+  const olhos = monocular ? 1 : 2;
   const itens = lc.map((l: any) => {
     const caixasPorOlhoAno = Math.ceil(365 / (l.unidades_por_caixa * l.dias_por_unidade));
-    const caixasTotal = caixasPorOlhoAno * 2;
-    const valor = Number(l.price_brl) * (l.combo_3mais1 ? Math.ceil(caixasTotal * 3 / 4) : caixasTotal);
+    const caixasTotal = caixasPorOlhoAno * olhos;
+    const valor = Number(l.price_brl) * (l.combo_3mais1 && !monocular ? Math.ceil(caixasTotal * 3 / 4) : caixasTotal);
     return {
       id: l.id, fornecedor: l.fornecedor, produto: l.produto, descarte: l.descarte,
       is_toric: l.is_toric, combo: l.combo_3mais1, price_caixa: Number(l.price_brl),
@@ -224,11 +225,9 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNa
     };
   });
 
-  // Para top 3: se operador não pediu cosmética, esconde coloridas.
   const candidatos = operadorPediuCosmetica ? itens : itens.filter((i: any) => !i._cosmetica);
   const pool = candidatos.length ? candidatos : itens;
 
-  // Diversifica por descarte (diária → quinzenal → mensal) — pula se operador pediu marca específica.
   let top: any[] = [];
   if (marca) {
     top = pool.slice(0, 3);
@@ -245,9 +244,10 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNa
     }
   }
 
-  const headerLC = `👁️ *Lentes de contato — opções:*\n${forceToric ? "_⚠️ Tórica (sob encomenda — cyl ≥ 0,75)_\n" : ""}\n`;
+  const headerLC = `👁️ *Lentes de contato — opções:*\n${forceToric ? "_⚠️ Tórica (sob encomenda — cyl ≥ 0,75)_\n" : ""}${monocular ? "_💡 Plano calculado para 1 olho apenas (visão monocular)._\n" : ""}\n`;
   const ctaLC = `\nQual descarte combina mais com a sua rotina? Te indico a loja mais próxima pra finalizar 😊`;
-  const lineLC = (it: any) => `• *${it.fornecedor} ${it.produto}* (${it.descarte}${it.is_dnz ? " · DNZ" : ""}${it.combo ? " · combo 3+1" : ""}) — ${brl(it.price_caixa)} a caixa\n  Plano anual (2 olhos): ~${brl(it.total_ano)} (${it.caixas_ano_2olhos} cx)\n`;
+  const planoLabel = monocular ? "Plano anual (1 olho)" : "Plano anual (2 olhos)";
+  const lineLC = (it: any) => `• *${it.fornecedor} ${it.produto}* (${it.descarte}${it.is_dnz ? " · DNZ" : ""}${it.combo && !monocular ? " · combo 3+1" : ""}) — ${brl(it.price_caixa)} a caixa\n  ${planoLabel}: ~${brl(it.total_ano)} (${it.caixas_ano_2olhos} cx)\n`;
 
   let msg = headerLC + top.map(lineLC).join("") + ctaLC;
 
