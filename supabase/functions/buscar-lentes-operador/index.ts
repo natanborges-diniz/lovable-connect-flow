@@ -145,7 +145,7 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], mon
 
   // Formata mensagem no estilo Gael.
   const od = s.od, oe = s.oe;
-  const header = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${s.hasAdd ? ` | Ad: +${s.maxAdd}` : ""}\n\n`;
+  const header = `🔍 *Opções de lentes para o seu grau:*\nOD ${od.sphere ?? "—"}/${od.cylinder ?? "—"} | OE ${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}${s.hasAdd ? ` | Ad: +${s.maxAdd}` : ""}\n${monocular ? "_💡 Valores já considerando apenas 1 lente (visão monocular)._\n" : ""}\n`;
   const renderFaixa = (label: string, itens: any[]) => {
     if (!itens.length) return "";
     const linhas = itens
