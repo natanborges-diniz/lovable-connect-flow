@@ -209,8 +209,8 @@ serve(async (req) => {
       const saldoDisp    = Number((saldoPre as any)?.saldo_usavel ?? 0);
       const fatorResgate = Number((cfgRowReg as any)?.fator_resgate ?? 3);
 
-      // Chama a RPC de resgate
-      const { data: resgate, error: errResgate } = await supabase.rpc(
+      // Chama a RPC de resgate USANDO o client autenticado, para propagar auth.uid().
+      const { data: resgate, error: errResgate } = await supabaseAsUser.rpc(
         "cashback_registrar_resgate",
         {
           _contato_id:         contato.id,
