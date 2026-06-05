@@ -434,6 +434,15 @@ export function GestaoUsuariosCard() {
         }}
       />
 
+      <NotificacaoPrefsDialog
+        userId={notifTarget?.id ?? null}
+        userName={notifTarget?.nome}
+        open={!!notifTarget}
+        onOpenChange={(o) => !o && setNotifTarget(null)}
+      />
+
+
+
       <Dialog open={!!resetTarget} onOpenChange={(o) => !o && setResetTarget(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

@@ -122,6 +122,7 @@ export default function Configuracoes() {
         <TabsContent value="usuarios">
           <div className="grid gap-6">
             <GestaoUsuariosCard />
+            <FallbackNotificacoesCard />
           </div>
         </TabsContent>
 
