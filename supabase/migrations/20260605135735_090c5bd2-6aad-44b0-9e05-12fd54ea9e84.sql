@@ -1,0 +1,1 @@
+UPDATE public.profiles SET ativo = true, updated_at = now() WHERE id = '8ca94d4c-c60f-4876-b231-1772188c70a4';
