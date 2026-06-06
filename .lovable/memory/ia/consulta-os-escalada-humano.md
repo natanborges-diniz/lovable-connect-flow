@@ -15,6 +15,7 @@ Quando o cliente pergunta sobre **status do pedido**, **OS**, **se o óculos est
 3. Move card para coluna **"Consulta de OS"** no setor Atendimento Corporativo (`32cbd99c-4b20-4c8b-b7b2-901904d0aff6`)
 4. Loga `eventos_crm.tipo='consulta_os'` com a mensagem original
 5. Dispara `summarize-atendimento` (via `handleNonClientEscalation`)
+6. **Fora do expediente** (`!isHorarioHumano()`): tanto o router de texto quanto o botão "🔍 Status do pedido" anexam aviso com `proximaAberturaHumana()` — router concatena ao `os_escalada`; botão usa `mensagemEscaladaForaHorario(nome)` direto. Cliente sempre sabe quando o consultor retorna.
 
 A IA **NUNCA** chega ao LLM nesse caso — bloqueia automaticamente pedido de receita, foto, grau, ADD, CIL ou orçamento. Reforço também via `ia_regras_proibidas` (categoria `comportamento`) e 3 exemplos em `ia_exemplos` categoria `consulta_os`.
 
