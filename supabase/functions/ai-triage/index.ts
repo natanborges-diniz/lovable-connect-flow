@@ -9001,11 +9001,24 @@ async function routeButtonClick(args: {
       await sendOrcamentoEstimativaLCDescartavel(supabase, supabaseUrl, serviceKey, atId, { motivo: "cliente_nao_sabe" });
       await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: null });
       return true;
-    case "status_pedido":
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂");
+    case "status_pedido": {
+      const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+      const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
+      const msg = isHorarioHumano()
+        ? "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂"
+        : mensagemEscaladaForaHorario(_prim);
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
       await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
-      await supabase.from("eventos_crm").insert({ contato_id: atendimento.contato_id, tipo: "consulta_os", descricao: "Botão Status do pedido — escalado", referencia_tipo: "atendimento", referencia_id: atId });
+      await supabase.from("eventos_crm").insert({
+        contato_id: atendimento.contato_id,
+        tipo: "consulta_os",
+        descricao: "Botão Status do pedido — escalado",
+        metadata: { fora_horario: !isHorarioHumano() },
+        referencia_tipo: "atendimento",
+        referencia_id: atId,
+      });
       return true;
+    }
     case "duvida":
       await patchMeta({ intent_detected: "duvida_livre", expected_reply: null });
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me contar sua dúvida por aqui 😊");
