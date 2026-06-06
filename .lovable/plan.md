@@ -1,80 +1,54 @@
-## Objetivo
+## Problema
 
-Resolver o `auth_required` ao registrar cashback. Causa: `cashback-loja` cria apenas um client com service-role, e a RPC `regua_registrar_venda` (chamada internamente por `cashback_registrar_resgate`) exige `auth.uid() IS NOT NULL`.
+Quando o cliente pergunta sobre status do pedido fora do horário de atendimento humano, a IA escala para consultor sem informar que a resposta só virá no próximo expediente. Isso ocorre em dois caminhos:
 
-## Mudança (Opção 1)
+1. **Router pre-LLM de texto** (`ai-triage` linha ~2799) — usa `renderMsgFixa("os_escalada", …)` direto, sem checar `isHorarioHumano()`.
+2. **Botão "🔍 Status do pedido"** (linha ~9001-9005) — mensagem hardcoded "Vou te conectar com um consultor… Só um instante 🙂", também sem checar horário. (Foi exatamente esse o caso do print do Paulo.)
 
-Em `supabase/functions/cashback-loja/index.ts`, criar **dois clients**:
+Todas as outras escaladas no `ai-triage` já fazem o padrão `isHorarioHumano() ? "<expediente>" : mensagemEscaladaForaHorario(nome)`, mas o intent `consulta_os` ficou de fora.
 
-1. `supabaseAdmin` — service-role puro, sem Authorization. Continua usado para:
-   - `auth.getUser(token)` (validação do JWT)
-   - leituras de `profiles`, `user_roles`, `telefones_lojas`, `cashback_config`
-   - inserts em `contatos` e `eventos_crm` (bypass de RLS)
-   - `cashback_consultar_saldo` (não depende de auth.uid)
+## Mudanças
 
-2. `supabaseAsUser` — service-role **com** `global.headers.Authorization: Bearer <token>` do usuário, para que `auth.uid()` propague no Postgres. Usado **apenas** em:
-   - `cashback_registrar_resgate` (que internamente invoca `regua_registrar_venda`)
+Arquivo único: `supabase/functions/ai-triage/index.ts`.
 
-Sem `auth.persistSession` / `autoRefreshToken` nos dois (são clients de servidor).
-
-### Snippet alvo (criação dos dois clients)
+### 1. Router de texto (~linha 2799)
+Trocar a montagem da `osMsg` por uma versão horário-aware:
 
 ```ts
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-const auth  = req.headers.get("Authorization") || "";
-const token = auth.replace("Bearer ", "").trim();
-
-// Client admin: bypassa RLS, sem identidade (auth.uid() = null)
-const supabaseAdmin = createClient(SUPABASE_URL, SERVICE, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
-
-// Client autenticado como a loja: service-role + Authorization do usuário
-// → auth.uid() = user.id dentro das RPCs SECURITY DEFINER
-const supabaseAsUser = createClient(SUPABASE_URL, SERVICE, {
-  auth: { persistSession: false, autoRefreshToken: false },
-  global: { headers: { Authorization: `Bearer ${token}` } },
-});
+const osMsgExpediente = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
+const osMsg = isHorarioHumano()
+  ? osMsgExpediente
+  : `${osMsgExpediente}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
 ```
 
-E a única chamada que muda:
+Mantém a mensagem fixa editável (`os_escalada` continua pedindo nº da OS ou nome completo) e apenas adiciona o aviso de expediente quando aplicável. Sem nova chave em `ia_mensagens_fixas` para não exigir migration.
+
+### 2. Botão "Status do pedido" (~linha 9001-9005)
+Substituir o texto hardcoded pela mesma lógica:
 
 ```ts
-const { data: resgate, error: errResgate } = await supabaseAsUser.rpc(
-  "cashback_registrar_resgate",
-  { ...params }
-);
+case "status_pedido": {
+  const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+  const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
+  const msg = isHorarioHumano()
+    ? "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂"
+    : mensagemEscaladaForaHorario(_prim);
+  await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
+  await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+  await supabase.from("eventos_crm").insert({
+    contato_id: atendimento.contato_id, tipo: "consulta_os",
+    descricao: "Botão Status do pedido — escalado",
+    metadata: { fora_horario: !isHorarioHumano() },
+    referencia_tipo: "atendimento", referencia_id: atId,
+  });
+  return true;
+}
 ```
 
-Todo o resto (`supabase` → renomeado `supabaseAdmin`) permanece igual.
+### Memória
+Atualizar `mem://ia/consulta-os-escalada-humano` registrando que a escalada (router e botão) respeita o expediente e avisa o próximo horário.
 
-## Restrições respeitadas
-
-- Nenhuma alteração de SQL / migrations.
-- Nenhuma alteração no projeto InFoco Messenger.
-- Contrato de resposta da função não muda (mesmas chaves: `status`, `cliente`, `ja_processado`, `credito_gerado`, `saldo_atual`, e mesmos `motivo` em erro).
-
-## Validação
-
-Após deploy, rodar teste como loja real autenticada via `supabase--curl_edge_functions` (usa o JWT da sessão do preview, que é uma loja):
-
-```
-POST /cashback-loja
-{ "action": "registrar",
-  "telefone": "<num teste>", "nome": "Teste Cashback",
-  "numero_venda": "TEST-<timestamp>",
-  "valor_informado": 100, "cashback_usado": 0 }
-```
-
-Critérios de sucesso:
-- Resposta `status: "ok"` com `cliente`, `credito_gerado`, `saldo_atual`.
-- `SELECT * FROM regua_inscricao WHERE numero_venda = 'TEST-<ts>'` → 1 linha.
-- `SELECT * FROM cashback_credito WHERE inscricao_id = <id>` → 1 linha.
-
-Colar no chat: trecho da criação dos dois clients + payload de resposta + linhas das 2 tabelas.
-
-## Arquivo afetado
-
-- `supabase/functions/cashback-loja/index.ts` (rename `supabase` → `supabaseAdmin`, novo `supabaseAsUser`, trocar 1 chamada de RPC).
+## Fora de escopo
+- Não cria nova chave em `ia_mensagens_fixas` (o texto fora-horário é concatenado in-loco; o trecho do expediente continua editável via `os_escalada`).
+- Não altera o restante do fluxo (move card, marca `intent_consulta_os_at`, dispara `handleNonClientEscalation`).
+- Não muda watchdogs nem outras escaladas (já corretas).

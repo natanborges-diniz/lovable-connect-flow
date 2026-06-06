@@ -2796,7 +2796,10 @@ serve(async (req) => {
         await loadMensagensFixas(supabase);
         const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", contatoId).maybeSingle();
         const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
-        const osMsg = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
+        const osMsgExpediente = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
+        const osMsg = isHorarioHumano()
+          ? osMsgExpediente
+          : `${osMsgExpediente}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
 
         // Marca flag de intent — bloqueia guards de receita pendente
         await supabase.from("atendimentos").update({
