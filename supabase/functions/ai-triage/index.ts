@@ -7,6 +7,18 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ── Menu de triagem — fonte única de verdade ─────────────────────────────────
+// Usado em: fast-path saudação recorrente, registrar_nome_cliente, nome_ok.
+// "cashback_ver" já é tratado por routeButtonClick (chama cashback_consultar_saldo).
+const MENU_TRIAGEM_ITENS: Array<{ id: string; titulo: string; descricao: string }> = [
+  { id: "orcamento",     titulo: "💰 Orçamento",        descricao: "Óculos ou lentes de contato" },
+  { id: "agendar",       titulo: "📅 Agendar visita",    descricao: "Marcar um horário na loja" },
+  { id: "status_pedido", titulo: "🔍 Status do pedido",  descricao: "Consultar OS / óculos pronto" },
+  { id: "duvida",        titulo: "💬 Tirar uma dúvida",  descricao: "Produtos / serviços" },
+  { id: "reclamacao",    titulo: "⚠️ Reclamação",        descricao: "Falar com a equipe" },
+  { id: "cashback_ver",  titulo: "💳 Meu cashback",      descricao: "Consultar seu saldo" },
+];
+
 // ═══════════════════════════════════════════
 // HORÁRIO COMERCIAL — ESCALADA HUMANA
 // ═══════════════════════════════════════════
@@ -3410,13 +3422,7 @@ serve(async (req) => {
             lista: {
               label: "Ver opções",
               secao: "Posso te ajudar com",
-              itens: [
-                { id: "orcamento", titulo: "💰 Orçamento", descricao: "Óculos ou lentes de contato" },
-                { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
-                { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
-                { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
-                { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
-              ],
+              itens: MENU_TRIAGEM_ITENS,
             },
           });
           await supabase.from("atendimentos").update({
@@ -6282,13 +6288,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               lista: {
                 label: "Ver opções",
                 secao: "Posso te ajudar com",
-                itens: [
-                  { id: "orcamento", titulo: "💰 Orçamento", descricao: "Óculos ou lentes de contato" },
-                  { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
-                  { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
-                  { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Falar sobre produtos / serviços" },
-                  { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
-                ],
+                itens: MENU_TRIAGEM_ITENS,
               },
             });
             // Marca que o menu inicial foi servido — evita LLM duplicar a pergunta.
@@ -8891,13 +8891,7 @@ async function routeButtonClick(args: {
       lista: {
         label: "Ver opções",
         secao: "Posso te ajudar com",
-        itens: [
-          { id: "orcamento", titulo: "💰 Orçamento", descricao: "Óculos ou lentes de contato" },
-          { id: "agendar", titulo: "📅 Agendar visita", descricao: "Marcar um horário na loja" },
-          { id: "status_pedido", titulo: "🔍 Status do pedido", descricao: "Consultar OS / óculos pronto" },
-          { id: "duvida", titulo: "💬 Tirar uma dúvida", descricao: "Produtos / serviços" },
-          { id: "reclamacao", titulo: "⚠️ Reclamação", descricao: "Falar com a equipe" },
-        ],
+        itens: MENU_TRIAGEM_ITENS,
       },
     });
     await patchMeta({ menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" });
