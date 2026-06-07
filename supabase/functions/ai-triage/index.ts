@@ -461,6 +461,16 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
     return null;
   }
 
+  // Cashback: cliente digitou em vez de tocar o botão da pergunta de confirmação
+  if (stage === "cashback_confirmacao") {
+    if (
+      /\b(sim|quero|pode|claro|aham|isso|manda|ver|ok|s|ss)\b/.test(t) ||
+      /[👍✅]/.test(text)
+    ) return "cashback_ver";
+    if (/\b(nao|agora nao|depois|deixa)\b/.test(t)) return "cashback_nao";
+    return null;
+  }
+
   return null;
 }
 
@@ -9210,6 +9220,64 @@ async function routeButtonClick(args: {
       await patchMeta({ recuperacao_recusada_at: new Date().toISOString(), expected_reply: null });
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Compreendo! Obrigado pelo retorno. Quando precisar, estaremos por aqui 😊");
       return true;
+  }
+
+  // ── Cashback: "Ver meu saldo" (botão ou texto afirmativo mapeado em detectExpectedReplyAction) ──
+  if (buttonId === "cashback_ver") {
+    await patchMeta({ expected_reply: null });
+
+    const { data: _cbS } = await supabase.rpc("cashback_consultar_saldo", { _contato_id: atendimento.contato_id });
+    const s        = _cbS as any;
+    const usavel   = Number(s?.saldo_usavel      ?? 0);
+    const carencia = Number(s?.saldo_em_carencia ?? 0);
+
+    const fmtBRL = (n: number) =>
+      Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtDia = (iso: string | null | undefined): string | null => {
+      if (!iso) return null;
+      const d = String(iso).slice(0, 10);
+      return d.slice(8) + "/" + d.slice(5, 7);
+    };
+    const proxVenc = fmtDia(s?.proximo_vencimento);
+    const proxLib  = fmtDia(s?.proxima_liberacao);
+
+    let cbMsg: string;
+    if (usavel > 0 && carencia === 0) {
+      cbMsg = `Seu cashback de R$ ${fmtBRL(usavel)} já está liberado pra usar` +
+        (proxVenc ? `, e vale até ${proxVenc} 💚` : " 💚");
+    } else if (usavel === 0 && carencia > 0) {
+      cbMsg = `Seu cashback de R$ ${fmtBRL(carencia)} já está garantido e libera dia ${proxLib} 💚`;
+    } else if (usavel > 0 && carencia > 0) {
+      cbMsg = `Você tem R$ ${fmtBRL(usavel)} liberado pra usar e mais R$ ${fmtBRL(carencia)} que libera dia ${proxLib} 💚`;
+    } else {
+      cbMsg = "Você ainda não tem cashback acumulado — mas a cada compra você ganha 15% de volta pra usar na próxima 💚";
+    }
+
+    if (usavel > 0 || carencia > 0) {
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: cbMsg,
+        botoes: [{ id: "cashback_como_funciona", titulo: "💳 Como funciona?" }],
+      });
+    } else {
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, cbMsg);
+    }
+
+    await supabase.from("eventos_crm").insert({
+      contato_id:      atendimento.contato_id,
+      tipo:            "cashback_consulta_cliente",
+      descricao:       "Cliente consultou saldo cashback via botão",
+      referencia_tipo: "atendimento",
+      referencia_id:   atId,
+    });
+    return true;
+  }
+
+  // ── Cashback: "Agora não" ──
+  if (buttonId === "cashback_nao") {
+    await patchMeta({ expected_reply: null });
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tranquilo! Qualquer coisa é só chamar 💚");
+    return true;
   }
 
   // BLOCO 1 — "Como funciona o cashback?" (stateless, não precisa de dados do contato)
