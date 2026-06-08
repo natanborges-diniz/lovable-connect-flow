@@ -32,7 +32,7 @@ import {
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
   MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw, Image as ImageIcon, ExternalLink,
-  Pin, Paperclip, Glasses,
+  Pin, Paperclip, Glasses, CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -814,6 +814,8 @@ function ConversationPanel({
   };
 
   // Find the latest open atendimento for this contato
+  // Busca o atendimento mais recente do contato (independente de status).
+  // Encerrados continuam visíveis em modo somente-leitura para preservar histórico.
   const { data: atendimentoData } = useQuery({
     queryKey: ["atendimento_contato", contatoId],
     queryFn: async () => {
@@ -821,10 +823,9 @@ function ConversationPanel({
         .from("atendimentos")
         .select("id, modo, status, canal, canal_provedor, solicitacao_id, metadata")
         .eq("contato_id", contatoId)
-        .neq("status", "encerrado")
         .order("created_at", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       if (error && error.code !== "PGRST116") throw error;
       return data;
     },
@@ -991,14 +992,20 @@ function ConversationPanel({
               </SelectContent>
             </Select>
           </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={handleEncerrarAtendimento}
-          >
-            <X className="h-3 w-3 mr-1" /> Encerrar
-          </Button>
+          {atendimentoData?.status === "encerrado" ? (
+            <Badge variant="outline" className="h-7 text-[11px] gap-1 border-muted-foreground/40 text-muted-foreground">
+              <CheckCircle2 className="h-3 w-3" /> Encerrado — somente leitura
+            </Badge>
+          ) : (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleEncerrarAtendimento}
+            >
+              <X className="h-3 w-3 mr-1" /> Encerrar
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1342,7 +1349,13 @@ const ChatView = forwardRef<ChatViewHandle, { atendimentoId: string; contatoNome
         )}
       </div>
 
-      {/* Composer fixo no rodapé */}
+      {/* Composer fixo no rodapé — escondido em atendimentos encerrados (somente leitura) */}
+      {atendimento?.status === "encerrado" ? (
+        <div className="border-t p-3 shrink-0 bg-muted/40 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Atendimento encerrado — histórico em modo somente leitura.
+        </div>
+      ) : (
       <div className="border-t p-3 shrink-0 bg-background">
         {attachmentPreview && (
           <div className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 p-2">
@@ -1412,6 +1425,7 @@ const ChatView = forwardRef<ChatViewHandle, { atendimentoId: string; contatoNome
           </Button>
         </div>
       </div>
+      )}
     </>
   );
 });
