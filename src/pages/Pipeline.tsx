@@ -1019,6 +1019,18 @@ function ConversationPanel({
           }}
         />
       )}
+
+      {atendimentoId && (
+        <EncerrarAtendimentoDialog
+          open={encerrarOpen}
+          onOpenChange={setEncerrarOpen}
+          atendimentoId={atendimentoId}
+          contatoId={contatoId}
+          perdidosColunaId={perdidosColunaId}
+          encerradosColunaId={encerradosColunaId}
+          onSuccess={handleEncerrarSuccess}
+        />
+      )}
     </>
   );
 }
