@@ -29,7 +29,9 @@ const STATUS_BY_TIPO: Record<string, "aguardando" | "confirmada" | "sem_estoque"
 export default function PipelineEstoque() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [editingCard, setEditingCard] = useState<any | null>(null);
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { data: colunas = [] } = usePipelineColunas(SETOR_ID);
   const { data: cards = [], isLoading } = useConfirmacoesEstoque();
   const moveCol = useUpdateConfirmacaoColuna();
