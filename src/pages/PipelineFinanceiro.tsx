@@ -44,6 +44,7 @@ import { ConfirmarPixDialog } from "@/components/financeiro/ConfirmarPixDialog";
 import { useAutomacoes } from "@/hooks/useAutomacoes";
 import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
 import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
+import { ConcluirSolicitacaoDialog } from "@/components/financeiro/ConcluirSolicitacaoDialog";
 import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
 
 export default function PipelineFinanceiro() {
@@ -129,7 +130,8 @@ export default function PipelineFinanceiro() {
   });
 
   const [cancelDialogId, setCancelDialogId] = useState<string | null>(null);
-  const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId: string } | null>(null);
+  const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId?: string; presets?: string[] } | null>(null);
+  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" } | null>(null);
 
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
