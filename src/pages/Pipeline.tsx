@@ -1349,7 +1349,13 @@ const ChatView = forwardRef<ChatViewHandle, { atendimentoId: string; contatoNome
         )}
       </div>
 
-      {/* Composer fixo no rodapé */}
+      {/* Composer fixo no rodapé — escondido em atendimentos encerrados (somente leitura) */}
+      {atendimento?.status === "encerrado" ? (
+        <div className="border-t p-3 shrink-0 bg-muted/40 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Atendimento encerrado — histórico em modo somente leitura.
+        </div>
+      ) : (
       <div className="border-t p-3 shrink-0 bg-background">
         {attachmentPreview && (
           <div className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 p-2">
