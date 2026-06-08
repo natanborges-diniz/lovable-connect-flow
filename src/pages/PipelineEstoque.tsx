@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Package, Search, ExternalLink, Clock, AlertTriangle } from "lucide-react";
+import { Plus, Package, Search, ExternalLink, Clock, AlertTriangle, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { usePipelineColunas } from "@/hooks/usePipelineColunas";
 import { useConfirmacoesEstoque, useUpdateConfirmacaoColuna } from "@/hooks/useConfirmacoesEstoque";
 import { NovaConfirmacaoEstoqueDialog } from "@/components/estoque/NovaConfirmacaoEstoqueDialog";
+import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
+import { useAuth } from "@/hooks/useAuth";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
