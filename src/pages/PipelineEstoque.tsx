@@ -119,6 +119,17 @@ export default function PipelineEstoque() {
                                   {c.foto_url && (
                                     <img src={c.foto_url} alt="peça" className="h-10 w-10 rounded object-cover border" />
                                   )}
+                                  {isAdmin && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
+                                      title="Editar informações (admin)"
+                                      onClick={(e) => { e.stopPropagation(); setEditingCard(c); }}
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                  )}
                                 </div>
                                 <p className="text-xs mt-1">
                                   <span className="text-muted-foreground">REF</span> {c.referencia} •{" "}
