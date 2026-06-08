@@ -4020,12 +4020,57 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         // Pode ser correção por texto — se for, deixa fluxo seguir; senão repete pergunta
         const possibleCorrection = detectPrescriptionCorrection(lastInboundText);
         if (!possibleCorrection) {
-          const respRep = lastRx
-            ? buildMsgConfirmarReceita(lastRx, false)
-            : "Antes de te passar as opções, preciso que você confirme os valores que li da sua receita. Pode dar uma olhada e me dizer se está certinho? 😊";
-          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respRep);
-          console.log(`[RX-CONFIRMACAO] Cliente desviou — repedindo confirmação`);
-          return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+          // ── Saída do loop: abandono claro ou intenção nova reconhecida ──
+          // Estende o regex de opt-out do gate de SET (mai/2026) + "esquece", "deixa pra lá"
+          const isAbandonoClaro = /\b(esquece(r?(\s+(a\s+)?receita)?)?|deixa\s+pr[ao]\s+l[aá]|n[aã]o\s+quero\s+(mais\s+)?(or[cç]amento|receita)|n[aã]o\s+precisa|guarda?r?\s+(a\s+)?receita|depois\s+(eu\s+)?(te\s+)?falo|s[oó]\s+(quero|queria|gostaria)\s+(que\s+)?(voc[eê]\s+)?guarde|s[oó]\s+(uma|tirando)\s+d[uú]vida)\b/i.test(lastInboundText);
+          const intentNova = detectForcedToolIntent(lastInboundText, hasValidReceitas, hasRecentUnparsedPrescriptionImage && !hasValidReceitas);
+          const isIntencaoNova = intentNova?.tool === "agendar_cliente_intent" || matchesCashdiniz(lastInboundText);
+
+          if (isAbandonoClaro || isIntencaoNova) {
+            // Limpa pending no contato
+            try {
+              await supabase.from("contatos").update({
+                metadata: {
+                  ...contatoMeta,
+                  receita_confirmacao: {
+                    ...contatoMeta.receita_confirmacao,
+                    pending: false,
+                    saiu_por: isAbandonoClaro ? "abandono" : "intencao_nova",
+                    saiu_em: new Date().toISOString(),
+                  },
+                },
+              }).eq("id", contatoId);
+              contatoMeta.receita_confirmacao = { ...contatoMeta.receita_confirmacao, pending: false };
+            } catch (_) { /* noop */ }
+            // Limpa receita_pending + expected_reply="receita_confirmacao" no atendimento se setados
+            try {
+              const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).maybeSingle();
+              const atMeta = (atRow?.metadata || {}) as Record<string, any>;
+              if (atMeta.receita_pending || atMeta.expected_reply === "receita_confirmacao") {
+                await supabase.from("atendimentos").update({
+                  metadata: {
+                    ...atMeta,
+                    receita_pending: null,
+                    expected_reply: atMeta.expected_reply === "receita_confirmacao" ? null : atMeta.expected_reply,
+                  },
+                }).eq("id", atendimento_id);
+              }
+            } catch (_) { /* noop */ }
+            console.log(`[RX-CONFIRMACAO] Saiu do loop — ${isAbandonoClaro ? "abandono" : "intencao_nova:" + intentNova?.tool}`);
+            if (isAbandonoClaro && !isIntencaoNova) {
+              await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, "Ok, sem problemas! Se precisar de orçamento depois é só chamar 😊");
+              return jsonResponse({ status: "ok", tools_used: ["receita_pending_abandonada"], intencao: "outro", precisa_humano: false, pipeline_coluna_sugerida: "Novo", modo: atendimento.modo });
+            }
+            // Intenção nova: não retorna — pipeline roteia normalmente (ex.: "quero agendar" cai no intercept)
+          } else {
+            // Input ambíguo — mantém loop
+            const respRep = lastRx
+              ? buildMsgConfirmarReceita(lastRx, false)
+              : "Antes de te passar as opções, preciso que você confirme os valores que li da sua receita. Pode dar uma olhada e me dizer se está certinho? 😊";
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respRep);
+            console.log(`[RX-CONFIRMACAO] Cliente desviou — repedindo confirmação`);
+            return jsonResponse({ status: "ok", tools_used: ["receita_aguardando_confirmacao"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+          }
         }
       }
     }
