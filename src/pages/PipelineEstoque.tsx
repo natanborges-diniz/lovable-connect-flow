@@ -171,6 +171,23 @@ export default function PipelineEstoque() {
           </div>
         </DragDropContext>
       )}
+
+      {editingCard && (
+        <EditCardInfoDialog
+          open={!!editingCard}
+          onOpenChange={(v) => { if (!v) setEditingCard(null); }}
+          table="confirmacoes_estoque"
+          rowId={editingCard.id}
+          title={`Editar card • ${editingCard.protocolo}`}
+          fields={[
+            { key: "referencia", label: "Referência", type: "text", value: editingCard.referencia },
+            { key: "codigo_produto", label: "Código do produto", type: "text", value: editingCard.codigo_produto },
+            { key: "descricao_peca", label: "Descrição da peça", type: "textarea", value: editingCard.descricao_peca, placeholder: "Ex: armação masculina acetato preta" },
+            { key: "observacao_estoque", label: "Observação interna", type: "textarea", value: editingCard.observacao_estoque, placeholder: "Notas para a equipe" },
+          ] as EditableField[]}
+          invalidateKeys={[["confirmacoes_estoque"]]}
+        />
+      )}
     </div>
   );
 }
