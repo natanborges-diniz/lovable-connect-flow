@@ -146,7 +146,60 @@ serve(async (req) => {
     }).eq("id", solicitacao_id);
 
     // 3) Mensagem na thread da demanda (Messenger)
-    const demandaId = (meta.demanda_id as string) || null;
+    //    Se a solicitação não tem demanda vinculada (criada direto via Messenger
+    //    sem passar por demandas_loja), auto-cria uma demanda para a loja
+    //    receber a carta/comprovante no app.
+    let demandaId = (meta.demanda_id as string) || null;
+
+    if (!demandaId && lojaNome) {
+      const { data: lojaInfo } = await supabase
+        .from("telefones_lojas")
+        .select("telefone, setor_destino_id")
+        .ilike("nome_loja", lojaNome)
+        .eq("ativo", true)
+        .maybeSingle();
+
+      if (lojaInfo?.telefone) {
+        const protocolo = `FIN-${new Date().getFullYear()}-${solicitacao_id.slice(0, 8)}`;
+        const assuntoDem = modo === "carta"
+          ? `Carta de estorno — ${sol.assunto || ""}`.slice(0, 120)
+          : `Comprovante de pagamento — ${sol.assunto || ""}`.slice(0, 120);
+        const perguntaDem = modo === "carta"
+          ? "Segue carta de estorno do cliente para repasse."
+          : `Comprovante de pagamento NSU ${body.nsu || ""} — R$ ${Number(body.valor || 0).toFixed(2)}`;
+
+        const { data: novaDem, error: novaDemErr } = await supabase
+          .from("demandas_loja")
+          .insert({
+            protocolo,
+            loja_nome: lojaNome,
+            loja_telefone: lojaInfo.telefone,
+            assunto: assuntoDem,
+            pergunta: perguntaDem,
+            status: "respondida",
+            origem: "operador",
+            tipo_chave: modo === "carta" ? "carta_estorno" : "comprovante_pagamento",
+            setor_destino_id: lojaInfo.setor_destino_id,
+            solicitante_id: usuario_id,
+            solicitante_nome: usuario_nome,
+            metadata: { solicitacao_id, auto_created_from: "concluir-solicitacao-financeiro" },
+          })
+          .select("id")
+          .single();
+
+        if (novaDemErr) {
+          console.error("[concluir-solicitacao-financeiro] auto-create demanda failed:", novaDemErr);
+        } else if (novaDem?.id) {
+          demandaId = novaDem.id;
+          // Backfill no solicitação para futuras interações
+          novoMeta.demanda_id = demandaId;
+          await supabase.from("solicitacoes")
+            .update({ metadata: novoMeta })
+            .eq("id", solicitacao_id);
+        }
+      }
+    }
+
     if (demandaId) {
       const tituloMsg = modo === "carta"
         ? `✅ Estorno concluído. Segue a carta para enviar ao cliente.`
@@ -185,6 +238,8 @@ serve(async (req) => {
         }));
         await supabase.from("notificacoes").insert(notifs);
       }
+    } else {
+      console.warn("[concluir-solicitacao-financeiro] sem demanda vinculada e sem telefone da loja — loja não foi notificada", { solicitacao_id, lojaNome });
     }
 
     // 4) Timeline
