@@ -387,6 +387,21 @@ export default function PipelineFinanceiro() {
                                                 </p>
                                               )}
                                             </div>
+                                            {/* Botão editar (admin) */}
+                                            {isAdmin && (
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
+                                                title="Editar informações (admin)"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setEditingCard(sol);
+                                                }}
+                                              >
+                                                <Pencil className="h-3 w-3" />
+                                              </Button>
+                                            )}
                                             {/* Botão excluir card */}
                                             <Button
                                               variant="ghost"
