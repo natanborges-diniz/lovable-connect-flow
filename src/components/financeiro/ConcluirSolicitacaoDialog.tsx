@@ -55,9 +55,12 @@ export function ConcluirSolicitacaoDialog({
     if (!file || !solicitacaoId) return;
     setUploading(true);
     try {
+      // RLS exige que o 1º segmento do path seja auth.uid()
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Sessão expirada — faça login novamente.");
       // Upload pro bucket público mensagens-anexos
       const ext = file.name.split(".").pop() || "bin";
-      const path = `financeiro/${solicitacaoId}/${Date.now()}-${modo}.${ext}`;
+      const path = `${user.id}/financeiro/${solicitacaoId}/${Date.now()}-${modo}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("mensagens-anexos").upload(path, file, { contentType: file.type, upsert: false });
       if (upErr) throw upErr;
