@@ -4183,12 +4183,27 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
       const isPaymentReceiptContext = recentPaymentLink || hasOpenPaymentSolicitation;
       if (isPaymentReceiptContext) {
-        console.log("[COMPROVANTE] Imagem após link de pagamento — tratando como comprovante, não receita");
-        const respostaComp = "Recebi seu comprovante 🙌 Vou validar com a equipe e te confirmo já já. Qualquer coisa, é só me chamar por aqui.";
+        console.log("[COMPROVANTE] Imagem após link de pagamento — anexa ao card, encerra atendimento e notifica Financeiro");
+
+        // Mensagem fixa editável (fallback hardcoded)
+        let respostaComp = "Recebi seu comprovante 🙌 Já encaminhei para o Financeiro conferir. Assim que confirmar, te aviso por aqui. Obrigado!";
+        try {
+          const { data: fixa } = await supabase
+            .from("ia_mensagens_fixas")
+            .select("texto, ativo")
+            .eq("chave", "comprovante_recebido_cliente")
+            .maybeSingle();
+          if (fixa?.ativo && fixa?.texto) respostaComp = fixa.texto;
+        } catch (_) { /* noop */ }
+
         await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respostaComp);
-        // Escala para humano (Financeiro valida TID/NSU manualmente)
-        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
-        // Marca a solicitação de pagamento como tendo recebido comprovante
+
+        // Localiza solicitação de pagamento aberta + extrai mídia
+        const lastInbound = recentInbound?.[recentInbound.length - 1] as any;
+        const anexoUrl = lastInbound?.url || lastInbound?.media_url || lastInbound?.imagem_url || null;
+        const anexoMime = lastInbound?.mime_type || lastInbound?.mimeType || "image/jpeg";
+
+        let solPagamento: any = null;
         try {
           const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
           const { data: paySols } = await supabase
@@ -4199,42 +4214,137 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             .gte("created_at", since)
             .order("created_at", { ascending: false })
             .limit(1);
-          const sol = paySols?.[0];
-          if (sol) {
-            const newMeta = { ...(sol.metadata || {}), comprovante_recebido_at: new Date().toISOString() };
-            await supabase.from("solicitacoes").update({ metadata: newMeta }).eq("id", sol.id);
+          solPagamento = paySols?.[0] || null;
+          if (solPagamento) {
+            const nowIso = new Date().toISOString();
+            const newMeta = {
+              ...(solPagamento.metadata || {}),
+              comprovante_recebido_at: nowIso,
+              comprovante_url: anexoUrl,
+              comprovante_origem: "cliente_whatsapp",
+            };
+            await supabase.from("solicitacoes").update({ metadata: newMeta }).eq("id", solPagamento.id);
+            // Anexo no card
+            if (anexoUrl) {
+              await supabase.from("solicitacao_anexos").insert({
+                solicitacao_id: solPagamento.id,
+                tipo: "comprovante_pagamento_cliente",
+                descricao: "Comprovante enviado pelo cliente via WhatsApp",
+                url_publica: anexoUrl,
+                mime_type: anexoMime,
+              }).then(() => undefined, () => undefined);
+            }
+            // Timeline
+            await supabase.from("pipeline_card_eventos").insert({
+              entidade: "solicitacao",
+              entidade_id: solPagamento.id,
+              tipo: "comprovante_cliente_recebido",
+              descricao: "Cliente enviou comprovante via WhatsApp",
+              metadata: { anexo_url: anexoUrl },
+            } as any).then(() => undefined, () => undefined);
             // Espelha em pagamentos_link
-            const pli = (sol.metadata as any)?.payment_link_id;
+            const pli = (solPagamento.metadata as any)?.payment_link_id;
             if (pli) {
               await supabase.from("pagamentos_link")
-                .update({ comprovante_recebido_at: new Date().toISOString() })
-                .eq("payment_link_id", pli);
+                .update({ comprovante_recebido_at: nowIso })
+                .eq("payment_link_id", pli).then(() => undefined, () => undefined);
             }
           }
         } catch (e) {
-          console.error("[COMPROVANTE] failed to mark solicitacao:", e);
+          console.error("[COMPROVANTE] failed to attach to solicitacao:", e);
         }
+
+        // Move card CRM para coluna terminal "Encerrados" + marca encerramento_motivo no contato
+        try {
+          const { data: encerradosCol } = await supabase
+            .from("pipeline_colunas")
+            .select("id")
+            .is("setor_id", null)
+            .ilike("nome", "Encerrados")
+            .eq("ativo", true)
+            .limit(1)
+            .maybeSingle();
+          if (encerradosCol?.id) {
+            const { data: cData } = await supabase
+              .from("contatos")
+              .select("pipeline_coluna_id, metadata")
+              .eq("id", contatoId)
+              .maybeSingle();
+            const prevCol = cData?.pipeline_coluna_id || null;
+            const cMeta = ((cData?.metadata as any) || {}) as Record<string, any>;
+            cMeta.encerramento_motivo = "comprovante_recebido";
+            if (cMeta.recuperacao_vendas) {
+              cMeta.recuperacao_vendas = { ...cMeta.recuperacao_vendas, status: "encerrado_auto" };
+            }
+            await supabase.from("contatos")
+              .update({ pipeline_coluna_id: encerradosCol.id, metadata: cMeta } as any)
+              .eq("id", contatoId);
+            await supabase.from("pipeline_card_eventos").insert({
+              entidade: "contato",
+              entidade_id: contatoId,
+              tipo: "atendimento_encerrado",
+              descricao: "Encerrado automaticamente — comprovante recebido",
+              coluna_anterior_id: prevCol,
+              coluna_nova_id: encerradosCol.id,
+              metadata: { motivo: "comprovante_recebido", automatico: true },
+            } as any).then(() => undefined, () => undefined);
+          }
+        } catch (e) {
+          console.error("[COMPROVANTE] failed to move CRM card:", e);
+        }
+
+        // Encerra atendimento (modo=ia, status=encerrado) + grava motivo
+        try {
+          const { data: a } = await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).maybeSingle();
+          const aMeta = ((a?.metadata as any) || {}) as Record<string, any>;
+          delete aMeta.ia_lock;
+          aMeta.encerramento_motivo = "comprovante_recebido";
+          aMeta.desfecho = "encerrado";
+          await supabase.from("atendimentos").update({
+            status: "encerrado",
+            modo: "ia",
+            fim_at: new Date().toISOString(),
+            metadata: aMeta,
+          } as any).eq("id", atendimento_id);
+        } catch (_) { /* noop */ }
+
+        // Notifica usuários do Financeiro
+        try {
+          const SETOR_FINANCEIRO = "7cd0d465-bb9d-4097-a1ae-93106fb82d48";
+          const { data: roles } = await supabase
+            .from("user_roles")
+            .select("user_id")
+            .eq("setor_id", SETOR_FINANCEIRO);
+          const userIds = Array.from(new Set((roles || []).map((r: any) => r.user_id).filter(Boolean)));
+          if (userIds.length > 0 && solPagamento) {
+            await supabase.from("notificacoes").insert(userIds.map((uid: string) => ({
+              usuario_id: uid,
+              tipo: "comprovante_recebido",
+              titulo: "Comprovante recebido",
+              mensagem: `Cliente enviou comprovante do link de pagamento`.slice(0, 140),
+              referencia_id: solPagamento.id,
+            })));
+          }
+        } catch (e) {
+          console.error("[COMPROVANTE] failed to notify financeiro:", e);
+        }
+
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId,
           tipo: "comprovante_pagamento_recebido",
-          descricao: "Cliente enviou imagem após link de pagamento — escalado para validação manual",
+          descricao: "Cliente enviou comprovante após link de pagamento — anexado ao card e Financeiro notificado",
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
-          metadata: { trigger: recentPaymentLink ? "recent_template" : "open_solicitation" },
+          metadata: { trigger: recentPaymentLink ? "recent_template" : "open_solicitation", auto_encerrado: true },
         }).then(() => undefined, () => undefined);
-        // Limpa lock de IA e retorna
-        try {
-          const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
-          delete m.ia_lock;
-          await supabase.from("atendimentos").update({ metadata: m }).eq("id", atendimento_id);
-        } catch (_) { /* noop */ }
+
         return jsonResponse({
           status: "ok",
           tools_used: ["comprovante_pagamento"],
           intencao: "comprovante_pagamento",
-          precisa_humano: true,
-          modo: "humano",
-          validator_flags: ["payment_receipt_short_circuit"],
+          precisa_humano: false,
+          modo: "ia",
+          validator_flags: ["payment_receipt_attached_and_closed"],
         });
       }
     }
