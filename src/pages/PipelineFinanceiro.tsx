@@ -800,7 +800,21 @@ export default function PipelineFinanceiro() {
         open={!!concluirDialog}
         onOpenChange={(o) => !o && setConcluirDialog(null)}
         onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }); setSelectedSolicitacao(null); }}
-      />
+
+      {editingCard && (
+        <EditCardInfoDialog
+          open={!!editingCard}
+          onOpenChange={(v) => { if (!v) setEditingCard(null); }}
+          table="solicitacoes"
+          rowId={editingCard.id}
+          title={`Editar card • ${editingCard.protocolo ?? editingCard.assunto ?? ""}`}
+          fields={[
+            { key: "assunto", label: "Título / assunto", type: "text", value: editingCard.assunto },
+            { key: "descricao", label: "Descrição", type: "textarea", value: editingCard.descricao, placeholder: "Detalhes da demanda" },
+          ] as EditableField[]}
+          invalidateKeys={[["solicitacoes_financeiro"]]}
+        />
+      )}
     </>
   );
 }
