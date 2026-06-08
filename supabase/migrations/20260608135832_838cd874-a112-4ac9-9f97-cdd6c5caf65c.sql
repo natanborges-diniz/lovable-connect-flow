@@ -1,0 +1,2 @@
+ALTER TABLE public.solicitacoes ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_solicitacoes_created_by ON public.solicitacoes(created_by);

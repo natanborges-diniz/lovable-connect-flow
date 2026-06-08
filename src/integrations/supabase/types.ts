@@ -2805,6 +2805,7 @@ export type Database = {
           classificacao_ia: Json | null
           contato_id: string
           created_at: string
+          created_by: string | null
           descricao: string | null
           id: string
           metadata: Json | null
@@ -2821,6 +2822,7 @@ export type Database = {
           classificacao_ia?: Json | null
           contato_id: string
           created_at?: string
+          created_by?: string | null
           descricao?: string | null
           id?: string
           metadata?: Json | null
@@ -2837,6 +2839,7 @@ export type Database = {
           classificacao_ia?: Json | null
           contato_id?: string
           created_at?: string
+          created_by?: string | null
           descricao?: string | null
           id?: string
           metadata?: Json | null
