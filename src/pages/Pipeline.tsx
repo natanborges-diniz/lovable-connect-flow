@@ -12,6 +12,7 @@ import {
   
 } from "@/hooks/usePipelineColunas";
 import { TransferPipelineDialog } from "@/components/pipeline/TransferPipelineDialog";
+import { EncerrarAtendimentoDialog } from "@/components/pipeline/EncerrarAtendimentoDialog";
 import { TipoContatoBadge, AtendimentoStatusBadge } from "@/components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -803,7 +804,18 @@ function ConversationPanel({
   const [transferColunaId, setTransferColunaId] = useState("");
   const [transferColunaNome, setTransferColunaNome] = useState("");
   const [buscarLentesOpen, setBuscarLentesOpen] = useState(false);
+  const [encerrarOpen, setEncerrarOpen] = useState(false);
   const chatViewRef = useRef<ChatViewHandle>(null);
+
+  // Resolve IDs das colunas terminais do CRM (setor_id NULL)
+  const perdidosColunaId = useMemo(
+    () => allColunas?.find((c) => !c.setor_id && /perdid/i.test(c.nome))?.id,
+    [allColunas]
+  );
+  const encerradosColunaId = useMemo(
+    () => allColunas?.find((c) => !c.setor_id && /encerrad/i.test(c.nome))?.id,
+    [allColunas]
+  );
 
   // Known setor name mappings
   const SETOR_MAP: Record<string, "lojas" | "financeiro" | "ti"> = {
@@ -889,37 +901,10 @@ function ConversationPanel({
     queryClient.invalidateQueries({ queryKey: ["pipeline_colunas_all"] });
   };
 
-  const handleEncerrarAtendimento = async () => {
-    if (!atendimentoId) return;
-    try {
-      // Generate summary
-      await supabase.functions.invoke("summarize-atendimento", {
-        body: { atendimento_id: atendimentoId },
-      });
-
-      // Close atendimento
-      const { error } = await supabase
-        .from("atendimentos")
-        .update({ status: "encerrado", fim_at: new Date().toISOString() } as any)
-        .eq("id", atendimentoId);
-      if (error) throw error;
-
-      // Cancel recovery cadence
-      if (contato) {
-        const meta = (contato.metadata as any) || {};
-        if (meta.recuperacao_vendas) {
-          await supabase.from("contatos").update({
-            metadata: { ...meta, recuperacao_vendas: { ...meta.recuperacao_vendas, status: "encerrado_manual" } },
-          } as any).eq("id", contatoId);
-        }
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["atendimento_contato", contatoId] });
-      queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
-      toast.success("Atendimento encerrado com sucesso");
-    } catch (e: any) {
-      toast.error("Erro ao encerrar: " + e.message);
-    }
+  const handleEncerrarSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ["atendimento_contato", contatoId] });
+    queryClient.invalidateQueries({ queryKey: ["atendimentos_modos"] });
+    queryClient.invalidateQueries({ queryKey: ["contatos"] });
   };
 
   if (!atendimentoId) {
@@ -1001,7 +986,7 @@ function ConversationPanel({
               variant="destructive"
               size="sm"
               className="h-7 text-xs"
-              onClick={handleEncerrarAtendimento}
+              onClick={() => setEncerrarOpen(true)}
             >
               <X className="h-3 w-3 mr-1" /> Encerrar
             </Button>
@@ -1032,6 +1017,18 @@ function ConversationPanel({
           onInsertComposer={(text) => {
             chatViewRef.current?.insertComposerText(text);
           }}
+        />
+      )}
+
+      {atendimentoId && (
+        <EncerrarAtendimentoDialog
+          open={encerrarOpen}
+          onOpenChange={setEncerrarOpen}
+          atendimentoId={atendimentoId}
+          contatoId={contatoId}
+          perdidosColunaId={perdidosColunaId}
+          encerradosColunaId={encerradosColunaId}
+          onSuccess={handleEncerrarSuccess}
         />
       )}
     </>
