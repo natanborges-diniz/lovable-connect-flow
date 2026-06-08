@@ -46,11 +46,15 @@ import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
 import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
 import { ConcluirSolicitacaoDialog } from "@/components/financeiro/ConcluirSolicitacaoDialog";
 import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
+import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
   const [selectedSolicitacao, setSelectedSolicitacao] = useState<any | null>(null);
+  const [editingCard, setEditingCard] = useState<any | null>(null);
 
   // Get Financeiro setor id
   const { data: financeiroSetor } = useQuery({
@@ -383,6 +387,21 @@ export default function PipelineFinanceiro() {
                                                 </p>
                                               )}
                                             </div>
+                                            {/* Botão editar (admin) */}
+                                            {isAdmin && (
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
+                                                title="Editar informações (admin)"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setEditingCard(sol);
+                                                }}
+                                              >
+                                                <Pencil className="h-3 w-3" />
+                                              </Button>
+                                            )}
                                             {/* Botão excluir card */}
                                             <Button
                                               variant="ghost"
@@ -782,6 +801,23 @@ export default function PipelineFinanceiro() {
         onOpenChange={(o) => !o && setConcluirDialog(null)}
         onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }); setSelectedSolicitacao(null); }}
       />
+
+
+
+      {editingCard && (
+        <EditCardInfoDialog
+          open={!!editingCard}
+          onOpenChange={(v) => { if (!v) setEditingCard(null); }}
+          table="solicitacoes"
+          rowId={editingCard.id}
+          title={`Editar card • ${editingCard.protocolo ?? editingCard.assunto ?? ""}`}
+          fields={[
+            { key: "assunto", label: "Título / assunto", type: "text", value: editingCard.assunto },
+            { key: "descricao", label: "Descrição", type: "textarea", value: editingCard.descricao, placeholder: "Detalhes da demanda" },
+          ] as EditableField[]}
+          invalidateKeys={[["solicitacoes_financeiro"]]}
+        />
+      )}
     </>
   );
 }

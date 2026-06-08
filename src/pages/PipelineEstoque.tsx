@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Package, Search, ExternalLink, Clock, AlertTriangle } from "lucide-react";
+import { Plus, Package, Search, ExternalLink, Clock, AlertTriangle, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { usePipelineColunas } from "@/hooks/usePipelineColunas";
 import { useConfirmacoesEstoque, useUpdateConfirmacaoColuna } from "@/hooks/useConfirmacoesEstoque";
 import { NovaConfirmacaoEstoqueDialog } from "@/components/estoque/NovaConfirmacaoEstoqueDialog";
+import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
+import { useAuth } from "@/hooks/useAuth";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -27,7 +29,9 @@ const STATUS_BY_TIPO: Record<string, "aguardando" | "confirmada" | "sem_estoque"
 export default function PipelineEstoque() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [editingCard, setEditingCard] = useState<any | null>(null);
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { data: colunas = [] } = usePipelineColunas(SETOR_ID);
   const { data: cards = [], isLoading } = useConfirmacoesEstoque();
   const moveCol = useUpdateConfirmacaoColuna();
@@ -115,6 +119,17 @@ export default function PipelineEstoque() {
                                   {c.foto_url && (
                                     <img src={c.foto_url} alt="peça" className="h-10 w-10 rounded object-cover border" />
                                   )}
+                                  {isAdmin && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
+                                      title="Editar informações (admin)"
+                                      onClick={(e) => { e.stopPropagation(); setEditingCard(c); }}
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                  )}
                                 </div>
                                 <p className="text-xs mt-1">
                                   <span className="text-muted-foreground">REF</span> {c.referencia} •{" "}
@@ -155,6 +170,23 @@ export default function PipelineEstoque() {
             })}
           </div>
         </DragDropContext>
+      )}
+
+      {editingCard && (
+        <EditCardInfoDialog
+          open={!!editingCard}
+          onOpenChange={(v) => { if (!v) setEditingCard(null); }}
+          table="confirmacoes_estoque"
+          rowId={editingCard.id}
+          title={`Editar card • ${editingCard.protocolo}`}
+          fields={[
+            { key: "referencia", label: "Referência", type: "text", value: editingCard.referencia },
+            { key: "codigo_produto", label: "Código do produto", type: "text", value: editingCard.codigo_produto },
+            { key: "descricao_peca", label: "Descrição da peça", type: "textarea", value: editingCard.descricao_peca, placeholder: "Ex: armação masculina acetato preta" },
+            { key: "observacao_estoque", label: "Observação interna", type: "textarea", value: editingCard.observacao_estoque, placeholder: "Notas para a equipe" },
+          ] as EditableField[]}
+          invalidateKeys={[["confirmacoes_estoque"]]}
+        />
       )}
     </div>
   );
