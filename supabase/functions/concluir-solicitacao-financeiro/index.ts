@@ -223,21 +223,9 @@ serve(async (req) => {
         ultima_mensagem_loja_at: nowIso,
       }).eq("id", demandaId);
 
-      // Notifica usuários da loja
-      const { data: dests } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
-      const userIds = (dests || []).map((d: any) => d.user_id).filter(Boolean);
-      if (userIds.length > 0) {
-        const notifs = userIds.map((uid: string) => ({
-          usuario_id: uid,
-          tipo: modo === "carta" ? "estorno_concluido" : "pagamento_concluido",
-          titulo: modo === "carta" ? "Estorno concluído" : "Pagamento concluído",
-          mensagem: modo === "carta"
-            ? `Carta de estorno disponível — ${sol.assunto || ""}`.slice(0, 140)
-            : `R$ ${Number(body.valor).toFixed(2)} — NSU ${body.nsu}`.slice(0, 140),
-          referencia_id: demandaId,
-        }));
-        await supabase.from("notificacoes").insert(notifs);
-      }
+      // (Notificações enviadas no bloco 3b com referencia_id=solicitacao_id —
+      //  o Messenger abre a thread da SOL, então evitamos duplicar aqui.)
+
     } else {
       console.warn("[concluir-solicitacao-financeiro] sem demanda vinculada e sem telefone da loja — loja não foi notificada", { solicitacao_id, lojaNome });
     }
