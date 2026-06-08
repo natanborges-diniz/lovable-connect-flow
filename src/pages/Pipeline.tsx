@@ -1425,6 +1425,7 @@ const ChatView = forwardRef<ChatViewHandle, { atendimentoId: string; contatoNome
           </Button>
         </div>
       </div>
+      )}
     </>
   );
 });
