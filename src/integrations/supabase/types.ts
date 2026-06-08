@@ -2755,29 +2755,41 @@ export type Database = {
       }
       solicitacao_comentarios: {
         Row: {
+          anexo_mime: string | null
+          anexo_nome: string | null
+          anexo_url: string | null
           autor_id: string | null
           autor_nome: string | null
           conteudo: string
           created_at: string
           id: string
+          metadata: Json
           solicitacao_id: string
           tipo: string
         }
         Insert: {
+          anexo_mime?: string | null
+          anexo_nome?: string | null
+          anexo_url?: string | null
           autor_id?: string | null
           autor_nome?: string | null
           conteudo: string
           created_at?: string
           id?: string
+          metadata?: Json
           solicitacao_id: string
           tipo?: string
         }
         Update: {
+          anexo_mime?: string | null
+          anexo_nome?: string | null
+          anexo_url?: string | null
           autor_id?: string | null
           autor_nome?: string | null
           conteudo?: string
           created_at?: string
           id?: string
+          metadata?: Json
           solicitacao_id?: string
           tipo?: string
         }

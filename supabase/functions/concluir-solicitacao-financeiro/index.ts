@@ -223,21 +223,9 @@ serve(async (req) => {
         ultima_mensagem_loja_at: nowIso,
       }).eq("id", demandaId);
 
-      // Notifica usuários da loja
-      const { data: dests } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
-      const userIds = (dests || []).map((d: any) => d.user_id).filter(Boolean);
-      if (userIds.length > 0) {
-        const notifs = userIds.map((uid: string) => ({
-          usuario_id: uid,
-          tipo: modo === "carta" ? "estorno_concluido" : "pagamento_concluido",
-          titulo: modo === "carta" ? "Estorno concluído" : "Pagamento concluído",
-          mensagem: modo === "carta"
-            ? `Carta de estorno disponível — ${sol.assunto || ""}`.slice(0, 140)
-            : `R$ ${Number(body.valor).toFixed(2)} — NSU ${body.nsu}`.slice(0, 140),
-          referencia_id: demandaId,
-        }));
-        await supabase.from("notificacoes").insert(notifs);
-      }
+      // (Notificações enviadas no bloco 3b com referencia_id=solicitacao_id —
+      //  o Messenger abre a thread da SOL, então evitamos duplicar aqui.)
+
     } else {
       console.warn("[concluir-solicitacao-financeiro] sem demanda vinculada e sem telefone da loja — loja não foi notificada", { solicitacao_id, lojaNome });
     }
@@ -245,9 +233,11 @@ serve(async (req) => {
     // 3b) ESPELHA no thread da própria solicitação (Messenger "Minhas demandas"
     //     lista solicitacoes e mostra solicitacao_comentarios). É aqui que a
     //     loja realmente lê a resposta do operador.
+    //     Mensagem curta + anexo estruturado (anexo_url/nome/mime) para o app
+    //     renderizar como card clicável (sem URL crua no texto).
     const comentarioMsg = modo === "carta"
-      ? `✅ Estorno concluído.\n\n📎 Carta para envio ao cliente:\n${anexo.url}\n\nToque no link acima para abrir, baixar ou compartilhar por WhatsApp.`
-      : `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\n📎 Comprovante:\n${anexo.url}`;
+      ? `✅ Estorno concluído.\n\nCarta de devolução em anexo — toque para abrir, baixar ou compartilhar por WhatsApp com o cliente.`
+      : `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\nComprovante em anexo.`;
 
     await supabase.from("solicitacao_comentarios").insert({
       solicitacao_id,
@@ -255,9 +245,14 @@ serve(async (req) => {
       autor_nome: usuario_nome || "Financeiro",
       conteudo: comentarioMsg + (body.observacao ? `\n\n📝 ${body.observacao}` : ""),
       tipo: "operador_para_loja",
+      anexo_url: anexo.url,
+      anexo_nome: anexo.nome || (modo === "carta" ? "carta-estorno.pdf" : "comprovante.pdf"),
+      anexo_mime: anexo.mime_type || null,
+      metadata: { tipo: "conclusao_financeiro", modo, storage_path: anexo.storage_path || null },
     });
 
-    // Notifica usuários da loja com referência à SOLICITAÇÃO (que é o que abre na Messenger)
+    // Notifica usuários da loja com referência à SOLICITAÇÃO (Messenger abre a
+    // thread da solicitação — é onde a loja vê a carta/comprovante).
     if (lojaNome) {
       const { data: destsSol } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
       const userIdsSol = (destsSol || []).map((d: any) => d.user_id).filter(Boolean);
@@ -273,6 +268,7 @@ serve(async (req) => {
         })));
       }
     }
+
 
 
     // 4) Timeline
