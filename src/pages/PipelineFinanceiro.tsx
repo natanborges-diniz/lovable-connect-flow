@@ -800,6 +800,9 @@ export default function PipelineFinanceiro() {
         open={!!concluirDialog}
         onOpenChange={(o) => !o && setConcluirDialog(null)}
         onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }); setSelectedSolicitacao(null); }}
+      />
+
+
 
       {editingCard && (
         <EditCardInfoDialog
