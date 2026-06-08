@@ -4084,7 +4084,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       if (posOrc?.etapa && !lastIsImage) {
         if (posOrc.etapa === "aguardando_cta_visita") {
           if (detectAceiteVisita(lastInboundText)) {
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, await getMsgListaCidades());
+            await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta);
             await _setPosOrc({ ...posOrc, etapa: "aguardando_cidade", atualizado_at: new Date().toISOString() });
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId, tipo: "cta_visita_aceito",
@@ -4112,9 +4112,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         } else if (posOrc.etapa === "aguardando_cidade") {
           const cidade = detectCidadeEscolhida(lastInboundText);
           if (cidade) {
-            const lojasMsg = await formatLojasPorCidade(cidade, lojas);
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
             await _setPosOrc({ ...posOrc, etapa: "aguardando_loja", cidade, atualizado_at: new Date().toISOString() });
+            await sendListaLojasDaCidade(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, cidade, lojas, contatoId);
             await supabase.from("eventos_crm").insert({
               contato_id: contatoId, tipo: "cidade_escolhida",
               descricao: `Cliente escolheu cidade ${(await loadCidadesLojas()).cidadeLabel[cidade] || cidade}`,
@@ -4125,7 +4124,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           }
           const tries = Number(posOrc.tries_cidade || 0) + 1;
           if (tries < 2) {
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, await getMsgListaCidades());
+            await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, "Desculpe, não entendi. Qual dessas cidades fica melhor pra você? 😊");
             await _setPosOrc({ ...posOrc, tries_cidade: tries });
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
@@ -4146,8 +4145,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
           }
           const tries = Number(posOrc.tries_loja || 0) + 1;
           if (tries < 2) {
-            const lojasMsg = await formatLojasPorCidade(posOrc.cidade || "osasco", lojas);
-            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, lojasMsg);
+            await sendListaLojasDaCidade(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, posOrc.cidade || "osasco", lojas, contatoId);
             await _setPosOrc({ ...posOrc, tries_loja: tries });
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
@@ -4382,6 +4380,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       let lojasStr = "";
       if (lojas.length > 0) {
         lojasStr = "## LOJAS DISPONÍVEIS\n";
+        lojasStr += "⚠️ NUNCA liste lojas em texto corrido. A seleção de loja é SEMPRE feita pela lista interativa do WhatsApp enviada automaticamente pelo sistema. Use estes dados SOMENTE para verificar horários, endereços e disponibilidade de datas. Se o cliente perguntar 'qual loja' ou 'onde fica', não liste — a lista interativa será enviada automaticamente.\n";
         lojasStr += "⚠️ Use a grade de horário abaixo. NUNCA ofereça horário num dia marcado como FECHADA. Se o cliente pedir um dia fechado, diga que aquela loja não abre nesse dia e ofereça outra data ou outra loja que abra naquele dia.\n\n";
         for (const l of lojas) {
           const parts = [`**${l.nome_loja}**`];
@@ -5477,6 +5476,16 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           });
         }
       }
+    } else if (forcedIntent?.tool === "agendar_cliente_intent"
+            && !hasAgendamentoAtivo
+            && !atendimentoMeta.agendamento_pending?.loja_nome) {
+      // Digitou intenção de agendar, sem loja pré-selecionada → bypassa LLM, envia lista de cidades.
+      await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta);
+      return jsonResponse({
+        status: "ok", tools_used: ["forced_lista_cidades"],
+        intencao: "agendamento", precisa_humano: false,
+        pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo,
+      });
     } else if (forcedIntent && (forcedIntent.tool === "consultar_lentes" || forcedIntent.tool === "consultar_lentes_contato" || forcedIntent.tool === "interpretar_receita" || forcedIntent.tool === "responder_pedindo_receita")) {
       const isRegionTrigger = /respondeu regi[aã]o/i.test(forcedIntent.reason || "");
       const brandRefMatch = (forcedIntent.reason || "").match(/^brand_refinement:([a-z]+):(.*)$/i);
@@ -8728,14 +8737,40 @@ async function routeExpectedTypedReply(args: {
       .eq("id", atId);
   };
 
+  // Fallback de texto: cliente digitou a cidade em vez de tocar na lista.
+  if (expectedReply === "cidade_selecao") {
+    const cidade = detectCidadeEscolhida(mensagemTexto);
+    if (!cidade) return false;
+    const { data: lojas } = await supabase
+      .from("telefones_lojas").select("id, nome_loja, endereco")
+      .eq("tipo", "loja").eq("ativo", true).order("nome_loja");
+    try {
+      const { data: ctRow } = await supabase.from("contatos")
+        .select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+      const ctMeta = (ctRow?.metadata || {}) as Record<string, any>;
+      if (ctMeta.pos_orcamento?.etapa === "aguardando_cidade") {
+        await supabase.from("contatos").update({
+          metadata: { ...ctMeta, pos_orcamento: {
+            ...ctMeta.pos_orcamento, etapa: "aguardando_loja", cidade,
+            atualizado_at: new Date().toISOString(),
+          }},
+        }).eq("id", atendimento.contato_id);
+      }
+    } catch (_) { /* noop */ }
+    await sendListaLojasDaCidade(
+      supabase, supabaseUrl, serviceKey, atId, atendimentoMeta, cidade, lojas || [], atendimento.contato_id,
+    );
+    return true;
+  }
+
+  // Fallback de texto: cliente digitou o nome da loja em vez de tocar na lista.
   if (expectedReply === "loja_selecao") {
     const { data: lojas } = await supabase
       .from("telefones_lojas")
       .select("id, nome_loja, endereco")
       .eq("tipo", "loja")
       .eq("ativo", true)
-      .order("nome_loja", { ascending: true })
-      .limit(10);
+      .order("nome_loja", { ascending: true });
 
     const lojaMatch = matchLojaByTypedText(lojas || [], mensagemTexto);
     if (!lojaMatch) return false;
@@ -8749,6 +8784,16 @@ async function routeExpectedTypedReply(args: {
       },
       ultimo_typed_expected_reply_at: new Date().toISOString(),
     });
+    // Limpa pos_orcamento para próxima mensagem (dia/hora) não re-disparar handler de loja.
+    try {
+      const { data: ctRow } = await supabase.from("contatos")
+        .select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+      const ctMeta = (ctRow?.metadata || {}) as Record<string, any>;
+      if (ctMeta.pos_orcamento) {
+        const { pos_orcamento: _p, ...rest } = ctMeta;
+        await supabase.from("contatos").update({ metadata: rest }).eq("id", atendimento.contato_id);
+      }
+    } catch (_) { /* noop */ }
     await sendWhatsApp(
       supabaseUrl,
       serviceKey,
@@ -8914,14 +8959,51 @@ async function routeButtonClick(args: {
     return true;
   }
 
+  // Seleção de cidade → envia lista de lojas dessa cidade.
+  if (buttonId.startsWith("cidade:")) {
+    const cidadeSlug = buttonId.slice(7);
+    const { data: lojas } = await supabase
+      .from("telefones_lojas").select("id, nome_loja, endereco")
+      .eq("tipo", "loja").eq("ativo", true).order("nome_loja");
+    // Avança pos_orcamento para que digitação de loja (fallback texto) funcione.
+    try {
+      const { data: ctRow } = await supabase.from("contatos")
+        .select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+      const ctMeta = (ctRow?.metadata || {}) as Record<string, any>;
+      if (ctMeta.pos_orcamento?.etapa === "aguardando_cidade") {
+        await supabase.from("contatos").update({
+          metadata: { ...ctMeta, pos_orcamento: {
+            ...ctMeta.pos_orcamento, etapa: "aguardando_loja", cidade: cidadeSlug,
+            atualizado_at: new Date().toISOString(),
+          }},
+        }).eq("id", atendimento.contato_id);
+      }
+    } catch (_) { /* noop */ }
+    await sendListaLojasDaCidade(
+      supabase, supabaseUrl, serviceKey, atId, atendimentoMeta, cidadeSlug, lojas || [], atendimento.contato_id,
+    );
+    return true;
+  }
+
   if (buttonId.startsWith("loja:")) {
     const lojaId = buttonId.slice(5);
     const { data: loja } = await supabase
       .from("telefones_lojas").select("id, nome_loja, endereco").eq("id", lojaId).maybeSingle();
     if (loja) {
       await patchMeta({
+        expected_reply: "agendamento_data_horario",
         agendamento_pending: { ...(atendimentoMeta.agendamento_pending || {}), loja_id: loja.id, loja_nome: loja.nome_loja },
       });
+      // Limpa pos_orcamento: próxima mensagem (dia/hora) não deve re-disparar handler de loja.
+      try {
+        const { data: ctRow } = await supabase.from("contatos")
+          .select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+        const ctMeta = (ctRow?.metadata || {}) as Record<string, any>;
+        if (ctMeta.pos_orcamento) {
+          const { pos_orcamento: _p, ...rest } = ctMeta;
+          await supabase.from("contatos").update({ metadata: rest }).eq("id", atendimento.contato_id);
+        }
+      } catch (_) { /* noop */ }
       await sendWhatsApp(supabaseUrl, serviceKey, atId,
         `Perfeito! Loja escolhida: *${loja.nome_loja}*.\nQual dia e horário ficaria melhor pra você? 😊`);
       return true;
@@ -9284,32 +9366,113 @@ async function routeButtonClick(args: {
   return false;
 }
 
+// ── Seleção de loja: sempre cidade → loja ────────────────────────────────────
+// sendListaCidades: ponto de entrada único. Substitui getMsgListaCidades (texto)
+// e o antigo sendListaLojas (lista flat). Seta expected_reply "cidade_selecao".
+async function sendListaCidades(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  atId: string, metaAtual: Record<string, any>,
+  texto = "Em qual cidade prefere ser atendido? 😊",
+): Promise<void> {
+  const snap = await loadCidadesLojas().catch(() => null);
+  const cidades = snap?.cidadesOrdenadas ?? [];
+  await supabase.from("atendimentos")
+    .update({ metadata: { ...metaAtual, expected_reply: "cidade_selecao" } })
+    .eq("id", atId);
+  if (!cidades.length) {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId,
+      "Em qual cidade fica melhor pra você? Temos em Osasco, Carapicuíba, Itapevi e Barueri 😊");
+    return;
+  }
+  await sendInteractive(supabaseUrl, serviceKey, atId, {
+    type: "list",
+    texto,
+    lista: {
+      label: "Ver cidades",
+      secao: "Nossas regiões",
+      itens: cidades.map((slug) => {
+        const n = snap!.cidadeToLojas[slug]?.length ?? 0;
+        return { id: `cidade:${slug}`, titulo: snap!.cidadeLabel[slug] || slug,
+                 descricao: `${n} unidade${n !== 1 ? "s" : ""}` };
+      }),
+    },
+  });
+}
+
+// sendListaLojasDaCidade: envia lojas de uma cidade. Se a cidade tiver apenas 1 loja,
+// pula a lista e confirma direto (otimização). contatoId necessário para limpar
+// pos_orcamento nesse caso e evitar re-rotear a mensagem de dia/hora.
+async function sendListaLojasDaCidade(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  atId: string, metaAtual: Record<string, any>,
+  cidadeSlug: string,
+  lojas: Array<{ id: string; nome_loja?: string | null; endereco?: string | null }>,
+  contatoId?: string,
+): Promise<void> {
+  const snap = await loadCidadesLojas().catch(() => null);
+  const nomesNaCidade = snap?.cidadeToLojas[cidadeSlug] ?? [];
+  const label = snap?.cidadeLabel[cidadeSlug] ?? cidadeSlug;
+  const filtradas = lojas.filter((l) =>
+    nomesNaCidade.some((n) => _normTxt(l.nome_loja || "") === _normTxt(n))
+  );
+
+  if (filtradas.length === 0) {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId,
+      `Pra ${label}, me passa o seu bairro que te indico a unidade mais próxima 😊`);
+    return;
+  }
+
+  // Cidade com 1 loja → confirma direto, sem lista de 1 item.
+  if (filtradas.length === 1) {
+    const loja = filtradas[0];
+    await supabase.from("atendimentos").update({
+      metadata: {
+        ...metaAtual, expected_reply: "agendamento_data_horario",
+        agendamento_pending: {
+          ...(metaAtual.agendamento_pending || {}), loja_id: loja.id, loja_nome: loja.nome_loja,
+        },
+      },
+    }).eq("id", atId);
+    // Limpa pos_orcamento para que "amanhã às 14h" não re-dispare o handler de loja.
+    if (contatoId) {
+      try {
+        const { data: ctRow } = await supabase.from("contatos")
+          .select("metadata").eq("id", contatoId).maybeSingle();
+        const ctMeta = (ctRow?.metadata || {}) as Record<string, any>;
+        if (ctMeta.pos_orcamento) {
+          const { pos_orcamento: _p, ...rest } = ctMeta;
+          await supabase.from("contatos").update({ metadata: rest }).eq("id", contatoId);
+        }
+      } catch (_) { /* noop */ }
+    }
+    await sendWhatsApp(supabaseUrl, serviceKey, atId,
+      `Ótimo! Nossa unidade em ${label} é a *${loja.nome_loja}* 😊\nQual dia e horário ficaria melhor pra você?`);
+    return;
+  }
+
+  await supabase.from("atendimentos")
+    .update({ metadata: { ...metaAtual, expected_reply: "loja_selecao" } })
+    .eq("id", atId);
+  await sendInteractive(supabaseUrl, serviceKey, atId, {
+    type: "list",
+    texto: `Aqui são as unidades em *${label}* — qual fica melhor? 😊`,
+    lista: {
+      label: "Ver lojas", secao: "Nossas unidades",
+      itens: filtradas.map((l) => ({
+        id: `loja:${l.id}`, titulo: l.nome_loja || "",
+        descricao: (l.endereco || "").slice(0, 72),
+      })),
+    },
+  });
+}
+
 async function sendListaLojas(supabase: any, supabaseUrl: string, serviceKey: string, atId: string) {
   let metaAtual: Record<string, any> = {};
   try {
     const { data: atRow } = await supabase.from("atendimentos").select("metadata").eq("id", atId).maybeSingle();
     metaAtual = (atRow?.metadata || {}) as Record<string, any>;
   } catch (_) { /* noop */ }
-  const { data: lojas } = await supabase
-    .from("telefones_lojas").select("id, nome_loja, endereco")
-    .eq("tipo", "loja").eq("ativo", true)
-    .order("nome_loja", { ascending: true }).limit(10);
-  if (!lojas?.length) {
-    await supabase.from("atendimentos").update({ metadata: { ...metaAtual, expected_reply: "bairro_regiao_livre" } }).eq("id", atId);
-    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Em qual cidade ou bairro fica melhor pra você? 😊");
-    return;
-  }
-  try {
-    await supabase.from("atendimentos").update({ metadata: { ...metaAtual, expected_reply: "loja_selecao" } }).eq("id", atId);
-  } catch (_) { /* noop */ }
-  await sendInteractive(supabaseUrl, serviceKey, atId, {
-    type: "list",
-    texto: "Em qual loja prefere ser atendido? 😊",
-    lista: {
-      label: "Ver lojas", secao: "Nossas unidades",
-      itens: lojas.map((l: any) => ({ id: `loja:${l.id}`, titulo: l.nome_loja, descricao: (l.endereco || "").slice(0, 72) })),
-    },
-  });
+  await sendListaCidades(supabase, supabaseUrl, serviceKey, atId, metaAtual);
 }
 
 async function sendEnderecosLojas(supabase: any, supabaseUrl: string, serviceKey: string, atId: string) {
