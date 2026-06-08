@@ -46,6 +46,8 @@ import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
 import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
 import { ConcluirSolicitacaoDialog } from "@/components/financeiro/ConcluirSolicitacaoDialog";
 import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
+import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
