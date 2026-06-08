@@ -992,14 +992,20 @@ function ConversationPanel({
               </SelectContent>
             </Select>
           </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={handleEncerrarAtendimento}
-          >
-            <X className="h-3 w-3 mr-1" /> Encerrar
-          </Button>
+          {atendimentoData?.status === "encerrado" ? (
+            <Badge variant="outline" className="h-7 text-[11px] gap-1 border-muted-foreground/40 text-muted-foreground">
+              <CheckCircle2 className="h-3 w-3" /> Encerrado — somente leitura
+            </Badge>
+          ) : (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleEncerrarAtendimento}
+            >
+              <X className="h-3 w-3 mr-1" /> Encerrar
+            </Button>
+          )}
         </div>
       </div>
 
