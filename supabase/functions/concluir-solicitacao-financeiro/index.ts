@@ -242,6 +242,39 @@ serve(async (req) => {
       console.warn("[concluir-solicitacao-financeiro] sem demanda vinculada e sem telefone da loja — loja não foi notificada", { solicitacao_id, lojaNome });
     }
 
+    // 3b) ESPELHA no thread da própria solicitação (Messenger "Minhas demandas"
+    //     lista solicitacoes e mostra solicitacao_comentarios). É aqui que a
+    //     loja realmente lê a resposta do operador.
+    const comentarioMsg = modo === "carta"
+      ? `✅ Estorno concluído.\n\n📎 Carta para envio ao cliente:\n${anexo.url}\n\nToque no link acima para abrir, baixar ou compartilhar por WhatsApp.`
+      : `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\n📎 Comprovante:\n${anexo.url}`;
+
+    await supabase.from("solicitacao_comentarios").insert({
+      solicitacao_id,
+      autor_id: usuario_id,
+      autor_nome: usuario_nome || "Financeiro",
+      conteudo: comentarioMsg + (body.observacao ? `\n\n📝 ${body.observacao}` : ""),
+      tipo: "operador_para_loja",
+    });
+
+    // Notifica usuários da loja com referência à SOLICITAÇÃO (que é o que abre na Messenger)
+    if (lojaNome) {
+      const { data: destsSol } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+      const userIdsSol = (destsSol || []).map((d: any) => d.user_id).filter(Boolean);
+      if (userIdsSol.length > 0) {
+        await supabase.from("notificacoes").insert(userIdsSol.map((uid: string) => ({
+          usuario_id: uid,
+          tipo: modo === "carta" ? "estorno_concluido" : "pagamento_concluido",
+          titulo: modo === "carta" ? "Carta de estorno disponível" : "Pagamento concluído",
+          mensagem: (modo === "carta"
+            ? `${sol.protocolo || "Solicitação"} — toque para baixar a carta`
+            : `${sol.protocolo || "Solicitação"} — R$ ${Number(body.valor).toFixed(2)} NSU ${body.nsu}`).slice(0, 140),
+          referencia_id: solicitacao_id,
+        })));
+      }
+    }
+
+
     // 4) Timeline
     await supabase.from("pipeline_card_eventos").insert({
       entidade: "solicitacao",
