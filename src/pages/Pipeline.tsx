@@ -814,6 +814,8 @@ function ConversationPanel({
   };
 
   // Find the latest open atendimento for this contato
+  // Busca o atendimento mais recente do contato (independente de status).
+  // Encerrados continuam visíveis em modo somente-leitura para preservar histórico.
   const { data: atendimentoData } = useQuery({
     queryKey: ["atendimento_contato", contatoId],
     queryFn: async () => {
@@ -821,10 +823,9 @@ function ConversationPanel({
         .from("atendimentos")
         .select("id, modo, status, canal, canal_provedor, solicitacao_id, metadata")
         .eq("contato_id", contatoId)
-        .neq("status", "encerrado")
         .order("created_at", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       if (error && error.code !== "PGRST116") throw error;
       return data;
     },
