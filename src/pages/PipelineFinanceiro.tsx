@@ -44,6 +44,7 @@ import { ConfirmarPixDialog } from "@/components/financeiro/ConfirmarPixDialog";
 import { useAutomacoes } from "@/hooks/useAutomacoes";
 import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
 import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
+import { ConcluirSolicitacaoDialog } from "@/components/financeiro/ConcluirSolicitacaoDialog";
 import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
 
 export default function PipelineFinanceiro() {
@@ -129,7 +130,8 @@ export default function PipelineFinanceiro() {
   });
 
   const [cancelDialogId, setCancelDialogId] = useState<string | null>(null);
-  const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId: string } | null>(null);
+  const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId?: string; presets?: string[] } | null>(null);
+  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" } | null>(null);
 
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
@@ -591,11 +593,145 @@ export default function PipelineFinanceiro() {
                     </div>
                   </div>
                 )}
+
+                {/* Dados estruturados — Estorno */}
+                {(selectedSolicitacao.tipo === "estorno_cartao" || selectedSolicitacao.tipo === "estorno_pix_debito") && (
+                  <div className="pt-2 border-t">
+                    <p className="text-muted-foreground text-xs mb-1">Dados do estorno</p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                      {selectedSolicitacao.metadata?.numero_venda && (<><span className="text-muted-foreground">OS/Venda</span><span className="font-medium">{selectedSolicitacao.metadata.numero_venda}</span></>)}
+                      {selectedSolicitacao.metadata?.data_processamento && (<><span className="text-muted-foreground">Processamento</span><span className="font-medium">{selectedSolicitacao.metadata.data_processamento}</span></>)}
+                      {selectedSolicitacao.metadata?.nsu && (<><span className="text-muted-foreground">NSU</span><span className="font-medium">{selectedSolicitacao.metadata.nsu}</span></>)}
+                      {selectedSolicitacao.metadata?.valor_total && (<><span className="text-muted-foreground">Valor total</span><span className="font-medium">R$ {Number(selectedSolicitacao.metadata.valor_total).toFixed(2)}</span></>)}
+                      {selectedSolicitacao.metadata?.valor && (<><span className="text-muted-foreground">A cancelar</span><span className="font-medium">R$ {Number(selectedSolicitacao.metadata.valor).toFixed(2)}</span></>)}
+                      {selectedSolicitacao.metadata?.estorno_status && (<><span className="text-muted-foreground">Status</span><Badge variant="outline">{String(selectedSolicitacao.metadata.estorno_status)}</Badge></>)}
+                    </div>
+                    {selectedSolicitacao.metadata?.carta_estorno_url && (
+                      <a href={String(selectedSolicitacao.metadata.carta_estorno_url)} target="_blank" rel="noopener noreferrer"
+                         className="text-primary underline text-xs mt-2 inline-block">📎 Carta de devolução</a>
+                    )}
+                  </div>
+                )}
+
+                {/* Dados estruturados — Pagamento / Reembolso */}
+                {(selectedSolicitacao.tipo === "pagamento" || selectedSolicitacao.tipo === "reembolso") && (
+                  <div className="pt-2 border-t">
+                    <p className="text-muted-foreground text-xs mb-1">Dados do {selectedSolicitacao.tipo === "pagamento" ? "pagamento" : "reembolso"}</p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                      {selectedSolicitacao.metadata?.favorecido && (<><span className="text-muted-foreground">Favorecido</span><span className="font-medium">{String(selectedSolicitacao.metadata.favorecido)}</span></>)}
+                      {selectedSolicitacao.metadata?.documento_favorecido && (<><span className="text-muted-foreground">CNPJ/CPF</span><span className="font-medium">{String(selectedSolicitacao.metadata.documento_favorecido)}</span></>)}
+                      {selectedSolicitacao.metadata?.valor && (<><span className="text-muted-foreground">Valor</span><span className="font-medium">R$ {Number(selectedSolicitacao.metadata.valor).toFixed(2)}</span></>)}
+                      {selectedSolicitacao.metadata?.vencimento && (<><span className="text-muted-foreground">Vencimento</span><span className="font-medium">{String(selectedSolicitacao.metadata.vencimento)}</span></>)}
+                      {selectedSolicitacao.metadata?.forma_pagamento && (<><span className="text-muted-foreground">Forma</span><span className="font-medium">{String(selectedSolicitacao.metadata.forma_pagamento)}</span></>)}
+                      {selectedSolicitacao.metadata?.forma_reembolso && (<><span className="text-muted-foreground">Forma</span><span className="font-medium">{String(selectedSolicitacao.metadata.forma_reembolso)}</span></>)}
+                      {selectedSolicitacao.metadata?.chave_pix && (<><span className="text-muted-foreground">Chave PIX</span><span className="font-medium break-all">{String(selectedSolicitacao.metadata.chave_pix)}</span></>)}
+                      {selectedSolicitacao.metadata?.dados_pagamento && (<><span className="text-muted-foreground">Dados</span><span className="font-medium break-all">{String(selectedSolicitacao.metadata.dados_pagamento)}</span></>)}
+                      {selectedSolicitacao.metadata?.loja_ou_setor && (<><span className="text-muted-foreground">Centro custo</span><span className="font-medium">{String(selectedSolicitacao.metadata.loja_ou_setor)}</span></>)}
+                    </div>
+                    {selectedSolicitacao.metadata?.anexo_nota && (
+                      <a href={String(selectedSolicitacao.metadata.anexo_nota)} target="_blank" rel="noopener noreferrer"
+                         className="text-primary underline text-xs mt-2 inline-block">📎 Nota / boleto anexado</a>
+                    )}
+                    {selectedSolicitacao.metadata?.comprovante && (
+                      <a href={String(selectedSolicitacao.metadata.comprovante)} target="_blank" rel="noopener noreferrer"
+                         className="text-primary underline text-xs mt-2 inline-block">📎 Comprovante de gasto</a>
+                    )}
+                    {selectedSolicitacao.metadata?.comprovante_url && (
+                      <a href={String(selectedSolicitacao.metadata.comprovante_url)} target="_blank" rel="noopener noreferrer"
+                         className="text-primary underline text-xs mt-2 inline-block">📎 Comprovante de pagamento</a>
+                    )}
+                  </div>
+                )}
+
+                {/* Bloco de Ações do operador */}
+                {(() => {
+                  const t = selectedSolicitacao.tipo;
+                  const status = selectedSolicitacao.status;
+                  const encerrado = status === "concluida" || status === "cancelada";
+                  const isEstorno = t === "estorno_cartao" || t === "estorno_pix_debito";
+                  const isPag = t === "pagamento" || t === "reembolso";
+                  if (encerrado || (!isEstorno && !isPag)) return null;
+
+                  const presetsEstorno = ["NSU incorreto", "Valor divergente", "Falta carta do cliente", "Outro"];
+                  const presetsPag = t === "pagamento"
+                    ? ["Falta CNPJ do favorecido", "Chave PIX inválida", "Anexo ilegível", "Valor divergente", "Outro"]
+                    : ["Comprovante ilegível", "Chave PIX inválida", "Valor divergente", "Outro"];
+
+                  return (
+                    <div className="pt-3 border-t space-y-2">
+                      <p className="text-xs font-semibold">Ações</p>
+                      <div className="flex flex-wrap gap-2">
+                        {isEstorno && (
+                          <>
+                            {selectedSolicitacao.metadata?.estorno_status !== "solicitado" && selectedSolicitacao.metadata?.estorno_status !== "concluido" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    const novoMeta = {
+                                      ...(selectedSolicitacao.metadata || {}),
+                                      estorno_status: "solicitado",
+                                      estorno_solicitado_em: new Date().toISOString(),
+                                    };
+                                    await supabase.from("solicitacoes")
+                                      .update({ metadata: novoMeta as any })
+                                      .eq("id", selectedSolicitacao.id);
+                                    // Mensagem na demanda
+                                    const demandaId = (selectedSolicitacao.metadata as any)?.demanda_id;
+                                    if (demandaId) {
+                                      await supabase.from("demanda_mensagens").insert({
+                                        demanda_id: demandaId,
+                                        direcao: "operador_para_loja",
+                                        autor_nome: "Financeiro",
+                                        conteudo: "✅ Estorno foi solicitado à adquirente. Aguardando retorno.",
+                                        metadata: { tipo: "estorno_solicitado", solicitacao_id: selectedSolicitacao.id },
+                                      });
+                                    }
+                                    toast.success("Estorno marcado como solicitado e loja avisada.");
+                                    queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
+                                    setSelectedSolicitacao(null);
+                                  } catch (e: any) {
+                                    toast.error("Falha: " + (e?.message || "erro"));
+                                  }
+                                }}
+                              >
+                                <Clock className="h-3.5 w-3.5 mr-1" /> Estorno solicitado
+                              </Button>
+                            )}
+                            <Button size="sm" onClick={() => setConcluirDialog({ id: selectedSolicitacao.id, modo: "carta" })}>
+                              <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Concluir com carta
+                            </Button>
+                          </>
+                        )}
+                        {isPag && (
+                          <Button size="sm" onClick={() => setConcluirDialog({ id: selectedSolicitacao.id, modo: "comprovante_pagamento" })}>
+                            <CreditCard className="h-3.5 w-3.5 mr-1" /> Concluir pagamento
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setDevolverDialog({
+                            id: selectedSolicitacao.id,
+                            presets: isEstorno ? presetsEstorno : presetsPag,
+                          })}
+                        >
+                          ↩️ Devolver à loja
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setCancelDialogId(selectedSolicitacao.id)}>
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
 
       {/* Confirm delete column dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
@@ -633,9 +769,18 @@ export default function PipelineFinanceiro() {
       <DevolverLojaDialog
         solicitacaoId={devolverDialog?.id ?? null}
         colunaDestinoId={devolverDialog?.colunaId ?? null}
+        presets={devolverDialog?.presets}
         open={!!devolverDialog}
         onOpenChange={(o) => !o && setDevolverDialog(null)}
-        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] })}
+        onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }); setSelectedSolicitacao(null); }}
+      />
+
+      <ConcluirSolicitacaoDialog
+        solicitacaoId={concluirDialog?.id ?? null}
+        modo={concluirDialog?.modo ?? "carta"}
+        open={!!concluirDialog}
+        onOpenChange={(o) => !o && setConcluirDialog(null)}
+        onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }); setSelectedSolicitacao(null); }}
       />
     </>
   );

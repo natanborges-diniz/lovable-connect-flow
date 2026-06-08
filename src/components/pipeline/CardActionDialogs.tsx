@@ -18,10 +18,14 @@ interface BaseProps {
 
 export function DevolverLojaDialog({
   solicitacaoId, open, onOpenChange, onSuccess,
-  colunaDestinoId,
-}: BaseProps & { colunaDestinoId?: string | null }) {
+  colunaDestinoId, presets,
+}: BaseProps & { colunaDestinoId?: string | null; presets?: string[] }) {
   const [motivo, setMotivo] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const applyPreset = (p: string) => {
+    setMotivo((cur) => (cur ? `${cur}\n• ${p}` : `• ${p}`));
+  };
 
   const handle = async () => {
     if (!solicitacaoId || motivo.trim().length < 3) {
@@ -63,6 +67,22 @@ export function DevolverLojaDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
+          {presets && presets.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {presets.map((p) => (
+                <Button
+                  key={p}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => applyPreset(p)}
+                >
+                  + {p}
+                </Button>
+              ))}
+            </div>
+          )}
           <Label htmlFor="motivo-devolucao" className="text-xs">O que está faltando? *</Label>
           <Textarea
             id="motivo-devolucao"
