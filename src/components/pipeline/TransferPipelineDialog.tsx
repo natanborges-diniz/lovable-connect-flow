@@ -123,25 +123,41 @@ export function TransferPipelineDialog({
 
         toast.success(`Agendamento criado — ${contatoNome} transferido para Lojas com histórico de conversa`);
       } else {
-        // Financeiro or TI
-        if (!assunto) {
-          toast.error("Preencha o assunto");
+        // Financeiro or TI — via edge function (gera protocolo + evento + autor)
+        if (!assunto || assunto.trim().length < 3) {
+          toast.error("Assunto obrigatório (mínimo 3 caracteres)");
+          setLoading(false);
+          return;
+        }
+        if (!tipo) {
+          toast.error("Selecione o tipo");
+          setLoading(false);
+          return;
+        }
+        if (!descricao || descricao.trim().length < 5) {
+          toast.error("Descrição obrigatória (mínimo 5 caracteres) — operador precisa de contexto");
           setLoading(false);
           return;
         }
 
-        const { error } = await supabase.from("solicitacoes").insert({
-          contato_id: contatoId,
-          assunto,
-          tipo: tipo || null,
-          descricao: descricao || null,
-          pipeline_coluna_id: colunaDestinoId,
-          canal_origem: "sistema",
-        } as any);
+        const { data, error } = await supabase.functions.invoke("criar-solicitacao-manual", {
+          body: {
+            contato_id: contatoId,
+            contato_nome: contatoNome,
+            assunto: assunto.trim(),
+            tipo,
+            descricao: descricao.trim(),
+            destino,
+            coluna_destino_id: colunaDestinoId,
+          },
+        });
         if (error) throw error;
+        if ((data as any)?.error) throw new Error((data as any).error);
 
-        toast.success(`Solicitação criada — ${contatoNome} transferido para ${destino === "financeiro" ? "Financeiro" : "TI"}`);
+        const proto = (data as any)?.protocolo ? ` (${(data as any).protocolo})` : "";
+        toast.success(`Solicitação criada${proto} — ${contatoNome} transferido para ${destino === "financeiro" ? "Financeiro" : "TI"}`);
       }
+
 
       onSuccess();
       onOpenChange(false);
@@ -283,14 +299,15 @@ export function TransferPipelineDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>Descrição</Label>
+              <Label>Descrição *</Label>
               <Textarea
                 value={descricao}
                 onChange={(e) => setDescricao(e.target.value)}
-                placeholder="Descrição adicional..."
-                rows={2}
+                placeholder="Contexto que o operador do setor precisa para agir (valor, NSU, motivo, etc)"
+                rows={3}
               />
             </div>
+
           </div>
         )}
 
