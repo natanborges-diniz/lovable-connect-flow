@@ -52,7 +52,9 @@ import { useAuth } from "@/hooks/useAuth";
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
   const [selectedSolicitacao, setSelectedSolicitacao] = useState<any | null>(null);
+  const [editingCard, setEditingCard] = useState<any | null>(null);
 
   // Get Financeiro setor id
   const { data: financeiroSetor } = useQuery({
