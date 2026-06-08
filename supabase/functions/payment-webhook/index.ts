@@ -133,6 +133,18 @@ serve(async (req) => {
 
     const now = new Date();
     const existingMeta = (solicitacao.metadata || {}) as Record<string, unknown>;
+
+    // Se já existe comprovante anexado pelo cliente, marca conciliação
+    let conciliadoComPrint = false;
+    try {
+      const { count } = await supabase
+        .from("solicitacao_anexos")
+        .select("id", { count: "exact", head: true })
+        .eq("solicitacao_id", solicitacao.id)
+        .eq("tipo", "comprovante_pagamento_cliente");
+      conciliadoComPrint = (count ?? 0) > 0;
+    } catch (_) { /* noop */ }
+
     const updatedMeta = {
       ...existingMeta,
       tid: tid || null,
@@ -151,6 +163,7 @@ serve(async (req) => {
       rede_time: redeTime,
       payment_status: status,
       payment_confirmed_at: now.toISOString(),
+      ...(conciliadoComPrint && status === "PAGO" ? { conciliado_com_print: true } : {}),
     };
 
     const updateData: Record<string, unknown> = { metadata: updatedMeta };
