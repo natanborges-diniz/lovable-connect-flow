@@ -3413,6 +3413,29 @@ serve(async (req) => {
 
       // Cliente recorrente + 1º inbound deste atendimento → menu de triagem direto.
       if (!_isImageFP && _nomeJaSalvo && inboundCount === 1 && contatoTipo === "cliente") {
+        // Preempt: 1ª msg contém intenção clara de menu → roteia direto, pula o menu.
+        // Reutiliza o mapeamento texto→ação de detectExpectedReplyAction("menu_triagem")
+        // e o handler routeButtonClick — exatamente o que acontece quando o cliente TOCA
+        // o item após o menu ser exibido. Vago ("oi", "bom dia") → null → cai no menu.
+        // Complemento de cobertura: detectForcedToolIntent captura frases STORE_VISIT
+        // ("vou aí", "quero ir na loja"...) que o regex menu_triagem não pega.
+        const _msgFP = String(currentMsg || "");
+        const _preemptAction = detectExpectedReplyAction("menu_triagem", _msgFP)
+          ?? (detectForcedToolIntent(_msgFP, false, false)?.tool === "agendar_cliente_intent" ? "agendar" : null);
+        if (_preemptAction) {
+          await routeButtonClick({
+            buttonId: _preemptAction,
+            atendimento,
+            atendimentoMeta,
+            supabase,
+            supabaseUrl: SUPABASE_URL,
+            serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+          });
+          const _precisaHumano = _preemptAction === "reclamacao" || _preemptAction === "status_pedido";
+          const _coluna = _preemptAction === "agendar" ? "Agendamento" : _preemptAction === "orcamento" ? "Orçamento" : "Novo Contato";
+          return jsonResponse({ status: "ok", tools_used: ["menu_preempt_" + _preemptAction], intencao: _preemptAction, precisa_humano: _precisaHumano, pipeline_coluna_sugerida: _coluna, modo: atendimento.modo });
+        }
+
         const _atMetaMenu = (atendimento.metadata as Record<string, any>) || {};
         if (!_atMetaMenu.menu_triagem_enviado_at) {
           const firstName = contatoNomeAtual.split(" ")[0];
