@@ -229,7 +229,11 @@ export function TransferPipelineDialog({
                       mode="single"
                       selected={dataAgendamento}
                       onSelect={setDataAgendamento}
-                      disabled={(date) => date < new Date()}
+                      disabled={(date) => {
+                        const hoje = new Date();
+                        hoje.setHours(0, 0, 0, 0);
+                        return date < hoje;
+                      }}
                       initialFocus
                       className={cn("p-3 pointer-events-auto")}
                     />
