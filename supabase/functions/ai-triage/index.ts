@@ -497,6 +497,12 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
     return null;
   }
 
+  if (stage === "os_aguardando_pertencimento") {
+    if (/^(sim|isso|é esse|e esse|esse mesmo|eh esse|exato|correto|pode ser|é|e|isso mesmo)\b/.test(t) || /[👍✅]/.test(text)) return "os_pert_sim";
+    if (/^(nao|não|errado|outro|outra|nao e|não é|nao eh|diferente|nao é esse|nao e esse)\b/.test(t)) return "os_pert_nao";
+    return null;
+  }
+
   return null;
 }
 
@@ -905,6 +911,167 @@ async function responderStatusOS(
     precisa_humano: false,
     modo: "ia",
   });
+}
+
+// ── OS Fatia 2a: lê CPF do contato, inicia coleta, trata resultado ──────────
+
+async function getCpfContato(supabase: any, contatoId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("contatos")
+    .select("documento")
+    .eq("id", contatoId)
+    .maybeSingle();
+  const raw = String(data?.documento || "").replace(/\D/g, "");
+  if (raw.length === 11 && validarCPF(raw)) return raw;
+  return null;
+}
+
+async function iniciarColetaOS(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimento_id: string,
+  contatoId: string,
+  meta: Record<string, any>,
+): Promise<void> {
+  const cpf = await getCpfContato(supabase, contatoId);
+  if (cpf) {
+    await sendInteractive(supabaseUrl, serviceKey, atendimento_id, {
+      type: "button",
+      texto: "Quer acompanhar qual pedido? 😊",
+      botoes: [
+        { id: "os_meu_pedido",   titulo: "📦 Meu pedido" },
+        { id: "os_outra_pessoa", titulo: "👤 De outra pessoa" },
+      ],
+    });
+    await supabase.from("atendimentos").update({
+      metadata: { ...meta, expected_reply: "os_aguardando_escolha", intent_consulta_os_at: new Date().toISOString() },
+    }).eq("id", atendimento_id);
+  } else {
+    await sendWhatsApp(supabaseUrl, serviceKey, atendimento_id, "Pra localizar seu pedido, me passa o número da OS (do comprovante) ou seu CPF 😊");
+    await supabase.from("atendimentos").update({
+      metadata: { ...meta, expected_reply: "os_aguardando_identificador", intent_consulta_os_at: new Date().toISOString() },
+    }).eq("id", atendimento_id);
+  }
+}
+
+async function tratarResultadoConsultaOS(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atId: string,
+  contatoId: string,
+  nomePrim: string,
+  meta: Record<string, any>,
+  r: { status: "ok" | "indisponivel"; encontrado?: boolean; resultados?: any[] },
+  ident: { tipo: "os" | "cpf"; valor: string } = { tipo: "os", valor: "" },
+): Promise<"handled" | "fallback"> {
+  // ── Indisponível ──────────────────────────────────────────────────────────
+  if (r.status === "indisponivel") {
+    const indispMsg = renderMsgFixa("os_erp_indisponivel", { nome_comma: nomePrim ? `, ${nomePrim}` : "" });
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, indispMsg);
+    await supabase.from("atendimentos").update({
+      metadata: { ...meta, intent_consulta_os_at: new Date().toISOString(), os_tentativas: null },
+    }).eq("id", atId);
+    return "handled";
+  }
+
+  // ── Múltiplos resultados → lista interativa das 2 mais recentes ───────────
+  if (r.encontrado && Array.isArray(r.resultados) && r.resultados.length > 1) {
+    const toSortable = (s: string) => {
+      const p = String(s || "").split("/");
+      return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s;
+    };
+    const sorted = [...r.resultados].sort((a, b) =>
+      toSortable(String((b.interno as any)?.dataEmissao || "")).localeCompare(
+        toSortable(String((a.interno as any)?.dataEmissao || "")),
+      ),
+    );
+    const top2 = sorted.slice(0, 2);
+    const itens = top2.map((res: any) => {
+      const emissao = String((res.interno as any)?.dataEmissao || "");
+      const ddmm = emissao.length >= 5 ? emissao.slice(0, 5) : emissao;
+      const prodResumo = String((res.publico as any)?.produtoResumo || "").trim();
+      return {
+        id:        `os_qual:${res.os}`,
+        titulo:    `OS ${res.os}`,
+        descricao: (prodResumo ? `${prodResumo} · ${ddmm}` : ddmm).slice(0, 72),
+      };
+    });
+    await sendInteractive(supabaseUrl, serviceKey, atId, {
+      type: "list",
+      texto: "Encontrei mais de um pedido 😊 Qual você quer acompanhar?",
+      lista: { label: "Ver pedidos", secao: "Seus pedidos", itens },
+    });
+    await supabase.from("atendimentos").update({
+      metadata: {
+        ...meta,
+        expected_reply: "os_aguardando_qual",
+        os_opcoes: top2.map((res: any) => String(res.os)),
+        intent_consulta_os_at: new Date().toISOString(),
+        os_tentativas: null,
+      },
+    }).eq("id", atId);
+    return "handled";
+  }
+
+  // ── Resultado único ───────────────────────────────────────────────────────
+  if (r.encontrado && Array.isArray(r.resultados) && r.resultados.length === 1) {
+    const res = r.resultados[0] as any;
+    // Fluxo de terceiro: pede confirmação de pertencimento antes de exibir
+    if (meta.os_fluxo_terceiro) {
+      const nomeCliente = String(res.cliente || "");
+      const confirmTxt = nomeCliente
+        ? `Encontrei um pedido em nome de *${nomeCliente}*. É esse mesmo? 😊`
+        : "Encontrei um pedido. É esse mesmo? 😊";
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: confirmTxt,
+        botoes: [
+          { id: "os_pert_sim", titulo: "✅ Sim, é esse" },
+          { id: "os_pert_nao", titulo: "❌ Não" },
+        ],
+      });
+      await supabase.from("atendimentos").update({
+        metadata: {
+          ...meta,
+          expected_reply: "os_aguardando_pertencimento",
+          os_pert_resultado: String(res.os),
+          os_fluxo_terceiro: null,
+          os_tentativas: null,
+        },
+      }).eq("id", atId);
+      return "handled";
+    }
+    // Fluxo normal (meu pedido / consulta direta): exibe direto
+    await responderStatusOS(supabase, supabaseUrl, serviceKey, atId, contatoId, nomePrim, { ...meta, os_tentativas: null }, res);
+    return "handled";
+  }
+
+  // ── Não encontrado → escada de recuperação ────────────────────────────────
+  const tentativas = Number(meta.os_tentativas ?? 0);
+  if (tentativas === 0) {
+    const msg = ident.tipo === "cpf"
+      ? "Não localizei nenhum pedido nesse CPF 🤔 Você tem o número da OS aí? Pelo comprovante a busca é mais certeira 😊"
+      : "Não localizei essa OS 🤔 Me confirma o número (5 dígitos do comprovante)? Ou, se preferir, me passa seu CPF 😊";
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
+    await supabase.from("atendimentos").update({
+      metadata: { ...meta, os_tentativas: 1, expected_reply: "os_aguardando_identificador", intent_consulta_os_at: new Date().toISOString() },
+    }).eq("id", atId);
+    return "handled";
+  }
+  if (tentativas === 1) {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Ainda não localizei. Me tira uma dúvida: a compra foi feita há pelo menos um dia? Pedidos do mesmo dia entram no sistema a partir do dia seguinte 😊");
+    await supabase.from("atendimentos").update({
+      metadata: { ...meta, os_tentativas: 2, expected_reply: "os_aguardando_identificador", intent_consulta_os_at: new Date().toISOString() },
+    }).eq("id", atId);
+    return "handled";
+  }
+  // tentativas >= 2: esgotou → limpa estado e retorna fallback para o caller escalar
+  await supabase.from("atendimentos").update({
+    metadata: { ...meta, os_tentativas: null, expected_reply: null, os_fluxo_terceiro: null },
+  }).eq("id", atId);
+  return "fallback";
 }
 
 // ── PRE-LLM: Formas de pagamento ──
@@ -3005,7 +3172,16 @@ serve(async (req) => {
           console.log(`[ROUTER] OS ident encontrado mas sem resultado único — fallback escalada (encontrado=${_osResult.encontrado}, n=${_osResult.resultados?.length ?? 0})`);
         }
 
-        // ── Fallback: escalada original (sem ident / não encontrado / múltiplos) ──
+        // ── Sem identificador → inicia coleta (Fatia 2a) ─────────────────────
+        if (_osIdent.tipo === null) {
+          await iniciarColetaOS(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, meta);
+          return jsonResponse({
+            status: "ok", tools_used: ["os_iniciar_coleta"],
+            intencao: "consulta_os", precisa_humano: false, modo: atendimento.modo,
+          });
+        }
+
+        // ── Fallback: escalada original (ident presente mas não encontrado / múltiplos) ──
         console.log(`[ROUTER] Consulta de OS detectada (modo=${atendimento.modo}) — escalando para humano`);
         const osMsgExpediente = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
         const osMsg = isHorarioHumano()
@@ -3620,7 +3796,7 @@ serve(async (req) => {
             supabaseUrl: SUPABASE_URL,
             serviceKey: SUPABASE_SERVICE_ROLE_KEY,
           });
-          const _precisaHumano = _preemptAction === "reclamacao" || _preemptAction === "status_pedido";
+          const _precisaHumano = _preemptAction === "reclamacao";
           const _coluna = _preemptAction === "agendar" ? "Agendamento" : _preemptAction === "orcamento" ? "Orçamento" : "Novo Contato";
           return jsonResponse({ status: "ok", tools_used: ["menu_preempt_" + _preemptAction], intencao: _preemptAction, precisa_humano: _precisaHumano, pipeline_coluna_sugerida: _coluna, modo: atendimento.modo });
         }
@@ -9171,6 +9347,86 @@ Qual dia e horário ficaria melhor pra você? 😊`,
     return true;
   }
 
+  // ── OS: cliente digitou em vez de tocar os botões de pertencimento ──────────
+  // sim/não já foram mapeados em detectExpectedReplyAction → os_pert_sim/os_pert_nao
+  // Só chega aqui quando o texto não foi reconhecido como sim nem não → reprompt.
+  if (expectedReply === "os_aguardando_pertencimento") {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Toca em *Sim, é esse* ou *Não* pra eu te ajudar 😊");
+    return true;
+  }
+
+  // ── OS: cliente digitou o nº da OS ao invés de tocar na lista ─────────────
+  if (expectedReply === "os_aguardando_qual") {
+    const identQ = extrairIdentificadorOS(mensagemTexto);
+    if (identQ.tipo !== null) {
+      await patchMeta({ expected_reply: null, os_opcoes: null });
+      const { data: ctOsQ } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+      const _primQ = (ctOsQ?.nome || "").trim().split(/\s+/)[0] || "";
+      await loadMensagensFixas(supabase);
+      const rQ = await consultarStatusOS(supabaseUrl, serviceKey, identQ);
+      const handledQ = await tratarResultadoConsultaOS(
+        supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
+        _primQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null }, rQ, identQ,
+      );
+      if (handledQ === "fallback") {
+        const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primQ ? `, ${_primQ}` : "" });
+        const osMsgQ = isHorarioHumano()
+          ? escMsg
+          : `${escMsg}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, osMsgQ);
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento.id);
+        await supabase.from("eventos_crm").insert({
+          contato_id: atendimento.contato_id,
+          tipo: "consulta_os",
+          descricao: "Consulta OS digitada após lista — sem resultado único — escalado para humano",
+          metadata: { modo: atendimento.modo },
+          referencia_tipo: "atendimento",
+          referencia_id: atId,
+        });
+      }
+      return true;
+    }
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode tocar em uma das opções acima ou digitar o número da OS (5 dígitos)? 😊");
+    return true;
+  }
+
+  // ── OS: cliente digitou no meio do fluxo de coleta de identificador ──────
+  if (expectedReply === "os_aguardando_escolha" || expectedReply === "os_aguardando_identificador") {
+    const ident = extrairIdentificadorOS(mensagemTexto);
+    if (ident.tipo !== null) {
+      await patchMeta({ expected_reply: null });
+      const { data: ctOsR } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+      const _primR = (ctOsR?.nome || "").trim().split(/\s+/)[0] || "";
+      await loadMensagensFixas(supabase);
+      const rR = await consultarStatusOS(supabaseUrl, serviceKey, ident);
+      const handledR = await tratarResultadoConsultaOS(
+        supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
+        _primR, { ...atendimentoMeta, expected_reply: null }, rR, ident,
+      );
+      if (handledR === "fallback") {
+        const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primR ? `, ${_primR}` : "" });
+        const osMsgR = isHorarioHumano()
+          ? escMsg
+          : `${escMsg}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, osMsgR);
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento.id);
+        await supabase.from("eventos_crm").insert({
+          contato_id: atendimento.contato_id,
+          tipo: "consulta_os",
+          descricao: "Consulta OS via typed reply — sem resultado único — escalado para humano",
+          metadata: { modo: atendimento.modo },
+          referencia_tipo: "atendimento",
+          referencia_id: atId,
+        });
+      }
+      return true;
+    }
+    // Não identificou OS nem CPF — reprompt gentil, transição para aguardando_identificador
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me passar o número da OS (5 dígitos do comprovante) ou seu CPF? 😊");
+    await patchMeta({ expected_reply: "os_aguardando_identificador" });
+    return true;
+  }
+
   if (!replyAction) return false;
 
   console.log(`[EXPECTED REPLY] stage=${expectedReply} typed_action=${replyAction}`);
@@ -9327,6 +9583,36 @@ async function routeButtonClick(args: {
   }
 
   // Seleção de cidade → envia lista de lojas dessa cidade.
+  if (buttonId.startsWith("os_qual:")) {
+    const osNum = buttonId.slice(8);
+    await patchMeta({ expected_reply: null, os_opcoes: null });
+    const { data: ctOsQ } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+    const _primOsQ = (ctOsQ?.nome || "").trim().split(/\s+/)[0] || "";
+    await loadMensagensFixas(supabase);
+    const rOsQ = await consultarStatusOS(supabaseUrl, serviceKey, { tipo: "os", valor: osNum });
+    const handledOsQ = await tratarResultadoConsultaOS(
+      supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
+      _primOsQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null }, rOsQ, { tipo: "os", valor: osNum },
+    );
+    if (handledOsQ === "fallback") {
+      const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primOsQ ? `, ${_primOsQ}` : "" });
+      const osMsgQ = isHorarioHumano()
+        ? escMsg
+        : `${escMsg}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, osMsgQ);
+      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+      await supabase.from("eventos_crm").insert({
+        contato_id: atendimento.contato_id,
+        tipo: "consulta_os",
+        descricao: "Consulta OS via lista — sem resultado único — escalado para humano",
+        metadata: { os: osNum, modo: atendimento.modo },
+        referencia_tipo: "atendimento",
+        referencia_id: atId,
+      });
+    }
+    return true;
+  }
+
   if (buttonId.startsWith("cidade:")) {
     const cidadeSlug = buttonId.slice(7);
     const { data: lojas } = await supabase
@@ -9455,21 +9741,86 @@ async function routeButtonClick(args: {
       await patchMeta({ intent_detected: "orcamento_lentes_contato", contexto_lc: true, expected_reply: null });
       return true;
     case "status_pedido": {
-      const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
-      const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
-      const msg = isHorarioHumano()
-        ? "Vou te conectar com um consultor pra verificar o status do seu pedido. Só um instante 🙂"
-        : mensagemEscaladaForaHorario(_prim);
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
-      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
-      await supabase.from("eventos_crm").insert({
-        contato_id: atendimento.contato_id,
-        tipo: "consulta_os",
-        descricao: "Botão Status do pedido — escalado",
-        metadata: { fora_horario: !isHorarioHumano() },
-        referencia_tipo: "atendimento",
-        referencia_id: atId,
-      });
+      await loadMensagensFixas(supabase);
+      await iniciarColetaOS(supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id, atendimentoMeta);
+      return true;
+    }
+    case "os_meu_pedido": {
+      const cpfMp = await getCpfContato(supabase, atendimento.contato_id);
+      if (!cpfMp) {
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pra localizar seu pedido, me passa o número da OS ou seu CPF 😊");
+        await patchMeta({ expected_reply: "os_aguardando_identificador" });
+        return true;
+      }
+      await patchMeta({ expected_reply: null });
+      const { data: ctMp } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+      const _primMp = (ctMp?.nome || "").trim().split(/\s+/)[0] || "";
+      await loadMensagensFixas(supabase);
+      const rMp = await consultarStatusOS(supabaseUrl, serviceKey, { tipo: "cpf", valor: cpfMp });
+      const handledMp = await tratarResultadoConsultaOS(
+        supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
+        _primMp, { ...atendimentoMeta, expected_reply: null, os_fluxo_terceiro: null }, rMp, { tipo: "cpf", valor: cpfMp },
+      );
+      if (handledMp === "fallback") {
+        const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primMp ? `, ${_primMp}` : "" });
+        const osMsgMp = isHorarioHumano()
+          ? escMsg
+          : `${escMsg}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, osMsgMp);
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+        await supabase.from("eventos_crm").insert({
+          contato_id: atendimento.contato_id,
+          tipo: "consulta_os",
+          descricao: "Consulta OS via CPF cadastrado — sem resultado único — escalado para humano",
+          metadata: { modo: atendimento.modo },
+          referencia_tipo: "atendimento",
+          referencia_id: atId,
+        });
+      }
+      return true;
+    }
+    case "os_outra_pessoa": {
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Me passa o número da OS ou o CPF da pessoa 😊");
+      await patchMeta({ expected_reply: "os_aguardando_identificador", os_fluxo_terceiro: true });
+      return true;
+    }
+    case "os_pert_sim": {
+      const osNumPs = String(atendimentoMeta.os_pert_resultado || "");
+      if (!osNumPs) {
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, "Não consegui localizar o pedido para confirmar. Me passa o número da OS ou CPF 😊");
+        await patchMeta({ expected_reply: "os_aguardando_identificador", os_pert_resultado: null });
+        return true;
+      }
+      await patchMeta({ expected_reply: null, os_pert_resultado: null });
+      const { data: ctPs } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+      const _primPs = (ctPs?.nome || "").trim().split(/\s+/)[0] || "";
+      await loadMensagensFixas(supabase);
+      const rPs = await consultarStatusOS(supabaseUrl, serviceKey, { tipo: "os", valor: osNumPs });
+      const handledPs = await tratarResultadoConsultaOS(
+        supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
+        _primPs, { ...atendimentoMeta, expected_reply: null, os_pert_resultado: null, os_fluxo_terceiro: null }, rPs, { tipo: "os", valor: osNumPs },
+      );
+      if (handledPs === "fallback") {
+        const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primPs ? `, ${_primPs}` : "" });
+        const osMsgPs = isHorarioHumano()
+          ? escMsg
+          : `${escMsg}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, osMsgPs);
+        await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+        await supabase.from("eventos_crm").insert({
+          contato_id: atendimento.contato_id,
+          tipo: "consulta_os",
+          descricao: "Consulta OS pertencimento confirmado — sem resultado único — escalado para humano",
+          metadata: { os: osNumPs, modo: atendimento.modo },
+          referencia_tipo: "atendimento",
+          referencia_id: atId,
+        });
+      }
+      return true;
+    }
+    case "os_pert_nao": {
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Me passa o número da OS ou o CPF correto 😊");
+      await patchMeta({ expected_reply: "os_aguardando_identificador", os_pert_resultado: null, os_fluxo_terceiro: null });
       return true;
     }
     case "duvida":
