@@ -1,3 +1,4 @@
+// redeploy trigger 2026-06-10 — forçar build da Fatia 2a+2b da consulta de OS
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
