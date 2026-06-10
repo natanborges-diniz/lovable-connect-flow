@@ -83,6 +83,20 @@ const _msgFixaDefaults: Record<string, string> = {
     "Combinado{nome_comma}! {tail} 👋 Qualquer dúvida é só me chamar.",
   formas_pagamento:
     "Trabalhamos com várias formas pra facilitar pra você 😊\n\n💳 *Cartão de crédito* — em até *10x sem juros*\n💰 *PIX / dinheiro* — com *desconto à vista*\n🧾 *Boleto* — à vista ou parcelado\n📋 *Crediário próprio Óticas Diniz* — análise na hora, sem cartão\n\nPosso já agendar uma visita na loja mais próxima pra você fechar o pedido? Me conta seu bairro 📍",
+  os_nao_iniciada:
+    "Oi{nome_comma}! Localizei sua OS *{os}*{produto_parte}. Ainda não foi iniciada a produção — nossa equipe começa em breve. Qualquer novidade te aviso! 😊",
+  os_producao_lentes:
+    "Oi{nome_comma}! Sua OS *{os}*{produto_parte} está em *produção de lentes*. Assim que ficar pronta te avisamos por aqui! 😊",
+  os_producao_montagem:
+    "Oi{nome_comma}! Sua OS *{os}*{produto_parte} está em *montagem final*. Tá quase — em breve fica disponível para retirada! 😊",
+  os_pronto:
+    "Oi{nome_comma}! Sua OS *{os}*{produto_parte} está *pronta para retirada* na {loja}! Pode passar quando quiser 😊",
+  os_entregue:
+    "Oi{nome_comma}! Sua OS *{os}*{produto_parte} já foi *entregue/retirada*. Se precisar de algo, é só chamar! 😊",
+  os_erp_indisponivel:
+    "Oi{nome_comma}! Não consegui acessar as informações do pedido agora 😅 Por favor, tente novamente em alguns minutos ou entre em contato com a loja diretamente.",
+  os_escala_verificacao:
+    "Deixa eu verificar esse pedido com mais cuidado pra você 😊 Vou te conectar com um consultor que confirma tudo certinho, tá? Um instante!",
 };
 const _msgFixaCache: Record<string, string> = { ..._msgFixaDefaults };
 let _msgFixaExpire = 0;
@@ -740,6 +754,157 @@ function matchesConsultaOs(msg: string, keywords: string[]): boolean {
   }
   // 2) Keywords editáveis pela auditoria (substring case/accent-insensitive)
   return keywords.some((k) => k && n.includes(k));
+}
+
+// ── OS: validação de CPF, extração de identificador, mascaramento, consulta bridge ──
+
+function validarCPF(cpf: string): boolean {
+  const d = cpf.replace(/\D/g, "");
+  if (d.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(d)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += Number(d[i]) * (10 - i);
+  let r = (sum * 10) % 11;
+  if (r === 10 || r === 11) r = 0;
+  if (r !== Number(d[9])) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += Number(d[i]) * (11 - i);
+  r = (sum * 10) % 11;
+  if (r === 10 || r === 11) r = 0;
+  return r === Number(d[10]);
+}
+
+function mascararCPF(cpf: string): string {
+  const d = cpf.replace(/\D/g, "");
+  if (d.length !== 11) return "***";
+  return `${d.slice(0, 3)}****${d.slice(7)}`;
+}
+
+function extrairIdentificadorOS(texto: string): { tipo: "os" | "cpf" | null; valor: string } {
+  // CPF primeiro: 11 dígitos contíguos (com ou sem . - /) que passem na validação
+  const cpfRe = /\b\d[\d.\-\/]{9,13}\d\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = cpfRe.exec(texto)) !== null) {
+    const digits = m[0].replace(/\D/g, "");
+    if (digits.length === 11 && validarCPF(digits)) {
+      return { tipo: "cpf", valor: digits };
+    }
+  }
+  // OS: exatamente 5 dígitos isolados (não adjacentes a mais dígitos — evita falso match em CPF/telefone)
+  const osRe = /(?<!\d)\d{5}(?!\d)/g;
+  while ((m = osRe.exec(texto)) !== null) {
+    return { tipo: "os", valor: m[0] };
+  }
+  return { tipo: null, valor: "" };
+}
+
+async function consultarStatusOS(
+  supabaseUrl: string,
+  serviceKey: string,
+  ident: { tipo: "os" | "cpf"; valor: string },
+): Promise<{ status: "ok" | "indisponivel"; encontrado?: boolean; resultados?: any[] }> {
+  try {
+    const body = ident.tipo === "os" ? { os: ident.valor } : { cpf: ident.valor };
+    console.log("[os-status] consulta", {
+      tipo: ident.tipo,
+      valor: ident.tipo === "cpf" ? mascararCPF(ident.valor) : ident.valor,
+    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 9_000);
+    const resp = await fetch(`${supabaseUrl}/functions/v1/os-status-public`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-service-key": Deno.env.get("INTERNAL_SERVICE_SECRET") ?? "",
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) {
+      console.warn("[os-status] bridge retornou", resp.status);
+      return { status: "indisponivel" };
+    }
+    const data = await resp.json();
+    return { status: "ok", encontrado: data.encontrado, resultados: data.resultados };
+  } catch (e) {
+    console.warn("[os-status] erro:", (e as Error)?.message);
+    return { status: "indisponivel" };
+  }
+}
+
+async function responderStatusOS(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimento_id: string,
+  contatoId: string,
+  nomePrim: string,
+  meta: Record<string, any>,
+  resultado: any,
+): Promise<Response> {
+  const pub = (resultado.publico || {}) as Record<string, any>;
+  const situacao = String(pub.situacao || "");
+
+  // situacao "escala_humano": caso anômalo — escala sem revelar motivo, sem pedir identificador de novo
+  if (situacao === "escala_humano") {
+    const nomeComma = nomePrim ? `, ${nomePrim}` : "";
+    const osMsgExp = renderMsgFixa("os_escala_verificacao", { nome_comma: nomeComma });
+    const osMsg = isHorarioHumano()
+      ? osMsgExp
+      : `${osMsgExp}\n\n⏰ Estamos fora do horário de atendimento humano agora. Assim que reabrirmos (${proximaAberturaHumana()}), um consultor confirma o status do seu pedido.`;
+    await supabase.from("atendimentos").update({
+      metadata: { ...meta, intent_consulta_os_at: new Date().toISOString() },
+    }).eq("id", atendimento_id);
+    await supabase.from("eventos_crm").insert({
+      contato_id: contatoId,
+      tipo: "consulta_os",
+      descricao: "Consulta OS — situação anômala (escala_humano) — escalado para humano",
+      metadata: { os: resultado.os, situacao },
+      referencia_tipo: "atendimento",
+      referencia_id: atendimento_id,
+    });
+    return await handleNonClientEscalation(supabase, supabaseUrl, serviceKey, atendimento_id, contatoId, osMsg, "consulta_os");
+  }
+
+  const SITUACAO_TO_TEMPLATE: Record<string, string> = {
+    nao_iniciada:      "os_nao_iniciada",
+    producao_lentes:   "os_producao_lentes",
+    producao_montagem: "os_producao_montagem",
+    pronto:            "os_pronto",
+    entregue:          "os_entregue",
+  };
+  const tmplKey = SITUACAO_TO_TEMPLATE[situacao] || "os_producao_lentes";
+  const produtoResumo = String(pub.produtoResumo || "").trim();
+  const msg = renderMsgFixa(tmplKey, {
+    nome_comma:    nomePrim ? `, ${nomePrim}` : "",
+    os:            String(resultado.os || ""),
+    produto_parte: produtoResumo ? ` (${produtoResumo})` : "",
+    loja:          String(resultado.empresa || ""),
+  });
+
+  await sendWhatsApp(supabaseUrl, serviceKey, atendimento_id, msg);
+
+  await supabase.from("atendimentos").update({
+    metadata: { ...meta, intent_consulta_os_at: new Date().toISOString() },
+  }).eq("id", atendimento_id);
+
+  await supabase.from("eventos_crm").insert({
+    contato_id: contatoId,
+    tipo: "consulta_os_respondida",
+    descricao: `Status OS respondido automaticamente (${situacao})`,
+    metadata: { os: resultado.os, situacao },
+    referencia_tipo: "atendimento",
+    referencia_id: atendimento_id,
+  });
+
+  return jsonResponse({
+    status: "ok",
+    tools_used: ["os_status_auto"],
+    intencao: "consulta_os",
+    precisa_humano: false,
+    modo: "ia",
+  });
 }
 
 // ── PRE-LLM: Formas de pagamento ──
@@ -2810,14 +2975,38 @@ serve(async (req) => {
     }
 
     // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
-    // Sempre escala para humano (inclusive em híbrido) — IA NUNCA pede receita nem oferece orçamento nesse intent.
+    // Se cliente informou OS (5 dígitos) ou CPF válido: consulta bridge e responde por template (mantém modo IA).
+    // Fallback (sem identificador / não encontrado / múltiplos resultados): escala para humano (comportamento anterior).
     {
       const osKw = await loadOsKeywords(supabase);
       if (matchesConsultaOs(currentMsg, osKw)) {
-        console.log(`[ROUTER] Consulta de OS detectada (modo=${atendimento.modo}) — escalando para humano`);
         await loadMensagensFixas(supabase);
         const { data: ctOs } = await supabase.from("contatos").select("nome").eq("id", contatoId).maybeSingle();
         const _prim = (ctOs?.nome || "").trim().split(/\s+/)[0] || "";
+
+        // ── Atalho: tem identificador → tenta consulta automática ──────────
+        const _osIdent = extrairIdentificadorOS(currentMsg);
+        if (_osIdent.tipo !== null) {
+          const _osResult = await consultarStatusOS(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, _osIdent);
+          if (_osResult.status === "indisponivel") {
+            const indispMsg = renderMsgFixa("os_erp_indisponivel", { nome_comma: _prim ? `, ${_prim}` : "" });
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, indispMsg);
+            await supabase.from("atendimentos").update({
+              metadata: { ...meta, intent_consulta_os_at: new Date().toISOString() },
+            }).eq("id", atendimento_id);
+            return jsonResponse({
+              status: "ok", tools_used: ["os_erp_indisponivel"],
+              intencao: "consulta_os", precisa_humano: false, modo: atendimento.modo,
+            });
+          }
+          if (_osResult.encontrado && Array.isArray(_osResult.resultados) && _osResult.resultados.length === 1) {
+            return await responderStatusOS(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, _prim, meta, _osResult.resultados[0]);
+          }
+          console.log(`[ROUTER] OS ident encontrado mas sem resultado único — fallback escalada (encontrado=${_osResult.encontrado}, n=${_osResult.resultados?.length ?? 0})`);
+        }
+
+        // ── Fallback: escalada original (sem ident / não encontrado / múltiplos) ──
+        console.log(`[ROUTER] Consulta de OS detectada (modo=${atendimento.modo}) — escalando para humano`);
         const osMsgExpediente = renderMsgFixa("os_escalada", { nome_comma: _prim ? `, ${_prim}` : "" });
         const osMsg = isHorarioHumano()
           ? osMsgExpediente
