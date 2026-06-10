@@ -89,3 +89,6 @@ verify_jwt = false
 
 [functions.cashback-loja]
 verify_jwt = false
+
+[functions.os-status-public]
+verify_jwt = false
