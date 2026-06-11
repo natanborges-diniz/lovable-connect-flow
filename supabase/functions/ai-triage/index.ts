@@ -1,4 +1,4 @@
-// deploy trigger 2026-06-10b — ativar Fatia 2a/2b consulta OS + fix logEvent
+// deploy lock atomico 2026-06-10 — CAS via ia_lock_at
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
