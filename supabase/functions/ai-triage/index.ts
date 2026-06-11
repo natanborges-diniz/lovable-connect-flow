@@ -2840,7 +2840,7 @@ serve(async (req) => {
     // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
       .from("atendimentos")
-      .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at")
+      .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at, ia_lock_at")
       .eq("id", atendimento_id)
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
@@ -3062,9 +3062,11 @@ serve(async (req) => {
 
     // ── 1.5. DEBOUNCE — prevent parallel processing for rapid messages ──
     const meta = (atendimento.metadata as Record<string, any>) || {};
-    const iaLock = meta.ia_lock ? new Date(meta.ia_lock).getTime() : 0;
+    // Lê o lock da coluna dedicada ia_lock_at (atômica via CAS).
+    // O campo meta.ia_lock (legado JSONB) é ignorado — pode existir em registros antigos.
+    const iaLock = (atendimento as any).ia_lock_at ? new Date((atendimento as any).ia_lock_at).getTime() : 0;
     const now = Date.now();
-    const LOCK_TTL_MS = 15_000; // 15 second lock
+    const LOCK_TTL_MS = 30_000; // 30 s — cobre geração pesada (OCR + LLM + pricing)
     const DEBOUNCE_WAIT_MS = 5_000; // wait 5 seconds for more messages
 
     if (!forceMode && iaLock && (now - iaLock) < LOCK_TTL_MS) {
@@ -3103,10 +3105,23 @@ serve(async (req) => {
       return jsonResponse({ status: "skipped", reason: "debounce — recent outbound <10s" });
     }
 
-    // Set lock
-    await supabase.from("atendimentos").update({
-      metadata: { ...meta, ia_lock: new Date().toISOString() },
-    }).eq("id", atendimento_id);
+    // ── Set lock — CAS atômico via coluna ia_lock_at ────────────────────────
+    // UPDATE … WHERE id=$1 AND (ia_lock_at IS NULL OR ia_lock_at < agora-TTL)
+    // é serializado pelo Postgres: só UMA execução concorrente ganha a linha.
+    // Se retornou vazio, outra execução tem o lock → aborta imediatamente.
+    const lockExpiredBefore = new Date(now - LOCK_TTL_MS).toISOString();
+    const { data: lockAcquired } = await supabase
+      .from("atendimentos")
+      .update({ ia_lock_at: new Date(now).toISOString() })
+      .eq("id", atendimento_id)
+      .or(`ia_lock_at.is.null,ia_lock_at.lt.${lockExpiredBefore}`)
+      .select("id");
+
+    if (!lockAcquired?.length) {
+      console.log("[LOCK-CAS] Lock held by concurrent execution — abortando para evitar duplicação");
+      return jsonResponse({ status: "skipped", reason: "lock-cas — concurrent execution blocked" });
+    }
+    console.log("[LOCK-CAS] Lock atômico adquirido");
 
     const isHibrido = atendimento.modo === "hibrido";
     const contatoId = contato_id || atendimento.contato_id;
@@ -8038,10 +8053,10 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     console.log(`[RESULT] tools=${toolCalls.map((t: any) => t.function?.name).join(",") || "text"} | intent=${intencao} | human=${precisa_humano} | col=${pipeline_coluna} | validator=${validatorFlags.join(",")}`);
 
-    // Clear debounce lock
-    const currentMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
-    delete currentMeta.ia_lock;
-    await supabase.from("atendimentos").update({ metadata: currentMeta }).eq("id", atendimento_id);
+    // Clear debounce lock — update simples, sem read-modify-write
+    await supabase.from("atendimentos")
+      .update({ ia_lock_at: null })
+      .eq("id", atendimento_id);
 
     return jsonResponse({
       status: "ok",
@@ -8055,12 +8070,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
   } catch (e) {
     console.error("[ERROR] ai-triage:", e);
-    // Clear lock on error too
+    // Clear lock on error too — update simples, sem read-modify-write
     try {
       if (atendimentoIdForCleanup) {
-        const errMeta = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimentoIdForCleanup).single()).data?.metadata as Record<string, any>) || {};
-        delete errMeta.ia_lock;
-        await supabase.from("atendimentos").update({ metadata: errMeta }).eq("id", atendimentoIdForCleanup);
+        await supabase.from("atendimentos")
+          .update({ ia_lock_at: null })
+          .eq("id", atendimentoIdForCleanup);
       }
     } catch (_) { /* ignore lock cleanup errors */ }
     return new Response(
