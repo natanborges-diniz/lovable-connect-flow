@@ -138,6 +138,7 @@ export type Database = {
           created_at: string
           fila_id: string | null
           fim_at: string | null
+          ia_lock_at: string | null
           id: string
           inicio_at: string | null
           metadata: Json | null
@@ -155,6 +156,7 @@ export type Database = {
           created_at?: string
           fila_id?: string | null
           fim_at?: string | null
+          ia_lock_at?: string | null
           id?: string
           inicio_at?: string | null
           metadata?: Json | null
@@ -172,6 +174,7 @@ export type Database = {
           created_at?: string
           fila_id?: string | null
           fim_at?: string | null
+          ia_lock_at?: string | null
           id?: string
           inicio_at?: string | null
           metadata?: Json | null
