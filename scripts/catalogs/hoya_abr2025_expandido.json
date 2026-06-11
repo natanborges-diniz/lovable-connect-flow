@@ -6,7 +6,7 @@
     "data_vigencia": "2025-04-01",
     "moeda": "BRL",
     "versao": "Abr/2025",
-    "total_skus": 657,
+    "total_skus": 622,
     "nota": "1 produto = 1 combinação de design × material × antirreflexo × adicional",
     "produtos": [
       {
@@ -92,7 +92,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 4160.0,
+          "valor": 3860.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -140,55 +140,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 4160.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "premium",
-          "freeform",
-          "individualizada"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_identity_vplus_1_59_meiryo_incolor",
-        "nome": "Nulux iDentity V+ Policarbonato Hi-Vision Meiryo",
-        "design_base": "Nulux iDentity V+",
-        "design_id": "hoya_nulux_identity_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "Meiryo",
-          "nome": "Hi-Vision Meiryo",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -13,
-          "esferico_max": 9,
-          "cilindrico_max": -6,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": 75,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 4160.0,
+          "valor": 3060.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -236,55 +188,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3910.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "premium",
-          "freeform",
-          "individualizada"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_identity_vplus_1_50_meiryo_incolor",
-        "nome": "Nulux iDentity V+ Orgânico 1.50 (ORG) Hi-Vision Meiryo",
-        "design_base": "Nulux iDentity V+",
-        "design_id": "hoya_nulux_identity_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.50",
-          "nome": "Orgânico 1.50 (ORG)",
-          "indice_refracao": 1.5
-        },
-        "antirreflexo": {
-          "codigo": "Meiryo",
-          "nome": "Hi-Vision Meiryo",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -15,
-          "esferico_max": 10,
-          "cilindrico_max": -6,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": 70,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 3410.0,
+          "valor": 2600.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -332,7 +236,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3860.0,
+          "valor": 4160.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -428,55 +332,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3660.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "premium",
-          "freeform",
-          "individualizada"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_identity_vplus_1_59_sunpro_incolor",
-        "nome": "Nulux iDentity V+ Policarbonato Hi-Vision SunPro",
-        "design_base": "Nulux iDentity V+",
-        "design_id": "hoya_nulux_identity_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -13,
-          "esferico_max": 9,
-          "cilindrico_max": -6,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": 75,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 3660.0,
+          "valor": 2860.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -524,55 +380,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3410.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "premium",
-          "freeform",
-          "individualizada"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_identity_vplus_1_50_sunpro_incolor",
-        "nome": "Nulux iDentity V+ Orgânico 1.50 (ORG) Hi-Vision SunPro",
-        "design_base": "Nulux iDentity V+",
-        "design_id": "hoya_nulux_identity_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.50",
-          "nome": "Orgânico 1.50 (ORG)",
-          "indice_refracao": 1.5
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -15,
-          "esferico_max": 10,
-          "cilindrico_max": -6,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": 70,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 2910.0,
+          "valor": 2400.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -620,7 +428,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3060.0,
+          "valor": 4160.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -668,7 +476,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2860.0,
+          "valor": 3660.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -730,54 +538,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_nulux_identity_vplus_1_59_llblue_incolor",
-        "nome": "Nulux iDentity V+ Policarbonato Hi-Vision LongLife BlueControl",
-        "design_base": "Nulux iDentity V+",
-        "design_id": "hoya_nulux_identity_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "LLBlue",
-          "nome": "Hi-Vision LongLife BlueControl",
-          "nivel": "Alto",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -13,
-          "esferico_max": 9,
-          "cilindrico_max": -6,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": 75,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 2860.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "premium",
-          "freeform",
-          "individualizada"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_nulux_identity_vplus_1_53_llblue_incolor",
         "nome": "Nulux iDentity V+ Trivex (PNX) Hi-Vision LongLife BlueControl",
         "design_base": "Nulux iDentity V+",
@@ -812,7 +572,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2610.0,
+          "valor": 2400.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -860,7 +620,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2110.0,
+          "valor": 2050.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -908,7 +668,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2600.0,
+          "valor": 3410.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -956,7 +716,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2400.0,
+          "valor": 3410.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -1004,55 +764,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2400.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "premium",
-          "freeform",
-          "individualizada"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_identity_vplus_1_59_nrblue_incolor",
-        "nome": "Nulux iDentity V+ Policarbonato No-Risk BlueControl",
-        "design_base": "Nulux iDentity V+",
-        "design_id": "hoya_nulux_identity_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "NRBlue",
-          "nome": "No-Risk BlueControl",
-          "nivel": "MédioAlto",
-          "garantia_anos": 2
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -13,
-          "esferico_max": 9,
-          "cilindrico_max": -6,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": 75,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 2400.0,
+          "valor": 2610.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -1148,7 +860,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1650.0,
+          "valor": 1800.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -1196,7 +908,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2050.0,
+          "valor": 3410.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -1244,7 +956,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2050.0,
+          "valor": 2610.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -1292,7 +1004,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1800.0,
+          "valor": 2150.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2376,7 +2088,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 4309.0,
+          "valor": 3309.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2424,7 +2136,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3049.0,
+          "valor": 3309.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2472,7 +2184,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2699.0,
+          "valor": 3059.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2520,7 +2232,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2699.0,
+          "valor": 3059.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2568,7 +2280,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2349.0,
+          "valor": 2709.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2616,7 +2328,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1349.0,
+          "valor": 2309.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2664,7 +2376,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 4309.0,
+          "valor": 2509.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2712,7 +2424,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3049.0,
+          "valor": 2509.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2760,7 +2472,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2699.0,
+          "valor": 2259.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2808,7 +2520,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2699.0,
+          "valor": 2259.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2856,7 +2568,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2349.0,
+          "valor": 1909.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -2904,151 +2616,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1349.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "atorica",
-          "asferica",
-          "astigmatismo"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_trueform_1_59_sunpro_incolor",
-        "nome": "Nulux TrueForm Policarbonato Hi-Vision SunPro",
-        "design_base": "Nulux TrueForm",
-        "design_id": "hoya_nulux_trueform",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -10,
-          "esferico_max": 8,
-          "cilindrico_max": -4,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 4059.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "atorica",
-          "asferica",
-          "astigmatismo"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_trueform_1_59_llblue_incolor",
-        "nome": "Nulux TrueForm Policarbonato Hi-Vision LongLife BlueControl",
-        "design_base": "Nulux TrueForm",
-        "design_id": "hoya_nulux_trueform",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "LLBlue",
-          "nome": "Hi-Vision LongLife BlueControl",
-          "nivel": "Alto",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -10,
-          "esferico_max": 8,
-          "cilindrico_max": -4,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 2799.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "surfacada",
-          "atorica",
-          "asferica",
-          "astigmatismo"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_nulux_trueform_1_59_nrblue_incolor",
-        "nome": "Nulux TrueForm Policarbonato No-Risk BlueControl",
-        "design_base": "Nulux TrueForm",
-        "design_id": "hoya_nulux_trueform",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "NRBlue",
-          "nome": "No-Risk BlueControl",
-          "nivel": "MédioAlto",
-          "garantia_anos": 2
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -10,
-          "esferico_max": 8,
-          "cilindrico_max": -4,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 2449.0,
+          "valor": 1509.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3096,7 +2664,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2449.0,
+          "valor": 1799.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3144,7 +2712,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2099.0,
+          "valor": 1449.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3192,7 +2760,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1099.0,
+          "valor": 1049.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3240,7 +2808,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3709.0,
+          "valor": 2049.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3288,7 +2856,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2449.0,
+          "valor": 2049.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3336,7 +2904,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2099.0,
+          "valor": 1799.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3384,7 +2952,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2099.0,
+          "valor": 1799.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3432,7 +3000,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1749.0,
+          "valor": 1449.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3480,7 +3048,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 749.0,
+          "valor": 1049.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3528,7 +3096,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3309.0,
+          "valor": 1699.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3576,7 +3144,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2049.0,
+          "valor": 1699.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3624,7 +3192,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2049.0,
+          "valor": 1699.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3672,7 +3240,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1699.0,
+          "valor": 1449.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3720,7 +3288,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1699.0,
+          "valor": 1449.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3768,7 +3336,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1349.0,
+          "valor": 1099.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -3816,7 +3384,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 349.0,
+          "valor": 699.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -4662,7 +4230,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2260.0,
+          "valor": 3060.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -4708,7 +4276,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1800.0,
+          "valor": 2810.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -4754,7 +4322,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1800.0,
+          "valor": 2810.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -4800,7 +4368,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1460.0,
+          "valor": 2460.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -4846,7 +4414,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1060.0,
+          "valor": 2060.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -4892,7 +4460,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 3060.0,
+          "valor": 2260.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -4984,7 +4552,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1800.0,
+          "valor": 2010.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -5030,7 +4598,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1800.0,
+          "valor": 2010.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -5076,7 +4644,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1460.0,
+          "valor": 1660.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -5122,7 +4690,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1060.0,
+          "valor": 1260.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -5168,7 +4736,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2810.0,
+          "valor": 1800.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -5214,7 +4782,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 2010.0,
+          "valor": 1800.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -5352,7 +4920,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 1210.0,
+          "valor": 1200.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -5398,7 +4966,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 810.0,
+          "valor": 800.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -8329,55 +7897,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_id_myself_1_59_meiryo_incolor",
-        "nome": "Hoyalux iD MySelf Policarbonato Hi-Vision Meiryo",
-        "design_base": "Hoyalux iD MySelf",
-        "design_id": "hoya_hoyalux_id_myself",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "Meiryo",
-          "nome": "Hi-Vision Meiryo",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 13759.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium_plus",
-          "binocular"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_id_myself_1_53_meiryo_incolor",
         "nome": "Hoyalux iD MySelf Trivex (PNX) Hi-Vision Meiryo",
         "design_base": "Hoyalux iD MySelf",
@@ -8623,55 +8142,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_id_myself_1_59_sunpro_incolor",
-        "nome": "Hoyalux iD MySelf Policarbonato Hi-Vision SunPro",
-        "design_base": "Hoyalux iD MySelf",
-        "design_id": "hoya_hoyalux_id_myself",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 12759.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium_plus",
-          "binocular"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_id_myself_1_53_sunpro_incolor",
         "nome": "Hoyalux iD MySelf Trivex (PNX) Hi-Vision SunPro",
         "design_base": "Hoyalux iD MySelf",
@@ -8894,55 +8364,6 @@
         "parametros": {
           "esferico_min": -8,
           "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 12259.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium_plus",
-          "binocular"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_id_myself_1_59_llblue_incolor",
-        "nome": "Hoyalux iD MySelf Policarbonato Hi-Vision LongLife BlueControl",
-        "design_base": "Hoyalux iD MySelf",
-        "design_id": "hoya_hoyalux_id_myself",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "LLBlue",
-          "nome": "Hi-Vision LongLife BlueControl",
-          "nivel": "Alto",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
           "cilindrico_max": -6,
           "adicao_min": 0.75,
           "adicao_max": 3.5,
@@ -9358,55 +8779,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_id_myself_1_59_nrblue_incolor",
-        "nome": "Hoyalux iD MySelf Policarbonato No-Risk BlueControl",
-        "design_base": "Hoyalux iD MySelf",
-        "design_id": "hoya_hoyalux_id_myself",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "NRBlue",
-          "nome": "No-Risk BlueControl",
-          "nivel": "MédioAlto",
-          "garantia_anos": 2
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 9999.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium_plus",
-          "binocular"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_id_myself_1_74_nr_incolor",
         "nome": "Hoyalux iD MySelf EYVIA No-Risk",
         "design_base": "Hoyalux iD MySelf",
@@ -9531,55 +8903,6 @@
         "parametros": {
           "esferico_min": -8,
           "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 9649.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium_plus",
-          "binocular"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_id_myself_1_59_nr_incolor",
-        "nome": "Hoyalux iD MySelf Policarbonato No-Risk",
-        "design_base": "Hoyalux iD MySelf",
-        "design_id": "hoya_hoyalux_id_myself",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "NR",
-          "nome": "No-Risk",
-          "nivel": "MédioAlto",
-          "garantia_anos": 2
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
           "cilindrico_max": -6,
           "adicao_min": 0.75,
           "adicao_max": 3.5,
@@ -11396,54 +10719,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_id_mystyle_vplus_1_59_meiryo_incolor",
-        "nome": "Hoyalux iD MyStyle V+ Policarbonato Hi-Vision Meiryo",
-        "design_base": "Hoyalux iD MyStyle V+",
-        "design_id": "hoya_hoyalux_id_mystyle_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "Meiryo",
-          "nome": "Hi-Vision Meiryo",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 1.0,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 13459.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_id_mystyle_vplus_1_53_meiryo_incolor",
         "nome": "Hoyalux iD MyStyle V+ Trivex (PNX) Hi-Vision Meiryo",
         "design_base": "Hoyalux iD MyStyle V+",
@@ -11684,54 +10959,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_id_mystyle_vplus_1_59_sunpro_incolor",
-        "nome": "Hoyalux iD MyStyle V+ Policarbonato Hi-Vision SunPro",
-        "design_base": "Hoyalux iD MyStyle V+",
-        "design_id": "hoya_hoyalux_id_mystyle_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 1.0,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 12459.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_id_mystyle_vplus_1_53_sunpro_incolor",
         "nome": "Hoyalux iD MyStyle V+ Trivex (PNX) Hi-Vision SunPro",
         "design_base": "Hoyalux iD MyStyle V+",
@@ -11950,54 +11177,6 @@
         "parametros": {
           "esferico_min": -8,
           "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 1.0,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 11959.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_id_mystyle_vplus_1_59_llblue_incolor",
-        "nome": "Hoyalux iD MyStyle V+ Policarbonato Hi-Vision LongLife BlueControl",
-        "design_base": "Hoyalux iD MyStyle V+",
-        "design_id": "hoya_hoyalux_id_mystyle_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "LLBlue",
-          "nome": "Hi-Vision LongLife BlueControl",
-          "nivel": "Alto",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
           "cilindrico_max": -6,
           "adicao_min": 1.0,
           "adicao_max": 3.5,
@@ -12404,54 +11583,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_id_mystyle_vplus_1_59_nrblue_incolor",
-        "nome": "Hoyalux iD MyStyle V+ Policarbonato No-Risk BlueControl",
-        "design_base": "Hoyalux iD MyStyle V+",
-        "design_id": "hoya_hoyalux_id_mystyle_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "NRBlue",
-          "nome": "No-Risk BlueControl",
-          "nivel": "MédioAlto",
-          "garantia_anos": 2
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 1.0,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 9699.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_id_mystyle_vplus_1_74_nr_incolor",
         "nome": "Hoyalux iD MyStyle V+ EYVIA No-Risk",
         "design_base": "Hoyalux iD MyStyle V+",
@@ -12574,54 +11705,6 @@
         "parametros": {
           "esferico_min": -8,
           "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 1.0,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14-20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 9349.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "premium",
-          "freeform",
-          "individualizada",
-          "id_premium"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_id_mystyle_vplus_1_59_nr_incolor",
-        "nome": "Hoyalux iD MyStyle V+ Policarbonato No-Risk",
-        "design_base": "Hoyalux iD MyStyle V+",
-        "design_id": "hoya_hoyalux_id_mystyle_vplus",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "NR",
-          "nome": "No-Risk",
-          "nivel": "MédioAlto",
-          "garantia_anos": 2
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -11,
-          "esferico_max": 8,
           "cilindrico_max": -6,
           "adicao_min": 1.0,
           "adicao_max": 3.5,
@@ -17633,145 +16716,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 8159.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "alto",
-          "freeform"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_balansis_1_60_sunpro_incolor",
-        "nome": "Hoyalux Balansis EYAS 2.0 Hi-Vision SunPro",
-        "design_base": "Hoyalux Balansis",
-        "design_id": "hoya_hoyalux_balansis",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.60",
-          "nome": "EYAS 2.0",
-          "indice_refracao": 1.6
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -8,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14,18mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 8159.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "alto",
-          "freeform"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_balansis_1_59_sunpro_incolor",
-        "nome": "Hoyalux Balansis Policarbonato Hi-Vision SunPro",
-        "design_base": "Hoyalux Balansis",
-        "design_id": "hoya_hoyalux_balansis",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -10,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14,18mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 8159.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "alto",
-          "freeform"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_balansis_1_53_sunpro_incolor",
-        "nome": "Hoyalux Balansis Trivex (PNX) Hi-Vision SunPro",
-        "design_base": "Hoyalux Balansis",
-        "design_id": "hoya_hoyalux_balansis",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.53",
-          "nome": "Trivex (PNX)",
-          "indice_refracao": 1.53
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -12,
-          "esferico_max": 8,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14,18mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 7909.0,
+          "valor": 6759.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -17817,7 +16762,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 7509.0,
+          "valor": 4149.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -17863,7 +16808,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5899.0,
+          "valor": 6759.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -17909,7 +16854,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5899.0,
+          "valor": 4959.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -17955,7 +16900,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5899.0,
+          "valor": 4959.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18001,7 +16946,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5649.0,
+          "valor": 4499.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18047,7 +16992,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5249.0,
+          "valor": 4149.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18093,7 +17038,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5549.0,
+          "valor": 6509.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18139,7 +17084,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5549.0,
+          "valor": 4709.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18185,7 +17130,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5549.0,
+          "valor": 4709.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18231,7 +17176,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 5299.0,
+          "valor": 4249.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18277,7 +17222,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 4899.0,
+          "valor": 3899.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18323,7 +17268,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 4149.0,
+          "valor": 4709.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -18369,7 +17314,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 4149.0,
+          "valor": 4709.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -19508,52 +18453,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_daynamic_1_74_sunpro_incolor",
-        "nome": "Hoyalux Daynamic EYVIA Hi-Vision SunPro",
-        "design_base": "Hoyalux Daynamic",
-        "design_id": "hoya_hoyalux_daynamic",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.74",
-          "nome": "EYVIA",
-          "indice_refracao": 1.74
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -8,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14,16,18,20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 7199.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "medio_alto",
-          "freeform"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_daynamic_1_67_sunpro_incolor",
         "nome": "Hoyalux Daynamic EYNOA Hi-Vision SunPro",
         "design_base": "Hoyalux Daynamic",
@@ -19635,52 +18534,6 @@
         },
         "preco": {
           "valor": 6599.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "medio_alto",
-          "freeform"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_daynamic_1_59_sunpro_incolor",
-        "nome": "Hoyalux Daynamic Policarbonato Hi-Vision SunPro",
-        "design_base": "Hoyalux Daynamic",
-        "design_id": "hoya_hoyalux_daynamic",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "SunPro",
-          "nome": "Hi-Vision SunPro",
-          "nivel": "Premium",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -10,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14,16,18,20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 5799.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -19784,52 +18637,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_hoyalux_daynamic_1_74_llblue_incolor",
-        "nome": "Hoyalux Daynamic EYVIA Hi-Vision LongLife BlueControl",
-        "design_base": "Hoyalux Daynamic",
-        "design_id": "hoya_hoyalux_daynamic",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.74",
-          "nome": "EYVIA",
-          "indice_refracao": 1.74
-        },
-        "antirreflexo": {
-          "codigo": "LLBlue",
-          "nome": "Hi-Vision LongLife BlueControl",
-          "nivel": "Alto",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -8,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14,16,18,20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 4939.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "medio_alto",
-          "freeform"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_hoyalux_daynamic_1_67_llblue_incolor",
         "nome": "Hoyalux Daynamic EYNOA Hi-Vision LongLife BlueControl",
         "design_base": "Hoyalux Daynamic",
@@ -19864,7 +18671,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 4939.0,
+          "valor": 5799.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -20094,53 +18901,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 4589.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "medio_alto",
-          "freeform"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_hoyalux_daynamic_1_74_nr_incolor",
-        "nome": "Hoyalux Daynamic EYVIA No-Risk",
-        "design_base": "Hoyalux Daynamic",
-        "design_id": "hoya_hoyalux_daynamic",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "progressiva",
-        "material": {
-          "codigo": "1.74",
-          "nome": "EYVIA",
-          "indice_refracao": 1.74
-        },
-        "antirreflexo": {
-          "codigo": "NR",
-          "nome": "No-Risk",
-          "nivel": "MédioAlto",
-          "garantia_anos": 2
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -8,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "14,16,18,20mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 4589.0,
+          "valor": 5549.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -20186,7 +18947,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 4589.0,
+          "valor": 5549.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -20416,7 +19177,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 3989.0,
+          "valor": 5199.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -20508,7 +19269,7 @@
           "altura_montagem_minima_mm": 14
         },
         "preco": {
-          "valor": 3589.0,
+          "valor": 4799.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -23970,102 +22731,6 @@
         "observacoes": null
       },
       {
-        "id": "hoya_workstyle_3_1_74_lluv_incolor",
-        "nome": "Hoyalux iD WorkStyle 3 EYVIA Hi-Vision LongLife UVControl",
-        "design_base": "Hoyalux iD WorkStyle 3",
-        "design_id": "hoya_workstyle_3",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "ocupacional",
-        "material": {
-          "codigo": "1.74",
-          "nome": "EYVIA",
-          "indice_refracao": 1.74
-        },
-        "antirreflexo": {
-          "codigo": "LLUv",
-          "nome": "Hi-Vision LongLife UVControl",
-          "nivel": "Alto",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -8,
-          "esferico_max": 5,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "15-18mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 7210.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "ocupacional",
-          "premium",
-          "freeform",
-          "trabalho",
-          "computador"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_workstyle_3_1_60_lluv_incolor",
-        "nome": "Hoyalux iD WorkStyle 3 EYAS 2.0 Hi-Vision LongLife UVControl",
-        "design_base": "Hoyalux iD WorkStyle 3",
-        "design_id": "hoya_workstyle_3",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "ocupacional",
-        "material": {
-          "codigo": "1.60",
-          "nome": "EYAS 2.0",
-          "indice_refracao": 1.6
-        },
-        "antirreflexo": {
-          "codigo": "LLUv",
-          "nome": "Hi-Vision LongLife UVControl",
-          "nivel": "Alto",
-          "garantia_anos": 3
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -8,
-          "esferico_max": 5,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": "15-18mm",
-          "altura_montagem_minima_mm": 14
-        },
-        "preco": {
-          "valor": 3910.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "ocupacional",
-          "premium",
-          "freeform",
-          "trabalho",
-          "computador"
-        ],
-        "observacoes": null
-      },
-      {
         "id": "hoya_workstyle_3_1_67_nr_incolor",
         "nome": "Hoyalux iD WorkStyle 3 EYNOA No-Risk",
         "design_base": "Hoyalux iD WorkStyle 3",
@@ -25649,150 +24314,6 @@
           "codigo": "1.60",
           "nome": "EYAS 2.0",
           "indice_refracao": 1.6
-        },
-        "antirreflexo": {
-          "codigo": "EnRoute",
-          "nome": "Antirreflexo EnRoute",
-          "nivel": "Especial",
-          "garantia_anos": null
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -12,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": 18
-        },
-        "preco": {
-          "valor": 5289.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "especial",
-          "dirigir",
-          "contraste",
-          "visao_noturna"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_enroute_prog_1_59_enroute_incolor",
-        "nome": "Hoyalux EnRoute (Progressiva) Policarbonato Antirreflexo EnRoute",
-        "design_base": "Hoyalux EnRoute (Progressiva)",
-        "design_id": "hoya_enroute_prog",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "especial",
-        "material": {
-          "codigo": "1.59",
-          "nome": "Policarbonato",
-          "indice_refracao": 1.59
-        },
-        "antirreflexo": {
-          "codigo": "EnRoute",
-          "nome": "Antirreflexo EnRoute",
-          "nivel": "Especial",
-          "garantia_anos": null
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -12,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": 18
-        },
-        "preco": {
-          "valor": 5289.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "especial",
-          "dirigir",
-          "contraste",
-          "visao_noturna"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_enroute_prog_1_53_enroute_incolor",
-        "nome": "Hoyalux EnRoute (Progressiva) Trivex (PNX) Antirreflexo EnRoute",
-        "design_base": "Hoyalux EnRoute (Progressiva)",
-        "design_id": "hoya_enroute_prog",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "especial",
-        "material": {
-          "codigo": "1.53",
-          "nome": "Trivex (PNX)",
-          "indice_refracao": 1.53
-        },
-        "antirreflexo": {
-          "codigo": "EnRoute",
-          "nome": "Antirreflexo EnRoute",
-          "nivel": "Especial",
-          "garantia_anos": null
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -12,
-          "esferico_max": 6,
-          "cilindrico_max": -6,
-          "adicao_min": 0.75,
-          "adicao_max": 3.5,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": 18
-        },
-        "preco": {
-          "valor": 4889.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "progressiva",
-          "especial",
-          "dirigir",
-          "contraste",
-          "visao_noturna"
-        ],
-        "observacoes": null
-      },
-      {
-        "id": "hoya_enroute_prog_1_50_enroute_incolor",
-        "nome": "Hoyalux EnRoute (Progressiva) Orgânico 1.50 (ORG) Antirreflexo EnRoute",
-        "design_base": "Hoyalux EnRoute (Progressiva)",
-        "design_id": "hoya_enroute_prog",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "especial",
-        "material": {
-          "codigo": "1.50",
-          "nome": "Orgânico 1.50 (ORG)",
-          "indice_refracao": 1.5
         },
         "antirreflexo": {
           "codigo": "EnRoute",
@@ -28683,7 +27204,7 @@
           "altura_montagem_minima_mm": 17
         },
         "preco": {
-          "valor": 1200.0,
+          "valor": 800.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -28730,7 +27251,7 @@
           "altura_montagem_minima_mm": 17
         },
         "preco": {
-          "valor": 1100.0,
+          "valor": 750.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -28777,7 +27298,7 @@
           "altura_montagem_minima_mm": 17
         },
         "preco": {
-          "valor": 1050.0,
+          "valor": 650.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -28824,7 +27345,7 @@
           "altura_montagem_minima_mm": 17
         },
         "preco": {
-          "valor": 1050.0,
+          "valor": 650.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -28871,7 +27392,7 @@
           "altura_montagem_minima_mm": 17
         },
         "preco": {
-          "valor": 950.0,
+          "valor": 550.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -28918,7 +27439,7 @@
           "altura_montagem_minima_mm": 17
         },
         "preco": {
-          "valor": 159.0,
+          "valor": 600.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -28965,7 +27486,7 @@
           "altura_montagem_minima_mm": 17
         },
         "preco": {
-          "valor": 99.0,
+          "valor": 400.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -29059,54 +27580,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 750.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "popular",
-          "maxxee",
-          "entrada"
-        ],
-        "observacoes": "Acompanha certificado de autenticidade MAXXEE"
-      },
-      {
-        "id": "hoya_maxxee_vs_1_50_hmcblue_incolor",
-        "nome": "MAXXEE Visão Simples Orgânico 1.50 (ORG) UV++ HMC Blue",
-        "design_base": "MAXXEE Visão Simples",
-        "design_id": "hoya_maxxee_vs",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.50",
-          "nome": "Orgânico 1.50 (ORG)",
-          "indice_refracao": 1.5
-        },
-        "antirreflexo": {
-          "codigo": "HMCBlue",
-          "nome": "UV++ HMC Blue",
-          "nivel": "MAXXEE",
-          "garantia_anos": null
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -6,
-          "esferico_max": 6,
-          "cilindrico_max": -4,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 650.0,
+          "valor": 159.0,
           "moeda": "BRL",
           "unidade": "par"
         },
@@ -29153,148 +27627,7 @@
           "altura_montagem_minima_mm": null
         },
         "preco": {
-          "valor": 650.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "popular",
-          "maxxee",
-          "entrada"
-        ],
-        "observacoes": "Acompanha certificado de autenticidade MAXXEE"
-      },
-      {
-        "id": "hoya_maxxee_vs_1_50_hmc_incolor",
-        "nome": "MAXXEE Visão Simples Orgânico 1.50 (ORG) HMC",
-        "design_base": "MAXXEE Visão Simples",
-        "design_id": "hoya_maxxee_vs",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.50",
-          "nome": "Orgânico 1.50 (ORG)",
-          "indice_refracao": 1.5
-        },
-        "antirreflexo": {
-          "codigo": "HMC",
-          "nome": "HMC",
-          "nivel": "MAXXEE",
-          "garantia_anos": null
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -6,
-          "esferico_max": 6,
-          "cilindrico_max": -4,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 600.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "popular",
-          "maxxee",
-          "entrada"
-        ],
-        "observacoes": "Acompanha certificado de autenticidade MAXXEE"
-      },
-      {
-        "id": "hoya_maxxee_vs_1_56_hmchard_incolor",
-        "nome": "MAXXEE Visão Simples MAXXEE 1.56 Hard (MAXXEE)",
-        "design_base": "MAXXEE Visão Simples",
-        "design_id": "hoya_maxxee_vs",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.56",
-          "nome": "MAXXEE 1.56",
-          "indice_refracao": 1.56
-        },
-        "antirreflexo": {
-          "codigo": "HMCHard",
-          "nome": "Hard (MAXXEE)",
-          "nivel": "MAXXEE",
-          "garantia_anos": null
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -6,
-          "esferico_max": 6,
-          "cilindrico_max": -4,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 450.0,
-          "moeda": "BRL",
-          "unidade": "par"
-        },
-        "tags": [
-          "monofocal",
-          "popular",
-          "maxxee",
-          "entrada"
-        ],
-        "observacoes": "Acompanha certificado de autenticidade MAXXEE"
-      },
-      {
-        "id": "hoya_maxxee_vs_1_50_hmchard_incolor",
-        "nome": "MAXXEE Visão Simples Orgânico 1.50 (ORG) Hard (MAXXEE)",
-        "design_base": "MAXXEE Visão Simples",
-        "design_id": "hoya_maxxee_vs",
-        "fornecedor": "HOYA Vision Care",
-        "marca": "HOYA",
-        "categoria": "lente_oftalmica",
-        "subcategoria": "monofocal",
-        "material": {
-          "codigo": "1.50",
-          "nome": "Orgânico 1.50 (ORG)",
-          "indice_refracao": 1.5
-        },
-        "antirreflexo": {
-          "codigo": "HMCHard",
-          "nome": "Hard (MAXXEE)",
-          "nivel": "MAXXEE",
-          "garantia_anos": null
-        },
-        "adicional": {
-          "tipo": "incolor",
-          "nome": "Incolor"
-        },
-        "parametros": {
-          "esferico_min": -6,
-          "esferico_max": 6,
-          "cilindrico_max": -4,
-          "adicao_min": null,
-          "adicao_max": null,
-          "diametro_mm": null,
-          "corredor_mm": null,
-          "altura_montagem_minima_mm": null
-        },
-        "preco": {
-          "valor": 400.0,
+          "valor": 99.0,
           "moeda": "BRL",
           "unidade": "par"
         },
