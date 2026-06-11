@@ -2999,7 +2999,7 @@ serve(async (req) => {
                       asked_at: new Date().toISOString(),
                       correction_count: 0,
                       reason: "retomada_pos_escalada",
-                      fora_da_faixa: _maxAbs > 10,
+                      fora_da_faixa: isReceitaForaDaFaixa(_merged), // C3: alinhado com regra de negócio (>16D)
                     },
                   };
                   await supabase.from("contatos").update({ metadata: _newCMeta }).eq("id", atendimento.contato_id);
@@ -5377,6 +5377,11 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     const intentBlock = `INTENÇÃO DETECTADA: ${detectedIntent.intent} (confiança: ${detectedIntent.confidence.toFixed(2)}). Trate esta conversa exclusivamente sob essa ótica até nova mensagem do cliente.`;
     const systemPromptWithIntent = `${intentBlock}\n\n${systemPrompt}`;
 
+    // C1: detecta receita digitada ANTES de montar messages — resultado usado em dois lugares:
+    // (a) suprime "PRIORIDADE MÁXIMA" quando o texto atual já foi parseado pelo parser (C1b),
+    // (b) reutilizado na seção 6.4 para evitar segunda chamada ao parser (C1c).
+    const _earlyRxDetected = !lastIsImage ? detectPrescriptionCorrection(lastInboundText) : null;
+
     const messages: any[] = [
       { role: "system", content: systemPromptWithIntent },
       {
@@ -5396,7 +5401,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
 - Se as últimas mensagens forem vagas e nenhuma intenção for clara, responda CURTO e contextual ("Voltei pra te ajudar — em que posso continuar?") em vez de escalar.${pendingIntent ? `\n\nINTENÇÃO PENDENTE DETECTADA: ${pendingIntent.intent.toUpperCase()} — ${pendingIntent.hint}` : ""}`,
           }]
         : []),
-      ...(hasRecentUnparsedPrescriptionImage && !hasValidReceitas && !isConsultaOsActive
+      ...(hasRecentUnparsedPrescriptionImage && !hasValidReceitas && !isConsultaOsActive && !_earlyRxDetected
         ? [{
             role: "system",
             content: "[SISTEMA: PRIORIDADE MÁXIMA — RECEITA PENDENTE] O cliente enviou uma imagem (provável receita) nas últimas mensagens e ela AINDA NÃO foi interpretada com sucesso (RECEITAS JÁ INTERPRETADAS está vazio ou inválido). REGRAS: 1) Você DEVE chamar a tool interpretar_receita usando a imagem mais recente entregue no histórico, ANTES de qualquer outra ação (não escale, não peça reenvio, não responda genericamente). 2) Se a imagem foi entregue ao modelo, use-a — mesmo que a última mensagem do cliente seja curta ('ok', 'então?', 'cadê'). 3) Só peça reenvio se o sistema avisar explicitamente que a imagem NÃO foi entregue. 4) Só escale para humano se a imagem estiver claramente ilegível APÓS a tentativa de interpretação.]",
@@ -5651,7 +5656,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       console.warn("[MONOCULAR] detection failed", e);
     }
 
-    const correction = detectPrescriptionCorrection(lastInboundText);
+    const correction = _earlyRxDetected; // C1c: resultado computado antes de messages (evita dupla chamada)
     if (correction) {
       const iaJustAskedForText = (recentOutbound || []).slice(-2).some((o: any) =>
         typeof o === "string" && /tô tendo dificuldade de ler|me passar por texto|esférico\s*\/\s*cil[ií]ndrico|preciso de:\s*•\s*\*od\*|beleza! me passa por texto/i.test(o)
@@ -5715,7 +5720,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         };
         // ── Detecta correção de ALTO IMPACTO ──
         // Só faz sentido em MODO CORREÇÃO (useFreshSlot=false) — receita standalone
-        // não tem "anterior" para comparar. maxNewAbs>10 segue valendo (lente especial).
+        // não tem "anterior" para comparar. isHighImpact usa maxNewAbs>10 para logging;
+        // fora_da_faixa usa isReceitaForaDaFaixa (>16D) — C3, alinhado com regra de negócio.
         const oldOdSph = (!useFreshSlot && typeof old?.eyes?.od?.sphere === "number") ? old.eyes.od.sphere : null;
         const oldOeSph = (!useFreshSlot && typeof old?.eyes?.oe?.sphere === "number") ? old.eyes.oe.sphere : null;
         const newOdSph = typeof correction.od?.sphere === "number" ? correction.od.sphere : null;
@@ -5750,7 +5756,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
             asked_at: new Date().toISOString(),
             correction_count: Number(contatoMeta?.receita_confirmacao?.correction_count || 0) + 1,
             reason: isHighImpact ? "high_impact_correction" : "low_impact_correction",
-            fora_da_faixa: maxNewAbs > 10,
+            fora_da_faixa: isReceitaForaDaFaixa(merged), // C3: alinhado com regra de negócio (>16D)
           };
         }
 
@@ -6334,6 +6340,22 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         intencao = "receita_oftalmologica";
         pipeline_coluna = "Orçamento";
 
+        // Guard C2: bloqueia alucinação quando interpretar_receita é chamada sem imagem real.
+        // correctionApplied=true ⟹ parser já salvou a receita neste turno → cota direto.
+        // Condição: msg atual é texto + parser detectou receita + não é nova foto pendente.
+        const _rxTextGuardBloqueou = !lastIsImage && !hasPendingNewPrescriptionImage && correctionApplied && !!_earlyRxDetected;
+        if (_rxTextGuardBloqueou) {
+          console.warn("[RX-TEXT-GUARD] interpretar_receita sem imagem real — parser já leu; cotando direto");
+          validatorFlags.push("rx_text_guard_bloqueou_ocr");
+          if (receitas.length > 0 && isReceitaValida(receitas[receitas.length - 1])) {
+            const _qg = await runConsultarLentes(supabase, contatoId, recentOutbound, {}, atendimento_id);
+            resposta = _qg.resposta;
+            intencao = "orcamento";
+          } else {
+            resposta = MSG_PEDIR_RECEITA_TEXTO;
+          }
+        } else {
+
         // ── QUOTE ENGINE: deterministic post-processing ──
         const od = args.eyes?.od || {};
         const oe = args.eyes?.oe || {};
@@ -6513,6 +6535,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         }
         console.log(`[RX] Prescription saved: ${rxType} conf=${(confidence * 100).toFixed(0)}% — ${rxJustValid && !explicitOptOut ? "pending_confirmation" : (explicitOptOut ? "client opted-out" : "no chain")}`);
         }
+        } // end guard C2: !_rxTextGuardBloqueou
 
         // ── SANITIZER pós-LLM: nunca enviar template com placeholders vazios ──
         if (resposta && /ESF\s*\?|CIL\s*\?|EIXO\s*\?°/.test(resposta)) {
