@@ -2838,30 +2838,12 @@ serve(async (req) => {
     if (incomingButtonId) console.log(`[BUTTON ROUTER] received button_id=${incomingButtonId}`);
 
     // ── 1. LOAD ATENDIMENTO ──
-    // TODO REMOVER após confirmar coluna ia_lock_at em produção (proteção anti-inversão de deploy)
-    let atendimento: Record<string, any> | null = null;
-    {
-      const { data, error } = await supabase
-        .from("atendimentos")
-        .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at, ia_lock_at")
-        .eq("id", atendimento_id)
-        .single();
-      if (error && String(error.message ?? error).includes("ia_lock_at")) {
-        // Coluna ainda não existe (migration pendente) — fallback sem ia_lock_at
-        console.warn("[LOCK] ia_lock_at ausente no schema — fallback sem CAS (proteção anti-inversão de deploy)");
-        const { data: data2, error: err2 } = await supabase
-          .from("atendimentos")
-          .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at")
-          .eq("id", atendimento_id)
-          .single();
-        if (err2 || !data2) throw new Error("Atendimento not found");
-        atendimento = { ...data2, ia_lock_at: null };
-      } else {
-        if (error || !data) throw new Error("Atendimento not found");
-        atendimento = data;
-      }
-    }
-    // TODO REMOVER — fim proteção SELECT
+    const { data: atendimento, error: atErr } = await supabase
+      .from("atendimentos")
+      .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at, ia_lock_at")
+      .eq("id", atendimento_id)
+      .single();
+    if (atErr || !atendimento) throw new Error("Atendimento not found");
 
     // ─────────────────────────────────────────────────────────────────────────
     // BUTTON ROUTER — Resposta determinística a cliques de botão/lista WhatsApp
@@ -3127,32 +3109,19 @@ serve(async (req) => {
     // UPDATE … WHERE id=$1 AND (ia_lock_at IS NULL OR ia_lock_at < agora-TTL)
     // é serializado pelo Postgres: só UMA execução concorrente ganha a linha.
     // Se retornou vazio, outra execução tem o lock → aborta imediatamente.
-    // TODO REMOVER try/catch externo após confirmar coluna ia_lock_at em produção (proteção anti-inversão de deploy)
     const lockExpiredBefore = new Date(now - LOCK_TTL_MS).toISOString();
-    let _casSkipped = false;
-    try {
-      const { data: lockAcquired } = await supabase
-        .from("atendimentos")
-        .update({ ia_lock_at: new Date(now).toISOString() })
-        .eq("id", atendimento_id)
-        .or(`ia_lock_at.is.null,ia_lock_at.lt.${lockExpiredBefore}`)
-        .select("id");
+    const { data: lockAcquired } = await supabase
+      .from("atendimentos")
+      .update({ ia_lock_at: new Date(now).toISOString() })
+      .eq("id", atendimento_id)
+      .or(`ia_lock_at.is.null,ia_lock_at.lt.${lockExpiredBefore}`)
+      .select("id");
 
-      if (!lockAcquired?.length) {
-        console.log("[LOCK-CAS] Lock held by concurrent execution — abortando para evitar duplicação");
-        return jsonResponse({ status: "skipped", reason: "lock-cas — concurrent execution blocked" });
-      }
-      console.log("[LOCK-CAS] Lock atômico adquirido");
-    } catch (casErr: any) {
-      if (String(casErr?.message ?? casErr).includes("ia_lock_at")) {
-        // Coluna ainda não existe — pula o CAS, continua sem lock atômico (modo degradado)
-        console.warn("[LOCK] ia_lock_at ausente — fallback sem CAS (proteção anti-inversão de deploy)");
-        _casSkipped = true;
-      } else {
-        throw casErr; // erro real, propaga
-      }
+    if (!lockAcquired?.length) {
+      console.log("[LOCK-CAS] Lock held by concurrent execution — abortando para evitar duplicação");
+      return jsonResponse({ status: "skipped", reason: "lock-cas — concurrent execution blocked" });
     }
-    // TODO REMOVER — fim proteção CAS
+    console.log("[LOCK-CAS] Lock atômico adquirido");
 
     const isHibrido = atendimento.modo === "hibrido";
     const contatoId = contato_id || atendimento.contato_id;
@@ -8085,13 +8054,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     console.log(`[RESULT] tools=${toolCalls.map((t: any) => t.function?.name).join(",") || "text"} | intent=${intencao} | human=${precisa_humano} | col=${pipeline_coluna} | validator=${validatorFlags.join(",")}`);
 
     // Clear debounce lock — update simples, sem read-modify-write
-    // TODO REMOVER try/catch após confirmar coluna ia_lock_at em produção (proteção anti-inversão de deploy)
-    try {
-      await supabase.from("atendimentos")
-        .update({ ia_lock_at: null })
-        .eq("id", atendimento_id);
-    } catch (_lockRelErr: any) { /* coluna ausente ou erro de rede — não bloqueia a resposta */ }
-    // TODO REMOVER — fim proteção release normal
+    await supabase.from("atendimentos")
+      .update({ ia_lock_at: null })
+      .eq("id", atendimento_id);
 
     return jsonResponse({
       status: "ok",
@@ -8106,15 +8071,13 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
   } catch (e) {
     console.error("[ERROR] ai-triage:", e);
     // Clear lock on error too — update simples, sem read-modify-write
-    // TODO REMOVER try/catch interno após confirmar coluna ia_lock_at em produção (proteção anti-inversão de deploy)
     try {
       if (atendimentoIdForCleanup) {
         await supabase.from("atendimentos")
           .update({ ia_lock_at: null })
           .eq("id", atendimentoIdForCleanup);
       }
-    } catch (_) { /* coluna ausente ou erro de rede — ignora no cleanup de erro */ }
-    // TODO REMOVER — fim proteção release catch
+    } catch (_) { /* ignore lock cleanup errors */ }
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
