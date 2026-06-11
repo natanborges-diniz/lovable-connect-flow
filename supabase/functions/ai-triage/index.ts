@@ -3313,7 +3313,7 @@ serve(async (req) => {
     if (matchesSubjectChange(currentMsg)) {
       console.log("[ROUTER] Subject change detected — deterministic response");
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, DETERMINISTIC_FALLBACKS_SUBJECT_CHANGE);
-      await logEvent(supabase, contatoId, atendimento_id, "router_subject_change", currentMsg);
+      await supabase.from("eventos_crm").insert({ contato_id: contatoId, tipo: "router_subject_change", descricao: currentMsg, referencia_tipo: "atendimento", referencia_id: atendimento_id });
       return jsonResponse({ status: "ok", tools_used: ["router_subject_change"], intencao: "outro", precisa_humano: false, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
     }
 
@@ -3522,7 +3522,7 @@ serve(async (req) => {
         } catch (e) {
           console.warn("[ROUTER armações] Failed to mark metadata:", e);
         }
-        await logEvent(supabase, contatoId, atendimento_id, "router_armacoes_presencial", currentMsg);
+        await supabase.from("eventos_crm").insert({ contato_id: contatoId, tipo: "router_armacoes_presencial", descricao: currentMsg, referencia_tipo: "atendimento", referencia_id: atendimento_id });
         return jsonResponse({ status: "ok", tools_used: ["router_armacoes_presencial"], intencao: "armacoes", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
       }
     }
@@ -3817,7 +3817,7 @@ serve(async (req) => {
           await supabase.from("atendimentos").update({
             metadata: { ..._atMetaMenu, menu_triagem_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" },
           }).eq("id", atendimento_id);
-          await logEvent(supabase, contatoId, atendimento_id, "menu_triagem_recorrente", "Cliente já cadastrado — menu direto");
+          await supabase.from("eventos_crm").insert({ contato_id: contatoId, tipo: "menu_triagem_recorrente", descricao: "Cliente já cadastrado — menu direto", referencia_tipo: "atendimento", referencia_id: atendimento_id });
           return jsonResponse({ status: "ok", tools_used: ["menu_triagem_recorrente"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
         }
       }
@@ -3931,7 +3931,7 @@ serve(async (req) => {
                 .eq("id", atendimento_id);
             } catch (_) { /* noop */ }
             console.log(`[FAST-PATH] greeting_buttons_sent candidato="${primeiroNome}" tentativas=${tentativas + 1}`);
-            await logEvent(supabase, contatoId, atendimento_id, "saudacao_botoes_nome", introTxt);
+            await supabase.from("eventos_crm").insert({ contato_id: contatoId, tipo: "saudacao_botoes_nome", descricao: introTxt, referencia_tipo: "atendimento", referencia_id: atendimento_id });
             return jsonResponse({ status: "ok", tools_used: ["greeting_buttons_nome"], intencao: "saudacao", precisa_humano: false, modo: atendimento.modo });
           }
 
@@ -3949,7 +3949,7 @@ serve(async (req) => {
 
           console.log(`[FAST-PATH] greeting_deterministic_sent inbound=${inboundCount} precisaConf=${precisaConfirmarNome} tentativas=${tentativas + 1}`);
           await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, greetingMsg);
-          await logEvent(supabase, contatoId, atendimento_id, "saudacao_deterministica", greetingMsg);
+          await supabase.from("eventos_crm").insert({ contato_id: contatoId, tipo: "saudacao_deterministica", descricao: greetingMsg, referencia_tipo: "atendimento", referencia_id: atendimento_id });
           return jsonResponse({ status: "ok", tools_used: ["greeting_deterministic"], intencao: "saudacao", precisa_humano: false, pipeline_coluna_sugerida: null, modo: atendimento.modo });
         }
       }
@@ -5245,7 +5245,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
 
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, despedidaMsg);
-      await logEvent(supabase, contatoId, atendimento_id, "despedida_deterministica", `${isExplicitClose ? "explicit" : isThanksClose ? "thanks" : isNegativaPosRetomada ? "negativa_pos_retomada" : "shortNoToHelp"}; agFmt=${agendamentoFmt || "vazio"}`);
+      await supabase.from("eventos_crm").insert({ contato_id: contatoId, tipo: "despedida_deterministica", descricao: `${isExplicitClose ? "explicit" : isThanksClose ? "thanks" : isNegativaPosRetomada ? "negativa_pos_retomada" : "shortNoToHelp"}; agFmt=${agendamentoFmt || "vazio"}`, referencia_tipo: "atendimento", referencia_id: atendimento_id });
 
       // ── BLOQUEIO DE RETOMADA AUTOMÁTICA ──
       // Cliente pediu para encerrar OU dispensou ajuda após despedida OU recusou retomada.
