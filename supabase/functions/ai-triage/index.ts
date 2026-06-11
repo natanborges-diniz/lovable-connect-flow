@@ -393,6 +393,9 @@ function detectRxRejeicao(text: string): boolean {
     || /\b(t[áa]\s+errad|est[áa]\s+errad|n[ãa]o\s+confere|nao\s*[eé]\s+isso|errou|esses?\s+valores?\s+est[aã]o\s+errad)\b/.test(t);
 }
 
+// ÂNCORA COMERCIAL — "a partir de" óculos sem receita (editar aqui para atualizar os pisos)
+const ANCORA_OCULOS = { visao_simples: 198, multifocal: 298, armacao: 98 };
+
 // PROTEÇÃO 1 (TTL): pending de receita expira em 24h.
 // Evita que cliente que sumiu e voltou dias depois caia em loop de
 // "confirme essa receita" referenciando uma leitura velha.
@@ -9522,6 +9525,46 @@ async function sendOrcamentoEstimativaLCDescartavel(
   }
 }
 
+async function sendOrcamentoEstimativaOculosSemReceita(
+  supabase: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  atendimentoId: string,
+): Promise<void> {
+  const vs = ANCORA_OCULOS.visao_simples;
+  const mf = ANCORA_OCULOS.multifocal;
+  const ar = ANCORA_OCULOS.armacao;
+
+  const msg =
+    "Sem problema! Sem a receita não consigo fechar o valor exato, mas te passo os *valores de referência* pra você já ir se planejando 😊\n\n" +
+    `👓 *Visão simples* (com antirreflexo) — a partir de *R$ ${vs}*\n` +
+    `🔭 *Multifocal/progressiva* (com antirreflexo) — a partir de *R$ ${mf}*\n` +
+    `🕶️ *Armação* — a partir de *R$ ${ar}*\n\n` +
+    "_Esses são os valores base. O preço final depende do seu grau, tratamentos e a armação escolhida — a receita fecha a conta certinha._";
+
+  try {
+    await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, msg);
+    await sendInteractive(supabaseUrl, serviceKey, atendimentoId, {
+      type: "button",
+      texto: "Como prefere continuar? 😊",
+      botoes: [
+        { id: "receita_foto",    titulo: "📷 Enviar receita" },
+        { id: "orcamento_agendar", titulo: "📅 Agendar visita" },
+        { id: "ver_menu",        titulo: "🏠 Outro assunto" },
+      ],
+    });
+    await supabase.from("eventos_crm").insert({
+      tipo: "orcamento_oculos_estimativa_ancora",
+      descricao: `Estimativa óculos sem receita (âncora) — VS R$${vs} / MF R$${mf} / ARM R$${ar}`,
+      metadata: { ancora: ANCORA_OCULOS },
+      referencia_tipo: "atendimento",
+      referencia_id: atendimentoId,
+    });
+  } catch (e) {
+    console.error("[EST-OCULOS] falha ao enviar estimativa:", e);
+  }
+}
+
 async function routeButtonClick(args: {
   buttonId: string;
   atendimento: any;
@@ -9884,8 +9927,40 @@ async function routeButtonClick(args: {
         await patchMeta({ intent_detected: "orcamento_lentes_contato", expected_reply: null });
         return true;
       }
-      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Sem a receita não consigo fechar valor exato, mas posso te dar uma faixa estimada. Você usa óculos pra perto, pra longe, ou multifocal? 😊");
-      await patchMeta({ intent_detected: "sem_receita", expected_reply: "sem_receita_tipo" });
+
+      // Óculos sem receita — 3 salvaguardas antes de disparar âncora comercial.
+      const { data: ctSemRx } = await supabase.from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+      const ctMetaSemRx = (ctSemRx?.metadata as Record<string, any>) || {};
+
+      // Salvaguarda 1: receita pendente de confirmação OCR → pede confirmação antes de qualquer preço
+      if (isReceitaPending(ctMetaSemRx)) {
+        const lastRx = Array.isArray(ctMetaSemRx.receitas) && ctMetaSemRx.receitas.length > 0
+          ? ctMetaSemRx.receitas[ctMetaSemRx.receitas.length - 1]
+          : (ctMetaSemRx.ultima_receita || null);
+        const msgPend = lastRx
+          ? buildMsgConfirmarReceita(lastRx, false)
+          : "Antes de continuar, preciso que você confirme os valores que li da sua receita 😊";
+        await sendReceitaConfirmInteractive(supabase, supabaseUrl, serviceKey, atId, msgPend);
+        return true;
+      }
+
+      // Salvaguarda 2: receita válida já confirmada → LLM usa consultar_lentes (preço exato)
+      const receitasSemRx: any[] = Array.isArray(ctMetaSemRx.receitas) && ctMetaSemRx.receitas.length > 0
+        ? ctMetaSemRx.receitas
+        : (ctMetaSemRx.ultima_receita?.eyes ? [ctMetaSemRx.ultima_receita] : []);
+      if (receitasSemRx.some((r: any) => isReceitaValida(r))) {
+        return false; // LLM assume com receita em contexto
+      }
+
+      // Salvaguarda 3: esférico declarado no atendimento → LLM usa consultar_lentes_estimativa (faixas)
+      // Em geral não ocorre no fluxo de botões (esférico vem de texto), mas defensivo.
+      if (atendimentoMeta.sphere_od != null || atendimentoMeta.sphere_oe != null) {
+        return false;
+      }
+
+      // Caso "zero": óculos, sem receita salva, sem grau declarado → âncora comercial determinística
+      await sendOrcamentoEstimativaOculosSemReceita(supabase, supabaseUrl, serviceKey, atId);
+      await patchMeta({ intent_detected: "orcamento_oculos_ancora", expected_reply: null });
       return true;
     }
     case "receita_ok": {
@@ -9955,6 +10030,18 @@ async function routeButtonClick(args: {
     case "desconto_pensar":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sem problema! Quando quiser dar continuidade, é só me chamar 😊");
       await patchMeta({ expected_reply: null });
+      return true;
+    case "ver_menu":
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "list",
+        texto: "Claro! Sobre o que quer falar? 😊",
+        lista: {
+          label: "Ver opções",
+          secao: "Posso te ajudar com",
+          itens: MENU_TRIAGEM_ITENS,
+        },
+      });
+      await patchMeta({ expected_reply: "menu_triagem", intent_detected: null });
       return true;
     case "ag_confirmar": {
       const pend = atendimentoMeta.agendamento_pending;
