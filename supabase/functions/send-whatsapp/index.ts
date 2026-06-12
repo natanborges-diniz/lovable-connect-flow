@@ -145,6 +145,18 @@ serve(async (req) => {
     });
   } catch (e) {
     console.error("[send-whatsapp] error:", e);
+    // Transient Meta 5xx → degrade gracefully (200 + fallback flag) to avoid client crash
+    if (e instanceof MetaTransientError) {
+      return new Response(
+        JSON.stringify({
+          error: "meta_unavailable",
+          fallback: true,
+          retryable: true,
+          reason: e.message,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
