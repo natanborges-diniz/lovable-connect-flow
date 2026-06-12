@@ -4905,11 +4905,33 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     }
 
     // ── 5.05 INJECT PRESCRIPTION CONTEXT ──
+    // B2.2: filtra receitas por sessão/confirmação antes de injetar no LLM.
+    // Receitas não-confirmadas de sessões anteriores são "fantasmas" — não devem
+    // disparar FLUXO PÓS-RECEITA nem ser reapresentadas automaticamente.
+    const _atInicioTs = Date.parse(String((atendimento as any).inicio_at || "")) || 0;
+    const _hasInicioAt = _atInicioTs > 0;
+    // Receitas do atendimento atual (salvas nesta sessão) — confirmadas ou pendentes.
+    const _receitasCurrentSession = (receitas as any[]).filter((r: any) => {
+      if (r.superseded_at) return false;
+      if (!_hasInicioAt) return !r.superseded_at; // sem inicio_at: trata tudo como atual
+      const rl = r.data_leitura ? Date.parse(String(r.data_leitura)) : 0;
+      return rl > 0 && rl >= _atInicioTs;
+    });
+    // Receitas confirmadas de sessões anteriores — mostrar com nota de "oferta", não forçar.
+    const _receitasConfirmadasAntigas = !_hasInicioAt ? [] : (receitas as any[]).filter((r: any) => {
+      if (r.superseded_at) return false;
+      if (!r.confirmed_by_client_at) return false;
+      const rl = r.data_leitura ? Date.parse(String(r.data_leitura)) : 0;
+      return !rl || rl < _atInicioTs;
+    });
+    // Flag usada na linha FLUXO PÓS-RECEITA: só dispara quando há receita da sessão atual.
+    const hasReceitasAtivasCtx = _receitasCurrentSession.some(isReceitaValida);
+
     let receitaCtx = "";
-    if (receitas.length > 0) {
+    if (_receitasCurrentSession.length > 0) {
       receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
-      for (let i = 0; i < receitas.length; i++) {
-        const rx = receitas[i];
+      for (let i = 0; i < _receitasCurrentSession.length; i++) {
+        const rx = _receitasCurrentSession[i];
         const label = rx.label || `receita ${i + 1}`;
         const dataLeitura = rx.data_leitura ? new Date(rx.data_leitura).toLocaleDateString("pt-BR") : "—";
         const rxTypeLabel = rx.rx_type === "progressive" ? "Progressiva" : rx.rx_type === "single_vision" ? "Visão simples" : rx.rx_type || "—";
@@ -4929,10 +4951,22 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
       receitaCtx += `\n⚠️ NÃO peça receita novamente. O cliente JÁ enviou. Use consultar_lentes referenciando a receita correta.`;
       receitaCtx += `\n⚠️ NUNCA cote uma receita marcada como "AGUARDA confirmação". Se o cliente escolher uma assim, peça que confirme os valores antes (o sistema cuida disso automaticamente).`;
-      if (receitas.length > 1) {
+      if (_receitasCurrentSession.length > 1) {
         receitaCtx += `\nQuando o cliente pedir orçamento, pergunte "Para qual receita?" antes de chamar consultar_lentes.`;
       }
-      console.log(`[RX-CTX] Injecting ${receitas.length} prescription(s) into context`);
+      console.log(`[RX-CTX] Injecting ${_receitasCurrentSession.length} current-session prescription(s) into context`);
+    }
+    // Receitas confirmadas antigas: oferecer, não impor (não dispara FLUXO PÓS-RECEITA).
+    if (_receitasConfirmadasAntigas.length > 0 && _receitasCurrentSession.length === 0) {
+      const _fmtAnt = (rx: any) => {
+        const od = rx.eyes?.od || {}; const oe = rx.eyes?.oe || {};
+        const dl = rx.data_leitura ? new Date(rx.data_leitura).toLocaleDateString("pt-BR") : "—";
+        return `OD esf ${od.sphere ?? "?"} / OE esf ${oe.sphere ?? "?"} — confirmada em ${dl}`;
+      };
+      receitaCtx += "\n\n# RECEITA ANTERIOR CONFIRMADA\n";
+      receitaCtx += _receitasConfirmadasAntigas.map(_fmtAnt).join("\n") + "\n";
+      receitaCtx += `\n⚠️ Esta receita é de um atendimento anterior. PERGUNTE ao cliente se quer usá-la OU se tem receita nova — NÃO chame consultar_lentes sem confirmar. Exemplo: "Vi que você tem uma receita confirmada de [data]. Quer usar ela ou tem uma nova?"`;
+      console.log(`[RX-CTX] ${_receitasConfirmadasAntigas.length} old confirmed prescription(s) — offer mode`);
     }
 
     // ── 5.1 DECIDE: compiled prompt vs legacy ──
@@ -5413,7 +5447,9 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             content: "[SISTEMA: NOVA RECEITA PENDENTE] O cliente declarou ter NOVA RECEITA e enviou uma imagem mais recente que a última receita salva. AÇÃO OBRIGATÓRIA: chame interpretar_receita AGORA com a imagem mais recente do histórico — NÃO use consultar_lentes/consultar_lentes_contato com a receita antiga (ela está desatualizada). Após interpretar, peça confirmação dos novos valores ao cliente antes de cotar. Se a imagem estiver ilegível APÓS a tentativa de OCR, peça reenvio uma única vez.",
           }]
         : []),
-      ...(hasValidReceitas && !hasPendingNewPrescriptionImage
+      // B2.2: só dispara quando há receita da SESSÃO ATUAL — receitas não-confirmadas de
+      // sessões anteriores não causam mais reapresentação automática no "olá".
+      ...(hasReceitasAtivasCtx && !hasPendingNewPrescriptionImage
         ? [{
             role: "system",
             content: isLCContextGlobal
@@ -5733,16 +5769,33 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
         // Marca a receita recém-gravada como NÃO confirmada pelo cliente
         merged.confirmed_by_client_at = null;
+        // B2.1: receita nova supersede todas as anteriores não-confirmadas — evitam acúmulo
+        // e contaminação de contexto em conversas futuras. Só no modo FRESH (nova receita);
+        // modo CORREÇÃO atualiza o slot existente, não precisa superseder nada.
+        if (useFreshSlot) {
+          const _supAt = new Date().toISOString();
+          for (let i = 0; i < receitas.length; i++) {
+            if (!receitas[i].confirmed_by_client_at && !receitas[i].superseded_at) {
+              receitas[i] = { ...receitas[i], superseded_at: _supAt, superseded_by: "nova_receita_digitada" };
+            }
+          }
+        }
         if (useFreshSlot) receitas.push(merged); else receitas[idx] = merged;
 
 
         const newMeta: any = { ...contatoMeta, receitas };
-        if (isStandaloneTyped && contatoMeta?.receita_confirmacao?.pending === true) {
+        // B1: fresh mode também define pending=true (habilita o return determinístico abaixo).
+        // Antes limpava o pending anterior — substituído: a nova receita cria o próprio pending.
+        if (isStandaloneTyped) {
+          const _freshIdx = receitas.length - 1;
           newMeta.receita_confirmacao = {
-            ...(contatoMeta.receita_confirmacao || {}),
-            pending: false,
-            superseded_at: new Date().toISOString(),
-            superseded_by: "receita_digitada_fresca",
+            pending: true,
+            rx_index: _freshIdx,
+            rx_label: merged.label || `receita_${_freshIdx + 1}`,
+            asked_at: new Date().toISOString(),
+            correction_count: 0,
+            reason: "receita_digitada_fresca",
+            fora_da_faixa: isReceitaForaDaFaixa(merged),
           };
         }
         // ── Toda correção textual (qualquer magnitude) marca receita como pendente de confirmação ──
@@ -5831,6 +5884,20 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           return jsonResponse({ status: "ok", tools_used: [isHighImpact ? "receita_alto_impacto_confirmar" : "receita_corrigida_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
         }
 
+        // B1: modo FRESH é determinístico — espelha modo CORREÇÃO, sem LLM.
+        // "Li sua receita assim, confere?" com os valores que o parser leu (não os anteriores).
+        if (isStandaloneTyped) {
+          await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, buildMsgConfirmarReceita(merged, false));
+          try {
+            const m = ((await supabase.from("atendimentos").select("metadata").eq("id", atendimento_id).single()).data?.metadata as Record<string, any>) || {};
+            delete m.ia_lock;
+            await supabase.from("atendimentos").update({ metadata: m }).eq("id", atendimento_id);
+          } catch (_) { /* noop */ }
+          console.log(`[RX-FIRST-TYPED] Determinístico — confirmação enviada sem LLM (OD=${correction.od.sphere}, OE=${correction.oe.sphere})`);
+          return jsonResponse({ status: "ok", tools_used: ["receita_digitada_confirmar"], intencao: "receita_oftalmologica", precisa_humano: false, pipeline_coluna_sugerida: "Orçamento", modo: atendimento.modo });
+        }
+
+        // Dead code: ambos os ramos acima retornam. Mantido para compilação segura.
         receitaCtx = "\n\n# RECEITAS JÁ INTERPRETADAS NESTA CONVERSA\n";
         for (let i = 0; i < receitas.length; i++) {
           const rx = receitas[i];
