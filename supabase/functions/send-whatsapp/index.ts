@@ -240,7 +240,9 @@ async function sendTextViaMeta(phone: string, text: string) {
 
   const result = await readResponseBody(res);
   if (!res.ok) {
-    throw new Error(`Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`);
+    const msg = `Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`;
+    if (res.status >= 500) throw new MetaTransientError(res.status, msg);
+    throw new Error(msg);
   }
   return result;
 }
