@@ -162,6 +162,35 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 1500
   }
 }
 
+// Retries Meta call once on transient 5xx / network errors.
+async function fetchMetaWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, init);
+      if (res.status >= 500 && attempt === 0) {
+        await res.text().catch(() => {});
+        console.warn(`[send-whatsapp] Meta ${res.status} on attempt ${attempt + 1}, retrying…`);
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      return res;
+    } catch (e) {
+      if (attempt === 0) {
+        console.warn(`[send-whatsapp] Meta fetch failed (${e}), retrying…`);
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("unreachable");
+}
+
+class MetaTransientError extends Error {
+  status: number;
+  constructor(status: number, msg: string) { super(msg); this.status = status; }
+}
+
 async function readResponseBody(res: Response): Promise<any> {
   const text = await res.text();
   if (!text) return null;
