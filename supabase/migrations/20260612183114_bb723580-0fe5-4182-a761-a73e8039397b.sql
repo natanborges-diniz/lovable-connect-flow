@@ -1,0 +1,1 @@
+grant select on storage.buckets to anon, authenticated;
