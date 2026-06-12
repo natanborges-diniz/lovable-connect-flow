@@ -145,6 +145,18 @@ serve(async (req) => {
     });
   } catch (e) {
     console.error("[send-whatsapp] error:", e);
+    // Transient Meta 5xx → degrade gracefully (200 + fallback flag) to avoid client crash
+    if (e instanceof MetaTransientError) {
+      return new Response(
+        JSON.stringify({
+          error: "meta_unavailable",
+          fallback: true,
+          retryable: true,
+          reason: e.message,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -160,6 +172,35 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 1500
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// Retries Meta call once on transient 5xx / network errors.
+async function fetchMetaWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, init);
+      if (res.status >= 500 && attempt === 0) {
+        await res.text().catch(() => {});
+        console.warn(`[send-whatsapp] Meta ${res.status} on attempt ${attempt + 1}, retrying…`);
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      return res;
+    } catch (e) {
+      if (attempt === 0) {
+        console.warn(`[send-whatsapp] Meta fetch failed (${e}), retrying…`);
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("unreachable");
+}
+
+class MetaTransientError extends Error {
+  status: number;
+  constructor(status: number, msg: string) { super(msg); this.status = status; }
 }
 
 async function readResponseBody(res: Response): Promise<any> {
@@ -185,7 +226,7 @@ function getMetaCreds() {
 
 async function sendTextViaMeta(phone: string, text: string) {
   const { accessToken, phoneNumberId } = getMetaCreds();
-  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetchMetaWithRetry(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -199,7 +240,9 @@ async function sendTextViaMeta(phone: string, text: string) {
 
   const result = await readResponseBody(res);
   if (!res.ok) {
-    throw new Error(`Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`);
+    const msg = `Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`;
+    if (res.status >= 500) throw new MetaTransientError(res.status, msg);
+    throw new Error(msg);
   }
   return result;
 }
@@ -208,7 +251,7 @@ async function sendImageViaMeta(phone: string, mediaUrl: string, caption?: strin
   const { accessToken, phoneNumberId } = getMetaCreds();
   // Meta limita caption a 1024 chars
   const safeCaption = caption ? caption.slice(0, 1024) : undefined;
-  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetchMetaWithRetry(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -225,7 +268,9 @@ async function sendImageViaMeta(phone: string, mediaUrl: string, caption?: strin
 
   const result = await readResponseBody(res);
   if (!res.ok) {
-    throw new Error(`Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`);
+    const msg = `Meta API error (status ${res.status}): ${bodyToString(result?.error?.message || result)}`;
+    if (res.status >= 500) throw new MetaTransientError(res.status, msg);
+    throw new Error(msg);
   }
   return result;
 }
@@ -306,7 +351,7 @@ async function sendInteractiveViaMeta(phone: string, p: InteractivePayload) {
     };
   }
 
-  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetchMetaWithRetry(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -320,7 +365,9 @@ async function sendInteractiveViaMeta(phone: string, p: InteractivePayload) {
 
   const result = await readResponseBody(res);
   if (!res.ok) {
-    throw new Error(`Meta API error (status ${res.status}) [interactive ${p.type}]: ${bodyToString(result?.error?.message || result)}`);
+    const msg = `Meta API error (status ${res.status}) [interactive ${p.type}]: ${bodyToString(result?.error?.message || result)}`;
+    if (res.status >= 500) throw new MetaTransientError(res.status, msg);
+    throw new Error(msg);
   }
   return result;
 }
