@@ -226,7 +226,7 @@ function getMetaCreds() {
 
 async function sendTextViaMeta(phone: string, text: string) {
   const { accessToken, phoneNumberId } = getMetaCreds();
-  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetchMetaWithRetry(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -249,7 +249,7 @@ async function sendImageViaMeta(phone: string, mediaUrl: string, caption?: strin
   const { accessToken, phoneNumberId } = getMetaCreds();
   // Meta limita caption a 1024 chars
   const safeCaption = caption ? caption.slice(0, 1024) : undefined;
-  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetchMetaWithRetry(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -347,7 +347,7 @@ async function sendInteractiveViaMeta(phone: string, p: InteractivePayload) {
     };
   }
 
-  const res = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetchMetaWithRetry(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
