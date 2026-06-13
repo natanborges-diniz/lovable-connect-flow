@@ -2845,7 +2845,7 @@ serve(async (req) => {
     // ── 1. LOAD ATENDIMENTO ──
     const { data: atendimento, error: atErr } = await supabase
       .from("atendimentos")
-      .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at, ia_lock_at")
+      .select("id, contato_id, canal, canal_provedor, modo, metadata, inicio_at, ia_lock_at, created_at")
       .eq("id", atendimento_id)
       .single();
     if (atErr || !atendimento) throw new Error("Atendimento not found");
@@ -4938,12 +4938,18 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // B2.2: filtra receitas por sessão/confirmação antes de injetar no LLM.
     // Receitas não-confirmadas de sessões anteriores são "fantasmas" — não devem
     // disparar FLUXO PÓS-RECEITA nem ser reapresentadas automaticamente.
-    const _atInicioTs = Date.parse(String((atendimento as any).inicio_at || "")) || 0;
+    // C1-FIX: inicio_at é nullable (só gravado quando operador humano assume).
+    // Para atendimentos de IA puro, inicio_at é sempre null → usar created_at (NOT NULL DEFAULT now()) como âncora.
+    // Se nem created_at estiver disponível (impossível em produção), _hasInicioAt=false e descartamos
+    // receitas antigas em vez de vazar (mais seguro).
+    const _atInicioTs =
+      Date.parse(String((atendimento as any).inicio_at || "")) ||
+      Date.parse(String((atendimento as any).created_at || "")) || 0;
     const _hasInicioAt = _atInicioTs > 0;
     // Receitas do atendimento atual (salvas nesta sessão) — confirmadas ou pendentes.
     const _receitasCurrentSession = (receitas as any[]).filter((r: any) => {
       if (r.superseded_at) return false;
-      if (!_hasInicioAt) return !r.superseded_at; // sem inicio_at: trata tudo como atual
+      if (!_hasInicioAt) return false; // sem âncora temporal: descarta em vez de vazar
       const rl = r.data_leitura ? Date.parse(String(r.data_leitura)) : 0;
       return rl > 0 && rl >= _atInicioTs;
     });
@@ -4986,8 +4992,13 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
       console.log(`[RX-CTX] Injecting ${_receitasCurrentSession.length} current-session prescription(s) into context`);
     }
-    // Receitas confirmadas antigas: oferecer, não impor (não dispara FLUXO PÓS-RECEITA).
-    if (_receitasConfirmadasAntigas.length > 0 && _receitasCurrentSession.length === 0) {
+    // Receitas confirmadas antigas: oferecer SOMENTE quando cliente sinaliza intenção de compra.
+    // "Bom dia" puro → sem oferta (intrusivo). "Quero fazer um óculos" → libera a oferta.
+    const _INTENT_COMPRA_RE = /\b(or[çc]amento|or[çc]ar|pre[çc]o|valor|quanto\s+(custa|fica|sai)|[oó]culos|lente[s]?|grau\b|receita\b|comprar|compra\b|renovar|refazer|armacao|armação)\b/i;
+    const _hasIntentCompra =
+      _INTENT_COMPRA_RE.test(lastInboundText) ||
+      (recentInboundText ? _INTENT_COMPRA_RE.test(recentInboundText) : false);
+    if (_receitasConfirmadasAntigas.length > 0 && _receitasCurrentSession.length === 0 && _hasIntentCompra) {
       const _fmtAnt = (rx: any) => {
         const od = rx.eyes?.od || {}; const oe = rx.eyes?.oe || {};
         const dl = rx.data_leitura ? new Date(rx.data_leitura).toLocaleDateString("pt-BR") : "—";
