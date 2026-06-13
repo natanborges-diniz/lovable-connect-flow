@@ -466,6 +466,10 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
 
   if (stage === "recuperacao") {
     if (/\b(loja|lojas|endereco|endereco|onde fica|unidade|unidades)\b/.test(t)) return "recupera_loja";
+    // Intenção própria do cliente VENCE a cadência de recuperação.
+    // "quero fazer óculos" / "quero um orçamento" / "preciso de receita" → não é "sim" genérico.
+    // Nota: agendar/marcar NÃO entram aqui — "quero marcar" é resposta legítima à oferta de retomada.
+    if (/\b(or[çc]amento|or[çc]ar|pre[çc]o|valor|[oó]culos|lente[s]?|grau\b|receita\b|comprar|compra\b|renovar|refazer|armac[aã]o|pedido\b|status\b)\b/.test(t)) return "recupera_intent_propria";
     if (/^(sim|quero|bora|vamos|pode|claro|gostaria|agendar|marcar|com certeza|por favor|pfv|👍|✅|positivo|topo)\b/.test(t)) return "recupera_sim";
     if (/^(nao|não|agora nao|agora não|depois|outro momento|nao quero|não quero|sem interesse|deixa)\b/.test(t)) return "recupera_nao";
     return null;
@@ -10254,6 +10258,27 @@ async function routeButtonClick(args: {
       }
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tudo bem! Quando quiser remarcar, é só me chamar por aqui 😊");
       return true;
+    }
+    case "recupera_intent_propria": {
+      // Cliente expressou intenção própria (orçamento/óculos/receita/OS/etc.) durante cadência.
+      // Encerra a recuperação e deixa o roteamento normal assumir o intent.
+      await patchMeta({ expected_reply: null });
+      try {
+        const { data: _riRow } = await supabase.from("contatos")
+          .select("metadata").eq("id", atendimento.contato_id).maybeSingle();
+        const _riMeta = (_riRow?.metadata || {}) as Record<string, any>;
+        if (_riMeta.recuperacao_vendas) {
+          await supabase.from("contatos").update({
+            metadata: { ..._riMeta, recuperacao_vendas: {
+              ..._riMeta.recuperacao_vendas,
+              status: "encerrado_intent_proprio",
+              encerrado_at: new Date().toISOString(),
+            }},
+          }).eq("id", atendimento.contato_id);
+        }
+      } catch (_) { /* noop */ }
+      console.log("[RECUPERACAO] Intenção própria do cliente detectada — cadência encerrada, roteamento normal assume");
+      return false; // NÃO consome — roteamento normal (pré-LLM / LLM) assume o intent
     }
     case "recupera_sim":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
