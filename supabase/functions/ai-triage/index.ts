@@ -3777,6 +3777,35 @@ serve(async (req) => {
       console.warn("[ROUTER-INVERSAO] preskip falhou:", (e as Error)?.message);
     }
 
+    // ── PRE-LLM ROUTER: loja_local — "onde fica / endereço / horário" sem LLM ──
+    // Só dispara quando não há fluxo ativo (receita/orçamento/expected_reply).
+    // Se houver contexto ativo, cai naturalmente no STORE_VISIT_REGEX → agendamento.
+    try {
+      const _lojaLocalRE = /\b(endere[çc]o|onde fica|onde [eé]|como chegar|fica onde|qual (o )?endere[çc]o|hor[aá]rio|que horas abre|abre quando|funciona(mento)?|google maps|maps)\b/i;
+      const _lojaLocalBlocked = !!(
+        atendimentoMeta?.expected_reply ||
+        atendimentoMeta?.receita_confirmacao?.pending ||
+        (contatoMeta as any)?.receita_confirmacao?.pending ||
+        (contatoMeta as any)?.pos_orcamento?.etapa
+      );
+      if (
+        _lojaLocalRE.test(String(mensagem_texto || "")) &&
+        !_lojaLocalBlocked &&
+        (atendimento.modo === "ia" || atendimento.modo === "hibrido")
+      ) {
+        const _savedCity = atendimentoMeta?.loja_local_cidade as string | undefined;
+        if (_savedCity) {
+          await sendInfoLojasCidade(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, _savedCity);
+        } else {
+          await sendCidadesLojaLocal(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta);
+        }
+        console.log(`[LOJA-LOCAL] Despachante determinístico — query: "${String(mensagem_texto || "").substring(0, 60)}" | city: ${_savedCity || "none"}`);
+        return jsonResponse({ status: "ok", tools_used: ["loja_local_deterministico"], intencao: "loja_local", precisa_humano: false, modo: atendimento.modo });
+      }
+    } catch (e) {
+      console.warn("[LOJA-LOCAL] fallback para LLM:", (e as Error)?.message);
+    }
+
     // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA + AUTO-PERSISTÊNCIA DE NOME ──
     // Elimina vazamento de prompt (proximo_passo, instruções internas) e reduz latência.
     // Só dispara para texto puro — imagens (receita) seguem o fluxo normal.
@@ -9416,6 +9445,15 @@ async function routeExpectedTypedReply(args: {
     return true;
   }
 
+  // Fallback de texto: cliente digitou a cidade para consulta de informações (loja_local).
+  if (expectedReply === "loja_local_cidade") {
+    const cidade = detectCidadeEscolhida(mensagemTexto);
+    if (!cidade) return false;
+    await sendInfoLojasCidade(supabase, supabaseUrl, serviceKey, atId, atendimentoMeta, cidade);
+    console.log(`[LOJA-LOCAL] Cidade digitada: ${cidade}`);
+    return true;
+  }
+
   // Fallback de texto: cliente digitou o nome da loja em vez de tocar na lista.
   if (expectedReply === "loja_selecao") {
     const { data: lojas } = await supabase
@@ -9785,6 +9823,14 @@ async function routeButtonClick(args: {
     await sendListaLojasDaCidade(
       supabase, supabaseUrl, serviceKey, atId, atendimentoMeta, cidadeSlug, lojas || [], atendimento.contato_id,
     );
+    return true;
+  }
+
+  // Botão de cidade no fluxo loja_local (info, sem agendamento).
+  if (buttonId.startsWith("loja_info:")) {
+    const cidadeSlug = buttonId.slice(10);
+    await sendInfoLojasCidade(supabase, supabaseUrl, serviceKey, atId, atendimentoMeta, cidadeSlug);
+    console.log(`[LOJA-LOCAL] Botão cidade: ${cidadeSlug}`);
     return true;
   }
 
@@ -10376,6 +10422,115 @@ async function sendListaLojasDaCidade(
       })),
     },
   });
+}
+
+// sendCidadesLojaLocal: envia botões de cidade para consulta de LOCALIZAÇÃO (não agendamento).
+// Usa loja_info:SLUG em vez de cidade:SLUG e seta expected_reply: "loja_local_cidade".
+async function sendCidadesLojaLocal(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  atId: string, metaAtual: Record<string, any>,
+): Promise<void> {
+  const snap = await loadCidadesLojas().catch(() => null);
+  const cidades = snap?.cidadesOrdenadas ?? [];
+  await supabase.from("atendimentos")
+    .update({ metadata: { ...metaAtual, expected_reply: "loja_local_cidade" } })
+    .eq("id", atId);
+  if (!cidades.length) {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId,
+      "Em qual cidade você nos procura? Temos lojas em Osasco, Carapicuíba, Itapevi e Barueri 😊");
+    return;
+  }
+  await sendInteractive(supabaseUrl, serviceKey, atId, {
+    type: "list",
+    texto: "Em qual cidade você quer saber informações das nossas lojas? 😊",
+    lista: {
+      label: "Ver cidades",
+      secao: "Nossas regiões",
+      itens: cidades.map((slug) => {
+        const n = snap!.cidadeToLojas[slug]?.length ?? 0;
+        return {
+          id: `loja_info:${slug}`,
+          titulo: snap!.cidadeLabel[slug] || slug,
+          descricao: `${n} unidade${n !== 1 ? "s" : ""}`,
+        };
+      }),
+    },
+  });
+}
+
+// sendInfoLojasCidade: envia endereço + horário hoje + Google Maps de cada loja da cidade.
+// NÃO inicia fluxo de agendamento — apenas responde a consulta de localização.
+async function sendInfoLojasCidade(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  atId: string, metaAtual: Record<string, any>,
+  cidadeSlug: string,
+): Promise<void> {
+  const snap = await loadCidadesLojas().catch(() => null);
+  const nomesNaCidade = snap?.cidadeToLojas[cidadeSlug] ?? [];
+  const label = snap?.cidadeLabel[cidadeSlug] ?? cidadeSlug;
+
+  const { data: lojasFull } = await supabase
+    .from("telefones_lojas")
+    .select("id, nome_loja, endereco, horario_abertura, horario_fechamento, google_profile_url, telefone")
+    .eq("ativo", true)
+    .order("nome_loja");
+
+  const filtradas = ((lojasFull || []) as any[]).filter((l: any) =>
+    nomesNaCidade.some((n: string) => _normTxt(l.nome_loja || "") === _normTxt(n))
+  );
+
+  // Limpa expected_reply após resolver (seja sucesso ou fallback)
+  await supabase.from("atendimentos")
+    .update({ metadata: { ...metaAtual, expected_reply: null, loja_local_cidade: cidadeSlug } })
+    .eq("id", atId);
+
+  if (filtradas.length === 0) {
+    await sendWhatsApp(supabaseUrl, serviceKey, atId,
+      `Pra ${label}, me passa seu bairro que te indico a unidade mais próxima 😊`);
+    return;
+  }
+
+  // Consulta horário de hoje na tabela loja_status_no_dia
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const lojasIds = filtradas.map((l: any) => l.id).filter(Boolean);
+  const statusMap: Record<string, string> = {};
+  if (lojasIds.length > 0) {
+    try {
+      const { data: statusRows } = await supabase
+        .from("loja_status_no_dia")
+        .select("loja_id, status, abertura, fechamento")
+        .in("loja_id", lojasIds)
+        .eq("data", todayStr);
+      for (const row of (statusRows || []) as any[]) {
+        if (row.status === "fechada") {
+          statusMap[row.loja_id] = "Hoje: FECHADA";
+        } else if (row.abertura && row.fechamento) {
+          statusMap[row.loja_id] = `Hoje: ${row.abertura}–${row.fechamento}`;
+        }
+      }
+    } catch (_) { /* noop */ }
+  }
+
+  const numEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"];
+  let msg = filtradas.length === 1
+    ? `Aqui estão as informações da nossa unidade em *${label}* 😊`
+    : `Aqui estão nossas unidades em *${label}* 😊`;
+
+  filtradas.forEach((l: any, i: number) => {
+    msg += `\n\n${numEmojis[i] || `${i + 1}.`} *${l.nome_loja}*`;
+    if (l.endereco) msg += `\n📍 ${l.endereco}`;
+    const gradeHoje = statusMap[l.id];
+    if (gradeHoje) {
+      msg += `\n🕐 ${gradeHoje}`;
+    } else if (l.horario_abertura && l.horario_fechamento) {
+      msg += `\n🕐 ${l.horario_abertura}–${l.horario_fechamento}`;
+    }
+    if (l.google_profile_url) msg += `\n🗺️ ${l.google_profile_url}`;
+  });
+
+  msg += "\n\nQualquer dúvida é só chamar! 😊";
+  console.log(`[LOJA-LOCAL] Info enviada: ${filtradas.length} loja(s) em ${label}`);
+  await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
 }
 
 async function sendListaLojas(supabase: any, supabaseUrl: string, serviceKey: string, atId: string) {
