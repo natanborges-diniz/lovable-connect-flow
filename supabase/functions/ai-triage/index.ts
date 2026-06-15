@@ -1,6 +1,6 @@
 // orcamento oculos deterministico 2026-06-10
 // receita B1 B2 deploy trigger 2026-06-12 (re-deploy pós-merge github)
-// deploy trigger 2026-06-13b — fix receita (vazamento + _hasIntentCompra gate)
+// deploy trigger 2026-06-15 — OCULOS_COMPRA_RE + recupera_intent_propria
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
