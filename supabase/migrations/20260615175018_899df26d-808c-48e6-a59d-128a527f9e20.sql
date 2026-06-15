@@ -1,0 +1,1 @@
+UPDATE contatos SET metadata = metadata - 'receitas' - 'ultima_receita' - 'receita_confirmacao' WHERE telefone LIKE '%11963268878%';
