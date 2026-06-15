@@ -1289,6 +1289,11 @@ function detectLoop(recentOutbound: string[]): { detected: boolean; similarity: 
 
 const LC_BRAND_REGEX = /\b(acuvue|oasys|biofinity|air\s*optix|solflex|sol[oó]tica|dnz|biomedics|focus|frequency|freshlook|proclear|purevision|softlens|hydron|mioflex|aviator|naturale|colors?)\b/i;
 const RESERVE_VERBS_REGEX = /\b(quero\s+(reservar|fechar|pedir|levar|essa|esse|comprar|fechar|essa op[cç][aã]o)|vou\s+(querer|levar|de|com)|fica\s+(com|essa|esse)|pode\s+(reservar|pedir|fechar|mandar)|fechar\s+(pedido|essa|esse|com)|fechar\b|reserva[r]?\b|comprar\s+essa)/i;
+// Detecta intenção de compra/orçamento de óculos sem acionar consultas de localização.
+// (?<!onde\s) no Branch A é obrigatório: protege "onde fazer oculos" de virar orçamento
+// (loja_local gate NÃO cobre "onde fazer", só "onde fica/tem/queda").
+// Aplica sobre t = norm() (lowercase, sem acento).
+const OCULOS_COMPRA_RE = /(?<!onde\s)\b(fazer|comprar|trocar|renovar)\b.{0,30}\boculos\b|\bquero\s+(?:um\s+)?oculos\b|\b(fazer|comprar|trocar|renovar)\s+(?:\w+\s+){0,2}lentes?\b/;
 
 // ── Validação de receita ──
 // Considera receita válida APENAS quando há esfera/cilindro útil em pelo menos
@@ -1431,7 +1436,8 @@ function detectForcedToolIntent(
   }
 
   // Quote / pricing keywords (aceita variações: quanto/quantos/qto/qnto, custa/sai/fica)
-  if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quantos?|qto|qnto|custa|sai\s+por|fica\s+por|tabela|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t)) {
+  // OCULOS_COMPRA_RE cobre frases de intenção de compra sem palavra de preço explícita.
+  if (/\b(or[cç]amento|or[cç]a|pre[cç]o|valor|quantos?|qto|qnto|custa|sai\s+por|fica\s+por|tabela|lentes? compat[ií]veis|op[cç][oõ]es? de lente|cota[cç][aã]o)\b/.test(t) || OCULOS_COMPRA_RE.test(t)) {
     const isLC = isLCContext || /\b(lente[s]? de contato|\blc\b|di[aá]ria[s]?|quinzenal|mensal|t[oó]rica[s]?|gelatinosa[s]?|esporte|academia|futebol|nata[çc][aã]o|corrida|treino)\b/.test(t);
     if (hasReceitas) return { tool: isLC ? "consultar_lentes_contato" : "consultar_lentes", reason: `cliente pediu orçamento${isLC ? " de LC" : ""} e há receita salva` };
     if (hasUnparsedImage) return { tool: "interpretar_receita", reason: "cliente pediu orçamento e há imagem pendente" };
