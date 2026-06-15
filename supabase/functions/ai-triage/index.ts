@@ -7225,20 +7225,22 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
 
     // ── GATE PÓS-LLM: bloquear orçamento quando há receita não confirmada ──
     // Caso 558488766851 (Mai/2026): cliente escolheu "a segunda" receita; LLM cotou direto.
-    // Se houver alguma receita sem confirmed_by_client_at e o turno produziu cotação/preços,
-    // sobrescreve com mensagem de confirmação dos valores.
-    if (resposta && !rxConfirmGateTriggered && Array.isArray(receitas) && receitas.length >= 1) {
-      const idxNaoConfirmada = receitas.findIndex((r: any) => r && !r.confirmed_by_client_at);
+    // FIX: usa _receitasCurrentSession (mesmo filtro do B2) em vez do array cru receitas[].
+    // Receitas não-confirmadas de sessões anteriores NÃO disparam o gate — cliente que pede
+    // óculos hoje vai pro orçamento, não pra reapresentação de receita velha.
+    if (resposta && !rxConfirmGateTriggered && _receitasCurrentSession.length >= 1) {
+      const rxNaoConfirmada = _receitasCurrentSession.find((r: any) => r && !r.confirmed_by_client_at);
       const respondeuComPrecos = /R\$\s*\d|Op[cç][oõ]es?\s+de\s+lentes|Mais\s+em\s+conta|Um\s+passo\s+acima|Premium/i.test(resposta || "");
       const usouQuoteTool = (toolCalls || []).some((t: any) => ["consultar_lentes", "consultar_lentes_contato", "consultar_lentes_estimativa"].includes(t?.function?.name));
-      if (idxNaoConfirmada >= 0 && (respondeuComPrecos || usouQuoteTool)) {
-        const rxAlvo = receitas[idxNaoConfirmada];
-        const rxLabelAlvo = rxAlvo.label || `receita_${idxNaoConfirmada + 1}`;
+      if (rxNaoConfirmada && (respondeuComPrecos || usouQuoteTool)) {
+        const rxAlvo = rxNaoConfirmada;
+        const idxGlobal = receitas.indexOf(rxAlvo); // índice no array global — para rx_index no metadata
+        const rxLabelAlvo = rxAlvo.label || (idxGlobal >= 0 ? `receita_${idxGlobal + 1}` : "receita_1");
         try {
           const novaReceitaConf = {
             pending: true,
             rx_label: rxLabelAlvo,
-            rx_index: idxNaoConfirmada,
+            rx_index: idxGlobal,
             asked_at: new Date().toISOString(),
             correction_count: 0,
             fora_da_faixa: isReceitaForaDaFaixa(rxAlvo),
@@ -7250,8 +7252,8 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId,
           tipo: "bloqueado_orcamento_receita_nao_confirmada",
-          descricao: `LLM ia cotar com receita idx=${idxNaoConfirmada} sem confirmação — sobrescrevendo com pedido de confirmação`,
-          metadata: { rx_label: rxLabelAlvo, rx_index: idxNaoConfirmada },
+          descricao: `LLM ia cotar com receita "${rxLabelAlvo}" sem confirmação — sobrescrevendo com pedido de confirmação`,
+          metadata: { rx_label: rxLabelAlvo, rx_index: idxGlobal },
           referencia_tipo: "atendimento", referencia_id: atendimento_id,
         }).then(() => undefined, () => undefined);
         resposta = buildMsgConfirmarReceita(rxAlvo, false);
@@ -7259,7 +7261,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         pipeline_coluna = "Orçamento";
         precisa_humano = false;
         validatorFlags.push("bloqueado_orcamento_receita_nao_confirmada");
-        console.log(`[RX-GATE-POSTLLM] Sobrescrevendo cotação — receita idx=${idxNaoConfirmada} ainda não confirmada`);
+        console.log(`[RX-GATE-POSTLLM] Sobrescrevendo cotação — receita "${rxLabelAlvo}" (sessão atual) ainda não confirmada`);
       }
     }
 
