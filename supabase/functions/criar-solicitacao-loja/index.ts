@@ -395,9 +395,13 @@ serve(async (req) => {
 
     // ── Insere solicitação ──
     const assunto = `${(fluxo as any).nome} — ${nomeLoja}`;
+    // Whitelist de chaves de controle interno (preservadas no metadata mas excluídas da descrição).
+    const INTERNAL_KEYS = new Set([
+      "comprovantes", "lojas_map", "loja_selecionada_nome", "loja_selecionada_cod",
+    ]);
     const descricao = Object.entries(dados)
-      .filter(([k]) => !k.startsWith("_"))
-      .map(([k, v]) => `${k}: ${v}`)
+      .filter(([k, v]) => !INTERNAL_KEYS.has(k) && v !== null && v !== undefined && String(v).trim() !== "")
+      .map(([k, v]) => `${k.replace(/^_+/, "")}: ${v}`)
       .join(" | ");
 
     const { data: solicitacao, error: sErr } = await supabase
