@@ -8,6 +8,7 @@ import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, User, Store, DollarSign, FileText, Loader2, RotateCcw,
+  ImageOff, Info, ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -25,17 +26,36 @@ const MSG_NAO_CONFIRMADO = "A confirmação de PIX solicitada ainda não foi com
 export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }: ConfirmarPixDialogProps) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
+  const [brokenImgIds, setBrokenImgIds] = useState<Set<string>>(new Set());
   const { data: anexos } = useSolicitacaoAnexos(solicitacao?.id);
 
   if (!solicitacao) return null;
 
-  const meta = solicitacao.metadata || {};
+  const meta = (solicitacao.metadata || {}) as Record<string, any>;
   const lojaNome = meta.alias_loja || meta.loja_nome || solicitacao.contato?.nome || "Loja";
+  const cliente = meta.nome_cliente || meta.cliente || null;
+  const valor = meta.valor ?? meta.valor_pix ?? null;
+  const dataHora = meta.data_hora || meta.data || meta.horario || null;
   const colAtual = colunas.find((c) => c.id === solicitacao.pipeline_coluna_id);
   const isConfirmado = colAtual?.nome === "PIX Confirmado";
   const isNaoConfirmado = colAtual?.nome === "PIX Não Confirmado";
 
+  // Chaves de controle interno — não mostrar no bloco "Detalhes enviados pela loja"
+  const CONTROL_KEYS = new Set([
+    "alias_loja", "loja_nome", "cod_empresa", "origem_app",
+    "nome_cliente", "cliente", "valor", "valor_pix", "data_hora", "data", "horario",
+    "pix_confirmado_at", "pix_nao_confirmado_at", "pix_revertido_at",
+    "cancelado_em", "cancelado_por", "motivo_cancelamento",
+    "comprovantes", "lojas_map", "loja_selecionada_nome", "loja_selecionada_cod",
+    "upload_falhou",
+  ]);
+  const detalhesExtras = Object.entries(meta).filter(
+    ([k, v]) => !CONTROL_KEYS.has(k) && v !== null && v !== undefined && String(v).trim() !== "",
+  );
+  const semDetalhes = !solicitacao.descricao?.trim() && !cliente && valor == null && !dataHora && detalhesExtras.length === 0;
+
   const findCol = (nome: string) => colunas.find((c) => c.nome === nome);
+
 
   const enviarRetornoLoja = async (mensagem: string, autorNome = "Financeiro") => {
     await supabase.from("solicitacao_comentarios").insert({
@@ -187,30 +207,65 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
                 <p className="font-medium">{format(new Date(solicitacao.created_at), "dd/MM HH:mm", { locale: ptBR })}</p>
               </div>
             </div>
-            {meta.cliente && (
+            {cliente && (
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4 text-muted-foreground" />
                 <div>
                   <p className="text-xs text-muted-foreground">Cliente</p>
-                  <p className="font-medium">{meta.cliente}</p>
+                  <p className="font-medium">{cliente}</p>
                 </div>
               </div>
             )}
-            {meta.valor && (
+            {valor != null && String(valor).trim() !== "" && (
               <div className="flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
                 <div>
                   <p className="text-xs text-muted-foreground">Valor</p>
-                  <p className="font-medium">R$ {Number(String(meta.valor).replace(",", ".")).toFixed(2)}</p>
+                  <p className="font-medium">
+                    {(() => {
+                      const n = Number(String(valor).replace(/\./g, "").replace(",", "."));
+                      return Number.isFinite(n) ? `R$ ${n.toFixed(2)}` : String(valor);
+                    })()}
+                  </p>
+                </div>
+              </div>
+            )}
+            {dataHora && (
+              <div className="flex items-center gap-2 col-span-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Data/Horário informado</p>
+                  <p className="font-medium">{String(dataHora)}</p>
                 </div>
               </div>
             )}
           </div>
 
-          {solicitacao.descricao && (
+          {solicitacao.descricao?.trim() && (
             <div className="bg-muted/50 rounded-lg p-3">
               <p className="text-xs text-muted-foreground mb-1">Descrição</p>
               <p className="text-sm whitespace-pre-wrap">{solicitacao.descricao}</p>
+            </div>
+          )}
+
+          {detalhesExtras.length > 0 && (
+            <div className="bg-muted/30 rounded-lg p-3 space-y-1">
+              <p className="text-xs font-semibold text-muted-foreground mb-1">Detalhes enviados pela loja</p>
+              {detalhesExtras.map(([k, v]) => (
+                <div key={k} className="flex gap-2 text-xs">
+                  <span className="text-muted-foreground capitalize">{k.replace(/_/g, " ")}:</span>
+                  <span className="font-medium break-all">{String(v)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {semDetalhes && (!anexos || anexos.length === 0) && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-800">
+              <Info className="h-4 w-4 shrink-0 mt-0.5" />
+              <p className="text-xs">
+                A loja não enviou detalhes nem comprovante via Messenger. Solicite reenvio antes de confirmar.
+              </p>
             </div>
           )}
 
@@ -218,27 +273,45 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
             <div className="space-y-2">
               <p className="text-xs font-semibold text-muted-foreground">Comprovante(s) enviado(s) pela loja</p>
               <div className="grid grid-cols-2 gap-2">
-                {anexos.map((a: any) => (
-                  <a
-                    key={a.id}
-                    href={a.url_publica}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block border rounded-lg overflow-hidden hover:ring-2 hover:ring-primary/40 transition"
-                  >
-                    {a.mime_type?.startsWith("image/") ? (
-                      <img src={a.url_publica} alt={a.descricao || "Comprovante"} className="w-full h-32 object-cover" />
-                    ) : (
-                      <div className="flex items-center gap-2 p-3">
-                        <FileText className="h-5 w-5 text-muted-foreground" />
-                        <span className="text-xs truncate">{a.descricao || "Anexo"}</span>
-                      </div>
-                    )}
-                  </a>
-                ))}
+                {anexos.map((a: any) => {
+                  const isImg = a.mime_type?.startsWith("image/");
+                  const broken = brokenImgIds.has(a.id);
+                  return (
+                    <a
+                      key={a.id}
+                      href={a.url_publica}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block border rounded-lg overflow-hidden hover:ring-2 hover:ring-primary/40 transition"
+                    >
+                      {isImg && !broken ? (
+                        <img
+                          src={a.url_publica}
+                          alt={a.descricao || "Comprovante"}
+                          className="w-full h-32 object-cover"
+                          onError={() => setBrokenImgIds((prev) => new Set(prev).add(a.id))}
+                        />
+                      ) : isImg && broken ? (
+                        <div className="flex flex-col items-center justify-center gap-1 h-32 p-3 bg-muted/40 text-muted-foreground">
+                          <ImageOff className="h-5 w-5" />
+                          <span className="text-[10px] text-center">Imagem indisponível no storage</span>
+                          <span className="text-[10px] inline-flex items-center gap-1 text-primary">
+                            Abrir URL original <ExternalLink className="h-3 w-3" />
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 p-3">
+                          <FileText className="h-5 w-5 text-muted-foreground" />
+                          <span className="text-xs truncate">{a.descricao || "Anexo"}</span>
+                        </div>
+                      )}
+                    </a>
+                  );
+                })}
               </div>
             </div>
           )}
+
 
           {isConfirmado && (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 text-green-700 border border-green-500/30">
