@@ -262,6 +262,77 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         }
       }
 
+      // Notificação explícita à loja (não depender só de automação de coluna)
+      try {
+        const lojaNome =
+          (meta as any).alias_loja ||
+          (meta as any).loja_nome ||
+          solicitacao.contato?.metadata?.loja_nome ||
+          solicitacao.contato?.nome ||
+          "";
+        if (lojaNome) {
+          const { data: dests, error: rpcErr } = await supabase.rpc(
+            "resolver_destinatarios_loja",
+            { _loja_nome: lojaNome }
+          );
+          if (rpcErr) {
+            console.error("[CpfApproval] resolver_destinatarios_loja", rpcErr);
+          }
+          const userIds = Array.from(
+            new Set(((dests || []) as any[]).map((d: any) => d.user_id))
+          ).filter(Boolean) as string[];
+
+          const protocolo = solicitacao.protocolo ? ` ${solicitacao.protocolo}` : "";
+          const titulo =
+            tipo === "aprovar"
+              ? `CPF aprovado${protocolo}`
+              : `CPF reprovado${protocolo}`;
+          const mensagem =
+            tipo === "aprovar"
+              ? `Financiamento autorizado para ${nomeCliente}. Pode prosseguir com a venda.`
+              : `Financiamento não autorizado para ${nomeCliente}.` +
+                (justificativa ? ` Motivo: ${justificativa.slice(0, 140)}` : "");
+
+          // Comentário no card (visível à loja no Atrium)
+          const { error: cErr } = await supabase
+            .from("solicitacao_comentarios")
+            .insert({
+              solicitacao_id: solicitacao.id,
+              tipo: "retorno_setor",
+              autor_nome: "Financeiro",
+              conteudo: mensagem,
+            } as any)
+            .select();
+          if (cErr) {
+            console.error("[CpfApproval] comentário", cErr);
+            toast.error("Comentário não foi salvo: " + cErr.message);
+          }
+
+          if (userIds.length > 0) {
+            const { error: nErr } = await supabase
+              .from("notificacoes")
+              .insert(
+                userIds.map((uid) => ({
+                  usuario_id: uid,
+                  tipo: "retorno_setor",
+                  titulo,
+                  mensagem,
+                  referencia_id: solicitacao.id,
+                }))
+              )
+              .select();
+            if (nErr) {
+              console.error("[CpfApproval] notificação", nErr);
+              toast.error("Loja não foi notificada: " + nErr.message);
+            }
+          } else {
+            toast.warning(`Nenhum usuário cadastrado para a loja "${lojaNome}".`);
+          }
+        }
+      } catch (e) {
+        console.warn("[CpfApproval] aviso loja falhou", e);
+      }
+
       queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
       toast.success(tipo === "aprovar" ? "CPF aprovado com sucesso!" : "CPF reprovado.");
       onOpenChange(false);
@@ -274,6 +345,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       setAction(null);
     }
   };
+
 
   const resetForm = () => {
     setJustificativa("");
