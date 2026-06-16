@@ -49,14 +49,19 @@ export function CreateCardDialog({ open, onOpenChange, pipelineType, firstColumn
   };
 
   const createNotification = async (titulo: string, mensagem: string, refId: string) => {
-    await supabase.from("notificacoes").insert({
+    const { error } = await supabase.from("notificacoes").insert({
       titulo,
       mensagem,
       tipo: "solicitacao",
       referencia_id: refId,
       setor_id: setorId || null,
-    });
+    }).select();
+    if (error) {
+      console.error("[CreateCardDialog] notificação falhou", error);
+      toast.error("Card criado, mas notificação ao setor falhou: " + error.message);
+    }
   };
+
 
   const handleSubmitCRM = async () => {
     if (!nome.trim()) { toast.error("Nome é obrigatório"); return; }

@@ -196,13 +196,17 @@ export function SolicitarAutorizacaoDialog({
       });
 
       // 3. Notificação push para o autorizador
-      await supabase.from("notificacoes").insert({
+      const { error: nErr1 } = await supabase.from("notificacoes").insert({
         usuario_id: escolhido.id,
         tipo: "autorizacao_excecao",
         titulo: `Autorização — ${tituloProcesso}`,
         mensagem: `${solicitanteNome}: ${motivo.trim().slice(0, 100)}`,
         referencia_id: autz.id,
-      });
+      }).select();
+      if (nErr1) {
+        console.error("[autorizacao] notificação ao autorizador falhou", nErr1);
+        toast.error("Autorização criada, mas notificação ao autorizador falhou: " + nErr1.message);
+      }
 
       // 4. Avisa a loja (read-only) que a solicitação está em análise especial
       // — só aplicável quando a referência é uma solicitacao (card de demanda da loja).
@@ -225,22 +229,29 @@ export function SolicitarAutorizacaoDialog({
               `Um supervisor foi acionado para avaliar uma possível exceção. Aguarde o retorno.`;
 
             // Comentário no card (mesmo padrão dos retornos atuais)
-            await supabase.from("solicitacao_comentarios").insert({
+            const { error: cErr } = await supabase.from("solicitacao_comentarios").insert({
               solicitacao_id: sol.id,
               tipo: "retorno_setor",
               autor_id: user.id,
               autor_nome: "Financeiro",
               conteudo: aviso,
-            });
+            }).select();
+            if (cErr) {
+              console.error("[autorizacao] comentário falhou", cErr);
+              toast.error("Aviso à loja não foi salvo: " + cErr.message);
+            }
 
             // Notifica usuários da loja (push via trigger)
             if (lojaNome) {
-              const { data: dest } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+              const { data: dest, error: rpcErr } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+              if (rpcErr) {
+                console.error("[autorizacao] resolver_destinatarios_loja falhou", rpcErr);
+              }
               const userIds = Array.from(
                 new Set(((dest || []) as any[]).map((d: any) => d.user_id))
               ).filter(Boolean) as string[];
               if (userIds.length > 0) {
-                await supabase.from("notificacoes").insert(
+                const { error: nErr2 } = await supabase.from("notificacoes").insert(
                   userIds.map((uid) => ({
                     usuario_id: uid,
                     titulo: `Em análise especial${protocolo}`,
@@ -248,7 +259,13 @@ export function SolicitarAutorizacaoDialog({
                     tipo: "retorno_setor",
                     referencia_id: sol.id,
                   }))
-                );
+                ).select();
+                if (nErr2) {
+                  console.error("[autorizacao] notificação à loja falhou", nErr2);
+                  toast.error("Loja não foi notificada: " + nErr2.message);
+                }
+              } else {
+                toast.warning(`Nenhum usuário cadastrado para a loja "${lojaNome}".`);
               }
             }
           }
@@ -256,6 +273,7 @@ export function SolicitarAutorizacaoDialog({
           console.warn("[autorizacao] aviso loja falhou", e);
         }
       }
+
 
       toast.success(`Pedido enviado a ${escolhido.nome}.`);
       onSent?.();

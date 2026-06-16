@@ -104,6 +104,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       const targetCol = findColuna("Dados Incompletos");
       const dadosLabels = dadosSelecionados.map(k => DADOS_POSSIVEIS.find(d => d.key === k)?.label || k);
 
+      // Persiste metadata da análise (mantém histórico que a UI já consome).
       const updatedMetadata = {
         ...meta,
         dados_incompletos: dadosSelecionados,
@@ -112,19 +113,31 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         data_dados_incompletos: new Date().toISOString(),
       };
 
-      const updatePayload: any = {
-        metadata: updatedMetadata,
-      };
-      if (targetCol) {
-        updatePayload.pipeline_coluna_id = targetCol.id;
-      }
-
-      const { error } = await supabase
+      const { error: metaErr } = await supabase
         .from("solicitacoes")
-        .update(updatePayload)
+        .update({ metadata: updatedMetadata })
         .eq("id", solicitacao.id);
+      if (metaErr) throw metaErr;
 
-      if (error) throw error;
+      // Devolução oficial: cria/atualiza demanda_loja (status=aguardando_complemento),
+      // move o card para "Dados Incompletos", notifica usuários da loja (sino+push)
+      // e habilita reabertura automática quando a loja responder (trg_demanda_resposta_reentrada).
+      const motivo =
+        `Dados incompletos na consulta de CPF: ${dadosLabels.join(", ")}.\n\n` +
+        `${observacaoIncompletos.trim()}`;
+
+      const { data: devData, error: devErr } = await supabase.functions.invoke(
+        "devolver-solicitacao-loja",
+        {
+          body: {
+            solicitacao_id: solicitacao.id,
+            motivo,
+            coluna_destino_id: targetCol?.id || null,
+          },
+        }
+      );
+      if (devErr) throw devErr;
+      if ((devData as any)?.error) throw new Error((devData as any).error);
 
       // Log CRM event
       if (solicitacao.contato_id) {
@@ -134,11 +147,11 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           descricao: `Dados incompletos na consulta CPF: ${dadosLabels.join(", ")}. Observação: ${observacaoIncompletos.trim()}`,
           referencia_tipo: "solicitacao",
           referencia_id: solicitacao.id,
-          metadata: { observacao: observacaoIncompletos.trim(), dados_incompletos: dadosSelecionados },
+          metadata: { observacao: observacaoIncompletos.trim(), dados_incompletos: dadosSelecionados, demanda_id: (devData as any)?.demanda_id || null },
         });
       }
 
-      // Trigger pipeline automations
+      // Mantém disparo de pipeline-automations (caso haja automação configurada na coluna).
       if (targetCol) {
         try {
           await supabase.functions.invoke("pipeline-automations", {
@@ -155,17 +168,18 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       }
 
       queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
-      toast.success("Card movido para Dados Incompletos.");
+      toast.success("Demanda devolvida à loja. Quando responderem no app, o card volta para revisão.");
       onOpenChange(false);
       resetForm();
     } catch (err: any) {
       console.error("Error:", err);
-      toast.error("Erro: " + err.message);
+      toast.error("Erro: " + (err.message || "falha ao devolver à loja"));
     } finally {
       setUploading(false);
       setAction(null);
     }
   };
+
 
   const handleAction = async (tipo: "aprovar" | "reprovar") => {
     if (!file && !existingDocUrl) {
@@ -248,6 +262,77 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         }
       }
 
+      // Notificação explícita à loja (não depender só de automação de coluna)
+      try {
+        const lojaNome =
+          (meta as any).alias_loja ||
+          (meta as any).loja_nome ||
+          solicitacao.contato?.metadata?.loja_nome ||
+          solicitacao.contato?.nome ||
+          "";
+        if (lojaNome) {
+          const { data: dests, error: rpcErr } = await supabase.rpc(
+            "resolver_destinatarios_loja",
+            { _loja_nome: lojaNome }
+          );
+          if (rpcErr) {
+            console.error("[CpfApproval] resolver_destinatarios_loja", rpcErr);
+          }
+          const userIds = Array.from(
+            new Set(((dests || []) as any[]).map((d: any) => d.user_id))
+          ).filter(Boolean) as string[];
+
+          const protocolo = solicitacao.protocolo ? ` ${solicitacao.protocolo}` : "";
+          const titulo =
+            tipo === "aprovar"
+              ? `CPF aprovado${protocolo}`
+              : `CPF reprovado${protocolo}`;
+          const mensagem =
+            tipo === "aprovar"
+              ? `Financiamento autorizado para ${nomeCliente}. Pode prosseguir com a venda.`
+              : `Financiamento não autorizado para ${nomeCliente}.` +
+                (justificativa ? ` Motivo: ${justificativa.slice(0, 140)}` : "");
+
+          // Comentário no card (visível à loja no Atrium)
+          const { error: cErr } = await supabase
+            .from("solicitacao_comentarios")
+            .insert({
+              solicitacao_id: solicitacao.id,
+              tipo: "retorno_setor",
+              autor_nome: "Financeiro",
+              conteudo: mensagem,
+            } as any)
+            .select();
+          if (cErr) {
+            console.error("[CpfApproval] comentário", cErr);
+            toast.error("Comentário não foi salvo: " + cErr.message);
+          }
+
+          if (userIds.length > 0) {
+            const { error: nErr } = await supabase
+              .from("notificacoes")
+              .insert(
+                userIds.map((uid) => ({
+                  usuario_id: uid,
+                  tipo: "retorno_setor",
+                  titulo,
+                  mensagem,
+                  referencia_id: solicitacao.id,
+                }))
+              )
+              .select();
+            if (nErr) {
+              console.error("[CpfApproval] notificação", nErr);
+              toast.error("Loja não foi notificada: " + nErr.message);
+            }
+          } else {
+            toast.warning(`Nenhum usuário cadastrado para a loja "${lojaNome}".`);
+          }
+        }
+      } catch (e) {
+        console.warn("[CpfApproval] aviso loja falhou", e);
+      }
+
       queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
       toast.success(tipo === "aprovar" ? "CPF aprovado com sucesso!" : "CPF reprovado.");
       onOpenChange(false);
@@ -260,6 +345,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       setAction(null);
     }
   };
+
 
   const resetForm = () => {
     setJustificativa("");
