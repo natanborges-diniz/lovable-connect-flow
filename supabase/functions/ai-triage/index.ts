@@ -1881,15 +1881,12 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
     }
   }
 
-  // All pool exhausted — escalate to human (keep current column, flag modo=humano)
-  const escResposta = isHorarioHumano()
-    ? "Vou chamar um Consultor especializado pra te ajudar melhor, tá? Ele já entra em contato!"
-    : mensagemEscaladaForaHorario("");
+  // All pool exhausted — redirect to agendamento (loja resolve; real escalations go via escalar_consultor)
   return {
-    resposta: escResposta,
-    intencao: "outro",
+    resposta: "Pra isso o ideal é passar na loja — posso agendar sua visita? 😊",
+    intencao: "agendamento_loja",
     pipeline_coluna: "Novo Contato",
-    precisa_humano: true,
+    precisa_humano: false,
   };
 }
 
@@ -6295,6 +6292,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     let pipeline_coluna = "Novo Contato";
     let setor_sugerido = "";
     let validatorFlags: string[] = [];
+    let direcionarAgendamentoLoja = false;
 
     const toolCalls = choice.message?.tool_calls || [];
     let rxConfirmGateTriggered = false;
@@ -6312,6 +6310,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
         precisa_humano = fallback.precisa_humano;
+        if (fallback.intencao === "agendamento_loja") direcionarAgendamentoLoja = true;
         validatorFlags.push("no_tool_deterministic");
       }
       console.log("[WARN] No tool call despite required — deterministic fallback applied");
@@ -6438,6 +6437,25 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           precisa_humano = false;
           setor_sugerido = "";
           validatorFlags.push("escalada_grau_sem_receita_bloqueada");
+          continue;
+        }
+
+        // ── FATIA 1: loja-resolve → agendamento (vs. escalada real) ──
+        const grauForaDaFaixa = (receitas as any[]).some((r: any) => isReceitaForaDaFaixa(r));
+        const especialistaMotive = /\b(especialista|alto grau|sob encomenda|convers[aã]o.*lc|lc.*convers[aã]o|lente.*especial|fora da faixa)\b/i.test(motivoStr);
+        const deveEscalar = explicitHumanRequest || freshComplaint || grauForaDaFaixa || especialistaMotive;
+        if (!deveEscalar) {
+          const mencionaExame = /\b(exame|cl[ií]nica|mapa de lente|topografia)\b/i.test(motivoStr);
+          resposta = mencionaExame
+            ? "Pra isso o ideal é passar na loja — posso agendar sua visita? A equipe te atende e, se precisar de exame, indicam a clínica parceira (o valor vira desconto na compra)."
+            : "Pra isso o ideal é passar na loja — posso agendar sua visita? 😊";
+          direcionarAgendamentoLoja = true;
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId, tipo: "escalonamento_redirecionado_agendamento",
+            descricao: `IA redirecionou escalonamento para agendamento (motivo: ${args.motivo})`,
+            metadata: { motivo: args.motivo, setor: args.setor },
+            referencia_tipo: "atendimento", referencia_id: atendimento_id,
+          });
           continue;
         }
 
@@ -7478,6 +7496,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
                   intencao = contextualFallback.intencao;
                   pipeline_coluna = contextualFallback.pipeline_coluna;
                   precisa_humano = contextualFallback.precisa_humano;
+                  if (contextualFallback.intencao === "agendamento_loja") direcionarAgendamentoLoja = true;
                   validatorFlags.push("contextual_deterministic_fallback");
                   console.log("[VALIDATOR] Contextual deterministic fallback applied");
                 }
@@ -7515,6 +7534,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
               intencao = contextualFallback.intencao;
               pipeline_coluna = contextualFallback.pipeline_coluna;
               precisa_humano = contextualFallback.precisa_humano;
+              if (contextualFallback.intencao === "agendamento_loja") direcionarAgendamentoLoja = true;
               validatorFlags.push("contextual_deterministic_fallback");
             }
           }
@@ -7537,6 +7557,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         intencao = fallback.intencao;
         pipeline_coluna = fallback.pipeline_coluna;
         precisa_humano = fallback.precisa_humano;
+        if (fallback.intencao === "agendamento_loja") direcionarAgendamentoLoja = true;
         validatorFlags.push("empty_response_deterministic");
       }
     }
@@ -7994,6 +8015,9 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
     } else {
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
+      if (direcionarAgendamentoLoja && !precisa_humano) {
+        await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta);
+      }
       // Follow-up determinístico após cotação de óculos/LC: oferece próximos passos em botões
       try {
         const _toolNamesQ: string[] = Array.isArray(toolCalls) ? toolCalls.map((t: any) => t?.function?.name).filter(Boolean) : [];
