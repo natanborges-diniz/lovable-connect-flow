@@ -8,6 +8,7 @@ import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, User, Store, DollarSign, FileText, Loader2, RotateCcw,
+  ImageOff, Info, ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
