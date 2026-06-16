@@ -443,35 +443,63 @@ serve(async (req) => {
         .eq("id", consultaCpfOrigem.id);
     }
 
-    // ── Anexos ──
+    // ── Anexos (resilientes: nunca grava caminho fantasma; cai pra URL original do Messenger) ──
     for (let i = 0; i < anexos.length; i++) {
       const a = anexos[i];
+      const mime = a.mime_type || "application/octet-stream";
+      const extMap: Record<string, string> = {
+        "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+        "application/pdf": "pdf", "image/gif": "gif",
+      };
+      const ext = extMap[mime] || "bin";
+      const path = `comprovantes/${ano}/${protocolo}/anexo_${i + 1}.${ext}`;
+
+      let storagePath: string | null = null;
+      let urlPublica: string = a.url;
+      let tamanho: number | null = null;
+      const uploadIssues: string[] = [];
+
       try {
         const r = await fetch(a.url);
-        if (!r.ok) continue;
-        const bytes = await r.arrayBuffer();
-        const mime = a.mime_type || "application/octet-stream";
-        const extMap: Record<string, string> = {
-          "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
-          "application/pdf": "pdf", "image/gif": "gif",
-        };
-        const ext = extMap[mime] || "bin";
-        const path = `comprovantes/${ano}/${protocolo}/anexo_${i + 1}.${ext}`;
-        await supabase.storage.from("whatsapp-media").upload(path, bytes, { contentType: mime, upsert: true });
-        const { data: pub } = supabase.storage.from("whatsapp-media").getPublicUrl(path);
-        await supabase.from("solicitacao_anexos").insert({
-          solicitacao_id: solicitacao.id,
-          tipo: "comprovante",
-          descricao: a.nome || `Anexo ${i + 1}`,
-          storage_path: path,
-          url_publica: pub?.publicUrl || a.url,
-          mime_type: mime,
-          tamanho_bytes: bytes.byteLength,
-        });
+        if (!r.ok) {
+          uploadIssues.push(`fetch_${r.status}`);
+          console.error(`[criar-solicitacao-loja] anexo ${i + 1}: fetch falhou (${r.status}) — mantendo URL original ${a.url}`);
+        } else {
+          const bytes = await r.arrayBuffer();
+          tamanho = bytes.byteLength;
+          const { error: upErr } = await supabase.storage
+            .from("whatsapp-media")
+            .upload(path, bytes, { contentType: mime, upsert: true });
+          if (upErr) {
+            uploadIssues.push(`upload_${upErr.message}`);
+            console.error(`[criar-solicitacao-loja] anexo ${i + 1}: upload falhou — ${upErr.message}. Mantendo URL original.`);
+          } else {
+            storagePath = path;
+            const { data: pub } = supabase.storage.from("whatsapp-media").getPublicUrl(path);
+            if (pub?.publicUrl) urlPublica = pub.publicUrl;
+          }
+        }
       } catch (e) {
-        console.error("[criar-solicitacao-loja] anexo error", e);
+        uploadIssues.push(`exception_${e instanceof Error ? e.message : String(e)}`);
+        console.error(`[criar-solicitacao-loja] anexo ${i + 1}: exceção — ${e}`);
+      }
+
+      const { error: insErr } = await supabase.from("solicitacao_anexos").insert({
+        solicitacao_id: solicitacao.id,
+        tipo: "comprovante",
+        descricao: a.nome || `Anexo ${i + 1}`,
+        storage_path: storagePath,
+        url_publica: urlPublica,
+        mime_type: mime,
+        tamanho_bytes: tamanho,
+      });
+      if (insErr) {
+        console.error(`[criar-solicitacao-loja] anexo ${i + 1}: insert solicitacao_anexos falhou — ${insErr.message}`);
+      } else if (uploadIssues.length) {
+        console.log(`[criar-solicitacao-loja] anexo ${i + 1} registrado com fallback (issues=${uploadIssues.join(",")}, url=${urlPublica})`);
       }
     }
+
 
     // ── Evento CRM ──
     await supabase.from("eventos_crm").insert({
