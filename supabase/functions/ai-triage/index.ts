@@ -1,6 +1,7 @@
 // orcamento oculos deterministico 2026-06-10
 // receita B1 B2 deploy trigger 2026-06-12 (re-deploy pós-merge github)
 // deploy trigger 2026-06-15b — safety net _receitasCurrentSession (ebb1522)
+// fatia1 direciona loja — merge 9cdd117
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
