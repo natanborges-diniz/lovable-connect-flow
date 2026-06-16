@@ -2322,11 +2322,13 @@ function buildOrcamentoParcialBlock(): string {
 }
 
 function buildRegionalCoverageBlock(): string {
+  // ⚠️ Cidades com loja real: Osasco, Carapicuíba, Barueri, Itapevi.
+  // Fonte de verdade: tabela lojas_cidades. Ao abrir/fechar loja em nova cidade, atualizar aqui.
   return `# COBERTURA REGIONAL — ESCADA DE PERSUASÃO
-- Você atende APENAS em Osasco e região (Carapicuíba, Barueri, Cotia, Itapevi, Jandira, Santana de Parnaíba, Alphaville).
+- Você atende APENAS nas lojas de Osasco, Carapicuíba, Barueri e Itapevi. NUNCA mencione outras cidades como tendo loja Óticas Diniz — não temos em Cotia, Jandira, Santana de Parnaíba, Alphaville ou qualquer outra cidade.
 - NUNCA sugira lojas ou atendimento em cidades fora da nossa cobertura (como Guarulhos, São Paulo capital, ABC, Campinas, etc.).
 - Quando o cliente for de fora da nossa região, siga esta ESCADA DE PERSUASÃO:
-  1º) Convide com carinho para conhecer nossas lojas em Osasco e região. Mencione diferenciais, promoções exclusivas e atendimento diferenciado. NÃO envie link do Google Maps.
+  1º) Convide com carinho para conhecer nossas lojas em Osasco, Carapicuíba, Barueri ou Itapevi. Mencione diferenciais, promoções exclusivas e atendimento diferenciado. NÃO envie link do Google Maps.
   2º) Se o cliente insistir que é longe ou que prefere outra região, reforce o convite com argumentos de acesso fácil, atendimento personalizado e condições especiais. NÃO envie link do Google Maps.
   3º) SOMENTE se o cliente se mostrar irredutível pela TERCEIRA VEZ: envie o link do Google Maps da loja mais próxima dele (da lista de LOJAS DISPONÍVEIS) e classifique como coluna_pipeline "Perdidos".
 - NUNCA envie o link do Google Maps logo na 1ª ou 2ª interação sobre localização.
@@ -9471,7 +9473,31 @@ async function routeExpectedTypedReply(args: {
   // Fallback de texto: cliente digitou a cidade em vez de tocar na lista.
   if (expectedReply === "cidade_selecao") {
     const cidade = detectCidadeEscolhida(mensagemTexto);
-    if (!cidade) return false;
+    if (!cidade) {
+      // Não reconheceu cidade real — responder deterministicamente, NUNCA cair no LLM.
+      const tNorm = _normTxt(mensagemTexto);
+      // Recusa explícita ("não obrigada", "tchau", "não vou precisar") → encerramento educado.
+      const isRecusaExplicita = /\bnao\b.{0,15}\b(obrigad|precis|quero|interess|vai\s+dar|vou)\b|\b(tchau|ate\s+logo|falou|encerr|cancela)\b/.test(tNorm)
+        && !/\b(osasco|carapicuiba|itapevi|barueri|alphaville)\b/.test(tNorm);
+      if (isRecusaExplicita) {
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tudo bem! Qualquer coisa estou por aqui 😊 Até mais!");
+        await patchMeta({ expected_reply: null });
+        return true;
+      }
+      // Mencionou cidade sem loja → informa limite + relança botões.
+      const mencionaCidadeForaDeCob = /\b(cotia|jandira|santana|sao\s*paulo|guarulhos|santo\s*andre|campinas)\b/.test(tNorm);
+      if (mencionaCidadeForaDeCob) {
+        await sendWhatsApp(supabaseUrl, serviceKey, atId,
+          "No momento nosso atendimento é nas lojas de Osasco, Carapicuíba, Barueri e Itapevi 😊");
+        await sendListaCidades(supabase, supabaseUrl, serviceKey, atId, atendimentoMeta,
+          "Gostaria de ser atendido em uma dessas cidades? 😊");
+      } else {
+        // Entrada ambígua → relança botões sem explicação extra.
+        await sendListaCidades(supabase, supabaseUrl, serviceKey, atId, atendimentoMeta,
+          "Pode escolher uma das opções abaixo 😊");
+      }
+      return true;
+    }
     const { data: lojas } = await supabase
       .from("telefones_lojas").select("id, nome_loja, endereco")
       .eq("tipo", "loja").eq("ativo", true).order("nome_loja");
