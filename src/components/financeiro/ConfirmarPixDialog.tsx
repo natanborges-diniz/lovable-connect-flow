@@ -26,17 +26,36 @@ const MSG_NAO_CONFIRMADO = "A confirmação de PIX solicitada ainda não foi com
 export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }: ConfirmarPixDialogProps) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
+  const [brokenImgIds, setBrokenImgIds] = useState<Set<string>>(new Set());
   const { data: anexos } = useSolicitacaoAnexos(solicitacao?.id);
 
   if (!solicitacao) return null;
 
-  const meta = solicitacao.metadata || {};
+  const meta = (solicitacao.metadata || {}) as Record<string, any>;
   const lojaNome = meta.alias_loja || meta.loja_nome || solicitacao.contato?.nome || "Loja";
+  const cliente = meta.nome_cliente || meta.cliente || null;
+  const valor = meta.valor ?? meta.valor_pix ?? null;
+  const dataHora = meta.data_hora || meta.data || meta.horario || null;
   const colAtual = colunas.find((c) => c.id === solicitacao.pipeline_coluna_id);
   const isConfirmado = colAtual?.nome === "PIX Confirmado";
   const isNaoConfirmado = colAtual?.nome === "PIX Não Confirmado";
 
+  // Chaves de controle interno — não mostrar no bloco "Detalhes enviados pela loja"
+  const CONTROL_KEYS = new Set([
+    "alias_loja", "loja_nome", "cod_empresa", "origem_app",
+    "nome_cliente", "cliente", "valor", "valor_pix", "data_hora", "data", "horario",
+    "pix_confirmado_at", "pix_nao_confirmado_at", "pix_revertido_at",
+    "cancelado_em", "cancelado_por", "motivo_cancelamento",
+    "comprovantes", "lojas_map", "loja_selecionada_nome", "loja_selecionada_cod",
+    "upload_falhou",
+  ]);
+  const detalhesExtras = Object.entries(meta).filter(
+    ([k, v]) => !CONTROL_KEYS.has(k) && v !== null && v !== undefined && String(v).trim() !== "",
+  );
+  const semDetalhes = !solicitacao.descricao?.trim() && !cliente && valor == null && !dataHora && detalhesExtras.length === 0;
+
   const findCol = (nome: string) => colunas.find((c) => c.nome === nome);
+
 
   const enviarRetornoLoja = async (mensagem: string, autorNome = "Financeiro") => {
     await supabase.from("solicitacao_comentarios").insert({
