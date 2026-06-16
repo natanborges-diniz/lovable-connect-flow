@@ -58,19 +58,31 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
 
 
   const enviarRetornoLoja = async (mensagem: string, autorNome = "Financeiro") => {
-    await supabase.from("solicitacao_comentarios").insert({
+    const { error: cErr } = await supabase.from("solicitacao_comentarios").insert({
       solicitacao_id: solicitacao.id,
       tipo: "retorno_setor",
       autor_nome: autorNome,
       conteudo: mensagem,
-    } as any);
+    } as any).select();
+    if (cErr) {
+      console.error("[ConfirmarPixDialog] comentário falhou", cErr);
+      toast.error("Comentário não foi salvo: " + cErr.message);
+    }
 
-    const { data: dests } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+    const { data: dests, error: rpcErr } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+    if (rpcErr) {
+      console.error("[ConfirmarPixDialog] resolver_destinatarios_loja falhou", rpcErr);
+      toast.error("Não foi possível identificar destinatários da loja.");
+      return;
+    }
     const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
-    if (list.length === 0) return;
+    if (list.length === 0) {
+      toast.warning(`Nenhum usuário cadastrado para a loja "${lojaNome}" — notificação não enviada.`);
+      return;
+    }
 
     const titulo = `Retorno do Financeiro — ${solicitacao.protocolo || "PIX"}`;
-    await supabase.from("notificacoes").insert(
+    const { error: nErr } = await supabase.from("notificacoes").insert(
       list.map((d) => ({
         usuario_id: d.user_id,
         setor_id: d.setor_id,
@@ -79,8 +91,13 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
         mensagem,
         referencia_id: solicitacao.id,
       })) as any
-    );
+    ).select();
+    if (nErr) {
+      console.error("[ConfirmarPixDialog] notificações falharam", nErr);
+      toast.error("Loja não foi notificada: " + nErr.message);
+    }
   };
+
 
   const moverPara = async (colNome: string, metaPatch: Record<string, any>, statusFinal: string | null) => {
     const target = findCol(colNome);
