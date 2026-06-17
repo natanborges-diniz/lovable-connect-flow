@@ -61,16 +61,71 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const findCol = (nome: string) => colunas.find((c) => c.nome === nome);
 
 
-  const enviarRetornoLoja = async (mensagem: string, autorNome = "Financeiro") => {
+  type AnexoEnvio = {
+    url: string;
+    nome: string;
+    mime: string | null;
+    storage_path: string;
+  } | null;
+
+  const uploadEvidencia = async (): Promise<AnexoEnvio> => {
+    if (!evidencia) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Sessão expirada — faça login novamente.");
+    const ext = evidencia.name.split(".").pop() || "bin";
+    const path = `${user.id}/financeiro/${solicitacao.id}/${Date.now()}-pix-confirm.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("mensagens-anexos").upload(path, evidencia, { contentType: evidencia.type, upsert: false });
+    if (upErr) throw upErr;
+    const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+    return { url: pub.publicUrl, nome: evidencia.name, mime: evidencia.type || null, storage_path: path };
+  };
+
+  const enviarRetornoLoja = async (mensagem: string, anexo: AnexoEnvio = null, autorNome = "Financeiro") => {
+    // 1) Comentário na thread da solicitação (Messenger lê daqui)
     const { error: cErr } = await supabase.from("solicitacao_comentarios").insert({
       solicitacao_id: solicitacao.id,
       tipo: "retorno_setor",
       autor_nome: autorNome,
       conteudo: mensagem,
+      ...(anexo ? { anexo_url: anexo.url, anexo_nome: anexo.nome, anexo_mime: anexo.mime } : {}),
+      ...(anexo ? { metadata: { tipo: "evidencia_pix", storage_path: anexo.storage_path } } : {}),
     } as any).select();
     if (cErr) {
       console.error("[ConfirmarPixDialog] comentário falhou", cErr);
       toast.error("Comentário não foi salvo: " + cErr.message);
+    }
+
+    // 2) Registra anexo na solicitação (aparece no painel do operador também)
+    if (anexo) {
+      await supabase.from("solicitacao_anexos").insert({
+        solicitacao_id: solicitacao.id,
+        tipo: "evidencia_pix",
+        descricao: "Evidência da confirmação de PIX",
+        url_publica: anexo.url,
+        storage_path: anexo.storage_path,
+        mime_type: anexo.mime,
+      } as any);
+    }
+
+    // 3) Espelha na thread da demanda Messenger (se houver)
+    const demandaId = (meta.demanda_id as string) || null;
+    if (demandaId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from("demanda_mensagens").insert({
+        demanda_id: demandaId,
+        direcao: "operador_para_loja",
+        autor_id: user?.id || null,
+        autor_nome: autorNome,
+        conteudo: mensagem,
+        ...(anexo ? { anexo_url: anexo.url, anexo_mime: anexo.mime } : {}),
+        metadata: { tipo: "retorno_pix", solicitacao_id: solicitacao.id },
+      } as any);
+      await supabase.from("demandas_loja").update({
+        status: "respondida",
+        vista_pelo_operador: true,
+        ultima_mensagem_loja_at: new Date().toISOString(),
+      }).eq("id", demandaId);
     }
 
     const { data: dests, error: rpcErr } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
@@ -92,7 +147,7 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
         setor_id: d.setor_id,
         tipo: "retorno_setor",
         titulo,
-        mensagem,
+        mensagem: anexo ? `${mensagem} (com evidência anexada)` : mensagem,
         referencia_id: solicitacao.id,
       })) as any
     ).select();
