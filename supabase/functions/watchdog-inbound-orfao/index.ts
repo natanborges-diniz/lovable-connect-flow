@@ -1,3 +1,4 @@
+// fatia2 receita escalada vira loja — merge fix/receita-escalada-vira-loja
 // Watchdog Inbound Órfão
 // Detecta atendimentos em modo=ia onde a última mensagem é INBOUND há >2min
 // e nenhuma OUTBOUND foi gerada depois. Força chamada ao ai-triage.
