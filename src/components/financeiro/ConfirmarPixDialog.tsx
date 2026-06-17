@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, User, Store, DollarSign, FileText, Loader2, RotateCcw,
-  ImageOff, Info, ExternalLink,
+  ImageOff, Info, ExternalLink, Paperclip, Upload,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
