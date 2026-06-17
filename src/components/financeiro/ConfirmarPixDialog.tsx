@@ -177,27 +177,33 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const handleConfirmar = async () => {
     setBusy("confirmar");
     try {
+      const anexo = await uploadEvidencia();
       const target = await moverPara(
         "PIX Confirmado",
-        { pix_confirmado_at: new Date().toISOString() },
+        {
+          pix_confirmado_at: new Date().toISOString(),
+          ...(anexo ? { pix_evidencia_url: anexo.url, pix_evidencia_nome: anexo.nome } : {}),
+        },
         "concluida"
       );
       if (!target) return;
 
-      await enviarRetornoLoja(MSG_CONFIRMADO);
+      await enviarRetornoLoja(MSG_CONFIRMADO, anexo);
 
       if (solicitacao.contato_id) {
         await supabase.from("eventos_crm").insert({
           contato_id: solicitacao.contato_id,
           tipo: "pix_confirmado",
-          descricao: `PIX confirmado pelo Financeiro — loja ${lojaNome}`,
+          descricao: `PIX confirmado pelo Financeiro — loja ${lojaNome}${anexo ? " (com evidência)" : ""}`,
           referencia_tipo: "solicitacao",
           referencia_id: solicitacao.id,
         });
       }
 
       queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
-      toast.success("PIX confirmado. Loja foi notificada.");
+      toast.success(anexo ? "PIX confirmado com evidência. Loja foi notificada." : "PIX confirmado. Loja foi notificada.");
+      setEvidencia(null);
+      if (fileRef.current) fileRef.current.value = "";
       onOpenChange(false);
     } catch (err: any) {
       toast.error("Erro ao confirmar: " + err.message);
@@ -209,6 +215,7 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const handleNaoConfirmar = async () => {
     setBusy("nao_confirmar");
     try {
+      const anexo = await uploadEvidencia();
       const target = await moverPara(
         "PIX Não Confirmado",
         { pix_nao_confirmado_at: new Date().toISOString() },
@@ -216,7 +223,7 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
       );
       if (!target) return;
 
-      await enviarRetornoLoja(MSG_NAO_CONFIRMADO);
+      await enviarRetornoLoja(MSG_NAO_CONFIRMADO, anexo);
 
       if (solicitacao.contato_id) {
         await supabase.from("eventos_crm").insert({
@@ -230,6 +237,8 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
 
       queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
       toast.success("Marcado como não confirmado. Loja foi avisada.");
+      setEvidencia(null);
+      if (fileRef.current) fileRef.current.value = "";
       onOpenChange(false);
     } catch (err: any) {
       toast.error("Erro: " + err.message);
