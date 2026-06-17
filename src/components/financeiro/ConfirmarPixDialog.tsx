@@ -420,7 +420,29 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
             </div>
           )}
 
+          {!isConfirmado && (
+            <div className="space-y-1 pt-2 border-t">
+              <Label className="text-xs flex items-center gap-1">
+                <Paperclip className="h-3 w-3" />
+                Evidência para a loja (imagem/PDF, opcional)
+              </Label>
+              <Input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,image/*"
+                disabled={!!busy}
+                onChange={(e) => setEvidencia(e.target.files?.[0] ?? null)}
+              />
+              {evidencia && (
+                <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+                  <Upload className="h-3 w-3" /> {evidencia.name} · {(evidencia.size / 1024).toFixed(0)} KB — será enviada à loja na demanda do Messenger.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-2 pt-2 border-t">
+
             {!isConfirmado && (
               <Button
                 onClick={handleConfirmar}
