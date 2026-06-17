@@ -255,30 +255,28 @@ serve(async (req) => {
           }).eq("id", c.contato_id);
 
           if (novasFalhas >= 2) {
-            // Escala humano direto
-            const np = String(cData?.nome || "").split(/\s+/)[0] || "";
-            const msgEscala = `Tô com dificuldade de ler sua receita aqui mesmo nas tentativas, ${np || "amigo(a)"}. Vou chamar alguém da equipe pra te ajudar com isso, tá? 🙌`;
+            // Fatia 2: não escala humano — direciona pra loja (medição presencial).
+            // Seta expected_reply="cidade_selecao" no metadata; na próxima mensagem do cliente
+            // o routeExpectedTypedReply do ai-triage exibe os botões de cidade (anti-loop garantido).
+            const msgPonte = "Sem problema! O jeito mais rápido é passar na loja — a equipe mede sua receita na hora e já monta seu orçamento. Me diz em qual cidade prefere ser atendido? 😊";
             await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
-              body: JSON.stringify({ atendimento_id: c.atendimento_id, mensagem: msgEscala }),
+              body: JSON.stringify({ atendimento_id: c.atendimento_id, mensagem: msgPonte }),
             });
             await supabase.from("atendimentos").update({
-              modo: "humano",
-              status: "aguardando",
               updated_at: new Date().toISOString(),
               metadata: {
                 ...(c.meta || {}),
                 analisando_orfao_last_at: new Date().toISOString(),
-                revisao_humana_pendente: true,
-                revisao_humana_motivo: "ocr_orfao_2_falhas",
-                escalado_humano_at: new Date().toISOString(),
+                expected_reply: "cidade_selecao",
+                redirecionado_loja_at: new Date().toISOString(),
               },
             }).eq("id", c.atendimento_id);
             await supabase.from("eventos_crm").insert({
               contato_id: c.contato_id,
-              tipo: "ocr_orfao_escalado_humano",
-              descricao: `2 falhas consecutivas de OCR sem follow-up — escalando para humano`,
+              tipo: "ocr_orfao_redirecionado_loja",
+              descricao: `2 falhas consecutivas de OCR sem follow-up — redirecionado para agendamento na loja`,
               referencia_id: c.atendimento_id,
               referencia_tipo: "atendimento",
               metadata: { ocr_falhas_count: novasFalhas, idade_min: c.ageMin },
