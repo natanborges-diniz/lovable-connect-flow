@@ -29,6 +29,8 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [brokenImgIds, setBrokenImgIds] = useState<Set<string>>(new Set());
+  const [evidencia, setEvidencia] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const { data: anexos } = useSolicitacaoAnexos(solicitacao?.id);
 
   if (!solicitacao) return null;
