@@ -1896,6 +1896,63 @@ function deterministicIntentFallback(msg: string, inboundCount: number, isHibrid
 // PHASE 3 — POST-LLM VALIDATOR (GUARDRAILS)
 // ═══════════════════════════════════════════
 
+// ── SHADOW CLASSIFIER ──────────────────────────────────────────────────────────
+// Roda em paralelo com o fluxo principal, NÃO altera roteamento.
+// Mede divergência entre classificação LLM-leve e cascata real.
+type ShadowResult = { intencao: string; confianca: number; latencia_ms: number };
+
+const _SHADOW_LABELS = [
+  "orcamento", "loja_local", "receita", "lentes_contato", "agendamento",
+  "consulta_os", "falar_humano", "resposta_campanha", "cliente_reativado",
+  "interesse_cashback", "outro",
+] as const;
+
+const _SHADOW_SYSTEM_PROMPT = `Classifica a intenção do cliente na conversa. Responda SOMENTE com JSON válido, sem texto adicional:
+{"intencao":"<label>","confianca":<0.0-1.0>}
+
+Labels:
+- orcamento: quer preço/cotação de óculos ou lentes de grau
+- loja_local: endereço, horário, onde fica a loja
+- receita: enviou ou quer falar de receita oftalmológica/grau
+- lentes_contato: assunto de lentes de contato (não óculos)
+- agendamento: quer marcar ou confirmar visita na loja
+- consulta_os: quer status de pedido/OS/encomenda
+- falar_humano: pediu falar com humano ou gerente explicitamente
+- resposta_campanha: respondendo a uma mensagem de campanha/promoção
+- cliente_reativado: voltou após longo silêncio sem intenção clara
+- interesse_cashback: pergunta sobre cashback ou desconto Diniz
+- outro: não encaixa nos acima`;
+
+async function classifyIntentShadow(
+  msgs: Array<{ role: "user" | "assistant"; content: string }>,
+  lovableApiKey: string,
+): Promise<ShadowResult | null> {
+  const _t = Date.now();
+  try {
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${lovableApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "openai/gpt-5-mini",
+        messages: [{ role: "system", content: _SHADOW_SYSTEM_PROMPT }, ...msgs],
+        max_completion_tokens: 60,
+        temperature: 0,
+      }),
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const raw = String(data?.choices?.[0]?.message?.content || "").trim();
+    const parsed = JSON.parse(raw);
+    if (!parsed?.intencao || typeof parsed.confianca !== "number") return null;
+    if (!(_SHADOW_LABELS as readonly string[]).includes(parsed.intencao)) return null;
+    return { intencao: parsed.intencao, confianca: Number(parsed.confianca), latencia_ms: Date.now() - _t };
+  } catch {
+    return null;
+  }
+}
+// ───────────────────────────────────────────────────────────────────────────────
+
 const BLACKLIST_PHRASES = [
   "se precisar", "estou por aqui", "estou à disposição",
   "se tiver alguma dúvida", "qualquer dúvida", "me avise",
@@ -3816,6 +3873,25 @@ serve(async (req) => {
       }
     } catch (e) {
       console.warn("[LOJA-LOCAL] fallback para LLM:", (e as Error)?.message);
+    }
+
+    // ── SHADOW CLASSIFIER — disparo paralelo (fire-and-forget, não bloqueia) ──
+    // Guards: modo humano / 1ª msg / imagem / expected_reply ativo → skip (economiza custo).
+    // O resultado é coletado e logado DEPOIS do LLM principal resolver (ver Step 12 abaixo).
+    let _shadowP: Promise<ShadowResult | null> | null = null;
+    if (
+      LOVABLE_API_KEY &&
+      (atendimento.modo === "ia" || atendimento.modo === "hibrido") &&
+      !atendimentoMeta?.expected_reply &&
+      inboundCount > 1 &&
+      !((allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.tipo_conteudo || "text") === "image") &&
+      !(media?.inline_base64 && media?.mime_type?.startsWith("image/"))
+    ) {
+      const _shadowMsgs = allMsgs.slice(-8).map((m: any) => ({
+        role: (m.direcao === "inbound" ? "user" : "assistant") as "user" | "assistant",
+        content: String(m.conteudo || "").slice(0, 500),
+      }));
+      _shadowP = classifyIntentShadow(_shadowMsgs, LOVABLE_API_KEY);
     }
 
     // ── 3.6. FAST-PATH: SAUDAÇÃO DETERMINÍSTICA + AUTO-PERSISTÊNCIA DE NOME ──
@@ -8227,6 +8303,41 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     });
 
     console.log(`[RESULT] tools=${toolCalls.map((t: any) => t.function?.name).join(",") || "text"} | intent=${intencao} | human=${precisa_humano} | col=${pipeline_coluna} | validator=${validatorFlags.join(",")}`);
+
+    // ── SHADOW CLASSIFIER — coleta resultado paralelo e loga (fire-and-forget) ──
+    // Por este ponto o mini (~500ms) já resolveu — o gpt-5 principal levou ~2s+.
+    // Timeout de 200ms como defesa; falha não afeta o atendimento.
+    if (_shadowP) {
+      try {
+        const _sr = await Promise.race([
+          _shadowP,
+          new Promise<null>((r) => setTimeout(() => r(null), 200)),
+        ]);
+        if (_sr) {
+          const _rawMsg = String(currentMsg || "").slice(0, 200);
+          const _hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(_rawMsg));
+          const _msgHash = Array.from(new Uint8Array(_hashBuf)).slice(0, 8)
+            .map((b) => b.toString(16).padStart(2, "0")).join("");
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoId,
+            tipo: "classifier_shadow",
+            descricao: `shadow:${_sr.intencao}(${_sr.confianca.toFixed(2)}) | cascata:${intencao}`,
+            metadata: {
+              intencao_classificador: _sr.intencao,
+              confianca: _sr.confianca,
+              rota_cascata_real: intencao,
+              latencia_ms: _sr.latencia_ms,
+              msg_hash: _msgHash,
+            },
+            referencia_tipo: "atendimento",
+            referencia_id: atendimento_id,
+          });
+          console.log(`[CLASSIFIER-SHADOW] intent=${_sr.intencao} conf=${_sr.confianca.toFixed(2)} | cascata=${intencao} | lat=${_sr.latencia_ms}ms`);
+        }
+      } catch (e) {
+        console.warn("[CLASSIFIER-SHADOW] log falhou, seguindo normal:", (e as Error)?.message);
+      }
+    }
 
     // Clear debounce lock — update simples, sem read-modify-write
     await supabase.from("atendimentos")
