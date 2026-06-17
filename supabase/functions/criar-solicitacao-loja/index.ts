@@ -55,7 +55,7 @@ serve(async (req) => {
       .select("id, nome, tipo_usuario")
       .eq("id", user.id)
       .single();
-    if (!profile || !["loja", "colaborador"].includes(profile.tipo_usuario)) {
+    if (!profile || !["loja", "colaborador", "admin"].includes(profile.tipo_usuario)) {
       return new Response(JSON.stringify({ error: "Apenas usuários loja/colaborador podem abrir solicitações" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
