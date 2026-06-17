@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, User, Store, DollarSign, FileText, Loader2, RotateCcw,
-  ImageOff, Info, ExternalLink,
+  ImageOff, Info, ExternalLink, Paperclip, Upload,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -27,6 +29,8 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [brokenImgIds, setBrokenImgIds] = useState<Set<string>>(new Set());
+  const [evidencia, setEvidencia] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const { data: anexos } = useSolicitacaoAnexos(solicitacao?.id);
 
   if (!solicitacao) return null;
@@ -57,16 +61,71 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const findCol = (nome: string) => colunas.find((c) => c.nome === nome);
 
 
-  const enviarRetornoLoja = async (mensagem: string, autorNome = "Financeiro") => {
+  type AnexoEnvio = {
+    url: string;
+    nome: string;
+    mime: string | null;
+    storage_path: string;
+  } | null;
+
+  const uploadEvidencia = async (): Promise<AnexoEnvio> => {
+    if (!evidencia) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Sessão expirada — faça login novamente.");
+    const ext = evidencia.name.split(".").pop() || "bin";
+    const path = `${user.id}/financeiro/${solicitacao.id}/${Date.now()}-pix-confirm.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("mensagens-anexos").upload(path, evidencia, { contentType: evidencia.type, upsert: false });
+    if (upErr) throw upErr;
+    const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+    return { url: pub.publicUrl, nome: evidencia.name, mime: evidencia.type || null, storage_path: path };
+  };
+
+  const enviarRetornoLoja = async (mensagem: string, anexo: AnexoEnvio = null, autorNome = "Financeiro") => {
+    // 1) Comentário na thread da solicitação (Messenger lê daqui)
     const { error: cErr } = await supabase.from("solicitacao_comentarios").insert({
       solicitacao_id: solicitacao.id,
       tipo: "retorno_setor",
       autor_nome: autorNome,
       conteudo: mensagem,
+      ...(anexo ? { anexo_url: anexo.url, anexo_nome: anexo.nome, anexo_mime: anexo.mime } : {}),
+      ...(anexo ? { metadata: { tipo: "evidencia_pix", storage_path: anexo.storage_path } } : {}),
     } as any).select();
     if (cErr) {
       console.error("[ConfirmarPixDialog] comentário falhou", cErr);
       toast.error("Comentário não foi salvo: " + cErr.message);
+    }
+
+    // 2) Registra anexo na solicitação (aparece no painel do operador também)
+    if (anexo) {
+      await supabase.from("solicitacao_anexos").insert({
+        solicitacao_id: solicitacao.id,
+        tipo: "evidencia_pix",
+        descricao: "Evidência da confirmação de PIX",
+        url_publica: anexo.url,
+        storage_path: anexo.storage_path,
+        mime_type: anexo.mime,
+      } as any);
+    }
+
+    // 3) Espelha na thread da demanda Messenger (se houver)
+    const demandaId = (meta.demanda_id as string) || null;
+    if (demandaId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from("demanda_mensagens").insert({
+        demanda_id: demandaId,
+        direcao: "operador_para_loja",
+        autor_id: user?.id || null,
+        autor_nome: autorNome,
+        conteudo: mensagem,
+        ...(anexo ? { anexo_url: anexo.url, anexo_mime: anexo.mime } : {}),
+        metadata: { tipo: "retorno_pix", solicitacao_id: solicitacao.id },
+      } as any);
+      await supabase.from("demandas_loja").update({
+        status: "respondida",
+        vista_pelo_operador: true,
+        ultima_mensagem_loja_at: new Date().toISOString(),
+      }).eq("id", demandaId);
     }
 
     const { data: dests, error: rpcErr } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
@@ -88,7 +147,7 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
         setor_id: d.setor_id,
         tipo: "retorno_setor",
         titulo,
-        mensagem,
+        mensagem: anexo ? `${mensagem} (com evidência anexada)` : mensagem,
         referencia_id: solicitacao.id,
       })) as any
     ).select();
@@ -118,27 +177,33 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const handleConfirmar = async () => {
     setBusy("confirmar");
     try {
+      const anexo = await uploadEvidencia();
       const target = await moverPara(
         "PIX Confirmado",
-        { pix_confirmado_at: new Date().toISOString() },
+        {
+          pix_confirmado_at: new Date().toISOString(),
+          ...(anexo ? { pix_evidencia_url: anexo.url, pix_evidencia_nome: anexo.nome } : {}),
+        },
         "concluida"
       );
       if (!target) return;
 
-      await enviarRetornoLoja(MSG_CONFIRMADO);
+      await enviarRetornoLoja(MSG_CONFIRMADO, anexo);
 
       if (solicitacao.contato_id) {
         await supabase.from("eventos_crm").insert({
           contato_id: solicitacao.contato_id,
           tipo: "pix_confirmado",
-          descricao: `PIX confirmado pelo Financeiro — loja ${lojaNome}`,
+          descricao: `PIX confirmado pelo Financeiro — loja ${lojaNome}${anexo ? " (com evidência)" : ""}`,
           referencia_tipo: "solicitacao",
           referencia_id: solicitacao.id,
         });
       }
 
       queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
-      toast.success("PIX confirmado. Loja foi notificada.");
+      toast.success(anexo ? "PIX confirmado com evidência. Loja foi notificada." : "PIX confirmado. Loja foi notificada.");
+      setEvidencia(null);
+      if (fileRef.current) fileRef.current.value = "";
       onOpenChange(false);
     } catch (err: any) {
       toast.error("Erro ao confirmar: " + err.message);
@@ -150,6 +215,7 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const handleNaoConfirmar = async () => {
     setBusy("nao_confirmar");
     try {
+      const anexo = await uploadEvidencia();
       const target = await moverPara(
         "PIX Não Confirmado",
         { pix_nao_confirmado_at: new Date().toISOString() },
@@ -157,7 +223,7 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
       );
       if (!target) return;
 
-      await enviarRetornoLoja(MSG_NAO_CONFIRMADO);
+      await enviarRetornoLoja(MSG_NAO_CONFIRMADO, anexo);
 
       if (solicitacao.contato_id) {
         await supabase.from("eventos_crm").insert({
@@ -171,6 +237,8 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
 
       queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
       toast.success("Marcado como não confirmado. Loja foi avisada.");
+      setEvidencia(null);
+      if (fileRef.current) fileRef.current.value = "";
       onOpenChange(false);
     } catch (err: any) {
       toast.error("Erro: " + err.message);
@@ -352,7 +420,29 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
             </div>
           )}
 
+          {!isConfirmado && (
+            <div className="space-y-1 pt-2 border-t">
+              <Label className="text-xs flex items-center gap-1">
+                <Paperclip className="h-3 w-3" />
+                Evidência para a loja (imagem/PDF, opcional)
+              </Label>
+              <Input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,image/*"
+                disabled={!!busy}
+                onChange={(e) => setEvidencia(e.target.files?.[0] ?? null)}
+              />
+              {evidencia && (
+                <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+                  <Upload className="h-3 w-3" /> {evidencia.name} · {(evidencia.size / 1024).toFixed(0)} KB — será enviada à loja na demanda do Messenger.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-2 pt-2 border-t">
+
             {!isConfirmado && (
               <Button
                 onClick={handleConfirmar}
