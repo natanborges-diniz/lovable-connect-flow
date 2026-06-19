@@ -592,18 +592,23 @@ async function processHumano(
     .order("created_at", { ascending: false })
     .limit(10);
 
-  if (lastOutbound?.length) {
-    const humanOut = lastOutbound.find((m: any) => {
-      const nome = String(m.remetente_nome || "").toLowerCase();
-      return nome && !/gael|sistema|template|bot|ia\b/i.test(nome);
-    });
-    if (humanOut) {
-      const sinceOut = (now.getTime() - new Date(humanOut.created_at).getTime()) / (1000 * 3600);
-      if (sinceOut < COOLDOWN_HORAS) {
-        console.log(`[HUMANO-COOLDOWN] ${contato.nome}: consultor respondeu há ${Math.round(sinceOut)}h (<${COOLDOWN_HORAS}h)`);
-        return result;
-      }
-    }
+  const humanOutbounds = (lastOutbound || []).filter((m: any) => {
+    const nome = String(m.remetente_nome || "").toLowerCase();
+    return nome && !/gael|assistente|sistema|template|bot|ia\b|recupera/i.test(nome);
+  });
+
+  // Gate: sem nenhuma interação humana real, não faz sentido "retomar contexto".
+  // O alerta interno de inatividade (notificacoes) já cobra o time acima.
+  if (!humanOutbounds.length) {
+    console.log(`[HUMANO-SKIP] ${contato.nome}: nenhum operador interagiu ainda — pulando retomada/despedida`);
+    return result;
+  }
+
+  const humanOut = humanOutbounds[0];
+  const sinceOut = (now.getTime() - new Date(humanOut.created_at).getTime()) / (1000 * 3600);
+  if (sinceOut < COOLDOWN_HORAS) {
+    console.log(`[HUMANO-COOLDOWN] ${contato.nome}: consultor respondeu há ${Math.round(sinceOut)}h (<${COOLDOWN_HORAS}h)`);
+    return result;
   }
 
   // Despedida final: já atingiu MAX e passou FINAL_WAIT_HOURS desde a última tentativa
