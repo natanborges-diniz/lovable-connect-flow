@@ -5,6 +5,7 @@
 // receita plano — deploy trigger 2026-06-21
 // ocr aceita pdf — deploy trigger 2026-06-21
 // cidade escape — deploy trigger 2026-06-21
+// escape s2 — deploy trigger 2026-06-21
 // fatia1 direciona loja — merge 9cdd117
 // cidades reais botoes — R1+R2 merge fix/cidades-reais-e-botoes
 // classificador shadow — merge acde38b
