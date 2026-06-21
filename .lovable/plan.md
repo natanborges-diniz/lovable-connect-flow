@@ -1,46 +1,66 @@
-## Problema
+## Auditoria de uploads
 
-No caso da Dayane, o atendimento foi escalado para humano às 16:32, mas nenhum operador respondeu. Mesmo assim, 4h depois (~20:45) o cron `vendas-recuperacao-cron` disparou `retomada_contexto_1` em nome do "Sistema". A cliente reagiu reclamando ("nem falei com ninguém, péssimo atendimento"), e ainda recebeu **um segundo** `retomada_contexto_1` depois da resposta da IA — confundindo ainda mais.
+Varredura em todos os buckets/locais que aceitam anexo:
 
-Causa: a função `processHumano` (linhas 540-770 de `vendas-recuperacao-cron/index.ts`) só checa cooldown **se** existir outbound humano. Quando nunca houve interação humana, ela passa direto e dispara o template como se fosse "retomada" de uma conversa que nunca aconteceu.
+| Bucket | Path usado no upload | Policy INSERT atual | Status |
+|---|---|---|---|
+| `cpf-documentos` | `${solicitacao.id}/...` (CpfApprovalDialog) | exige `foldername[1] = auth.uid()` | **❌ quebrado para não-admin** (Felix/Leticia) |
+| `mensagens-anexos` | `demandas/{ano}/uuid.ext` (AcionarLojaDialog) | exige `foldername[1] = auth.uid()` | **❌ quebrado para todos** (a primeira pasta é "demandas") |
+| `mensagens-anexos` | `${user.id}/financeiro/...` (ConcluirSolicitacaoDialog, ConfirmarPixDialog) | mesma policy | ✅ funciona |
+| `mensagens-anexos` | `${uid}/atendimentos/...` (Pipeline.tsx, Atendimentos.tsx) | mesma policy | ✅ funciona |
+| `estoque-confirmacoes` | `{ano}/uuid.ext` | livre para authenticated | ✅ |
+| `solicitacao-anexos` | usada via EF | livre para authenticated | ✅ |
+| `whatsapp-media` | service_role | service_role | ✅ |
 
 ## Correção
 
-Adicionar um **gate de pré-condição** em `processHumano`: só executar a cadência de retomada se já existir pelo menos **uma mensagem outbound de operador humano real** no atendimento. Sem isso, o "retomar contexto" é mentira.
+Migration ajustando as policies dos dois buckets afetados — são internos (cpf privado, mensagens-anexos público apenas em SELECT) e quem chega no Dialog já passou pelo gate de módulo (Financeiro / Atendimentos).
 
-### Mudanças
+```sql
+-- cpf-documentos: libera INSERT/SELECT/UPDATE p/ qualquer authenticated; DELETE só admin.
+DROP POLICY IF EXISTS "Users upload own cpf docs" ON storage.objects;
+DROP POLICY IF EXISTS "Users read own cpf docs"   ON storage.objects;
+DROP POLICY IF EXISTS "Users update own cpf docs" ON storage.objects;
+DROP POLICY IF EXISTS "Users delete own cpf docs" ON storage.objects;
 
-**`supabase/functions/vendas-recuperacao-cron/index.ts` — função `processHumano`**
+CREATE POLICY "Financeiro upload cpf docs" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'cpf-documentos');
 
-Logo após calcular `lastOutbound` (linha ~593) e antes do bloco de cooldown, adicionar:
+CREATE POLICY "Financeiro read cpf docs" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (bucket_id = 'cpf-documentos');
 
-```ts
-const houveInteracaoHumana = (lastOutbound || []).some((m: any) => {
-  const nome = String(m.remetente_nome || "").toLowerCase();
-  return nome && !/gael|assistente|sistema|template|bot|ia\b|recupera/i.test(nome);
-});
+CREATE POLICY "Financeiro update cpf docs" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'cpf-documentos')
+  WITH CHECK (bucket_id = 'cpf-documentos');
 
-if (!houveInteracaoHumana) {
-  // Atendimento escalado mas operador ainda não respondeu —
-  // não faz sentido mandar "retomada de contexto". Mantém apenas
-  // o alerta de inatividade interno (notificacoes) já gerado acima.
-  console.log(`[HUMANO-SKIP] ${contato.nome}: nenhum operador interagiu ainda — pulando retomada`);
-  return result;
-}
+CREATE POLICY "Admin delete cpf docs" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (bucket_id = 'cpf-documentos' AND public.is_admin(auth.uid()));
+
+-- mensagens-anexos: libera INSERT/UPDATE/DELETE para qualquer authenticated
+-- (SELECT já é público — bucket usado em comprovantes, demandas, etc).
+DROP POLICY IF EXISTS "Anexos: upload do próprio usuário" ON storage.objects;
+DROP POLICY IF EXISTS "Anexos: update do próprio usuário" ON storage.objects;
+DROP POLICY IF EXISTS "Anexos: delete do próprio usuário" ON storage.objects;
+
+CREATE POLICY "Anexos: upload autenticado" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'mensagens-anexos');
+
+CREATE POLICY "Anexos: update autenticado" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'mensagens-anexos')
+  WITH CHECK (bucket_id = 'mensagens-anexos');
+
+CREATE POLICY "Anexos: delete autenticado" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (bucket_id = 'mensagens-anexos');
 ```
 
-Esse gate:
-- Mantém o alerta interno (`notificacoes` tipo `inatividade_humano`) que já é emitido antes — o time continua sendo cobrado.
-- Bloqueia tanto a tentativa 1 quanto a despedida final (a despedida `retomada_despedida` também não faz sentido sem nenhuma interação humana prévia).
-- Como o `lastOutbound` busca os últimos 10 outbounds, cobre os casos reais de handoff (1ª mensagem humana é o gatilho legítimo para a cadência).
+Nenhuma mudança de frontend é necessária — todos os componentes voltam a funcionar (CpfApprovalDialog para Felix/Leticia + AcionarLojaDialog com anexo para qualquer operador).
 
-### O que NÃO muda
-
-- Cadência IA (`processIA`) continua igual — não estava envolvida.
-- Cooldown humano de 24h após resposta do consultor continua igual.
-- Despedida e movimento para "Perdidos" continuam disparando normalmente **depois** que o operador interagiu pelo menos uma vez.
-- Alertas internos de inatividade para a equipe seguem funcionando — eles é que devem cobrar o operador, não um template para o cliente.
-
-## Resultado esperado
-
-Atendimentos escalados que ficam "órfãos" (operador nunca respondeu) deixam de receber `retomada_contexto_*`. A pressão volta para onde deve estar: notificação interna ao time. Quando o operador finalmente mandar a 1ª mensagem, a cadência de retomada passa a valer normalmente caso o cliente suma depois.
+## Resumo
+Duas RLS de Storage exigiam que a 1ª pasta do arquivo fosse o uid do usuário, mas o código grava com prefixo `solicitacao.id` ou `demandas/`. Libero leitura/escrita para autenticados nos buckets `cpf-documentos` e `mensagens-anexos` (delete do cpf segue restrito a admin). Sem alterações no frontend.
