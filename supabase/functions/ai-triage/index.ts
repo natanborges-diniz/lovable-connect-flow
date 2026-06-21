@@ -6598,11 +6598,12 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
         const _odNumCount = ["sphere","cylinder","axis","add"].filter((k) => typeof (od as any)[k] === "number").length;
         const _oeNumCount = ["sphere","cylinder","axis","add"].filter((k) => typeof (oe as any)[k] === "number").length;
         const _ocrSemValores = (_odNumCount + _oeNumCount) === 0;
-        const _ocrSoEsfericoZero =
-          (_odNumCount + _oeNumCount) > 0 &&
-          ![od.cylinder, oe.cylinder, od.axis, oe.axis, od.add, oe.add].some((v: any) => typeof v === "number") &&
-          (od.sphere === 0 || od.sphere == null) && (oe.sphere === 0 || oe.sphere == null);
-        const _ocrInutil = _ocrSemValores || _ocrSoEsfericoZero || rxType === "unknown";
+        // _ocrSoEsfericoZero REMOVIDO (Jun/2026): confundia sphere=0 (Plano legítimo, LLM leu
+        // zero) com sphere=null (LLM não leu). O caso OCR-falho-total (eyes:{}) já é coberto por
+        // _ocrSemValores (total de campos numéricos = 0). Receitas com OD/OE Plano puro passam
+        // para confirmação ao cliente — se o LLM alucionou zero numa foto ilegível, confidence
+        // < 0.80 já marca needsHumanReview e o cliente pode corrigir no fluxo de confirmação.
+        const _ocrInutil = _ocrSemValores || rxType === "unknown";
 
         if (_ocrInutil) {
           // ── CONTADOR DE FALHAS DE OCR (anti-loop) ──
