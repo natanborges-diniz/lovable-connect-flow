@@ -4235,9 +4235,19 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         const temCotacaoEnviada = /(🟢|🟡|💎|🟢\s*Econ[oô]mica|Intermedi[aá]ria|Premium)/i.test(outboundJoined)
           && /R\$\s?\d/.test(outboundJoined);
         if (temCotacaoEnviada && !detectRxConfirmation(lastInboundText) && !detectRxRejeicao(lastInboundText) && !detectPrescriptionCorrection(lastInboundText)) {
+          // B3a-FIX: marca confirmed_by_client_at na receita alvo (necessário para que
+          // receitaCtx e o gate pós-cotação (~7289) reconheçam confirmação implícita).
+          const _implIdx = typeof contatoMeta.receita_confirmacao?.rx_index === "number"
+            ? contatoMeta.receita_confirmacao.rx_index
+            : (Array.isArray(contatoMeta.receitas) ? contatoMeta.receitas.length - 1 : -1);
+          const _implReceitas = Array.isArray(contatoMeta.receitas) ? [...contatoMeta.receitas] : [];
+          if (_implIdx >= 0 && _implReceitas[_implIdx]) {
+            _implReceitas[_implIdx] = { ..._implReceitas[_implIdx], confirmed_by_client_at: new Date().toISOString() };
+          }
           await supabase.from("contatos").update({
             metadata: {
               ...contatoMeta,
+              receitas: _implReceitas.length ? _implReceitas : contatoMeta.receitas,
               receita_confirmacao: {
                 ...contatoMeta.receita_confirmacao,
                 pending: false,
@@ -4246,6 +4256,7 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
               },
             },
           }).eq("id", contatoId);
+          if (_implReceitas.length) { contatoMeta.receitas = _implReceitas; receitas = _implReceitas; }
           contatoMeta.receita_confirmacao = { ...contatoMeta.receita_confirmacao, pending: false, confirmed_at: new Date().toISOString(), confirmed_via: "cotacao_ja_enviada_implicito" };
           await supabase.from("eventos_crm").insert({
             contato_id: contatoId,
@@ -5195,11 +5206,22 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // e o layout novo de orçamento: "🟢 Mais em conta:" / "🟡 Um passo acima:" / "📌 Temos opções premium"
     const orcamentoOutboundRegex = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎|🟢\s*Mais em conta|🟡\s*Um passo acima|📌\s*Temos opções premium)/i;
     const recentOrcamento = (recentOutbound || []).slice(-3).find((t: string) => orcamentoOutboundRegex.test(t || "")) || "";
+    // B1-FIX: flag true quando cotação já foi enviada nesta sessão (via outbound ou
+    // pos_quote_botoes_at). Usado para suprimir [PÓS-RECEITA OBRIGATÓRIO] pós-cotação.
+    const _cotacaoJaFoiEnviada = !!(recentOrcamento || (atendimentoMeta as any)?.pos_quote_botoes_at);
     let orcamentoBrandsList: string[] = [];
     if (recentOrcamento) {
       // Extrai marcas dos formatos "*BRAND family*" e categorias
       const brandMatches = [...recentOrcamento.matchAll(/\*([A-Z][A-Z0-9 ]{1,12})\b/g)];
       orcamentoBrandsList = [...new Set(brandMatches.map(m => m[1].trim()).filter(b => b.length >= 3))];
+      // B2c-FIX: captura marcas em Title Case (ex: "*Hoya*", "*Essilor*") que a regex
+      // acima não pega por exigir ALL_CAPS — o orçamento usa Title Case nessas marcas.
+      const _tcBrandMatches = [...recentOrcamento.matchAll(/\*(Hoya|Essilor|Zeiss|Varilux|Kodak|Solflex)\b/g)];
+      for (const m of _tcBrandMatches) {
+        if (!orcamentoBrandsList.some(b => b.toLowerCase() === m[1].toLowerCase())) {
+          orcamentoBrandsList.push(m[1]);
+        }
+      }
     }
     const msgMencionaMarca = orcamentoBrandsList.some(b =>
       new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(currentMsg)
@@ -5549,7 +5571,9 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         : []),
       // B2.2: só dispara quando há receita da SESSÃO ATUAL — receitas não-confirmadas de
       // sessões anteriores não causam mais reapresentação automática no "olá".
-      ...(hasReceitasAtivasCtx && !hasPendingNewPrescriptionImage
+      // B1-FIX: suprime quando cotação já foi enviada (_cotacaoJaFoiEnviada) para que
+      // dúvidas pós-cotação (ex: "Balansis hoya") não re-disparem pedir confirmação.
+      ...(hasReceitasAtivasCtx && !hasPendingNewPrescriptionImage && !_cotacaoJaFoiEnviada
         ? [{
             role: "system",
             content: isLCContextGlobal
@@ -9492,6 +9516,15 @@ async function runQuoteWithFilter(
       const { data: cRow } = await supabase.from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
       const cMeta = (cRow?.metadata || {}) as Record<string, any>;
       if (cMeta?.receita_confirmacao?.pending === true) {
+        // B3b-FIX: marca confirmed_by_client_at na receita alvo.
+        const _addIdx = typeof cMeta.receita_confirmacao?.rx_index === "number"
+          ? cMeta.receita_confirmacao.rx_index
+          : (Array.isArray(cMeta.receitas) ? cMeta.receitas.length - 1 : -1);
+        if (_addIdx >= 0 && Array.isArray(cMeta.receitas) && cMeta.receitas[_addIdx]) {
+          const _addReceitas = [...cMeta.receitas];
+          _addReceitas[_addIdx] = { ..._addReceitas[_addIdx], confirmed_by_client_at: new Date().toISOString() };
+          cMeta.receitas = _addReceitas;
+        }
         cMeta.receita_confirmacao = { ...cMeta.receita_confirmacao, pending: false, confirmed_at: new Date().toISOString(), confirmed_via: "adicional_botao" };
         await supabase.from("contatos").update({ metadata: cMeta }).eq("id", atendimento.contato_id);
       }
@@ -9720,6 +9753,14 @@ Qual dia e horário ficaria melhor pra você? 😊`,
     await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me passar o número da OS (5 dígitos do comprovante) ou seu CPF? 😊");
     await patchMeta({ expected_reply: "os_aguardando_identificador" });
     return true;
+  }
+
+  // B2b-FIX: texto digitado após "Tirar dúvida" cai aqui. Limpa expected_reply e devolve
+  // false para que o LLM responda normalmente — o _cotacaoJaFoiEnviada já suprimiu o
+  // [PÓS-RECEITA OBRIGATÓRIO], então não há risco de re-pedido de confirmação.
+  if (expectedReply === "duvida_pos_cotacao") {
+    await patchMeta({ expected_reply: null });
+    return false;
   }
 
   if (!replyAction) return false;
@@ -10255,6 +10296,15 @@ async function routeButtonClick(args: {
         try {
           const { data: cRow } = await supabase.from("contatos").select("metadata").eq("id", atendimento.contato_id).maybeSingle();
           const cMeta = (cRow?.metadata || {}) as Record<string, any>;
+          // B3c-FIX: marca confirmed_by_client_at na receita alvo.
+          const _okIdx = typeof cMeta.receita_confirmacao?.rx_index === "number"
+            ? cMeta.receita_confirmacao.rx_index
+            : (Array.isArray(cMeta.receitas) ? cMeta.receitas.length - 1 : -1);
+          if (_okIdx >= 0 && Array.isArray(cMeta.receitas) && cMeta.receitas[_okIdx]) {
+            const _okReceitas = [...cMeta.receitas];
+            _okReceitas[_okIdx] = { ..._okReceitas[_okIdx], confirmed_by_client_at: new Date().toISOString() };
+            cMeta.receitas = _okReceitas;
+          }
           cMeta.receita_confirmacao = { ...(cMeta.receita_confirmacao || {}), pending: false, confirmed_at: new Date().toISOString(), confirmed_via: "botao_receita_ok" };
           await supabase.from("contatos").update({ metadata: cMeta }).eq("id", atendimento.contato_id);
         } catch (e) {
@@ -10289,7 +10339,10 @@ async function routeButtonClick(args: {
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
       return true;
     case "orcamento_duvida":
-      await patchMeta({ expected_reply: null, intent_detected: "duvida_pos_orcamento" });
+      // B2a-FIX: seta expected_reply="duvida_pos_cotacao" em vez de null — garante que a
+      // próxima msg do cliente passe por routeExpectedTypedReply e chegue ao LLM SEM o
+      // [PÓS-RECEITA OBRIGATÓRIO], que antes forçava re-confirmação de receita.
+      await patchMeta({ expected_reply: "duvida_pos_cotacao", intent_detected: "duvida_pos_orcamento" });
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Claro! Me diz qual ponto da cotação você quer que eu explique melhor 😊");
       return true;
     case "orcamento_mais_barato":
