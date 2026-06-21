@@ -1,4 +1,5 @@
 // orcamento oculos deterministico 2026-06-10
+// modo consultivo
 // receita B1 B2 deploy trigger 2026-06-12 (re-deploy pós-merge github)
 // deploy trigger 2026-06-15b — safety net _receitasCurrentSession (ebb1522)
 // loop receita pos cotacao — deploy trigger 2026-06-21
