@@ -1,6 +1,7 @@
 // orcamento oculos deterministico 2026-06-10
 // receita B1 B2 deploy trigger 2026-06-12 (re-deploy pós-merge github)
 // deploy trigger 2026-06-15b — safety net _receitasCurrentSession (ebb1522)
+// loop receita pos cotacao — deploy trigger 2026-06-21
 // fatia1 direciona loja — merge 9cdd117
 // cidades reais botoes — R1+R2 merge fix/cidades-reais-e-botoes
 // classificador shadow — merge acde38b
