@@ -1,66 +1,43 @@
-## Auditoria de uploads
+# Fix: títulos de botão WhatsApp cortados
 
-Varredura em todos os buckets/locais que aceitam anexo:
+## Causa
 
-| Bucket | Path usado no upload | Policy INSERT atual | Status |
-|---|---|---|---|
-| `cpf-documentos` | `${solicitacao.id}/...` (CpfApprovalDialog) | exige `foldername[1] = auth.uid()` | **❌ quebrado para não-admin** (Felix/Leticia) |
-| `mensagens-anexos` | `demandas/{ano}/uuid.ext` (AcionarLojaDialog) | exige `foldername[1] = auth.uid()` | **❌ quebrado para todos** (a primeira pasta é "demandas") |
-| `mensagens-anexos` | `${user.id}/financeiro/...` (ConcluirSolicitacaoDialog, ConfirmarPixDialog) | mesma policy | ✅ funciona |
-| `mensagens-anexos` | `${uid}/atendimentos/...` (Pipeline.tsx, Atendimentos.tsx) | mesma policy | ✅ funciona |
-| `estoque-confirmacoes` | `{ano}/uuid.ext` | livre para authenticated | ✅ |
-| `solicitacao-anexos` | usada via EF | livre para authenticated | ✅ |
-| `whatsapp-media` | service_role | service_role | ✅ |
+Meta limita `button.reply.title` a **20 caracteres**, e emojis multibyte (🔎, 💬) contam como 2 unidades UTF-16. O helper `trunc(b.titulo, 20)` em `supabase/functions/send-whatsapp/index.ts` corta com `…` quando estoura — o que está acontecendo no menu de loop e nas reações ao orçamento.
 
-## Correção
+Strings atuais (todas com 21 unidades):
+- `🔎 Quero um orçamento`
+- `💬 Falar com a equipe`
 
-Migration ajustando as policies dos dois buckets afetados — são internos (cpf privado, mensagens-anexos público apenas em SELECT) e quem chega no Dialog já passou pelo gate de módulo (Financeiro / Atendimentos).
+`📅 Agendar visita` (17) passa direto.
 
-```sql
--- cpf-documentos: libera INSERT/SELECT/UPDATE p/ qualquer authenticated; DELETE só admin.
-DROP POLICY IF EXISTS "Users upload own cpf docs" ON storage.objects;
-DROP POLICY IF EXISTS "Users read own cpf docs"   ON storage.objects;
-DROP POLICY IF EXISTS "Users update own cpf docs" ON storage.objects;
-DROP POLICY IF EXISTS "Users delete own cpf docs" ON storage.objects;
+## Mudança proposta
 
-CREATE POLICY "Financeiro upload cpf docs" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'cpf-documentos');
+Encurtar apenas os títulos visíveis no botão (mantendo `id` e fluxo intactos):
 
-CREATE POLICY "Financeiro read cpf docs" ON storage.objects
-  FOR SELECT TO authenticated
-  USING (bucket_id = 'cpf-documentos');
+| Antes | Depois | Tamanho |
+|---|---|---|
+| `🔎 Quero um orçamento` | `🔎 Orçamento` | 12 |
+| `💬 Falar com a equipe` | `💬 Falar com equipe` | 19 |
+| `📅 Agendar visita` | `📅 Agendar visita` | 17 (sem mudança) |
 
-CREATE POLICY "Financeiro update cpf docs" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (bucket_id = 'cpf-documentos')
-  WITH CHECK (bucket_id = 'cpf-documentos');
+## Arquivos afetados
 
-CREATE POLICY "Admin delete cpf docs" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (bucket_id = 'cpf-documentos' AND public.is_admin(auth.uid()));
+`supabase/functions/ai-triage/index.ts`, três blocos:
 
--- mensagens-anexos: libera INSERT/UPDATE/DELETE para qualquer authenticated
--- (SELECT já é público — bucket usado em comprovantes, demandas, etc).
-DROP POLICY IF EXISTS "Anexos: upload do próprio usuário" ON storage.objects;
-DROP POLICY IF EXISTS "Anexos: update do próprio usuário" ON storage.objects;
-DROP POLICY IF EXISTS "Anexos: delete do próprio usuário" ON storage.objects;
+1. **Linhas 6427–6431** — menu de loop ("Pode me ajudar a te ajudar melhor?")
+   - `loop_menu_orcamento` → `🔎 Orçamento`
+   - `loop_menu_humano` → `💬 Falar com equipe`
 
-CREATE POLICY "Anexos: upload autenticado" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'mensagens-anexos');
+2. **Linha 9677** — reação ao orçamento (mesmos botões `orcamento_agendar` / `orcamento_duvida` / `orcamento_mais_barato`). Verificar se `orcamento_duvida` e `orcamento_mais_barato` também estouram e ajustar (provavelmente sim — `💸 Quero mais barato` ~21).
 
-CREATE POLICY "Anexos: update autenticado" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (bucket_id = 'mensagens-anexos')
-  WITH CHECK (bucket_id = 'mensagens-anexos');
+3. **Linha 10099** — segundo ponto que reusa `orcamento_agendar`. Mesma normalização.
 
-CREATE POLICY "Anexos: delete autenticado" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (bucket_id = 'mensagens-anexos');
-```
+## Validação
 
-Nenhuma mudança de frontend é necessária — todos os componentes voltam a funcionar (CpfApprovalDialog para Felix/Leticia + AcionarLojaDialog com anexo para qualquer operador).
+- `grep` no arquivo deployado após edit confirma novos títulos.
+- Reabrir conversa de teste 11963268878, disparar loop e reação ao orçamento, conferir botões na imagem do WhatsApp.
+- Garantir que `routeButtonClick()` continua casando pelos `id`s (não tocados).
 
-## Resumo
-Duas RLS de Storage exigiam que a 1ª pasta do arquivo fosse o uid do usuário, mas o código grava com prefixo `solicitacao.id` ou `demandas/`. Libero leitura/escrita para autenticados nos buckets `cpf-documentos` e `mensagens-anexos` (delete do cpf segue restrito a admin). Sem alterações no frontend.
+## Escopo
+
+Só presentation/strings em `ai-triage`. Sem mudança em `send-whatsapp`, sem migração, sem alteração de tools/LLM.

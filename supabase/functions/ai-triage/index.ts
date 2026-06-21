@@ -6426,9 +6426,9 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
             type: "button",
             texto: "Pode me ajudar a te ajudar melhor? 😊",
             botoes: [
-              { id: "loop_menu_orcamento", titulo: "🔎 Quero um orçamento" },
+              { id: "loop_menu_orcamento", titulo: "🔎 Orçamento" },
               { id: "loop_menu_agendar",   titulo: "📅 Agendar visita" },
-              { id: "loop_menu_humano",    titulo: "💬 Falar com a equipe" },
+              { id: "loop_menu_humano",    titulo: "💬 Falar com equipe" },
             ],
           });
           await supabase.from("atendimentos").update({
