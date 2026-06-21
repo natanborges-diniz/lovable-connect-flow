@@ -9655,6 +9655,23 @@ async function routeExpectedTypedReply(args: {
     if (!cidade) {
       // Não reconheceu cidade real — responder deterministicamente, NUNCA cair no LLM.
       const tNorm = _normTxt(mensagemTexto);
+
+      // Escape hatch: cliente expressa intenção clara diferente de escolher cidade.
+      // Exemplo: "quero fazer óculos" (orçamento) chega enquanto expected_reply="cidade_selecao"
+      // ainda está ativo de turno anterior. Sem este escape, o branch tratava como cidade
+      // ambígua e relançava os botões, prendendo o cliente no loop.
+      // Limpa expected_reply e retorna false → cascata/LLM assume normalmente.
+      // Só dispara quando detectCidadeEscolhida retornou null (cidades reais passam acima).
+      const isIntencaoClaraEscape =
+        OCULOS_COMPRA_RE.test(tNorm)
+        || /\b(or[cç]ament[oa]|or[cç]ar|pre[cç]o|valor|custa|cotac[aã]o|quanto\s+(custa|fica|sai))\b/.test(tNorm)
+        || /\blente[s]?\s+de\s+contato\b/.test(tNorm);
+      if (isIntencaoClaraEscape) {
+        await patchMeta({ expected_reply: null });
+        console.log(`[CIDADE-ESCAPE] intenção clara detectada, clearing expected_reply — "${mensagemTexto.slice(0, 80)}"`);
+        return false;
+      }
+
       // Recusa explícita ("não obrigada", "tchau", "não vou precisar") → encerramento educado.
       const isRecusaExplicita = /\bnao\b.{0,15}\b(obrigad|precis|quero|interess|vai\s+dar|vou)\b|\b(tchau|ate\s+logo|falou|encerr|cancela)\b/.test(tNorm)
         && !/\b(osasco|carapicuiba|itapevi|barueri|alphaville)\b/.test(tNorm);
