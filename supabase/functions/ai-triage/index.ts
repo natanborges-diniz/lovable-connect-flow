@@ -1322,10 +1322,18 @@ const OCULOS_COMPRA_RE = /(?<!onde\s)\b(fazer|comprar|trocar|renovar)\b.{0,30}\b
 // Detecta intenção clara diferente de "escolher cidade" — usada como escape hatch
 // nos dois sistemas paralelos de seleção de cidade (S1: routeExpectedTypedReply;
 // S2: bloco pos_orcamento). Recebe tNorm = _normTxt(mensagem).
+function _isProdutoDuvida(tNorm: string): boolean {
+  // Detecta perguntas de produto/dúvida que NÃO são pedidos de ação (cotar/agendar).
+  // Usado por _isEscapeIntent (escape de pos_orcamento) e isDuvidaPosOrcamento (modo consultivo).
+  return /\b(o\s+que\s+[eé]|o\s+que\s+tem|por\s*qu[eê]|qual\s+a?\s+diferen[cç]a|diferen[cç]a[s]?|especial|vale\s+a\s+pena|explica|como\s+funciona|vantage[mn][s]?|melhor\s+pra|ideal\s+pra|tem\s+de\s+especial|caracteristica[s]?|tecnologia|detalh[ae]r?)\b/.test(tNorm)
+    || (/\b(varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax|transitions|antirreflexo|filtro\s+azul|fotossensivel|luz\s+azul)\b/.test(tNorm) && /\?/.test(tNorm));
+}
+
 function _isEscapeIntent(tNorm: string): boolean {
   return OCULOS_COMPRA_RE.test(tNorm)
     || /\b(or[cç]ament[oa]|or[cç]ar|pre[cç]o|valor|custa|cotac[aã]o|quanto\s+(custa|fica|sai))\b/.test(tNorm)
-    || /\blente[s]?\s+de\s+contato\b/.test(tNorm);
+    || /\blente[s]?\s+de\s+contato\b/.test(tNorm)
+    || _isProdutoDuvida(tNorm);
 }
 
 // ── Validação de receita ──
@@ -4737,13 +4745,22 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, ask);
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_loja_definida"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
-          const tries = Number(posOrc.tries_loja || 0) + 1;
-          if (tries < 2) {
-            await sendListaLojasDaCidade(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, posOrc.cidade || "osasco", lojas, contatoId);
-            await _setPosOrc({ ...posOrc, tries_loja: tries });
-            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          // Escape hatch: mesmo critério de aguardando_cidade.
+          if (_isEscapeIntent(_normTxt(lastInboundText))) {
+            await _setPosOrc(null);
+            await supabase.from("atendimentos")
+              .update({ metadata: { ...atendimentoMeta, expected_reply: null } })
+              .eq("id", atendimento_id);
+            console.log(`[POS-ORC-ESCAPE] loja — intenção/dúvida clara, limpando pos_orcamento — "${lastInboundText.slice(0, 80)}"`);
+          } else {
+            const tries = Number(posOrc.tries_loja || 0) + 1;
+            if (tries < 2) {
+              await sendListaLojasDaCidade(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, posOrc.cidade || "osasco", lojas, contatoId);
+              await _setPosOrc({ ...posOrc, tries_loja: tries });
+              return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+            }
+            await _setPosOrc(null);
           }
-          await _setPosOrc(null);
         }
       }
     }
@@ -5247,9 +5264,29 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     // e o layout novo de orçamento: "🟢 Mais em conta:" / "🟡 Um passo acima:" / "📌 Temos opções premium"
     const orcamentoOutboundRegex = /(🔍\s*\*Opções|Econômica:|Intermediária:|Premium:|💚|💛|💎|🟢\s*Mais em conta|🟡\s*Um passo acima|📌\s*Temos opções premium)/i;
     const recentOrcamento = (recentOutbound || []).slice(-3).find((t: string) => orcamentoOutboundRegex.test(t || "")) || "";
+
+    // ── MODO CONSULTIVO: dúvida pós-cotação ──
+    // _metaIsDuvida: client clicou "Tirar dúvida" → intent setado em turno anterior.
+    // _inlineDuvida: client digitou pergunta de produto enquanto expected_reply="pos_cotacao"
+    // (sem clicar o botão), detectado inline via _isProdutoDuvida.
+    const _metaIsDuvida = (atendimentoMeta as any)?.intent_detected === "duvida_pos_orcamento";
+    const _inlineDuvida = !_metaIsDuvida
+      && (atendimentoMeta as any)?.expected_reply === "pos_cotacao"
+      && _isProdutoDuvida(_normTxt(lastInboundText));
+    const isDuvidaPosOrcamento = _metaIsDuvida || _inlineDuvida;
+    if (_inlineDuvida) {
+      // Persiste modo consultivo + limpa expected_reply para próxima mensagem
+      supabase.from("atendimentos")
+        .update({ metadata: { ...atendimentoMeta, expected_reply: null, intent_detected: "duvida_pos_orcamento" } })
+        .eq("id", atendimento_id)
+        .then(() => {}).catch(() => {});
+      console.log(`[DUVIDA-INLINE] Pergunta de produto em pos_cotacao — modo consultivo ativo`);
+    }
+
     // B1-FIX: flag true quando cotação já foi enviada nesta sessão (via outbound ou
-    // pos_quote_botoes_at). Usado para suprimir [PÓS-RECEITA OBRIGATÓRIO] pós-cotação.
-    const _cotacaoJaFoiEnviada = !!(recentOrcamento || (atendimentoMeta as any)?.pos_quote_botoes_at);
+    // pos_quote_botoes_at). isDuvidaPosOrcamento também garante supressão — se o cliente
+    // está em dúvida, cotação já foi enviada por definição.
+    const _cotacaoJaFoiEnviada = !!(recentOrcamento || (atendimentoMeta as any)?.pos_quote_botoes_at || isDuvidaPosOrcamento);
     let orcamentoBrandsList: string[] = [];
     if (recentOrcamento) {
       // Extrai marcas dos formatos "*BRAND family*" e categorias
@@ -5654,6 +5691,36 @@ EXEMPLO DE TOM (Essilor vs Zeiss):
 A *Zeiss SmartLife Individual 3* é alemã, top de linha. Ela é personalizada ao seu rosto e armação, garantindo visão periférica perfeita. Tem DuraVision Platinum UV (antirreflexo super resistente) + BlueGuard, que é filtro azul integrado no material da lente.
 
 ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me chamar.` : "Resumo: Essilor é referência em conforto digital; Zeiss entrega precisão alemã sob medida. Quer fechar com uma delas, ou prefere agendar pra experimentar com armação?"}"`,
+          }]
+        : []),
+      // ── MODO CONSULTIVO — DÚVIDA PÓS-COTAÇÃO ──
+      // Injeta quando o cliente está tirando dúvida sobre produto (não pedindo nova cotação).
+      // isDetalhamentoContext já cobre pedidos explícitos de comparativo — esse bloco cobre
+      // perguntas de produto mais abertas ("Tem varilux?", "O que tem de especial?", etc.)
+      // que não bateram no detector de detalhamento mas estão em contexto de dúvida.
+      ...(isDuvidaPosOrcamento && !isDetalhamentoContext
+        ? [{
+            role: "system",
+            content: `[MODO CONSULTIVO — DÚVIDA PÓS-COTAÇÃO] O cliente está tirando dúvida sobre produto/lentes. NÃO repita o orçamento. NÃO chame consultar_lentes de novo. NÃO force agendamento nesta resposta.
+
+RESPONDA A DÚVIDA com base no conhecimento abaixo. Use a tool responder.
+
+CONHECIMENTO DAS MARCAS:
+- DNZ (HDI / DMAX): linha própria Diniz, custo-benefício, antirreflexo AR Verde/Azul, fabricação nacional.
+- ESSILOR: francesa, líder global. Varilux = referência em progressivos (multifocais). Eyezen/Eyezen Boost = redução de fadiga digital (zonas de relaxamento pra tela). Crizal Prevencia = antirreflexo + filtro de luz azul nociva + UV. Crizal Sapphire HR = antirreflexo premium, máxima transparência.
+- ZEISS: alemã, engenharia de precisão. SmartLife Individual = personalizada ao rosto/armação, visão periférica perfeita. DuraVision Platinum UV = antirreflexo super resistente + proteção UV total. BlueGuard = filtro de luz azul INTEGRADO ao material da lente (não é camada superficial — toda a lente protege).
+- HOYA: japonesa, premium. Hi-Vision LongLife = antirreflexo durável. iD MyStyle = multifocais sob medida.
+- KODAK: intermediário-premium acessível, tratamentos CleAR.
+
+CAMPOS COM EVIDÊNCIA REAL (PODE afirmar com segurança):
+- Índice numérico (ex: 1.74): quanto maior o índice, mais fina e leve a lente para o mesmo grau.
+- blue=true na lente cotada: PODE dizer "tem filtro de luz azul".
+- photo=true na lente cotada: PODE dizer "é fotossensível (escurece com a luz solar)".
+- treatment (ex: "Crizal Prevencia", "BlueGuard"): PODE explicar conforme o conhecimento acima.
+
+NÃO INVENTE: NÃO diga "reduz fadiga visual" sem que seja Eyezen/linha digital. NÃO diga "mais confortável que X". NÃO prometa características que não estão nos campos acima.
+
+APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visita OU comparar com outra opção. ${agendamentoFmt ? `Cliente JÁ TEM AGENDAMENTO (${agendamentoFmt}) — NÃO reoferte agendamento, encerre com "Te espero ${agendamentoFmt} 👋".` : "Sem forçar — se o cliente quiser fechar, ótimo; se quiser mais dúvidas, responda."}`,
           }]
         : []),
       ...((isShortNo || isShortNoToHelp || isThanksClose || isExplicitClose)
@@ -6152,7 +6219,7 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
     );
 
     const lastOutboundForIntent = (recentOutbound || []).slice(-1)[0] || "";
-    const forcedIntent = detectForcedToolIntent(
+    const _forcedIntentRaw = detectForcedToolIntent(
       lastInboundText,
       hasValidReceitas,
       hasRecentUnparsedPrescriptionImage && !hasValidReceitas,
@@ -6161,6 +6228,15 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
       lastOutboundForIntent,
       recentInboundText,
     );
+    // Modo consultivo: suprime brand_refinement→consultar_lentes quando o cliente está
+    // em dúvida pós-cotação. "Tem varilux?" é pergunta de produto, não pedido de re-cotação.
+    // Outras razões de forcedIntent (região, store_visit, agendar, etc.) são preservadas.
+    const forcedIntent = (isDuvidaPosOrcamento
+      && _forcedIntentRaw?.tool === "consultar_lentes"
+      && typeof _forcedIntentRaw?.reason === "string"
+      && _forcedIntentRaw.reason.startsWith("brand_refinement:"))
+      ? (console.log(`[DUVIDA-CONSULTIVA] Suprimindo brand_refinement em modo consultivo — "${lastInboundText.slice(0, 60)}"`), null)
+      : _forcedIntentRaw;
 
     // ── REFERÊNCIA A OPÇÃO DO ORÇAMENTO ANTERIOR ──
     // Caso Paulo Henrique 2026-04-27 16:49: cliente disse "Quero orçamento da 1 e 2 por favor"
