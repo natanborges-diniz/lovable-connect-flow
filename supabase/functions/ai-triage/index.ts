@@ -6300,22 +6300,50 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           });
           console.log(`[LOOP-DETECTOR] Brand refinement intercepted (${brandFilter}) — forcing consultar_lentes instead of escalation`);
         } else {
-          console.log(`[LOOP-DETECTOR] No clear intent — escalating to human`);
+          // Menu suave: se já enviou menu recentemente (< 5min), aí sim escala.
+          const _loopMenuAt = (atendimentoMeta as any)?.loop_menu_enviado_at;
+          const _loopMenuRecente = _loopMenuAt && (Date.now() - new Date(_loopMenuAt).getTime()) < 5 * 60 * 1000;
+          const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+          if (_loopMenuRecente) {
+            console.log(`[LOOP-DETECTOR] No clear intent + menu já enviado — escalating to human`);
+            await supabase.from("eventos_crm").insert({
+              contato_id: contatoId, tipo: "loop_ia_escalado",
+              descricao: `Loop sem intent claro (menu suave ignorado) — escalado para humano (similaridade ${(loopCheck.similarity * 100).toFixed(0)}%)`,
+              metadata: { similarity: loopCheck.similarity, last_inbound: lastInboundText.substring(0, 200) },
+              referencia_tipo: "atendimento", referencia_id: atendimento_id,
+            });
+            await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+            const escMsg = isHorarioHumano()
+              ? "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊"
+              : mensagemEscaladaForaHorario(_np);
+            await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, escMsg);
+            return jsonResponse({
+              status: "ok", tools_used: ["loop_escalation_fallback"], intencao: "outro",
+              precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: "humano",
+            });
+          }
+          console.log(`[LOOP-DETECTOR] No clear intent — enviando menu suave`);
           await supabase.from("eventos_crm").insert({
-            contato_id: contatoId, tipo: "loop_ia_escalado",
-            descricao: `Loop sem intent claro — escalado para humano (similaridade ${(loopCheck.similarity * 100).toFixed(0)}%)`,
+            contato_id: contatoId, tipo: "loop_ia_menu_suave",
+            descricao: `Loop sem intent claro — menu suave enviado (similaridade ${(loopCheck.similarity * 100).toFixed(0)}%)`,
             metadata: { similarity: loopCheck.similarity, last_inbound: lastInboundText.substring(0, 200) },
             referencia_tipo: "atendimento", referencia_id: atendimento_id,
           });
-          await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
-          const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
-          const escMsg = isHorarioHumano()
-            ? "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊"
-            : mensagemEscaladaForaHorario(_np);
-          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, escMsg);
+          await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+            type: "button",
+            texto: "Pode me ajudar a te ajudar melhor? 😊",
+            botoes: [
+              { id: "loop_menu_orcamento", titulo: "🔎 Quero um orçamento" },
+              { id: "loop_menu_agendar",   titulo: "📅 Agendar visita" },
+              { id: "loop_menu_humano",    titulo: "💬 Falar com a equipe" },
+            ],
+          });
+          await supabase.from("atendimentos").update({
+            metadata: { ...atendimentoMeta, loop_menu_enviado_at: new Date().toISOString(), expected_reply: "menu_triagem" },
+          }).eq("id", atendimento_id);
           return jsonResponse({
-            status: "ok", tools_used: ["loop_escalation"], intencao: "outro",
-            precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: "humano",
+            status: "ok", tools_used: ["loop_menu_suave"], intencao: "outro",
+            precisa_humano: false, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo,
           });
         }
       }
@@ -10157,6 +10185,49 @@ async function routeButtonClick(args: {
   }
 
   switch (buttonId) {
+    // ── Botões do menu suave do loop detector ──
+    case "loop_menu_orcamento":
+      // Limpa o estado de menu e delega ao mesmo fluxo do botão "orcamento" do menu de triagem.
+      await patchMeta({ loop_menu_enviado_at: undefined, expected_reply: null });
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Beleza! O orçamento é pra qual tipo de lente? 😊",
+        botoes: [
+          { id: "orcamento_oculos", titulo: "👓 Óculos" },
+          { id: "orcamento_lc", titulo: "👁️ Lentes de contato" },
+          { id: "orcamento_indef", titulo: "🤔 Ainda não sei" },
+        ],
+      });
+      await patchMeta({ intent_detected: "orcamento", expected_reply: "orcamento_tipo" });
+      return true;
+    case "loop_menu_agendar":
+      await patchMeta({ loop_menu_enviado_at: undefined, expected_reply: null });
+      await sendListaCidades(supabase, supabaseUrl, serviceKey, atId, atendimentoMeta);
+      return true;
+    case "loop_menu_humano": {
+      await patchMeta({ loop_menu_enviado_at: undefined, expected_reply: null });
+      const _npLM = (atendimento.contato_id || "");
+      const { data: _ctLM } = await supabase.from("contatos").select("nome").eq("id", _npLM).maybeSingle();
+      const _nomeLM = ((_ctLM?.nome || "").split(/\s+/)[0]) || "";
+      const escMsgLM = isHorarioHumano()
+        ? "Claro! Vou chamar alguém da equipe pra te ajudar. Um momento 😊"
+        : mensagemEscaladaForaHorario(_nomeLM);
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, escMsgLM);
+      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
+      await supabase.from("eventos_crm").insert({
+        contato_id: atendimento.contato_id, tipo: "loop_ia_escalado",
+        descricao: "Loop: cliente optou por falar com a equipe via menu suave",
+        referencia_tipo: "atendimento", referencia_id: atId,
+      });
+      try {
+        await fetch(`${supabaseUrl}/functions/v1/summarize-atendimento`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ atendimento_id: atId }),
+        });
+      } catch (_) { /* best effort */ }
+      return true;
+    }
     case "orcamento":
       await sendInteractive(supabaseUrl, serviceKey, atId, {
         type: "button",
