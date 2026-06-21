@@ -772,6 +772,13 @@ const OS_INTENT_CORE_REGEX: RegExp[] = [
   /\b(pedido|encomenda|[oó]culos|compra)\b[\s\S]{0,20}\b(atras(ado|ada)?|demor(a|ando|ou)|n[aã]o chegou|ainda n[aã]o)\b/i,
   // "cad[eê] (meu) pedido/oculos/encomenda"
   /\bcad[eê]\b[\s\S]{0,20}\b(meu|minha|o|a)?\s*(pedido|encomenda|[oó]culos|compra|os)\b/i,
+  // INVERSA da RE3 — "status/situação/andamento ... pedido/óculos" (ordem trocada,
+  // formulações formais tipo "gostaria de saber o status de outro pedido").
+  // Trigger inicial é palavra de CONSULTA (status, situação, andamento, previsão, novidade,
+  // posição, atualização, retirada/retirar) — não casa "fazer/quero pedido" (orçamento).
+  /\b(status|situa[cç][aã]o|andamento|previs[aã]o|novidade|posi[cç][aã]o|atualiza[cç][aã]o|retirada|retirar)\b[\s\S]{0,40}\b(meu|do|de|outro|outra|esse|este)?\s*(pedido|encomenda|compra|os|[oó]culos|len(te|tes))\b/i,
+  // "como (está/anda/tá/fica) (meu/o/esse) pedido/encomenda/óculos" — paráfrase coloquial
+  /\bcomo\s+(est[aá]|anda|t[aá]|fica|vai)\b[\s\S]{0,20}\b(meu|o|seu|esse|este)?\s*(pedido|encomenda|compra|os|[oó]culos|len(te|tes))\b/i,
 ];
 
 function matchesConsultaOs(msg: string, keywords: string[]): boolean {
