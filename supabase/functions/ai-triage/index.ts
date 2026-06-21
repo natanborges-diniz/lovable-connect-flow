@@ -1192,6 +1192,18 @@ function imageContentFromBase64(base64String: string, mimeType: string): any | n
   };
 }
 
+// Entrega PDF ao LLM via content type "file" (GPT-5 vision aceita application/pdf).
+// Diferente de imageContentFromBase64: sem verificação de assinatura (PDF não tem magic bytes
+// de imagem) e formato de content diferente.
+function pdfContentFromBase64(base64String: string, filename = "receita.pdf"): any | null {
+  const cleaned = cleanBase64(base64String);
+  if (!cleaned) return null;
+  return {
+    type: "file",
+    file: { filename, file_data: `data:application/pdf;base64,${cleaned}` },
+  };
+}
+
 function matchesEscalation(msg: string): boolean {
   const n = norm(msg);
   return ESCALATION_KEYWORDS.some((kw) => n.includes(norm(kw)));
@@ -4132,7 +4144,6 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     const latestImageCtxIndex = latestInboundImageIndex >= contextWindowOffset
       ? latestInboundImageIndex - contextWindowOffset
       : -1;
-
     // Detect if the CURRENT message (last inbound) is an image
     const inboundMsgs = allMsgs.filter((m: any) => m.direcao === "inbound");
     const lastInbound = inboundMsgs.slice(-1)[0];
@@ -4146,12 +4157,16 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
     const last5Inbound = inboundMsgs.slice(-5);
     const hasRecentUnparsedPrescriptionImage = last5Inbound.some(
       (m: any) => (m.tipo_conteudo || "text") === "image"
+        // PDF de receita tratado como imagem para fins de detecção de OCR pendente
+        || ((m.tipo_conteudo || "text") === "document" && (m.metadata as any)?.mime_type === "application/pdf")
     );
     const customerInsistsAlreadySent = /\bj[aá]\s*mandei\b|\bj[aá]\s*enviei\b|\bja foi\b|\bmande[iy]\b.*\breceita\b|\bcad[eê]\b|\bcad[eê].*receita\b/i.test(lastInboundText);
-    // Image context = last msg is image OR there's a pending unparsed image in recent history with no interpretation yet
+    // Image context = last msg is image/PDF OR there's a pending unparsed image/PDF in recent history
     const lastIsImage = (lastInbound?.tipo_conteudo || "text") === "image"
+      || ((lastInbound?.tipo_conteudo || "text") === "document" && (lastInbound?.metadata as any)?.mime_type === "application/pdf")
       || /\[image\]|\[document\]/.test(currentMsg)
-      || (media?.inline_base64 && media?.mime_type?.startsWith("image/"));
+      || (media?.inline_base64 && media?.mime_type?.startsWith("image/"))
+      || (media?.tipo_conteudo === "document" && media?.mime_type === "application/pdf");
     // Receita salva mas vazia/`unknown` (caso Jardel) NÃO conta — força nova OCR.
     let hasValidReceitas = hasReceitasValidas(receitas);
 
@@ -5715,6 +5730,61 @@ ${agendamentoFmt ? `Te espero ${agendamentoFmt} 👋 Qualquer dúvida é só me 
           messages.push({
             role: "system",
             content: "[SISTEMA: ⚠️ Há uma imagem do cliente no histórico que NÃO foi entregue ao modelo (falha de download). NUNCA diga 'recebi sua receita', 'parece ser uma receita' ou similar. NÃO chame interpretar_receita. Peça ao cliente que reenvie a foto da receita com boa iluminação, sem reflexos, segurando firme. Se ele já reclamou que enviou ('já mandei'), peça desculpa pelo problema técnico e oriente o reenvio uma única vez.]",
+          });
+        }
+      } else if (tipo === "document" && (m.metadata as any)?.mime_type === "application/pdf" && role === "user") {
+        // ── PDF de receita: entrega ao GPT-5 via content type "file" ──
+        // O inlineBase64 do webhook é null para PDFs — sempre baixamos do media_url do bucket.
+        // Limite do Lovable gateway: 10 MB. Acima disso, pedimos foto em vez do PDF.
+        const pdfCaption = m.conteudo && m.conteudo !== "[document]"
+          ? m.conteudo
+          : "[Cliente enviou um PDF — provável receita]";
+
+        let pdfContent: any | null = null;
+        try {
+          if (mediaUrl) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            try {
+              const pdfResp = await fetch(mediaUrl, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              if (pdfResp.ok) {
+                const pdfBuffer = await pdfResp.arrayBuffer();
+                const pdfBytes = new Uint8Array(pdfBuffer);
+                const PDF_MAX_BYTES = 10 * 1024 * 1024; // 10 MB — limite do gateway Lovable
+                if (pdfBytes.length > PDF_MAX_BYTES) {
+                  console.warn(`[MEDIA-PDF] PDF muito grande (${(pdfBytes.length / 1024 / 1024).toFixed(1)}MB > 10MB) — pedindo foto`);
+                  // pdfContent permanece null → fallback abaixo instrui o LLM a pedir foto
+                } else {
+                  let binary = "";
+                  const chunkSize = 8192;
+                  for (let j = 0; j < pdfBytes.length; j += chunkSize) {
+                    binary += String.fromCharCode(...pdfBytes.subarray(j, j + chunkSize));
+                  }
+                  const fname = String(m.conteudo || "receita.pdf").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 60) || "receita.pdf";
+                  pdfContent = pdfContentFromBase64(btoa(binary), fname.endsWith(".pdf") ? fname : "receita.pdf");
+                  if (pdfContent) console.log(`[MEDIA-PDF] PDF entregue (${(pdfBytes.length / 1024).toFixed(0)}KB, ctx index ${i})`);
+                }
+              } else {
+                console.warn(`[MEDIA-PDF] media_url retornou ${pdfResp.status}`);
+              }
+            } catch (dlErr) {
+              console.warn(`[MEDIA-PDF] Falha no download do PDF:`, dlErr);
+            }
+          }
+        } catch (e) {
+          console.warn(`[MEDIA-PDF] Erro ao preparar PDF para IA:`, e);
+        }
+
+        if (pdfContent) {
+          const content: any[] = [pdfContent];
+          if (m.conteudo && m.conteudo !== "[document]") content.push({ type: "text", text: m.conteudo });
+          messages.push({ role, content });
+        } else {
+          messages.push({ role, content: pdfCaption });
+          messages.push({
+            role: "system",
+            content: "[SISTEMA: ⚠️ O cliente enviou um PDF de receita mas não foi possível carregá-lo (arquivo muito grande ou erro de download). Peça ao cliente que tire uma FOTO da receita com o celular e envie como imagem (JPEG/PNG) — é mais fácil de ler do que PDF. NÃO chame interpretar_receita sem ter a imagem. Se ele insistir que já enviou, explique que o formato PDF às vezes tem problema técnico e peça a foto.]",
           });
         }
       } else {
