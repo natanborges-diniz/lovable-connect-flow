@@ -1317,6 +1317,15 @@ const RESERVE_VERBS_REGEX = /\b(quero\s+(reservar|fechar|pedir|levar|essa|esse|c
 // Aplica sobre t = norm() (lowercase, sem acento).
 const OCULOS_COMPRA_RE = /(?<!onde\s)\b(fazer|comprar|trocar|renovar)\b.{0,30}\boculos\b|\bquero\s+(?:um\s+)?oculos\b|\b(fazer|comprar|trocar|renovar)\s+(?:\w+\s+){0,2}lentes?\b/;
 
+// Detecta intenção clara diferente de "escolher cidade" — usada como escape hatch
+// nos dois sistemas paralelos de seleção de cidade (S1: routeExpectedTypedReply;
+// S2: bloco pos_orcamento). Recebe tNorm = _normTxt(mensagem).
+function _isEscapeIntent(tNorm: string): boolean {
+  return OCULOS_COMPRA_RE.test(tNorm)
+    || /\b(or[cç]ament[oa]|or[cç]ar|pre[cç]o|valor|custa|cotac[aã]o|quanto\s+(custa|fica|sai))\b/.test(tNorm)
+    || /\blente[s]?\s+de\s+contato\b/.test(tNorm);
+}
+
 // ── Validação de receita ──
 // Considera receita válida APENAS quando há esfera/cilindro útil em pelo menos
 // um olho E rx_type não é "unknown". Receita salva como `unknown` com olhos
@@ -4694,13 +4703,24 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
             }).then(() => undefined, () => undefined);
             return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_lojas"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
           }
-          const tries = Number(posOrc.tries_cidade || 0) + 1;
-          if (tries < 2) {
-            await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, "Desculpe, não entendi. Qual dessas cidades fica melhor pra você? 😊");
-            await _setPosOrc({ ...posOrc, tries_cidade: tries });
-            return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+          // Escape hatch: intenção clara diferente de escolher cidade (mesmo critério do S1).
+          // Limpa pos_orcamento + garante expected_reply=null sem usar variável stale.
+          // Não retorna — roteamento normal (LLM / cascata) assume abaixo.
+          if (_isEscapeIntent(_normTxt(lastInboundText))) {
+            await _setPosOrc(null);
+            await supabase.from("atendimentos")
+              .update({ metadata: { ...atendimentoMeta, expected_reply: null } })
+              .eq("id", atendimento_id);
+            console.log(`[POS-ORC-ESCAPE] intenção clara, limpando pos_orcamento — "${lastInboundText.slice(0, 80)}"`);
+          } else {
+            const tries = Number(posOrc.tries_cidade || 0) + 1;
+            if (tries < 2) {
+              await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta, "Desculpe, não entendi. Qual dessas cidades fica melhor pra você? 😊");
+              await _setPosOrc({ ...posOrc, tries_cidade: tries });
+              return jsonResponse({ status: "ok", tools_used: ["pos_orcamento_cidades_repete"], intencao: "agendamento", precisa_humano: false, pipeline_coluna_sugerida: "Agendamento", modo: atendimento.modo });
+            }
+            await _setPosOrc(null);
           }
-          await _setPosOrc(null);
         } else if (posOrc.etapa === "aguardando_loja") {
           const loja = await matchLojaEscolhida(lastInboundText, posOrc.cidade || "", lojas);
           if (loja) {
@@ -9663,11 +9683,7 @@ async function routeExpectedTypedReply(args: {
       // ambígua e relançava os botões, prendendo o cliente no loop.
       // Limpa expected_reply e retorna false → cascata/LLM assume normalmente.
       // Só dispara quando detectCidadeEscolhida retornou null (cidades reais passam acima).
-      const isIntencaoClaraEscape =
-        OCULOS_COMPRA_RE.test(tNorm)
-        || /\b(or[cç]ament[oa]|or[cç]ar|pre[cç]o|valor|custa|cotac[aã]o|quanto\s+(custa|fica|sai))\b/.test(tNorm)
-        || /\blente[s]?\s+de\s+contato\b/.test(tNorm);
-      if (isIntencaoClaraEscape) {
+      if (_isEscapeIntent(tNorm)) {
         await patchMeta({ expected_reply: null });
         console.log(`[CIDADE-ESCAPE] intenção clara detectada, clearing expected_reply — "${mensagemTexto.slice(0, 80)}"`);
         return false;
