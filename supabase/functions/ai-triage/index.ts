@@ -1325,8 +1325,23 @@ const OCULOS_COMPRA_RE = /(?<!onde\s)\b(fazer|comprar|trocar|renovar)\b.{0,30}\b
 function _isProdutoDuvida(tNorm: string): boolean {
   // Detecta perguntas de produto/dúvida que NÃO são pedidos de ação (cotar/agendar).
   // Usado por _isEscapeIntent (escape de pos_orcamento) e isDuvidaPosOrcamento (modo consultivo).
-  return /\b(o\s+que\s+[eé]|o\s+que\s+tem|por\s*qu[eê]|qual\s+a?\s+diferen[cç]a|diferen[cç]a[s]?|especial|vale\s+a\s+pena|explica|como\s+funciona|vantage[mn][s]?|melhor\s+pra|ideal\s+pra|tem\s+de\s+especial|caracteristica[s]?|tecnologia|detalh[ae]r?)\b/.test(tNorm)
-    || (/\b(varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax|transitions|antirreflexo|filtro\s+azul|fotossensivel|luz\s+azul)\b/.test(tNorm) && /\?/.test(tNorm));
+  // Padrões ambíguos ("especial", "tecnologia") só contam com âncora de produto.
+  return (
+    // Fortes — standalone, sem falso positivo
+    /\b(por\s*qu[eê]|qual\s+a?\s+diferen[cç]a|vale\s+a\s+pena|como\s+funciona|vantage[mn][s]?|detalh[ae]r?|melhor\s+pra|ideal\s+pra|explica|o\s+que\s+[eé])\b/.test(tNorm)
+    // "o que [contexto] tem" — lookahead 50 chars cobre "o que essa Varilux XR tem de especial"
+    || /\bo\s+que\b.{0,50}\btem\b/.test(tNorm)
+    // "especial" só com âncora de produto — não bate em "situação especial", "receita especial"
+    || /\b(tem\s+de\s+especial|que\s+tem\s+de\s+especial)\b/.test(tNorm)
+    || /\bo\s+que\b.{0,50}\bespecial\b/.test(tNorm)
+    || /\bespecial\s+(nessa|nesse|dessa|desse|desta|deste|nela|nele)\b/.test(tNorm)
+    // "tecnologia" só com âncora de consulta — não bate em "tecnologia de ponta" genérico
+    || /\b(qual\s+a?\s+tecnologia|que\s+tecnologia|tecnologia\s+(dessa|desta|da|do|de)\s+lente[s]?)\b/.test(tNorm)
+    // "características" só com âncora de produto
+    || /\b(quais?\s+(s[aã]o\s+as?\s+)?caracteristica[s]?|caracteristica[s]?\s+(dess[ao]|nessa|nesse|da\s+lente|do\s+produto))\b/.test(tNorm)
+    // Marca + "?" = pergunta sobre produto ("Tem varilux?", "e o zeiss?")
+    || (/\b(varilux|essilor|eyezen|crizal|stellest|zeiss|hoya|kodak|dnz|dmax|transitions|antirreflexo|filtro\s+azul|fotossensivel|luz\s+azul)\b/.test(tNorm) && /\?/.test(tNorm))
+  );
 }
 
 function _isEscapeIntent(tNorm: string): boolean {
