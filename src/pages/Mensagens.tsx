@@ -160,11 +160,12 @@ export default function Mensagens() {
         title="Mensagens"
         description="Comunicação interna entre usuários"
         actions={
-          (isAdmin || (acessos as any)?.modulos?.menu_loja) ? (
+          (isAdmin || acessos?.acessoTotal || acessos?.modulos?.menu_loja) ? (
             <ConfirmarRecebimentoOSDialog />
           ) : undefined
         }
       />
+
 
       <div className="flex border rounded-lg bg-card h-[calc(100vh-12rem)] overflow-hidden">
         {/* Left: Conversation list */}
