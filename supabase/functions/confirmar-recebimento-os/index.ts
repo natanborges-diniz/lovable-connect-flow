@@ -37,11 +37,65 @@ serve(async (req) => {
     const userId = authData?.user?.id ?? null;
 
     const body = await req.json().catch(() => ({}));
+    const action = String(body.action ?? "confirm").toLowerCase(); // "preview" | "confirm"
     const os_numero = String(body.os_numero ?? "").trim();
     const loja_nome = String(body.loja_nome ?? "").trim();
 
-    if (!os_numero || !loja_nome) {
-      return json({ error: "os_numero e loja_nome são obrigatórios" }, 400);
+    if (!os_numero) {
+      return json({ error: "os_numero é obrigatório" }, 400);
+    }
+    if (action === "confirm" && !loja_nome) {
+      return json({ error: "loja_nome é obrigatório para confirmar" }, 400);
+    }
+
+    // ── MODO PREVIEW ──
+    // Loja digita o número da OS no Messenger; backend consulta a bridge
+    // e devolve cliente/loja/produto/etapa para a tela exibir antes de confirmar.
+    if (action === "preview") {
+      if (!BRIDGE_URL || !SVC_SECRET) {
+        return json({ error: "bridge_indisponivel" }, 503);
+      }
+      const resp = await fetch(
+        `${BRIDGE_URL.replace(/\/$/, "")}/api/v1/os/consulta-status?os=${encodeURIComponent(os_numero)}`,
+        { headers: { "x-service-key": SVC_SECRET } },
+      );
+      if (!resp.ok) {
+        return json({ error: "bridge_falhou", status: resp.status }, 502);
+      }
+      const j = await resp.json();
+      const rows = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
+      const r = rows[0] ?? null;
+      if (!r) return json({ error: "os_nao_encontrada", os_numero }, 404);
+
+      // Loja informada x loja da OS — só alerta, não bloqueia (admin pode receber em qualquer).
+      const lojaOs = r.empresa ? String(r.empresa) : null;
+      const lojaConfere = loja_nome ? loja_nome.toLowerCase() === (lojaOs || "").toLowerCase() : null;
+
+      // Já recebida?
+      const { data: existente } = await supabase
+        .from("os_recebimento_loja")
+        .select("recebido_at, recebido_por, loja_nome")
+        .eq("os_numero", os_numero)
+        .maybeSingle();
+
+      return json({
+        status: "ok",
+        preview: {
+          os_numero,
+          cliente_nome: r.cliente ?? null,
+          cliente_telefone: r.telefone ?? null,
+          loja_nome_os: lojaOs,
+          cod_empresa: r.codEmpresa ?? null,
+          cod_etapa_atual: r.codEtapa ?? null,
+          etapa_label: r.etapa ?? null,
+          produtos: Array.isArray(r.produtos) ? r.produtos : [],
+        },
+        loja_confere: lojaConfere,
+        ja_recebida: existente?.recebido_at ? {
+          recebido_at: existente.recebido_at,
+          loja: existente.loja_nome,
+        } : null,
+      });
     }
 
     // 1) Procura linha existente (pode ter sido criada pelo cron de codEtapa=15)
