@@ -31,7 +31,7 @@ import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble
 import { toast } from "sonner";
 
 export default function Mensagens() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, acessos } = useAuth();
   const uid = user?.id;
   const { conversas, makeConversaId, makeGroupConversaId } = useMensagensInternas();
   const [selectedConversa, setSelectedConversa] = useState<string | null>(null);
