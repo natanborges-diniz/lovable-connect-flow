@@ -102,7 +102,9 @@ export default function ReguaNovaVenda() {
         toast.warning(`Já existe inscrição para a venda ${numeroVenda.trim()}`);
         return;
       }
-      toast.success("Venda cadastrada na régua");
+      toast.success("Venda cadastrada — enviando PIN ao cliente...");
+      setPinNomeCliente(nome.trim());
+      setPinInscricaoId(res.inscricao_id);
       setNome("");
       setWhatsapp("");
       setCpf("");
