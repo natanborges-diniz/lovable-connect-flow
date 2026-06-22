@@ -19,6 +19,8 @@ import Atendimentos from "./pages/Atendimentos";
 import Tarefas from "./pages/Tarefas";
 import Mensagens from "./pages/Mensagens";
 import ReguaNovaVenda from "./pages/ReguaNovaVenda";
+import CashbackAuditoria from "./pages/CashbackAuditoria";
+
 import Demandas from "./pages/Demandas";
 import Configuracoes from "./pages/Configuracoes";
 import Auth from "./pages/Auth";
@@ -57,6 +59,8 @@ const App = () => (
               <Route path="/tarefas" element={<Tarefas />} />
               <Route path="/mensagens" element={<Mensagens />} />
               <Route path="/regua/nova-venda" element={<ReguaNovaVenda />} />
+              <Route path="/regua/auditoria" element={<CashbackAuditoria />} />
+
               <Route path="/demandas" element={<Demandas />} />
               <Route path="/configuracoes" element={
                 <ProtectedRoute allowedRoles={["admin"]}>
