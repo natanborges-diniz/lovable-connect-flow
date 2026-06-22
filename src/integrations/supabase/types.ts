@@ -1987,6 +1987,59 @@ export type Database = {
           },
         ]
       }
+      os_avisos_armacao_log: {
+        Row: {
+          cliente_telefone: string | null
+          cod_empresa: string | null
+          contato_id: string | null
+          created_at: string
+          data_movimentacao: string
+          enviado_at: string
+          id: string
+          loja_nome: string
+          os_numero: string
+          payload: Json
+          status: string
+          template_alias: string
+        }
+        Insert: {
+          cliente_telefone?: string | null
+          cod_empresa?: string | null
+          contato_id?: string | null
+          created_at?: string
+          data_movimentacao: string
+          enviado_at?: string
+          id?: string
+          loja_nome: string
+          os_numero: string
+          payload?: Json
+          status?: string
+          template_alias?: string
+        }
+        Update: {
+          cliente_telefone?: string | null
+          cod_empresa?: string | null
+          contato_id?: string | null
+          created_at?: string
+          data_movimentacao?: string
+          enviado_at?: string
+          id?: string
+          loja_nome?: string
+          os_numero?: string
+          payload?: Json
+          status?: string
+          template_alias?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_avisos_armacao_log_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       os_recebimento_loja: {
         Row: {
           agendamento_id: string | null
