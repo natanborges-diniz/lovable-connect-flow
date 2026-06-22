@@ -422,6 +422,7 @@ export type Database = {
       canais: {
         Row: {
           ativo: boolean | null
+          canal_consentimento: string | null
           contato_id: string
           created_at: string
           id: string
@@ -429,10 +430,20 @@ export type Database = {
           metadata: Json | null
           principal: boolean
           provedor: string | null
+          status: string
+          tentativas_entregues: number
+          tentativas_enviadas: number
+          tentativas_lidas: number
+          tentativas_respondidas: number
+          termos_versao: string | null
           tipo: Database["public"]["Enums"]["tipo_canal"]
+          ultima_falha_at: string | null
+          ultimo_motivo_falha: string | null
+          validado_at: string | null
         }
         Insert: {
           ativo?: boolean | null
+          canal_consentimento?: string | null
           contato_id: string
           created_at?: string
           id?: string
@@ -440,10 +451,20 @@ export type Database = {
           metadata?: Json | null
           principal?: boolean
           provedor?: string | null
+          status?: string
+          tentativas_entregues?: number
+          tentativas_enviadas?: number
+          tentativas_lidas?: number
+          tentativas_respondidas?: number
+          termos_versao?: string | null
           tipo: Database["public"]["Enums"]["tipo_canal"]
+          ultima_falha_at?: string | null
+          ultimo_motivo_falha?: string | null
+          validado_at?: string | null
         }
         Update: {
           ativo?: boolean | null
+          canal_consentimento?: string | null
           contato_id?: string
           created_at?: string
           id?: string
@@ -451,7 +472,16 @@ export type Database = {
           metadata?: Json | null
           principal?: boolean
           provedor?: string | null
+          status?: string
+          tentativas_entregues?: number
+          tentativas_enviadas?: number
+          tentativas_lidas?: number
+          tentativas_respondidas?: number
+          termos_versao?: string | null
           tipo?: Database["public"]["Enums"]["tipo_canal"]
+          ultima_falha_at?: string | null
+          ultimo_motivo_falha?: string | null
+          validado_at?: string | null
         }
         Relationships: [
           {
@@ -2683,10 +2713,16 @@ export type Database = {
           criado_em: string
           data_entrega_ancora: string | null
           id: string
+          ip_origem_consultor: unknown
           nome_cliente: string | null
           numero_venda: string
           origem: string | null
+          pin_confirmado_at: string | null
+          pin_expira_at: string | null
+          pin_hash: string | null
+          pin_tentativas: number
           status: string
+          termos_versao: string | null
           usuario_lancamento: string | null
           valor_status: string
           valor_total_informado: number | null
@@ -2703,10 +2739,16 @@ export type Database = {
           criado_em?: string
           data_entrega_ancora?: string | null
           id?: string
+          ip_origem_consultor?: unknown
           nome_cliente?: string | null
           numero_venda: string
           origem?: string | null
+          pin_confirmado_at?: string | null
+          pin_expira_at?: string | null
+          pin_hash?: string | null
+          pin_tentativas?: number
           status?: string
+          termos_versao?: string | null
           usuario_lancamento?: string | null
           valor_status?: string
           valor_total_informado?: number | null
@@ -2723,10 +2765,16 @@ export type Database = {
           criado_em?: string
           data_entrega_ancora?: string | null
           id?: string
+          ip_origem_consultor?: unknown
           nome_cliente?: string | null
           numero_venda?: string
           origem?: string | null
+          pin_confirmado_at?: string | null
+          pin_expira_at?: string | null
+          pin_hash?: string | null
+          pin_tentativas?: number
           status?: string
+          termos_versao?: string | null
           usuario_lancamento?: string | null
           valor_status?: string
           valor_total_informado?: number | null
@@ -3301,6 +3349,16 @@ export type Database = {
       calcular_membros_grupo: {
         Args: { _ref: string; _tipo: string }
         Returns: string[]
+      }
+      canal_registrar_evento: {
+        Args: {
+          _canal_consentimento?: string
+          _evento: string
+          _motivo?: string
+          _telefone: string
+          _termos_versao?: string
+        }
+        Returns: undefined
       }
       cashback_confirmar_credito: {
         Args: { _inscricao_id: string; _valor_validado: number }
