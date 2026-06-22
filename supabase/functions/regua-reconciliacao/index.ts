@@ -296,22 +296,50 @@ async function abrirDemandaDivergencia(
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  // Reusa criar-demanda-loja com service role
+
+  // Resolve loja_nome real a partir do cod_empresa (lojas_cidades.loja_id)
+  // O resolver de destinatários trabalha por nome textual, não por código.
+  let lojaNomeResolvida: string = `Loja ${insc.cod_empresa ?? "?"}`;
+  if (insc.cod_empresa) {
+    const { data: lc } = await supabase
+      .from("lojas_cidades")
+      .select("loja_nome")
+      .eq("loja_id", insc.cod_empresa)
+      .eq("ativo", true)
+      .maybeSingle();
+    if (lc?.loja_nome) lojaNomeResolvida = lc.loja_nome as string;
+  }
+
+  // Reusa criar-demanda-loja com service role (header x-service-call:1)
   const resp = await fetch(`${SUPABASE_URL}/functions/v1/criar-demanda-loja`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${SRK}`,
       "apikey": SRK,
+      "x-service-call": "1",
     },
     body: JSON.stringify({
-      loja_nome: insc.cod_empresa ?? "loja",
+      loja_nome: lojaNomeResolvida,
       loja_telefone: "__INTERNO__",
       pergunta,
       assunto: `Divergência cashback — venda ${insc.numero_venda}`,
-      origem: "sistema",
+      solicitante_nome: "Reconciliação cashback",
+      tipo_chave: "cashback_divergencia",
+      metadata: {
+        tipo_chave: "cashback_divergencia",
+        inscricao_id: insc.id,
+        numero_venda: insc.numero_venda,
+        cod_empresa: insc.cod_empresa,
+        cliente_nome: cliente,
+        valor_lancado: valorLancado,
+        valor_sistema: valorSistema,
+        diff,
+        silencioso_cliente: true,
+      },
     }),
   });
+
   const json = await resp.json().catch(() => ({} as Record<string, unknown>));
   if (!resp.ok) {
     console.error("[RECONCIL] falha criar demanda divergência:", json);
