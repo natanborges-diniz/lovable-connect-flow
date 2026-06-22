@@ -920,7 +920,9 @@ async function responderStatusOS(
   const produtoResumo = String(pub.produtoResumo || "").trim();
   const msg = renderMsgFixa(tmplKey, {
     nome_comma:    nomePrim ? `, ${nomePrim}` : "",
+    nome:          nomePrim || "",
     os:            String(resultado.os || ""),
+    produto:       produtoResumo,
     produto_parte: produtoResumo ? ` (${produtoResumo})` : "",
     loja:          String(resultado.empresa || ""),
   });
