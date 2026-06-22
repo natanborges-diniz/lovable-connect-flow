@@ -346,26 +346,16 @@ async function abrirDemandaDivergencia(
     return;
   }
   const demandaId = (json as Record<string, unknown>).demanda_id as string | undefined;
+  const destinatarios = Number((json as Record<string, unknown>).destinatarios_internos ?? 0);
   if (!demandaId) return;
-
-  await supabase.from("demandas_loja").update({
-    tipo_chave: "cashback_divergencia",
-    metadata: {
-      tipo_chave: "cashback_divergencia",
-      inscricao_id: insc.id,
-      numero_venda: insc.numero_venda,
-      cod_empresa: insc.cod_empresa,
-      cliente_nome: cliente,
-      valor_lancado: valorLancado,
-      valor_sistema: valorSistema,
-      diff,
-      silencioso_cliente: true,
-    },
-  }).eq("id", demandaId);
-
+  if (destinatarios === 0) {
+    console.warn(`[RECONCIL] demanda ${demandaId} criada para loja "${lojaNomeResolvida}" SEM destinatários internos — cadastre usuários em Configurações → Lojas/Usuários.`);
+  }
+  // tipo_chave + metadata já gravados pela própria criar-demanda-loja (body.metadata/tipo_chave).
   await supabase.from("regua_inscricao")
     .update({ demanda_divergencia_id: demandaId })
     .eq("id", insc.id);
+
 
   if (insc.contato_id) {
     await supabase.from("eventos_crm").insert({
