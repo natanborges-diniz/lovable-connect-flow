@@ -381,7 +381,7 @@ serve(async (req) => {
   // Busca todas as inscrições pendentes (sem limite paginado — volume esperado baixo)
   let query = supabase
     .from("regua_inscricao")
-    .select("id, numero_venda, cod_empresa, contato_id, cpf, valor_total_informado")
+    .select("id, numero_venda, cod_empresa, contato_id, cpf, valor_total_informado, nome_cliente, tentativas_reconciliacao, demanda_divergencia_id, valor_status")
     .eq("status", "aguardando_entrega");
 
   if (empresa) {
