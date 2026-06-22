@@ -9967,14 +9967,14 @@ Qual dia e horário ficaria melhor pra você? 😊`,
   if (expectedReply === "os_aguardando_qual") {
     const identQ = extrairIdentificadorOS(mensagemTexto);
     if (identQ.tipo !== null) {
-      await patchMeta({ expected_reply: null, os_opcoes: null });
+      await patchMeta({ expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null });
       const { data: ctOsQ } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
       const _primQ = (ctOsQ?.nome || "").trim().split(/\s+/)[0] || "";
       await loadMensagensFixas(supabase);
       const rQ = await consultarStatusOS(supabaseUrl, serviceKey, identQ);
       const handledQ = await tratarResultadoConsultaOS(
         supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
-        _primQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null }, rQ, identQ,
+        _primQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null }, rQ, identQ,
       );
       if (handledQ === "fallback") {
         const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primQ ? `, ${_primQ}` : "" });
@@ -10322,14 +10322,14 @@ async function routeButtonClick(args: {
   // Seleção de cidade → envia lista de lojas dessa cidade.
   if (buttonId.startsWith("os_qual:")) {
     const osNum = buttonId.slice(8);
-    await patchMeta({ expected_reply: null, os_opcoes: null });
+    await patchMeta({ expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null });
     const { data: ctOsQ } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
     const _primOsQ = (ctOsQ?.nome || "").trim().split(/\s+/)[0] || "";
     await loadMensagensFixas(supabase);
     const rOsQ = await consultarStatusOS(supabaseUrl, serviceKey, { tipo: "os", valor: osNum });
     const handledOsQ = await tratarResultadoConsultaOS(
       supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
-      _primOsQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null }, rOsQ, { tipo: "os", valor: osNum },
+      _primOsQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null }, rOsQ, { tipo: "os", valor: osNum },
     );
     if (handledOsQ === "fallback") {
       const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primOsQ ? `, ${_primOsQ}` : "" });
