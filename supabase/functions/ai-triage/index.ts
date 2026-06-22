@@ -9842,6 +9842,51 @@ async function routeExpectedTypedReply(args: {
       .eq("id", atId);
   };
 
+  // ── GUARD CENTRAL DE MUDANÇA DE ASSUNTO ──────────────────────────────
+  // Roda antes de qualquer handler específico.
+  // os_retry_aguardando tem handler próprio completo — bypassa o guard inteiro.
+  if (expectedReply !== "os_retry_aguardando") {
+    const tGuard = _normTxt(mensagemTexto);
+
+    // Condição 1 — Recusa explícita (com exceções)
+    // "depois" só entra como composto — evita falso positivo em "depois das 14h"
+    const GUARD_RECUSA_EXCLUIDOS = new Set([
+      "receita_confirmacao", "recuperacao", "cashback_confirmacao",
+      "os_aguardando_pertencimento", "desconto_followup", "dia_d_lembrete",
+    ]);
+    const RECUSA_RE_1 = /\b(n[aã]o\s+(quero|preciso|quero\s+mais|interessa(r)?)|agora\s+n[aã]o|mais\s+tarde|cancela(r)?|deixa\s+(pra\s+l[aá]|quieto)|esquece|esqueci|n[aã]o\s+obrigad)\b/i;
+    const RECUSA_RE_2 = /\b(deixa\s+pra\s+depois|chamo?\s+depois|falo\s+depois|depois\s+(eu\s+)?(vejo|te\s+chamo|falo))\b/i;
+
+    if (
+      !GUARD_RECUSA_EXCLUIDOS.has(expectedReply) &&
+      (RECUSA_RE_1.test(tGuard) || RECUSA_RE_2.test(tGuard))
+    ) {
+      await patchMeta({ expected_reply: null });
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Tudo bem! Quando precisar, é só chamar 😊");
+      return true;
+    }
+
+    // Condição 2 — Dúvida / intenção alternativa
+    if (_isProdutoDuvida(tGuard) || _isEscapeIntent(tGuard)) {
+      await patchMeta({ expected_reply: null });
+      return false;
+    }
+
+    // Condição 3 — Consulta OS
+    const GUARD_OS_EXCLUIDOS = new Set([
+      "os_aguardando_qual", "os_aguardando_identificador",
+      "os_aguardando_escolha", "os_aguardando_pertencimento",
+    ]);
+    if (!GUARD_OS_EXCLUIDOS.has(expectedReply)) {
+      const osKw = await loadOsKeywords(supabase);
+      if (matchesConsultaOs(mensagemTexto, osKw)) {
+        await patchMeta({ expected_reply: null });
+        return false;
+      }
+    }
+  }
+  // ── FIM DO GUARD ────────────────────────────────────────────────────
+
   // Fallback de texto: cliente digitou a cidade em vez de tocar na lista.
   if (expectedReply === "cidade_selecao") {
     const cidade = detectCidadeEscolhida(mensagemTexto);
