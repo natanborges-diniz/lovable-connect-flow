@@ -39,6 +39,7 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/termos/cashback" element={<TermosCashback />} />
             <Route path="/somente-messenger" element={<ProtectedRoute><SomenteMessenger /></ProtectedRoute>} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
