@@ -55,6 +55,8 @@ export default function ReguaNovaVenda() {
   const [cpf, setCpf] = useState("");
   const [numeroVenda, setNumeroVenda] = useState("");
   const [valor, setValor] = useState("");
+  const [pinInscricaoId, setPinInscricaoId] = useState<string | null>(null);
+  const [pinNomeCliente, setPinNomeCliente] = useState("");
 
   const lojaUsuario = getUserLojaNames()[0] || profile?.lojas?.[0] || null;
 
