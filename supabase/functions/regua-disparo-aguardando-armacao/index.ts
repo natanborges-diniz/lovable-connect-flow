@@ -70,8 +70,18 @@ serve(async (req) => {
 
     // Permite override via body (testes manuais)
     const body = await req.json().catch(() => ({}));
-    const dataConsulta: string = body?.data || dataOntemSaoPaulo();
     const codEtapa: string = String(body?.codEtapa ?? 15);
+    const datas: string[] = body?.data
+      ? [String(body.data)]
+      : Array.isArray(body?.datas) && body.datas.length
+        ? body.datas.map(String)
+        : datasParaProcessar();
+
+    if (datas.length === 0) {
+      console.log("[regua-armacao] domingo SP — execução pulada");
+      return json({ ok: true, skipped: "domingo", datas: [], total: 0, enviados: 0, pulados: 0, erros: 0 });
+    }
+    console.log(`[regua-armacao] datas a processar: ${datas.join(", ")}`);
 
     const url = `${BRIDGE_URL.replace(/\/$/, "")}/api/v1/os/movimentadas?data=${dataConsulta}&codEtapa=${codEtapa}`;
     console.log(`[regua-armacao] consultando bridge: ${url}`);
