@@ -755,6 +755,7 @@ async function loadOsKeywords(client: any): Promise<string[]> {
 // Regex "núcleo" do intent (sempre ativas, independem das keywords editáveis).
 // Cobrem paráfrases comuns: "quanto tempo fica pronto", "ia/vou retirar",
 // "fiz pedido online esperando", "tô aguardando meu pedido", "pedido atrasado".
+// os regex bidirecional
 const OS_INTENT_CORE_REGEX: RegExp[] = [
   // "OS 12345" / "OS #45123"
   /\bos\s*[#nº]?\s*\d{3,8}\b/i,
