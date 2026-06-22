@@ -1,99 +1,80 @@
+# Gate "agendamento na loja da OS"
 
-## Objetivo
+Quando o cliente recebe `aviso_aguardando_armacao_v2` ou `os_recebida_loja_v2` e responde pedindo para agendar, a IA precisa **forçar a loja da OS** (sem perguntar cidade/loja) e o registro do agendamento precisa ficar **linkado** à OS de origem.
 
-Dois fluxos complementares ligados à OS no Firebird:
+## 1. Migration
 
-1. **Recebimento manual no Atrium Messenger** — loja vê lista de OS com movimentação recente no banco e dá "Recebi" → cliente recebe notificação automática.
-2. **Aviso automático D-1 → D 08h** — toda OS que entrou em `codEtapa=15` (Aguardando Armação) em D-1 dispara, no dia seguinte às 08:00 SP, template WhatsApp pedindo para o cliente trazer a armação.
+Adicionar coluna em `os_recebimento_loja`:
+- `agendamento_id uuid null` — FK para `agendamentos(id)` `on delete set null`. Permite saber qual OS gerou qual agendamento e evitar dupla oferta.
 
-Complementa (não substitui) o futuro aviso de "OS pronta para retirada" (codEtapa=5).
+(Sem alterações em RLS — a coluna herda as policies existentes.)
 
----
+## 2. `ai-triage` — contexto novo no prompt
 
-## 1. Recebimento de OS no Atrium Messenger
+Após carregar `agendamentosAtivos`, query adicional:
 
-### Tabela nova `os_recebimento_loja`
-| campo | tipo | descrição |
-|---|---|---|
-| `id` | uuid PK | |
-| `os_numero` | text | |
-| `loja_nome` | text | |
-| `contato_id` | uuid (nullable) | resolvido por telefone do cliente da OS |
-| `cod_etapa_atual` | int | snapshot no momento da ingestão |
-| `etapa_label` | text | rótulo ERP |
-| `produto_descricao` | text | usa `montarProdutoDescricao` do `os-status-public` |
-| `data_movimentacao` | date | última movimentação no Firebird |
-| `recebido_at` | timestamptz null | preenchido quando loja clica "Recebi" |
-| `recebido_por` | uuid null | profile da loja |
-| `notificado_cliente_at` | timestamptz null | quando o cliente recebeu o aviso |
-| `metadata` | jsonb | payload bruto Firebird |
+```ts
+const { data: osPendentes } = await supabase
+  .from("os_recebimento_loja")
+  .select("os_numero, loja_nome, aviso_armacao_enviado_at, notificado_cliente_at, agendamento_id")
+  .eq("contato_id", contatoId)
+  .is("agendamento_id", null)
+  .or("aviso_armacao_enviado_at.gte.<D-30>,notificado_cliente_at.gte.<D-30>")
+  .order("aviso_armacao_enviado_at", { ascending: false })
+  .limit(3);
+```
 
-Único: `(os_numero, loja_nome)`. RLS: loja só vê suas linhas; admin/operador veem tudo.
+Se vier resultado, injeta bloco logo após `agendamentoCtx`:
 
-### Cron diário de ingestão `regua-ingestao-os-loja` (06:30 SP)
-- Lê do Firebird (via EF `os-status-public` em modo "lista") todas as OS com movimentação em D-1.
-- Faz upsert em `os_recebimento_loja` (sem sobrescrever `recebido_at`).
-- Resolve `contato_id` por telefone do cliente.
+```
+# OS RECENTES DESTE CLIENTE (loja OBRIGATÓRIA se agendar)
+- OS {os_numero} na loja {loja_nome} ({fluxo: aguardando_armacao | os_recebida}) — avisado {data}
 
-### UI Messenger (cross-project InFoco Messenger) — nova aba "OS para receber"
-- Lista cards pendentes (`recebido_at IS NULL`) filtrados pela loja do usuário.
-- Cada card: nº OS, cliente, produto (descrição sanitizada), etapa, data movimentação.
-- Botão **"Confirmar recebimento"** → chama EF `confirmar-recebimento-os` do Atrium.
+REGRA: se o cliente pedir para agendar visita relacionada a essas OS (trazer
+armação, retirar óculos, etc.), use loja_nome="{loja_nome}" DIRETAMENTE na
+tool agendar_visita. PROIBIDO perguntar "em qual loja prefere?" ou oferecer
+outras unidades — a armação/produto está fisicamente nessa loja.
+```
 
-### EF nova `confirmar-recebimento-os`
-- Marca `recebido_at` + `recebido_por`.
-- Dispara template `os_recebida_loja` (UTILITY) ao cliente: "Sua OS {numero} chegou na {loja}. Em breve nossa equipe finaliza e te avisa."
-- Loga em `eventos_crm`.
-- Idempotente: se já recebida, retorna 200 sem reenviar.
+`fluxo` é deduzido: `aviso_armacao_enviado_at IS NOT NULL` → `aguardando_armacao`; `notificado_cliente_at IS NOT NULL` → `os_recebida`.
 
-### Templates novos (catálogo `whatsapp_templates`)
-- `os_recebida_loja` (UTILITY) — vars: `{nome}`, `{os_numero}`, `{loja}`
-- Aliases: `os_recebida_loja` → versão aprovada (gate em `send-whatsapp-template`)
+## 3. `agendar-cliente` — linkar OS ↔ agendamento
 
----
+Após o `INSERT` em `agendamentos` bem-sucedido (linha 168):
 
-## 2. Aviso D-1 → D 08h "traga a armação" (codEtapa 15)
+```ts
+// Linka OS recente (mesma loja, mesmo contato, sem agendamento ainda)
+const { data: osLink } = await supabase
+  .from("os_recebimento_loja")
+  .select("id, os_numero, aviso_armacao_enviado_at, notificado_cliente_at")
+  .eq("contato_id", contato_id)
+  .ilike("loja_nome", loja_nome)
+  .is("agendamento_id", null)
+  .order("updated_at", { ascending: false })
+  .limit(1)
+  .maybeSingle();
 
-### Ingestão diária
-Reaproveita o mesmo cron de 06:30 SP. Para OS detectada em `codEtapa=15` com `data_movimentacao = D-1`:
-- Cria touchpoint em `regua_touchpoint` com `tipo='aguardando_armacao_08h'`, `data_prevista = hoje`, `template_key='aviso_aguardando_armacao'`.
-- Único `(inscricao_id, tipo)` evita duplicação.
+if (osLink) {
+  await supabase.from("os_recebimento_loja")
+    .update({ agendamento_id: agendamento.id })
+    .eq("id", osLink.id);
 
-### Cron disparo 08:00 SP `regua-disparo-aguardando-armacao`
-- Seleciona touchpoints `tipo='aguardando_armacao_08h'`, `data_prevista=hoje`, `status='PENDENTE'`.
-- Dispara template `aviso_aguardando_armacao` via `send-whatsapp-template` (UTILITY, sempre alias).
-- Marca `enviado_at`, `status='ENVIADO'`.
-- Anti-duplicação: skip se `notificado_em` já existe.
+  const fluxo = osLink.notificado_cliente_at ? "os_recebida" : "aguardando_armacao";
+  await supabase.from("agendamentos")
+    .update({ metadata: { os_origem: { os_numero: osLink.os_numero, fluxo, loja_nome } } })
+    .eq("id", agendamento.id);
+}
+```
 
-### Template novo
-- `aviso_aguardando_armacao` (UTILITY) — vars: `{nome}`, `{os_numero}`, `{loja}`, `{endereco_loja}`
-- Texto sugerido: "Oi {nome}! Sua OS {os_numero} já está com as lentes prontas e só falta a armação para finalizarmos. Passe na {loja} ({endereco_loja}) no horário que for melhor pra você. — Óticas Diniz"
-- Alias: `aviso_aguardando_armacao`
+Sem novos parâmetros na API — derivação automática por `(contato_id, loja_nome)`.
 
----
+## 4. Memória
 
-## Decisões de design
+Atualizar `mem://regua/os-aguardando-armacao-e-recebimento-loja` com a nova regra:
+- "Cliente que responde aos templates `_v2` pedindo agendar → IA força loja da OS via contexto injetado em `ai-triage`; `agendar-cliente` linka `os_recebimento_loja.agendamento_id` automaticamente."
 
-- **Branding**: cliente final vê "Óticas Diniz". Atrium só na UI interna.
-- **Horário comercial**: cron 08:00 SP; se loja fechada no dia (`loja_status_no_dia`), atrasa para próximo dia útil (skip + reagenda touchpoint).
-- **Anti-spam**: cada OS recebe no máximo 1 aviso por etapa (uniq `regua_touchpoint(inscricao_id,tipo)`).
-- **Gate de template**: `send-whatsapp-template` já bloqueia se status != approved; mensagem fica retida até aprovação Meta.
-- **Memória**: criar `mem://regua/os-aguardando-armacao-e-recebimento-loja` documentando os dois fluxos.
+## Fora de escopo
 
----
-
-## Entregáveis (ordem)
-
-1. Migração: tabela `os_recebimento_loja` + grants + RLS + trigger updated_at; novos `tipo` permitidos em `regua_touchpoint`.
-2. Templates: criar `os_recebida_loja` e `aviso_aguardando_armacao` em `whatsapp_templates` (rascunho) + aliases.
-3. EF `regua-ingestao-os-loja` (cron 06:30) — ingestão Firebird → `os_recebimento_loja` + `regua_touchpoint`.
-4. EF `confirmar-recebimento-os` (chamada do Messenger).
-5. EF `regua-disparo-aguardando-armacao` (cron 08:00).
-6. Schedules pg_cron via `manage-cron-jobs`.
-7. UI no projeto **InFoco Messenger** (cross-project): nova rota `/os-para-receber`.
-8. Documentação de memória + atualização do índice.
-
-## Itens que ficam fora deste plano (próximo ciclo)
-
-- Aviso de "OS pronta para retirada" (codEtapa=5) — herda o mesmo motor de touchpoint, só adicionar `tipo='os_pronta_retirada'`.
-- Submissão e aprovação dos 2 templates na Meta (manual via Configurações).
+- Nenhuma alteração nos templates ou na bridge.
+- Nenhuma mudança no schema da tool `agendar_visita` (a IA continua passando `loja_nome` — só que agora o contexto dita qual valor usar).
+- Painel do InFoco Messenger não muda: ele já filtra por loja via RLS.

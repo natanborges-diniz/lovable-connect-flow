@@ -1989,6 +1989,7 @@ export type Database = {
       }
       os_recebimento_loja: {
         Row: {
+          agendamento_id: string | null
           aviso_armacao_enviado_at: string | null
           aviso_armacao_template: string | null
           cliente_nome: string | null
@@ -2011,6 +2012,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          agendamento_id?: string | null
           aviso_armacao_enviado_at?: string | null
           aviso_armacao_template?: string | null
           cliente_nome?: string | null
@@ -2033,6 +2035,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          agendamento_id?: string | null
           aviso_armacao_enviado_at?: string | null
           aviso_armacao_template?: string | null
           cliente_nome?: string | null
@@ -2055,6 +2058,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "os_recebimento_loja_agendamento_id_fkey"
+            columns: ["agendamento_id"]
+            isOneToOne: false
+            referencedRelation: "agendamentos"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "os_recebimento_loja_contato_id_fkey"
             columns: ["contato_id"]
