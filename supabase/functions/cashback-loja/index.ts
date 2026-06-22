@@ -322,8 +322,6 @@ serve(async (req) => {
         .update({ pin_hash, pin_expira_at: expira, pin_tentativas: 0 })
         .eq("id", inscricao_id);
 
-      const primeiroNome = String((insc as any).nome_cliente || "cliente").trim().split(/\s+/)[0];
-      const linkTermos = `https://atrium-link.lovable.app/termos/cashback?ins=${inscricao_id}`;
       try {
         await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
           method: "POST",
@@ -331,7 +329,7 @@ serve(async (req) => {
           body: JSON.stringify({
             contato_id: (insc as any).contato_id,
             template_alias: "cashback_pin_validacao",
-            template_params: [primeiroNome, pin, linkTermos],
+            template_params: [pin],
           }),
         });
       } catch (e) {
