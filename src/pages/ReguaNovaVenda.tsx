@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { CashbackPinDialog } from "@/components/cashback/CashbackPinDialog";
 
 const onlyDigits = (s: string) => (s || "").replace(/\D+/g, "");
 
