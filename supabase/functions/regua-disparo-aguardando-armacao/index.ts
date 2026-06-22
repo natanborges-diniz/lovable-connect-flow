@@ -19,14 +19,30 @@ function json(body: unknown, status = 200) {
   });
 }
 
-// D-1 em São Paulo, formato YYYY-MM-DD
-function dataOntemSaoPaulo(): string {
-  const nowSP = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
-  nowSP.setDate(nowSP.getDate() - 1);
-  const y = nowSP.getFullYear();
-  const m = String(nowSP.getMonth() + 1).padStart(2, "0");
-  const d = String(nowSP.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+// Hoje em São Paulo (Date com fuso SP)
+function hojeSP(): Date {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+}
+function fmt(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+// Regra:
+//  - domingo (dow=0)  → não roda
+//  - segunda (dow=1)  → processa D-1 (domingo) + D-2 (sábado), pois domingo não rodou
+//  - demais dias      → processa apenas D-1
+function datasParaProcessar(): string[] {
+  const hoje = hojeSP();
+  const dow = hoje.getDay();
+  if (dow === 0) return []; // domingo
+  const d1 = new Date(hoje); d1.setDate(d1.getDate() - 1);
+  if (dow === 1) {
+    const d2 = new Date(hoje); d2.setDate(d2.getDate() - 2);
+    return [fmt(d2), fmt(d1)];
+  }
+  return [fmt(d1)];
 }
 
 function montarProdutoDescricao(produtos: Array<{ tipo: string; descricao: string }>): string {
@@ -54,26 +70,20 @@ serve(async (req) => {
 
     // Permite override via body (testes manuais)
     const body = await req.json().catch(() => ({}));
-    const dataConsulta: string = body?.data || dataOntemSaoPaulo();
     const codEtapa: string = String(body?.codEtapa ?? 15);
+    const datas: string[] = body?.data
+      ? [String(body.data)]
+      : Array.isArray(body?.datas) && body.datas.length
+        ? body.datas.map(String)
+        : datasParaProcessar();
 
-    const url = `${BRIDGE_URL.replace(/\/$/, "")}/api/v1/os/movimentadas?data=${dataConsulta}&codEtapa=${codEtapa}`;
-    console.log(`[regua-armacao] consultando bridge: ${url}`);
-
-    const bridgeResp = await fetch(url, { headers: { "x-service-key": SVC_SECRET } });
-    if (!bridgeResp.ok) {
-      const t = await bridgeResp.text().catch(() => "");
-      console.error("[regua-armacao] bridge erro", bridgeResp.status, t.slice(0, 200));
-      return json({ error: "bridge_error", status: bridgeResp.status }, 502);
+    if (datas.length === 0) {
+      console.log("[regua-armacao] domingo SP — execução pulada");
+      return json({ ok: true, skipped: "domingo", datas: [], total: 0, enviados: 0, pulados: 0, erros: 0 });
     }
-    const bridgeJson = await bridgeResp.json();
-    const rows: Array<Record<string, unknown>> = Array.isArray(bridgeJson?.data)
-      ? bridgeJson.data
-      : Array.isArray(bridgeJson) ? bridgeJson : [];
+    console.log(`[regua-armacao] datas a processar: ${datas.join(", ")}`);
 
-    console.log(`[regua-armacao] ${rows.length} OS retornadas`);
-
-    // Carrega mapa cod_empresa → loja_nome
+    // Carrega mapa cod_empresa → loja_nome (uma única vez)
     const { data: tlojas } = await supabase
       .from("telefones_lojas")
       .select("cod_empresa, nome_loja")
@@ -84,103 +94,123 @@ serve(async (req) => {
       if (t.cod_empresa) codToLoja.set(String(t.cod_empresa), t.nome_loja);
     });
 
+    let totalRows = 0;
     let enviados = 0;
     let pulados = 0;
     let erros = 0;
     const detalhes: any[] = [];
 
-    // Dedup por (os, loja) — bridge pode retornar a mesma OS em múltiplas linhas de log
-    const seen = new Set<string>();
+    for (const dataConsulta of datas) {
+      const url = `${BRIDGE_URL.replace(/\/$/, "")}/api/v1/os/movimentadas?data=${dataConsulta}&codEtapa=${codEtapa}`;
+      console.log(`[regua-armacao] consultando bridge: ${url}`);
 
-    for (const r of rows) {
-      const os_numero = String(r.os ?? "").trim();
-      const codEmpresa = r.codEmpresa != null ? String(r.codEmpresa) : null;
-      const loja_nome = (codEmpresa && codToLoja.get(codEmpresa)) || String(r.empresa ?? "").trim();
-      if (!os_numero || !loja_nome) { erros++; continue; }
-
-      const key = `${os_numero}|${loja_nome}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const cliente_nome = r.cliente ? String(r.cliente) : null;
-      const cliente_telefone = r.telefone ? String(r.telefone) : null;
-      const produtos = Array.isArray(r.produtos) ? r.produtos as any[] : [];
-      const produto_descricao = montarProdutoDescricao(produtos);
-
-      // Resolve contato por telefone
-      let contato_id: string | null = null;
-      if (cliente_telefone) {
-        const clean = cliente_telefone.replace(/\D/g, "");
-        const { data: c } = await supabase
-          .from("contatos")
-          .select("id")
-          .eq("telefone", clean)
-          .maybeSingle();
-        contato_id = c?.id ?? null;
-      }
-
-      // Upsert
-      const { data: row, error: upErr } = await supabase
-        .from("os_recebimento_loja")
-        .upsert(
-          {
-            os_numero,
-            loja_nome,
-            cod_empresa: codEmpresa,
-            contato_id,
-            cliente_nome,
-            cliente_telefone,
-            produto_descricao,
-            cod_etapa_atual: Number(codEtapa),
-            etapa_label: r.etapa ? String(r.etapa) : "Aguardando armação",
-            data_movimentacao: dataConsulta,
-            metadata: { origem: "regua-disparo-aguardando-armacao", raw_produtos: produtos },
-          },
-          { onConflict: "os_numero,loja_nome" },
-        )
-        .select()
-        .single();
-      if (upErr) { console.error("upsert err", upErr); erros++; continue; }
-
-      if (row.aviso_armacao_enviado_at) { pulados++; continue; }
-
-      if (!contato_id) {
-        detalhes.push({ os_numero, loja_nome, skipped: "sem_contato" });
-        pulados++;
+      const bridgeResp = await fetch(url, { headers: { "x-service-key": SVC_SECRET } });
+      if (!bridgeResp.ok) {
+        const t = await bridgeResp.text().catch(() => "");
+        console.error("[regua-armacao] bridge erro", bridgeResp.status, t.slice(0, 200));
+        detalhes.push({ data: dataConsulta, error: "bridge_error", status: bridgeResp.status });
+        erros++;
         continue;
       }
+      const bridgeJson = await bridgeResp.json();
+      const rows: Array<Record<string, unknown>> = Array.isArray(bridgeJson?.data)
+        ? bridgeJson.data
+        : Array.isArray(bridgeJson) ? bridgeJson : [];
 
-      const primeiroNome = (cliente_nome ?? "").split(" ")[0] || "tudo bem";
-      const tplResp = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
-        body: JSON.stringify({
-          contato_id,
-          template_alias: "aviso_aguardando_armacao",
-          template_params: [primeiroNome, os_numero, loja_nome],
-          language: "pt_BR",
-        }),
-      });
-      const tplJson = await tplResp.json().catch(() => ({}));
+      console.log(`[regua-armacao] data=${dataConsulta} → ${rows.length} OS retornadas`);
+      totalRows += rows.length;
 
-      if (tplResp.ok && tplJson?.status === "sent") {
-        await supabase
+      // Dedup por (os, loja) dentro da mesma data
+      const seen = new Set<string>();
+
+      for (const r of rows) {
+        const os_numero = String(r.os ?? "").trim();
+        const codEmpresa = r.codEmpresa != null ? String(r.codEmpresa) : null;
+        const loja_nome = (codEmpresa && codToLoja.get(codEmpresa)) || String(r.empresa ?? "").trim();
+        if (!os_numero || !loja_nome) { erros++; continue; }
+
+        const key = `${os_numero}|${loja_nome}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const cliente_nome = r.cliente ? String(r.cliente) : null;
+        const cliente_telefone = r.telefone ? String(r.telefone) : null;
+        const produtos = Array.isArray(r.produtos) ? r.produtos as any[] : [];
+        const produto_descricao = montarProdutoDescricao(produtos);
+
+        let contato_id: string | null = null;
+        if (cliente_telefone) {
+          const clean = cliente_telefone.replace(/\D/g, "");
+          const { data: c } = await supabase
+            .from("contatos")
+            .select("id")
+            .eq("telefone", clean)
+            .maybeSingle();
+          contato_id = c?.id ?? null;
+        }
+
+        const { data: row, error: upErr } = await supabase
           .from("os_recebimento_loja")
-          .update({
-            aviso_armacao_enviado_at: new Date().toISOString(),
-            aviso_armacao_template: "aviso_aguardando_armacao",
-          })
-          .eq("id", row.id);
-        enviados++;
-        detalhes.push({ os_numero, loja_nome, sent: true });
-      } else {
-        erros++;
-        detalhes.push({ os_numero, loja_nome, error: tplJson });
+          .upsert(
+            {
+              os_numero,
+              loja_nome,
+              cod_empresa: codEmpresa,
+              contato_id,
+              cliente_nome,
+              cliente_telefone,
+              produto_descricao,
+              cod_etapa_atual: Number(codEtapa),
+              etapa_label: r.etapa ? String(r.etapa) : "Aguardando armação",
+              data_movimentacao: dataConsulta,
+              metadata: { origem: "regua-disparo-aguardando-armacao", raw_produtos: produtos },
+            },
+            { onConflict: "os_numero,loja_nome" },
+          )
+          .select()
+          .single();
+        if (upErr) { console.error("upsert err", upErr); erros++; continue; }
+
+        if (row.aviso_armacao_enviado_at) { pulados++; continue; }
+
+        if (!contato_id) {
+          detalhes.push({ data: dataConsulta, os_numero, loja_nome, skipped: "sem_contato" });
+          pulados++;
+          continue;
+        }
+
+        const primeiroNome = (cliente_nome ?? "").split(" ")[0] || "tudo bem";
+        const tplResp = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+          body: JSON.stringify({
+            contato_id,
+            template_alias: "aviso_aguardando_armacao",
+            template_params: [primeiroNome, os_numero, loja_nome],
+            language: "pt_BR",
+          }),
+        });
+        const tplJson = await tplResp.json().catch(() => ({}));
+
+        if (tplResp.ok && tplJson?.status === "sent") {
+          await supabase
+            .from("os_recebimento_loja")
+            .update({
+              aviso_armacao_enviado_at: new Date().toISOString(),
+              aviso_armacao_template: "aviso_aguardando_armacao",
+            })
+            .eq("id", row.id);
+          enviados++;
+          detalhes.push({ data: dataConsulta, os_numero, loja_nome, sent: true });
+        } else {
+          erros++;
+          detalhes.push({ data: dataConsulta, os_numero, loja_nome, error: tplJson });
+        }
       }
     }
 
     console.log(`[regua-armacao] enviados=${enviados} pulados=${pulados} erros=${erros}`);
-    return json({ ok: true, data: dataConsulta, codEtapa, total: rows.length, enviados, pulados, erros, detalhes });
+    return json({ ok: true, datas, codEtapa, total: totalRows, enviados, pulados, erros, detalhes });
   } catch (e) {
     console.error("regua-disparo-aguardando-armacao error:", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
