@@ -3252,20 +3252,39 @@ serve(async (req) => {
     // ── Set lock — CAS atômico via coluna ia_lock_at ────────────────────────
     // UPDATE … WHERE id=$1 AND (ia_lock_at IS NULL OR ia_lock_at < agora-TTL)
     // é serializado pelo Postgres: só UMA execução concorrente ganha a linha.
-    // Se retornou vazio, outra execução tem o lock → aborta imediatamente.
-    const lockExpiredBefore = new Date(now - LOCK_TTL_MS).toISOString();
-    const { data: lockAcquired } = await supabase
-      .from("atendimentos")
-      .update({ ia_lock_at: new Date(now).toISOString() })
-      .eq("id", atendimento_id)
-      .or(`ia_lock_at.is.null,ia_lock_at.lt.${lockExpiredBefore}`)
-      .select("id");
-
-    if (!lockAcquired?.length) {
+    // Se falha, tenta novamente 2x (3s entre tentativas) — cobre casos em que
+    // a execução concorrente termina rápido, evitando depender do watchdog 1min.
+    // Se ainda falha após 3 tentativas, aborta (watchdog cobre como 2ª camada).
+    let lockAcquired: { id: string }[] | null = null;
+    let lockAttempt = 0;
+    const LOCK_MAX_ATTEMPTS = 3;
+    while (lockAttempt < LOCK_MAX_ATTEMPTS) {
+      lockAttempt++;
+      const lockExpiredBefore = new Date(Date.now() - LOCK_TTL_MS).toISOString();
+      const { data } = await supabase
+        .from("atendimentos")
+        .update({ ia_lock_at: new Date().toISOString() })
+        .eq("id", atendimento_id)
+        .or(`ia_lock_at.is.null,ia_lock_at.lt.${lockExpiredBefore}`)
+        .select("id");
+      if (data?.length) {
+        lockAcquired = data as { id: string }[];
+        if (lockAttempt > 1) {
+          console.log(`[LOCK-CAS] Lock atômico adquirido após retry (tentativa ${lockAttempt})`);
+        } else {
+          console.log("[LOCK-CAS] Lock atômico adquirido");
+        }
+        break;
+      }
+      if (lockAttempt < LOCK_MAX_ATTEMPTS) {
+        console.log(`[LOCK-CAS] Lock ocupado — retry ${lockAttempt}/${LOCK_MAX_ATTEMPTS - 1} em 3s`);
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
+    if (!lockAcquired) {
       console.log("[LOCK-CAS] Lock held by concurrent execution — abortando para evitar duplicação");
       return jsonResponse({ status: "skipped", reason: "lock-cas — concurrent execution blocked" });
     }
-    console.log("[LOCK-CAS] Lock atômico adquirido");
 
     const isHibrido = atendimento.modo === "hibrido";
     const contatoId = contato_id || atendimento.contato_id;
