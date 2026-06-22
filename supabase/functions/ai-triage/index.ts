@@ -781,6 +781,8 @@ const OS_INTENT_CORE_REGEX: RegExp[] = [
   /\b(status|situa[cç][aã]o|andamento|previs[aã]o|novidade|posi[cç][aã]o|atualiza[cç][aã]o|retirada|retirar)\b[\s\S]{0,40}\b(meu|do|de|outro|outra|esse|este)?\s*(pedido|encomenda|compra|os|[oó]culos|len(te|tes))\b/i,
   // "como (está/anda/tá/fica) (meu/o/esse) pedido/encomenda/óculos" — paráfrase coloquial
   /\bcomo\s+(est[aá]|anda|t[aá]|fica|vai)\b[\s\S]{0,20}\b(meu|o|seu|esse|este)?\s*(pedido|encomenda|compra|os|[oó]culos|len(te|tes))\b/i,
+  // "(quero|queria|preciso|gostaria|posso) (saber|consultar|ver|acompanhar) ... (pedido|encomenda|os|óculos|lente|compra)"
+  /\b(quero|queria|preciso|gostaria|posso)\b[\s\S]{0,30}\b(saber|consultar|ver|acompanhar)\b[\s\S]{0,30}\b(pedido|encomenda|os|[oó]culos|len(te|tes)|compra)\b/i,
 ];
 
 function matchesConsultaOs(msg: string, keywords: string[]): boolean {
