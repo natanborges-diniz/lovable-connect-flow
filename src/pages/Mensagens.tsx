@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { ConfirmarRecebimentoOSDialog } from "@/components/os/ConfirmarRecebimentoOSDialog";
+
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
 import { NovoGrupoDialog } from "@/components/mensagens/NovoGrupoDialog";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
