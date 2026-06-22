@@ -25,6 +25,7 @@ import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import SomenteMessenger from "./pages/SomenteMessenger";
 import NotFound from "./pages/NotFound";
+import TermosCashback from "./pages/TermosCashback";
 
 const queryClient = new QueryClient();
 
