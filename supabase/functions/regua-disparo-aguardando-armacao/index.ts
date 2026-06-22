@@ -19,14 +19,30 @@ function json(body: unknown, status = 200) {
   });
 }
 
-// D-1 em São Paulo, formato YYYY-MM-DD
-function dataOntemSaoPaulo(): string {
-  const nowSP = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
-  nowSP.setDate(nowSP.getDate() - 1);
-  const y = nowSP.getFullYear();
-  const m = String(nowSP.getMonth() + 1).padStart(2, "0");
-  const d = String(nowSP.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+// Hoje em São Paulo (Date com fuso SP)
+function hojeSP(): Date {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+}
+function fmt(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+// Regra:
+//  - domingo (dow=0)  → não roda
+//  - segunda (dow=1)  → processa D-1 (domingo) + D-2 (sábado), pois domingo não rodou
+//  - demais dias      → processa apenas D-1
+function datasParaProcessar(): string[] {
+  const hoje = hojeSP();
+  const dow = hoje.getDay();
+  if (dow === 0) return []; // domingo
+  const d1 = new Date(hoje); d1.setDate(d1.getDate() - 1);
+  if (dow === 1) {
+    const d2 = new Date(hoje); d2.setDate(d2.getDate() - 2);
+    return [fmt(d2), fmt(d1)];
+  }
+  return [fmt(d1)];
 }
 
 function montarProdutoDescricao(produtos: Array<{ tipo: string; descricao: string }>): string {
