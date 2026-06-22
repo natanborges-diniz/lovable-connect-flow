@@ -48,6 +48,10 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
     || demanda.metadata?.tipo_chave === "confirmacao_estoque";
   const confestId: string | undefined = demanda.metadata?.confirmacao_estoque_id;
   const confestRespondida = !!demanda.metadata?.confirmacao_respondida;
+  const isCashbackDiv = (demanda as any).tipo_chave === "cashback_divergencia"
+    || demanda.metadata?.tipo_chave === "cashback_divergencia";
+  const cashbackDecisao = demanda.metadata?.cashback_decisao as string | undefined;
+
 
   // Marca como vista
   useEffect(() => {
