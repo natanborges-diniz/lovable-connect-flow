@@ -169,6 +169,51 @@ serve(async (req) => {
 
     if (agErr) throw agErr;
 
+    // ── LINK A OS DE ORIGEM (aviso_aguardando_armacao / os_recebida_loja) ──
+    // Se existir OS recente do contato nessa loja ainda não vinculada a
+    // agendamento, marca o agendamento_id e grava os_origem no metadata.
+    // Isso fecha o gate "loja obrigatória" — não vamos voltar a oferecer outras
+    // unidades enquanto a OS continuar nesse fluxo.
+    try {
+      const { data: osLink } = await supabase
+        .from("os_recebimento_loja")
+        .select("id, os_numero, aviso_armacao_enviado_at, notificado_cliente_at")
+        .eq("contato_id", contato_id)
+        .ilike("loja_nome", loja_nome)
+        .is("agendamento_id", null)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (osLink) {
+        await supabase
+          .from("os_recebimento_loja")
+          .update({ agendamento_id: agendamento.id })
+          .eq("id", osLink.id);
+
+        const fluxo = osLink.notificado_cliente_at ? "os_recebida" : "aguardando_armacao";
+        await supabase
+          .from("agendamentos")
+          .update({
+            metadata: {
+              ...((agendamento as any).metadata || {}),
+              os_origem: {
+                os_recebimento_id: osLink.id,
+                os_numero: osLink.os_numero,
+                loja_nome,
+                fluxo,
+                linked_at: new Date().toISOString(),
+              },
+            },
+          })
+          .eq("id", agendamento.id);
+
+        console.log(`[agendar-cliente] OS ${osLink.os_numero} (${fluxo}) linkada ao agendamento ${agendamento.id}`);
+      }
+    } catch (e) {
+      console.warn("[agendar-cliente] linkagem os_recebimento_loja falhou (prossegue):", e);
+    }
+
     // Format date for message (sempre em America/Sao_Paulo)
     const dt = new Date(data_horario);
     const dataFormatada = dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", timeZone: "America/Sao_Paulo" });

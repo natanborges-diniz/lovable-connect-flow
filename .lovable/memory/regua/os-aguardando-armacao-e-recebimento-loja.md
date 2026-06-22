@@ -36,6 +36,14 @@ Catálogo em `whatsapp_templates`; gate em `send-whatsapp-template` bloqueia dis
 - **Demais dias** → processa apenas D-1.
 - Override manual via body: `{data: "YYYY-MM-DD"}` ou `{datas: ["YYYY-MM-DD", ...]}`.
 
+## Gate "loja obrigatória" pós-template
+
+Cliente que recebeu `aviso_aguardando_armacao_v2` ou `os_recebida_loja_v2` tem a armação/produto fisicamente naquela loja — **não pode** ser oferecida outra unidade se ele pedir para agendar.
+
+- **ai-triage**: query `os_recebimento_loja WHERE contato_id=? AND agendamento_id IS NULL AND (aviso_armacao_enviado_at OR notificado_cliente_at >= now()-30d)`. Se retornar, injeta bloco `# OS RECENTES DESTE CLIENTE (loja OBRIGATÓRIA se agendar)` no prompt com a regra "use loja_nome da OS DIRETAMENTE, proibido perguntar cidade/loja".
+- **agendar-cliente**: após `INSERT` em `agendamentos`, procura `os_recebimento_loja` recente do contato na mesma loja (case-insensitive, `agendamento_id IS NULL`), faz `UPDATE agendamento_id = novo.id` e grava `agendamentos.metadata.os_origem = {os_recebimento_id, os_numero, loja_nome, fluxo}`. `fluxo` deduzido por `notificado_cliente_at` (→`os_recebida`) ou `aviso_armacao_enviado_at` (→`aguardando_armacao`).
+- Coluna `os_recebimento_loja.agendamento_id` (FK → `agendamentos.id ON DELETE SET NULL`) é a fonte da verdade do vínculo. Uma vez linkada, a OS some do bloco injetado (não força mais a loja).
+
 ## RLS `os_recebimento_loja`
 
 - Admin/operador: tudo.
