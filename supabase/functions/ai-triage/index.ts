@@ -1036,11 +1036,13 @@ async function tratarResultadoConsultaOS(
     const itens = top2.map((res: any) => {
       const emissao = String((res.interno as any)?.dataEmissao || "");
       const ddmm = emissao.length >= 5 ? emissao.slice(0, 5) : emissao;
+      const prodDetalhe = String((res.publico as any)?.produtoDescricao || "").trim();
       const prodResumo = String((res.publico as any)?.produtoResumo || "").trim();
+      const prod = prodDetalhe || prodResumo;
       return {
         id:        `os_qual:${res.os}`,
         titulo:    `OS ${res.os}`,
-        descricao: (prodResumo ? `${prodResumo} · ${ddmm}` : ddmm).slice(0, 72),
+        descricao: (prod ? `${prod} · ${ddmm}` : ddmm).slice(0, 72),
       };
     });
     await sendInteractive(supabaseUrl, serviceKey, atId, {
@@ -1053,6 +1055,7 @@ async function tratarResultadoConsultaOS(
         ...meta,
         expected_reply: "os_aguardando_qual",
         os_opcoes: top2.map((res: any) => String(res.os)),
+        os_opcoes_snapshot: itens, // snapshot para re-render caso o cliente mande texto livre
         intent_consulta_os_at: new Date().toISOString(),
         os_tentativas: null,
       },
