@@ -95,6 +95,40 @@ serve(async (req) => {
     const source = "meta_official"; // CANAL ÚNICO: webhook só aceita Meta Official.
     console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${interactiveReply ? `[btn:${interactiveReply.id}]` : ''} ${text.substring(0, 50)}`);
 
+    // ─── 0z. Sempre registrar "respondido" no canal (telemetria de efetividade) ───
+    try {
+      await supabase.rpc("canal_registrar_evento", {
+        _telefone: phone, _evento: "respondido", _motivo: null,
+        _canal_consentimento: null, _termos_versao: null,
+      });
+    } catch (_) { /* não bloqueia o webhook */ }
+
+    // ─── 0y. Detecta "NÃO FUI EU" (texto livre ou botão nao_fui_eu / sim_sou_eu) ───
+    const _norm = (text || "").trim().toLowerCase().replace(/[^a-zà-ú0-9\s]/gi, "");
+    const isBotaoNao = interactiveReply?.id === "nao_fui_eu";
+    const isTextoNao = /\bnao\s+fui\s+eu\b/.test(_norm) || /\bnão\s+fui\s+eu\b/.test(text || "");
+    const isBotaoSim = interactiveReply?.id === "sim_sou_eu";
+    if (isBotaoNao || isTextoNao) {
+      try {
+        await supabase.rpc("canal_registrar_evento", {
+          _telefone: phone, _evento: "pessoa_errada", _motivo: "pessoa_errada",
+          _canal_consentimento: null, _termos_versao: null,
+        });
+      } catch (e) { console.warn("[pessoa_errada] erro:", e); }
+      return new Response(JSON.stringify({ status: "ok", action: "marcado_pessoa_errada" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (isBotaoSim) {
+      try {
+        await supabase.rpc("canal_registrar_evento", {
+          _telefone: phone, _evento: "validado", _motivo: null,
+          _canal_consentimento: "botao_template", _termos_versao: null,
+        });
+      } catch (e) { console.warn("[sim_sou_eu] erro:", e); }
+      // segue fluxo normal — cliente confirmou identidade e pode conversar
+    }
+
     // ─── 0a. ECHO-SAUDAÇÃO FILTER ───
     // Defensivo: descarta se nosso próprio número devolver a saudação automática como inbound.
     if (text && (mediaType === "text" || !mediaType)) {
