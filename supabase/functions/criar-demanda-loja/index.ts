@@ -182,11 +182,12 @@ serve(async (req) => {
           destinatario_id: d.user_id,
           conversa_id,
           conteudo: corpoChat,
-
-        anexo_url: anexo_url,
-        anexo_tipo: anexo_mime,
-      });
+          anexo_url: anexo_url,
+          anexo_tipo: anexo_mime,
+        });
+      }
     }
+
 
     if (dests.length === 0) {
       console.warn(`[criar-demanda-loja] Nenhum destinatário interno para "${headerLoja}".`);
