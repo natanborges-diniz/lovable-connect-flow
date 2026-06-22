@@ -733,6 +733,7 @@ const OS_INTENT_DEFAULT_KEYWORDS: string[] = [
   "status do pedido", "status da os",
   "minha os", "numero da os", "ordem de servico",
   "previsao de entrega", "pedido ficou pronto", "retirar meu oculos",
+  "saber do meu pedido", "saber do pedido", "saber sobre meu pedido",
 ];
 let _osKeywordsCache: string[] = OS_INTENT_DEFAULT_KEYWORDS;
 let _osKeywordsExpire = 0;
