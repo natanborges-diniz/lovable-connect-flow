@@ -48,7 +48,7 @@ serve(async (req) => {
     // ─── GATE: bloquear se template não estiver aprovado no catálogo local ───
     const { data: catalogo } = await supabase
       .from("whatsapp_templates")
-      .select("status, motivo_rejeicao")
+      .select("status, motivo_rejeicao, categoria")
       .eq("nome", template_name)
       .maybeSingle();
 
