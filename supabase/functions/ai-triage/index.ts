@@ -9994,6 +9994,16 @@ Qual dia e horário ficaria melhor pra você? 😊`,
       }
       return true;
     }
+    // Texto livre que não é OS/CPF: re-renderiza a lista interativa a partir do snapshot
+    const snapshot = Array.isArray(atendimentoMeta.os_opcoes_snapshot) ? atendimentoMeta.os_opcoes_snapshot : [];
+    if (snapshot.length > 0) {
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "list",
+        texto: "Toca em um dos pedidos abaixo pra eu te mostrar o status 😊",
+        lista: { label: "Ver pedidos", secao: "Seus pedidos", itens: snapshot },
+      });
+      return true;
+    }
     await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode tocar em uma das opções acima ou digitar o número da OS (5 dígitos)? 😊");
     return true;
   }
