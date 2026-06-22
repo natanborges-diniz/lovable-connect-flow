@@ -245,6 +245,16 @@ export default function ReguaNovaVenda() {
           )}
         </CardContent>
       </Card>
+
+      <CashbackPinDialog
+        inscricaoId={pinInscricaoId}
+        nomeCliente={pinNomeCliente}
+        onClose={() => setPinInscricaoId(null)}
+        onConfirmed={() => {
+          setPinInscricaoId(null);
+          qc.invalidateQueries({ queryKey: ["regua_inscricao_list"] });
+        }}
+      />
     </div>
   );
 }
