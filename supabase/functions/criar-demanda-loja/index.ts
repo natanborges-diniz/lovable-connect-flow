@@ -174,11 +174,15 @@ serve(async (req) => {
         referencia_id: demanda.id,
       });
 
-      await supabase.from("mensagens_internas").insert({
-        remetente_id: user.id,
-        destinatario_id: d.user_id,
-        conversa_id,
-        conteudo: corpoChat,
+      // Chat broadcast no Messenger: pula em service call (sem remetente_id válido).
+      // A loja recebe a notificação acima e abre a demanda pelo painel /demandas.
+      if (user) {
+        await supabase.from("mensagens_internas").insert({
+          remetente_id: user.id,
+          destinatario_id: d.user_id,
+          conversa_id,
+          conteudo: corpoChat,
+
         anexo_url: anexo_url,
         anexo_tipo: anexo_mime,
       });
