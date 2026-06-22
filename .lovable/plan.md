@@ -1,52 +1,99 @@
-## Correções para Latência + Intent de Consulta de OS
 
-### Problema A — Latência ~2min após perda do CAS lock
+## Objetivo
 
-Quando `ai-triage` perde o CAS lock (outra execução concorrente segura o lock), o código **aborta sem retry** (`supabase/functions/ai-triage/index.ts` L3261-3263). A recuperação só vem via `watchdog-inbound-orfao` (cron de 1min), gerando ~107s de silêncio entre o inbound e a resposta.
+Dois fluxos complementares ligados à OS no Firebird:
 
-**Fix:** transformar o ponto de aquisição do lock em um pequeno loop de retry com backoff. Antes de desistir, esperar 2 vezes (3s cada) tentando reaquirir — assim cobrimos o caso onde a execução concorrente termina em poucos segundos. Continua-se preservando a anti-duplicação (uma única execução por vez), mas elimina-se a dependência do cron de 1min nesse cenário.
+1. **Recebimento manual no Atrium Messenger** — loja vê lista de OS com movimentação recente no banco e dá "Recebi" → cliente recebe notificação automática.
+2. **Aviso automático D-1 → D 08h** — toda OS que entrou em `codEtapa=15` (Aguardando Armação) em D-1 dispara, no dia seguinte às 08:00 SP, template WhatsApp pedindo para o cliente trazer a armação.
 
-```text
-acquire_lock()                  → ok → segue
-fail → wait 3s → acquire_lock() → ok → segue
-fail → wait 3s → acquire_lock() → ok → segue
-fail → abort (watchdog cobre)
-```
+Complementa (não substitui) o futuro aviso de "OS pronta para retirada" (codEtapa=5).
 
-Quando o lock é perdido por execução genuinamente concorrente que produz uma outbound, o anti-duplicação posterior (`veryRecentOut <10s`) bloqueia naturalmente a nossa segunda execução. Não há risco de resposta duplicada.
+---
 
-### Problema B — "quero saber do meu pedido" não bate em consulta_os
+## 1. Recebimento de OS no Atrium Messenger
 
-O router pre-LLM em `OS_INTENT_CORE_REGEX` (L759-783) cobre "status/situação/andamento", "como está", "cadê meu pedido", mas **não cobre o padrão `(quero|preciso|queria|gostaria) saber ... pedido`** — exatamente a frase que o cliente 5511963268878 usou. Resultado: caiu no LLM, classificado como "outro" com conf 0.00, escalado por loop-detector — sem disparar `consulta_os` nem o roteamento direto para humano.
+### Tabela nova `os_recebimento_loja`
+| campo | tipo | descrição |
+|---|---|---|
+| `id` | uuid PK | |
+| `os_numero` | text | |
+| `loja_nome` | text | |
+| `contato_id` | uuid (nullable) | resolvido por telefone do cliente da OS |
+| `cod_etapa_atual` | int | snapshot no momento da ingestão |
+| `etapa_label` | text | rótulo ERP |
+| `produto_descricao` | text | usa `montarProdutoDescricao` do `os-status-public` |
+| `data_movimentacao` | date | última movimentação no Firebird |
+| `recebido_at` | timestamptz null | preenchido quando loja clica "Recebi" |
+| `recebido_por` | uuid null | profile da loja |
+| `notificado_cliente_at` | timestamptz null | quando o cliente recebeu o aviso |
+| `metadata` | jsonb | payload bruto Firebird |
 
-**Fix:** adicionar **uma regex** ao `OS_INTENT_CORE_REGEX` para esses verbos de consulta + objeto pedido/OS/óculos/encomenda, e **3 keywords** ao `OS_INTENT_DEFAULT_KEYWORDS` como rede de segurança.
+Único: `(os_numero, loja_nome)`. RLS: loja só vê suas linhas; admin/operador veem tudo.
 
-```text
-Nova regex:
-\b(quero|queria|preciso|gostaria|posso)\b[\s\S]{0,30}\b(saber|consultar|ver|acompanhar)\b[\s\S]{0,30}\b(pedido|encomenda|os|[oó]culos|len(te|tes)|compra)\b
+### Cron diário de ingestão `regua-ingestao-os-loja` (06:30 SP)
+- Lê do Firebird (via EF `os-status-public` em modo "lista") todas as OS com movimentação em D-1.
+- Faz upsert em `os_recebimento_loja` (sem sobrescrever `recebido_at`).
+- Resolve `contato_id` por telefone do cliente.
 
-Novas keywords:
-"saber do meu pedido"
-"saber do pedido"
-"saber sobre meu pedido"
-```
+### UI Messenger (cross-project InFoco Messenger) — nova aba "OS para receber"
+- Lista cards pendentes (`recebido_at IS NULL`) filtrados pela loja do usuário.
+- Cada card: nº OS, cliente, produto (descrição sanitizada), etapa, data movimentação.
+- Botão **"Confirmar recebimento"** → chama EF `confirmar-recebimento-os` do Atrium.
 
-### Detalhes técnicos
+### EF nova `confirmar-recebimento-os`
+- Marca `recebido_at` + `recebido_por`.
+- Dispara template `os_recebida_loja` (UTILITY) ao cliente: "Sua OS {numero} chegou na {loja}. Em breve nossa equipe finaliza e te avisa."
+- Loga em `eventos_crm`.
+- Idempotente: se já recebida, retorna 200 sem reenviar.
 
-**Arquivo único:** `supabase/functions/ai-triage/index.ts`
+### Templates novos (catálogo `whatsapp_templates`)
+- `os_recebida_loja` (UTILITY) — vars: `{nome}`, `{os_numero}`, `{loja}`
+- Aliases: `os_recebida_loja` → versão aprovada (gate em `send-whatsapp-template`)
 
-1. **L729-736 (`OS_INTENT_DEFAULT_KEYWORDS`)** — append 3 strings.
-2. **L759-783 (`OS_INTENT_CORE_REGEX`)** — append 1 regex.
-3. **L3253-3264 (bloco de CAS lock)** — envolver em loop de 3 tentativas com `await new Promise(r => setTimeout(r, 3000))` entre cada; mantém o log `[LOCK-CAS] Lock atômico adquirido` no sucesso e `[LOCK-CAS] Lock held by concurrent execution — abortando` quando esgota.
+---
 
-Mudanças são todas pontuais, no `ai-triage`. Sem migration, sem mexer em outras edge functions, sem mexer em frontend. Edge function sobe via autodeploy assim que aprovada.
+## 2. Aviso D-1 → D 08h "traga a armação" (codEtapa 15)
 
-### Validação pós-deploy
+### Ingestão diária
+Reaproveita o mesmo cron de 06:30 SP. Para OS detectada em `codEtapa=15` com `data_movimentacao = D-1`:
+- Cria touchpoint em `regua_touchpoint` com `tipo='aguardando_armacao_08h'`, `data_prevista = hoje`, `template_key='aviso_aguardando_armacao'`.
+- Único `(inscricao_id, tipo)` evita duplicação.
 
-- Conferir nos logs do `ai-triage` que `quero saber do meu pedido` agora dispara o branch de `consulta_os` (escalada direta para humano, conforme memória `consulta-os-escalada-humano`).
-- Em conversas com lock concorrente, observar nova linha de log indicando "lock retry adquirido" (a adicionar) e ausência de eventos de `watchdog-inbound-orfao` recuperando o mesmo atendimento.
+### Cron disparo 08:00 SP `regua-disparo-aguardando-armacao`
+- Seleciona touchpoints `tipo='aguardando_armacao_08h'`, `data_prevista=hoje`, `status='PENDENTE'`.
+- Dispara template `aviso_aguardando_armacao` via `send-whatsapp-template` (UTILITY, sempre alias).
+- Marca `enviado_at`, `status='ENVIADO'`.
+- Anti-duplicação: skip se `notificado_em` já existe.
 
-### Memória a atualizar (após confirmar fix em produção)
+### Template novo
+- `aviso_aguardando_armacao` (UTILITY) — vars: `{nome}`, `{os_numero}`, `{loja}`, `{endereco_loja}`
+- Texto sugerido: "Oi {nome}! Sua OS {os_numero} já está com as lentes prontas e só falta a armação para finalizarmos. Passe na {loja} ({endereco_loja}) no horário que for melhor pra você. — Óticas Diniz"
+- Alias: `aviso_aguardando_armacao`
 
-- `ia/consulta-os-escalada-humano.md`: registrar que o intent agora cobre "quero/queria/preciso/gostaria saber + pedido/OS/óculos".
-- `ia/watchdog-inbound-orfao.md`: nota de que o triage agora faz retry curto antes de cair no watchdog (watchdog vira fallback de 2ª camada).
+---
+
+## Decisões de design
+
+- **Branding**: cliente final vê "Óticas Diniz". Atrium só na UI interna.
+- **Horário comercial**: cron 08:00 SP; se loja fechada no dia (`loja_status_no_dia`), atrasa para próximo dia útil (skip + reagenda touchpoint).
+- **Anti-spam**: cada OS recebe no máximo 1 aviso por etapa (uniq `regua_touchpoint(inscricao_id,tipo)`).
+- **Gate de template**: `send-whatsapp-template` já bloqueia se status != approved; mensagem fica retida até aprovação Meta.
+- **Memória**: criar `mem://regua/os-aguardando-armacao-e-recebimento-loja` documentando os dois fluxos.
+
+---
+
+## Entregáveis (ordem)
+
+1. Migração: tabela `os_recebimento_loja` + grants + RLS + trigger updated_at; novos `tipo` permitidos em `regua_touchpoint`.
+2. Templates: criar `os_recebida_loja` e `aviso_aguardando_armacao` em `whatsapp_templates` (rascunho) + aliases.
+3. EF `regua-ingestao-os-loja` (cron 06:30) — ingestão Firebird → `os_recebimento_loja` + `regua_touchpoint`.
+4. EF `confirmar-recebimento-os` (chamada do Messenger).
+5. EF `regua-disparo-aguardando-armacao` (cron 08:00).
+6. Schedules pg_cron via `manage-cron-jobs`.
+7. UI no projeto **InFoco Messenger** (cross-project): nova rota `/os-para-receber`.
+8. Documentação de memória + atualização do índice.
+
+## Itens que ficam fora deste plano (próximo ciclo)
+
+- Aviso de "OS pronta para retirada" (codEtapa=5) — herda o mesmo motor de touchpoint, só adicionar `tipo='os_pronta_retirada'`.
+- Submissão e aprovação dos 2 templates na Meta (manual via Configurações).
