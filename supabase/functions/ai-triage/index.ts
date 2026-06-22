@@ -135,7 +135,9 @@ async function loadMensagensFixas(client: any): Promise<void> {
 function renderMsgFixa(chave: string, vars: Record<string, string> = {}): string {
   let t = _msgFixaCache[chave] || _msgFixaDefaults[chave] || "";
   for (const [k, v] of Object.entries(vars)) {
-    t = t.split(`{${k}}`).join(v ?? "");
+    const val = v ?? "";
+    // Suporta tanto {chave} (defaults internos) quanto {{chave}} (templates editados no banco)
+    t = t.split(`{{${k}}}`).join(val).split(`{${k}}`).join(val);
   }
   return t;
 }
