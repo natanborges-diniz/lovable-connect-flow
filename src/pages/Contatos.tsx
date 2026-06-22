@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import type { TipoContato, EstagioFunil } from "@/types/database";
 
 export default function Contatos() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [tipoFilter, setTipoFilter] = useState<string>("todos");
   const [dialogOpen, setDialogOpen] = useState(false);
