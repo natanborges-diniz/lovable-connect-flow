@@ -1,91 +1,66 @@
-## Reconciliação D+1 do cashback — fluxo final
-
-### Princípio inegociável
-
-**Cliente final não é notificado em momento algum** sobre reconciliação, divergência ou ajuste. Toda a comunicação ao cliente continua a do ato da venda: validação do PIN + mensagem amigável de boas-vindas ao cashback (saldo, validade, como usar). Os ajustes de D+1 são silenciosos: o saldo mostrado no extrato simplesmente sai de "provisório" para "disponível" quando a confirmação ocorre.
-
-### Estado atual
-
-- Edge function `regua-reconciliacao` pronta (consulta bridge, calcula `valor_status`, chama `cashback_confirmar_credito`, seta âncora).
-- RPC `cashback_confirmar_credito` move provisório → confirmado.
-- **Não há cron agendado** (3 inscrições paradas).
-- **Não há fluxo de tratamento de divergência** (loja + gestor).
-
-### Fluxo definitivo aprovado
-
-```text
-Loja lança venda  ──►  PIN ao cliente (única comunicação)
-                       crédito PROVISÓRIO + inscrição "aguardando_entrega"
-                          │
-        cron 07:00 SP ────┤   (único, diário)
-                          ▼
-         regua-reconciliacao consulta bridge por nº venda + empresa
-                          │
-        ┌─────────────────┼──────────────────┐
-        ▼                 ▼                  ▼
-   valor = informado   valor diverge     venda não existe
-   (tol R$ 0,50)       > tolerância       no Firebird
-        │                 │                  │
-   APROVA AUTO        demanda interna    tentativas++;
-   status=confirmado  para a LOJA via    após 5x → notifica
-   (silencioso        Messenger Atrium   supervisor; status
-   p/ cliente)        (silencioso        = sem_venda_persistente
-                       p/ cliente)
-                          │
-        ┌─────────────────┼──────────────────┐
-        ▼                 ▼                  ▼
-   Loja: "Ajustar    Loja: "Manter     Sem resposta em
-   p/ valor sistema" lançado"          24h → escala
-        │             (precisa             gestor (mesma
-   confirma com       aprovação do          UI de auditoria)
-   valor Firebird     supervisor)
-```
-
-Em **nenhum** dos ramos sai mensagem ao cliente. O cliente só vê seu saldo virar "disponível" no extrato/atendimento — sem texto, sem template, sem push.
-
-### Mudanças necessárias
-
-**1. Cron único — 07:00 SP (10:00 UTC) diário**
-- `regua-reconciliacao-diaria` chamando a edge function. Sem outro disparo.
-
-**2. Edge function `regua-reconciliacao` — ajustes**
-- `valor_status='ok'`: confirma automaticamente + emite evento `cashback_confirmado` na timeline (interno).
-- `valor_status='divergente'`: NÃO confirma; cria demanda interna `cashback_divergencia` para a loja `cod_empresa` com `{ valor_sistema, valor_lancado, inscricao_id, numero_venda }`; push + notificação Atrium aos vendedores; evento `cashback_divergente` (interno). **Nenhum template WhatsApp ao cliente.**
-- `sem_venda`: incrementa `tentativas_reconciliacao`; após 5x marca `sem_venda_persistente` + notifica supervisor (interno).
-- Guard explícito no código: comentário e helper que confirma que toda chamada de envio é `mensagens_internas` / `notificacoes`, nunca `send-whatsapp*`.
-
-**3. Migration**
-- `regua_inscricao`: + `tentativas_reconciliacao int default 0`, + `ultima_tentativa_at timestamptz`, + `demanda_divergencia_id uuid`.
-- Convenção `tipo_chave='cashback_divergencia'` em `demandas_loja`.
-
-**4. RPCs novas (security definer)**
-- `cashback_aprovar_divergencia(_inscricao_id, _valor_aceito, _origem, _motivo)` — confirma silenciosamente; fecha demanda; grava `metadata.origem_decisao` (`loja_ajustou_sistema` / `loja_manteve_lancado` / `supervisor_override`). Não dispara nada ao cliente.
-- `cashback_cancelar_inscricao(_inscricao_id, _motivo)` — estorna provisório silenciosamente.
-
-**5. UI — loja (Messenger / DemandaThreadView)**
-- Card `cashback_divergencia` com os 2 valores e 2 botões:
-  - "Ajustar para sistema (R$X)" → aprova na hora com `_origem='loja_ajustou_sistema'`.
-  - "Manter lançado (R$Y)" → marca demanda aguardando supervisor.
-
-**6. UI — gestor (`/regua` → nova aba "Auditoria de Cashback")**
-- Filtros: divergentes pendentes, pedidos de override, `sem_venda_persistente`.
-- Ações: Aprovar sistema / Aprovar lançado / Cancelar / Reprocessar.
-- Acesso por `user_acessos.cashback_auditoria` (admin/supervisor).
-
-**7. Memória**
-- `.lovable/memory/contatos/cashback-d1-auditoria.md`: cron 07h, aprovação automática silenciosa, demanda Atrium em divergência, **regra dura: nenhuma comunicação ao cliente durante reconciliação** — única mensagem ao cliente é o PIN no ato da venda + saldo no extrato.
-
-### Arquivos previstos
-
-- `supabase/migrations/<ts>_cashback_auditoria.sql`
-- Cron agendado via `supabase--insert`
-- `supabase/functions/regua-reconciliacao/index.ts` (ramo divergência → demanda interna)
-- `src/pages/CashbackAuditoria.tsx` + entrada no menu Régua
-- `src/components/cashback/AuditoriaDivergencias.tsx`
-- `src/components/atendimentos/DemandaThreadView.tsx` (render `cashback_divergencia`)
-- `src/hooks/useCashbackAuditoria.ts`
-- `.lovable/memory/contatos/cashback-d1-auditoria.md`
+## Auditoria: Cashback D+1 + Consulta OS — pode liberar?
 
 ### Resposta direta
+**Ainda não.** Roteador de OS e a infra de reconciliação estão prontos e os templates Meta `aviso_aguardando_armacao` e `os_recebida_loja` já estão **aprovados**, mas há 3 pontas soltas que quebram silenciosamente em produção. Plano abaixo corrige cada uma sem mexer no que já funciona.
 
-Tudo blindado em backstage: cron 07h, aprovação automática quando bate, demanda interna à loja em divergência, supervisor como fallback — e nenhuma mensagem ao cliente em nenhum desses passos.
+### O que está OK (verificado)
+- **Cron único 07:00 SP** (`regua-reconciliacao-diaria-07h-sp`, schedule `0 10 * * *`) ativo. Sem cron extra de meio-dia.
+- **Cron 07:00 SP aguardando armação** (`regua-disparo-aguardando-armacao`) também ativo.
+- **Templates Meta aprovados** (`os_recebida_loja` → `os_recebida_loja_v2`, `aviso_aguardando_armacao` → `aviso_aguardando_armacao_v2`).
+- **Roteador `ai-triage`** detecta `consulta_os` antes do LLM, escala para humano, move card para coluna "Consulta de OS", trava pedido de receita/orçamento. Keywords editáveis em `configuracoes_ia.os_intent_keywords` populadas.
+- **UI auditoria gestor** (`/regua/auditoria`) e **card de divergência** no `DemandaThreadView` plugados.
+- **RPCs `cashback_aprovar_divergencia` / `cashback_cancelar_inscricao`** existem e são silenciosas ao cliente.
+
+### Gaps que bloqueiam produção
+
+**1. Divergência de cashback nunca chega à loja (bug bloqueante)**
+`regua-reconciliacao` chama `criar-demanda-loja` com a service role key, mas `criar-demanda-loja` faz `supabase.auth.getUser(token)` e devolve **401 Unauthorized** quando o token não é JWT de usuário. Resultado: na primeira divergência real a demanda nunca é criada, a inscrição fica `valor_status='divergente'` órfã e nenhuma loja é avisada.
+
+**2. `loja_nome` enviado é o `cod_empresa` (ex.: `"18"`)**
+`resolver_destinatarios_loja(_loja_nome)` casa pelo nome textual da loja — passar o código numérico devolve lista vazia, então mesmo se o passo 1 fosse corrigido, **0 destinatários** seriam notificados via Messenger/push.
+
+**3. Loja não tem como confirmar recebimento de OS no Messenger**
+A edge function `confirmar-recebimento-os` (preview + confirm) está pronta e dispara o template aprovado, mas **nenhum componente em `src/` a chama**. Sem botão/tela, o template `os_recebida_loja` nunca sai, quebrando a régua de OS.
+
+### Correções (escopo cirúrgico)
+
+```text
+A. supabase/functions/criar-demanda-loja/index.ts
+   ├─ aceitar header "x-service-call: 1" + body.solicitante_nome
+   │  → pula auth.getUser(), grava solicitante_id=NULL, solicitante_nome="Sistema"
+   └─ continua exigindo JWT para chamadas do frontend (default)
+
+B. supabase/functions/regua-reconciliacao/index.ts (criarDemandaDivergencia)
+   ├─ resolver loja_nome real: lookup em lojas_cidades por loja_id=cod_empresa
+   │  (fallback: telefones_lojas; último recurso: "Loja {cod_empresa}")
+   ├─ adicionar header "x-service-call: 1" + solicitante_nome:"Reconciliação cashback"
+   └─ log explícito quando destinatários=0 (para auditoria)
+
+C. Frontend — confirmar recebimento de OS
+   ├─ novo componente src/components/os/ConfirmarRecebimentoOSDialog.tsx
+   │  - input nº OS → action="preview" mostra cliente/loja/produto
+   │  - botão "Confirmar recebimento" → action="confirm"
+   ├─ ponto de entrada: botão no Messenger (página /mensagens) visível
+   │  para usuários com user_acessos.menu_loja=true
+   └─ toast de sucesso + refetch da lista de OS pendentes
+
+D. Memória
+   └─ atualizar mem://regua/os-aguardando-armacao-e-recebimento-loja:
+      templates já aprovados (sair de "rascunho") + entrada UI no Messenger.
+```
+
+### Smoke test antes de liberar (sem migration, sem cron novo)
+1. Inserir 1 `regua_inscricao` fake com `cod_empresa='18'`, valor divergente, rodar `regua-reconciliacao` manualmente → confirmar demanda criada, destinatários>0, push chegando, **nenhum** registro em `mensagens` (WhatsApp ao cliente).
+2. Loja clica "Ajustar para sistema" → confirmar `cashback_credito.valor` recalculado, `valor_status='ok'`, demanda fechada, **nenhum** WhatsApp ao cliente.
+3. Loja clica "Manter lançado" → demanda fica aguardando supervisor; gestor abre `/regua/auditoria` e aprova; verificar evento `cashback_confirmado` interno.
+4. No Messenger, abrir o novo diálogo de OS com um nº real → preview retorna cliente, confirmar dispara `os_recebida_loja_v2` (idempotente: 2ª chamada devolve `already_received`).
+
+### Arquivos previstos
+- `supabase/functions/criar-demanda-loja/index.ts` (bypass service)
+- `supabase/functions/regua-reconciliacao/index.ts` (resolver loja_nome + header service)
+- `src/components/os/ConfirmarRecebimentoOSDialog.tsx` (novo)
+- `src/pages/Mensagens.tsx` (botão de entrada)
+- `.lovable/memory/regua/os-aguardando-armacao-e-recebimento-loja.md` (status templates)
+
+### Recomendação
+Aplicar A→D, rodar o smoke test, **aí sim** liberar produção. Os 3 itens são pequenos e independentes; sem eles o fluxo aparenta funcionar mas falha no primeiro caso real (divergência presa, loja não confirma OS).

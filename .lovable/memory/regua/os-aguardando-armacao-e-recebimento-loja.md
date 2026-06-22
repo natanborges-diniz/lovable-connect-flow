@@ -42,25 +42,26 @@ Injeta bloco `# OS RECENTES DESTE CLIENTE (loja OBRIGATÓRIA se agendar)` no pro
 
 `agendar-cliente` faz o link em `os_recebimento_loja.agendamento_id` quando há match em mesma loja (Fluxo 2 sai do gate ao agendar). Fluxo 1 não tem coluna de link — gate expira por tempo (30d) ou desuso.
 
-## Templates (rascunho — aguardando aprovação Meta)
+## Templates (APROVADOS)
 
-- `os_recebida_loja_v2` (UTILITY, pt_BR, PENDING) — params `{nome, os_numero, loja}`. Alias `os_recebida_loja`.
-- `aviso_aguardando_armacao_v2` (UTILITY, pt_BR, PENDING) — params `{nome, os_numero, loja}`. Alias `aviso_aguardando_armacao`.
+- `os_recebida_loja_v2` (UTILITY, pt_BR, **APPROVED**) — params `{nome, os_numero, loja}`. Alias `os_recebida_loja`.
+- `aviso_aguardando_armacao_v2` (UTILITY, pt_BR, **APPROVED**) — params `{nome, os_numero, loja}`. Alias `aviso_aguardando_armacao`.
 
-Gate em `send-whatsapp-template` bloqueia disparo enquanto `status != 'approved'`.
+Gate em `send-whatsapp-template` continua respeitando `status='approved'`.
 
 ## RLS
 
 - `os_avisos_armacao_log`: SELECT só admin/operador (`has_role`). Service role grava.
 - `os_recebimento_loja`: admin/operador tudo; usuário `tipo_usuario='loja'` vê/atualiza só linhas das próprias `user_acessos.lojas[]`.
 
-## UI Atrium Messenger (cross-project)
+## UI Atrium web (Mensagens)
 
-Tela "Recebimento de OS" — Fluxo 2 only:
-- Input "Número da OS" → chama `confirmar-recebimento-os` `action=preview`.
-- Exibe dados retornados (cliente, loja, produto, etapa) + alerta se `loja_confere=false`.
-- Botão "Confirmar recebimento" → chama `action=confirm` → dispara template.
-- Histórico opcional: `SELECT * FROM os_recebimento_loja WHERE recebido_at IS NOT NULL` últimos 30d filtrado por `user_acessos.lojas[]`.
+`src/components/os/ConfirmarRecebimentoOSDialog.tsx` — visível no header de `/mensagens` para `isAdmin || acessos.acessoTotal || acessos.modulos.menu_loja`.
+
+- Input "Número da OS" + "Loja que está recebendo" → botão "Consultar OS" chama `confirmar-recebimento-os` `action=preview`.
+- Exibe cliente / loja da OS / etapa / produtos + alerta se já recebida.
+- Botão "Confirmar recebimento" → `action=confirm` → dispara `os_recebida_loja_v2` ao cliente (idempotente).
+
 
 ## Branding
 

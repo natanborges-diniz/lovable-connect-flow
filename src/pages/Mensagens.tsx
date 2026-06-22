@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { ConfirmarRecebimentoOSDialog } from "@/components/os/ConfirmarRecebimentoOSDialog";
+
 import { AutorizacaoExcecaoCard } from "@/components/mensagens/AutorizacaoExcecaoCard";
 import { NovoGrupoDialog } from "@/components/mensagens/NovoGrupoDialog";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
@@ -29,7 +31,7 @@ import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble
 import { toast } from "sonner";
 
 export default function Mensagens() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, acessos } = useAuth();
   const uid = user?.id;
   const { conversas, makeConversaId, makeGroupConversaId } = useMensagensInternas();
   const [selectedConversa, setSelectedConversa] = useState<string | null>(null);
@@ -154,7 +156,17 @@ export default function Mensagens() {
 
   return (
     <div>
-      <PageHeader title="Mensagens" description="Comunicação interna entre usuários" />
+      <PageHeader
+        title="Mensagens"
+        description="Comunicação interna entre usuários"
+        actions={
+          (isAdmin || acessos?.acessoTotal || acessos?.modulos?.menu_loja) ? (
+            <ConfirmarRecebimentoOSDialog />
+          ) : undefined
+        }
+      />
+
+
       <div className="flex border rounded-lg bg-card h-[calc(100vh-12rem)] overflow-hidden">
         {/* Left: Conversation list */}
         <div className="w-80 border-r flex flex-col flex-shrink-0">
