@@ -13,6 +13,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { useResponderConfirmacaoEstoque } from "@/hooks/useConfirmacoesEstoque";
+import { CashbackDivergenciaCard } from "@/components/cashback/CashbackDivergenciaCard";
+
 
 const dirColors: Record<string, string> = {
   operador_para_loja: "bg-primary text-primary-foreground ml-auto",
