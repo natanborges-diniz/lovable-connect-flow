@@ -1001,8 +1001,13 @@ async function tratarResultadoConsultaOS(
   if (r.status === "indisponivel") {
     const indispMsg = renderMsgFixa("os_erp_indisponivel", { nome_comma: nomePrim ? `, ${nomePrim}` : "" });
     await sendWhatsApp(supabaseUrl, serviceKey, atId, indispMsg);
+    // Guarda identificador pra retry — se cliente disser "tenta de novo" depois,
+    // re-consulta com este sem pedir o número novamente. Handler: os_retry_aguardando.
+    const retryPayload = ident.valor
+      ? { os_retry: { identificador: ident.valor, tipo: ident.tipo, asked_at: new Date().toISOString(), tries: 1 }, expected_reply: "os_retry_aguardando" }
+      : {};
     await supabase.from("atendimentos").update({
-      metadata: { ...meta, intent_consulta_os_at: new Date().toISOString(), os_tentativas: null },
+      metadata: { ...meta, intent_consulta_os_at: new Date().toISOString(), os_tentativas: null, ...retryPayload },
     }).eq("id", atId);
     return "handled";
   }
@@ -3310,8 +3315,14 @@ serve(async (req) => {
           if (_osResult.status === "indisponivel") {
             const indispMsg = renderMsgFixa("os_erp_indisponivel", { nome_comma: _prim ? `, ${_prim}` : "" });
             await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, indispMsg);
+            // Guarda identificador pra retry — handler: os_retry_aguardando em routeExpectedTypedReply.
             await supabase.from("atendimentos").update({
-              metadata: { ...meta, intent_consulta_os_at: new Date().toISOString() },
+              metadata: {
+                ...meta,
+                intent_consulta_os_at: new Date().toISOString(),
+                os_retry: { identificador: _osIdent.valor, tipo: _osIdent.tipo, asked_at: new Date().toISOString(), tries: 1 },
+                expected_reply: "os_retry_aguardando",
+              },
             }).eq("id", atendimento_id);
             return jsonResponse({
               status: "ok", tools_used: ["os_erp_indisponivel"],
@@ -9991,6 +10002,77 @@ Qual dia e horário ficaria melhor pra você? 😊`,
     await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me passar o número da OS (5 dígitos do comprovante) ou seu CPF? 😊");
     await patchMeta({ expected_reply: "os_aguardando_identificador" });
     return true;
+  }
+
+  // ── OS RETRY: cliente esperando o ERP voltar após "os_erp_indisponivel" ─────
+  // Setado pelos blocos "indisponível" no router (~L3309) e em tratarResultadoConsultaOS (~L1000).
+  // Guarda { identificador, tipo, asked_at, tries } em meta.os_retry. Aqui:
+  //  - "tenta de novo / consulta agora / voltou? / etc." → re-dispara com o identificador guardado
+  //  - cliente digitou OUTRO identificador → re-dispara com o novo
+  //  - mudou de assunto → limpa retry, devolve false (LLM segue normal)
+  //  - expirou (>30min) → limpa, peça o número de novo
+  if (expectedReply === "os_retry_aguardando") {
+    const retry = (atendimentoMeta as any)?.os_retry as
+      | { identificador?: string; tipo?: "os" | "cpf"; asked_at?: string; tries?: number }
+      | undefined;
+    const RETRY_TTL_MS = 30 * 60 * 1000;
+    const expired = retry?.asked_at ? (Date.now() - new Date(retry.asked_at).getTime() > RETRY_TTL_MS) : true;
+    const hasGuardado = !!retry?.identificador && !!retry?.tipo && !expired;
+
+    // Sem identificador guardado válido — limpa e segue fluxo normal
+    if (!hasGuardado) {
+      await patchMeta({ expected_reply: null, os_retry: null });
+      return false;
+    }
+
+    const { data: ctRet } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+    const _primRet = (ctRet?.nome || "").trim().split(/\s+/)[0] || "";
+
+    // Cliente forneceu OUTRO identificador (trocou OS/CPF) → usa o novo
+    const novoIdent = extrairIdentificadorOS(mensagemTexto);
+    if (novoIdent.tipo !== null) {
+      await loadMensagensFixas(supabase);
+      const rN = await consultarStatusOS(supabaseUrl, serviceKey, novoIdent);
+      await tratarResultadoConsultaOS(
+        supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
+        _primRet, { ...atendimentoMeta, expected_reply: null, os_retry: null }, rN, novoIdent,
+      );
+      return true;
+    }
+
+    // Sinal de retry ("tenta de novo / consulta agora / voltou?") OU repetição da pergunta
+    const RETRY_REGEX = /\b(tenta(r)?\s+(de\s+)?(novo|denovo|outra\s+vez|mais\s+uma|agora)|tenta\s+a[ií]|consulta(r)?\s+(agora|de\s+novo|denovo|novamente)|j[aá]\s+(pode|p[oô]de|tentou|consultou|voltou)|e\s+agora\??|voltou\s+(o\s+)?sistema|alguma\s+novidade|tem\s+novidade|conseguiu|d[aá]\s+pra\s+(tenta|consulta)r?)\b/i;
+    const nMsg = norm(mensagemTexto);
+    const osKwRet = await loadOsKeywords(supabase);
+    const sinalRetry = RETRY_REGEX.test(mensagemTexto) || RETRY_REGEX.test(nMsg) || matchesConsultaOs(mensagemTexto, osKwRet);
+
+    if (sinalRetry) {
+      const identGuardado: { tipo: "os" | "cpf"; valor: string } = { tipo: retry!.tipo!, valor: retry!.identificador! };
+      await loadMensagensFixas(supabase);
+      const rG = await consultarStatusOS(supabaseUrl, serviceKey, identGuardado);
+      if (rG.status === "indisponivel") {
+        const newTries = (retry!.tries || 1) + 1;
+        const msg = newTries >= 3
+          ? "Ainda sem acesso ao sistema 😅 Já tentei algumas vezes. Posso te conectar com a equipe da loja pra confirmar pessoalmente?"
+          : "Ainda não consegui agora 😅 Me avisa em alguns minutos pra eu tentar de novo.";
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
+        await patchMeta({
+          expected_reply: "os_retry_aguardando",
+          os_retry: { ...retry!, tries: newTries, asked_at: new Date().toISOString() },
+        });
+        return true;
+      }
+      // Sucesso (ou outro resultado): trata normalmente, limpa retry
+      await tratarResultadoConsultaOS(
+        supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
+        _primRet, { ...atendimentoMeta, expected_reply: null, os_retry: null }, rG, identGuardado,
+      );
+      return true;
+    }
+
+    // Mudança de assunto: limpa e deixa o fluxo normal continuar
+    await patchMeta({ expected_reply: null, os_retry: null });
+    return false;
   }
 
   // B2b-FIX: texto digitado após "Tirar dúvida" cai aqui. Limpa expected_reply e devolve
