@@ -7,12 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Pencil } from "lucide-react";
+import { Plus, Search, Pencil, User } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import type { TipoContato, EstagioFunil } from "@/types/database";
 
 export default function Contatos() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [tipoFilter, setTipoFilter] = useState<string>("todos");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -108,7 +110,7 @@ export default function Contatos() {
               </TableHeader>
               <TableBody>
                 {contatos.map((contato) => (
-                  <TableRow key={contato.id}>
+                  <TableRow key={contato.id} className="cursor-pointer" onClick={() => navigate(`/crm/contatos/${contato.id}`)}>
                     <TableCell className="font-medium">{contato.nome}</TableCell>
                     <TableCell><TipoContatoBadge tipo={contato.tipo} /></TableCell>
                     <TableCell><EstagioFunilBadge estagio={contato.estagio} /></TableCell>
@@ -123,18 +125,22 @@ export default function Contatos() {
                         </div>
                       ) : "—"}
                     </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setEditingContato(contato);
-                          setEditDialogOpen(true);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost" size="icon" className="h-8 w-8"
+                          title="Visão 360"
+                          onClick={() => navigate(`/crm/contatos/${contato.id}`)}
+                        >
+                          <User className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost" size="icon" className="h-8 w-8"
+                          onClick={() => { setEditingContato(contato); setEditDialogOpen(true); }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

@@ -3376,6 +3376,25 @@ export type Database = {
         }
         Returns: Json
       }
+      contato_kpis: { Args: { _contato_id: string }; Returns: Json }
+      contato_timeline: {
+        Args: {
+          _contato_id: string
+          _filtros?: string[]
+          _limit?: number
+          _offset?: number
+        }
+        Returns: {
+          descricao: string
+          fonte: string
+          metadata: Json
+          ocorrido_at: string
+          referencia_id: string
+          referencia_tipo: string
+          tipo: string
+          titulo: string
+        }[]
+      }
       desanitize_corporate_contact: {
         Args: { _telefone: string }
         Returns: Json

@@ -26,6 +26,7 @@ import ResetPassword from "./pages/ResetPassword";
 import SomenteMessenger from "./pages/SomenteMessenger";
 import NotFound from "./pages/NotFound";
 import TermosCashback from "./pages/TermosCashback";
+import ContatoDetalhe from "./pages/ContatoDetalhe";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +47,7 @@ const App = () => (
               <Route path="/crm" element={<Pipeline />} />
               <Route path="/crm/conversas" element={<Atendimentos />} />
               <Route path="/crm/contatos" element={<Contatos />} />
+              <Route path="/crm/contatos/:id" element={<ContatoDetalhe />} />
               <Route path="/financeiro" element={<PipelineFinanceiro />} />
               <Route path="/financeiro/pagamentos" element={<PagamentosLink />} />
               <Route path="/lojas" element={<PipelineAgendamentos />} />
