@@ -25,10 +25,16 @@ Tabela única com PK `(os_numero, loja_nome)` rastreando ambos:
 
 ## Templates (rascunho — aguardando aprovação Meta)
 
-- `os_recebida_loja` (UTILITY, pt_BR) — params `{nome, os_numero, loja}`. Alias homônimo.
-- `aviso_aguardando_armacao` (UTILITY, pt_BR) — params `{nome, os_numero, loja}`. Alias homônimo.
+- `os_recebida_loja_v2` (UTILITY, pt_BR, PENDING) — "óculos pronto para retirada". Params `{nome, os_numero, loja}`. Alias `os_recebida_loja` → `_v2`.
+- `aviso_aguardando_armacao_v2` (UTILITY, pt_BR, PENDING) — "lentes chegaram, escolha armação e quer agendar?". Params `{nome, os_numero, loja}`. Alias `aviso_aguardando_armacao` → `_v2`.
 
-Catálogo em `whatsapp_templates`; gate em `send-whatsapp-template` bloqueia disparo enquanto `status != 'approved'`. Aliases permitem repointar para `_v2` aprovado sem redeploy.
+Catálogo em `whatsapp_templates`; gate em `send-whatsapp-template` bloqueia disparo enquanto `status != 'approved'`. Aliases permitem repointar sem redeploy.
+
+### Calendário do cron `regua-disparo-aguardando-armacao`
+- **Domingo SP** → execução pulada (retorna `skipped: "domingo"`).
+- **Segunda SP** → processa D-1 (domingo) **+** D-2 (sábado), para cobrir o domingo que não rodou.
+- **Demais dias** → processa apenas D-1.
+- Override manual via body: `{data: "YYYY-MM-DD"}` ou `{datas: ["YYYY-MM-DD", ...]}`.
 
 ## RLS `os_recebimento_loja`
 
