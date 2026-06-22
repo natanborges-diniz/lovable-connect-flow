@@ -53,7 +53,12 @@ interface Inscricao {
   contato_id:            string | null;
   cpf:                   string | null;
   valor_total_informado: number | null;
+  nome_cliente:          string | null;
+  tentativas_reconciliacao: number | null;
+  demanda_divergencia_id: string | null;
+  valor_status:          string | null;
 }
+
 
 type ResultadoInscricao = "anchorada" | "aguardando" | "sem_venda" | "erro";
 
