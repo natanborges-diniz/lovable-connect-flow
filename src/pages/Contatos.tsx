@@ -110,7 +110,7 @@ export default function Contatos() {
               </TableHeader>
               <TableBody>
                 {contatos.map((contato) => (
-                  <TableRow key={contato.id}>
+                  <TableRow key={contato.id} className="cursor-pointer" onClick={() => navigate(`/crm/contatos/${contato.id}`)}>
                     <TableCell className="font-medium">{contato.nome}</TableCell>
                     <TableCell><TipoContatoBadge tipo={contato.tipo} /></TableCell>
                     <TableCell><EstagioFunilBadge estagio={contato.estagio} /></TableCell>
@@ -125,18 +125,22 @@ export default function Contatos() {
                         </div>
                       ) : "—"}
                     </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setEditingContato(contato);
-                          setEditDialogOpen(true);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost" size="icon" className="h-8 w-8"
+                          title="Visão 360"
+                          onClick={() => navigate(`/crm/contatos/${contato.id}`)}
+                        >
+                          <User className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost" size="icon" className="h-8 w-8"
+                          onClick={() => { setEditingContato(contato); setEditDialogOpen(true); }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
