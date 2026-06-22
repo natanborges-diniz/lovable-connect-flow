@@ -155,12 +155,13 @@ function normalizarResultado(raw: Record<string, unknown>): {
     : [];
 
   const publico: Record<string, unknown> = {
-    situacao,                                          // fonte de verdade para o ai-triage
-    etapa:           String(raw.etapa ?? "").trim(),   // rótulo textual de apoio (Firebird)
-    produtoResumo:   montarProdutoResumo(produtos),    // produtos crus NÃO vão no público
-    previsaoEntrega: formatarDataBR(raw.dataPrevisao as string | null),
-    pronto:          situacao === "pronto",
-    entregue:        situacao === "entregue",
+    situacao,                                            // fonte de verdade para o ai-triage
+    etapa:             String(raw.etapa ?? "").trim(),   // rótulo textual de apoio (Firebird)
+    produtoResumo:     montarProdutoResumo(produtos),    // genérico: "armação + lentes"
+    produtoDescricao:  montarProdutoDescricao(produtos), // amigável: "armação RB4171 + lentes multifocais com antirreflexo"
+    previsaoEntrega:   formatarDataBR(raw.dataPrevisao as string | null),
+    pronto:            situacao === "pronto",
+    entregue:          situacao === "entregue",
   };
 
   const interno: Record<string, unknown> = {
