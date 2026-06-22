@@ -16,7 +16,7 @@ Ao consultar saldo no atendimento, o cliente vê o valor já "disponível" sem n
 2. `regua-reconciliacao` para cada `regua_inscricao.status='aguardando_entrega'`:
    - Consulta bridge `/api/v1/crm/venda`.
    - `valor_status='ok'` → chama `cashback_confirmar_credito` automaticamente + evento interno `cashback_confirmado`.
-   - `valor_status='divergente'` → NÃO confirma; chama `criar-demanda-loja` (loja `cod_empresa`, telefone `__INTERNO__`) e marca `tipo_chave='cashback_divergencia'` com metadata `{ inscricao_id, numero_venda, valor_lancado, valor_sistema, diff, silencioso_cliente: true }`. Salva `regua_inscricao.demanda_divergencia_id`. Evento interno `cashback_divergente`.
+   - `valor_status='divergente'` → NÃO confirma; resolve `loja_nome` via `lojas_cidades.loja_id=cod_empresa` (fallback "Loja {cod_empresa}") e chama `criar-demanda-loja` com header `x-service-call:1` + `solicitante_nome:"Reconciliação cashback"`, body inclui `tipo_chave:"cashback_divergencia"` + `metadata` completa (`inscricao_id, numero_venda, valor_lancado, valor_sistema, diff, silencioso_cliente: true`). Salva `regua_inscricao.demanda_divergencia_id`. Loga warning se `destinatarios_internos=0`. Evento interno `cashback_divergente`.
    - `sem_venda` → incrementa `tentativas_reconciliacao`; ao chegar em 5x marca `valor_status='sem_venda_persistente'` e cria notificação interna `cashback_sem_venda_persistente`.
 
 ## RPCs
