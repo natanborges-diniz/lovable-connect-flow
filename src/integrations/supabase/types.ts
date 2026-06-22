@@ -1987,6 +1987,83 @@ export type Database = {
           },
         ]
       }
+      os_recebimento_loja: {
+        Row: {
+          aviso_armacao_enviado_at: string | null
+          aviso_armacao_template: string | null
+          cliente_nome: string | null
+          cliente_telefone: string | null
+          cod_empresa: string | null
+          cod_etapa_atual: number | null
+          contato_id: string | null
+          created_at: string
+          data_movimentacao: string | null
+          etapa_label: string | null
+          id: string
+          loja_nome: string
+          metadata: Json
+          notificado_cliente_at: string | null
+          notificado_cliente_template: string | null
+          os_numero: string
+          produto_descricao: string | null
+          recebido_at: string | null
+          recebido_por: string | null
+          updated_at: string
+        }
+        Insert: {
+          aviso_armacao_enviado_at?: string | null
+          aviso_armacao_template?: string | null
+          cliente_nome?: string | null
+          cliente_telefone?: string | null
+          cod_empresa?: string | null
+          cod_etapa_atual?: number | null
+          contato_id?: string | null
+          created_at?: string
+          data_movimentacao?: string | null
+          etapa_label?: string | null
+          id?: string
+          loja_nome: string
+          metadata?: Json
+          notificado_cliente_at?: string | null
+          notificado_cliente_template?: string | null
+          os_numero: string
+          produto_descricao?: string | null
+          recebido_at?: string | null
+          recebido_por?: string | null
+          updated_at?: string
+        }
+        Update: {
+          aviso_armacao_enviado_at?: string | null
+          aviso_armacao_template?: string | null
+          cliente_nome?: string | null
+          cliente_telefone?: string | null
+          cod_empresa?: string | null
+          cod_etapa_atual?: number | null
+          contato_id?: string | null
+          created_at?: string
+          data_movimentacao?: string | null
+          etapa_label?: string | null
+          id?: string
+          loja_nome?: string
+          metadata?: Json
+          notificado_cliente_at?: string | null
+          notificado_cliente_template?: string | null
+          os_numero?: string
+          produto_descricao?: string | null
+          recebido_at?: string | null
+          recebido_por?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_recebimento_loja_contato_id_fkey"
+            columns: ["contato_id"]
+            isOneToOne: false
+            referencedRelation: "contatos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pagamentos_link: {
         Row: {
           alias_loja: string | null

@@ -92,3 +92,9 @@ verify_jwt = false
 
 [functions.os-status-public]
 verify_jwt = false
+
+[functions.confirmar-recebimento-os]
+verify_jwt = true
+
+[functions.regua-disparo-aguardando-armacao]
+verify_jwt = false
