@@ -5128,6 +5128,39 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       }
     }
 
+    // ── 5.045 GATE LOJA OBRIGATÓRIA (OS pós-template) ──
+    // Cliente que recebeu aviso_aguardando_armacao_v2 ou os_recebida_loja_v2
+    // tem a armação/produto FISICAMENTE na loja onde a OS está. Se ele pedir
+    // para agendar visita, a IA NÃO pode oferecer outras unidades nem perguntar
+    // cidade/loja — tem que usar loja_nome da OS direto na tool agendar_visita.
+    // O linkage real é feito por agendar-cliente (os_recebimento_loja.agendamento_id).
+    try {
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: osPendentes } = await supabase
+        .from("os_recebimento_loja")
+        .select("os_numero, loja_nome, aviso_armacao_enviado_at, notificado_cliente_at")
+        .eq("contato_id", contatoId)
+        .is("agendamento_id", null)
+        .or(`aviso_armacao_enviado_at.gte.${cutoff},notificado_cliente_at.gte.${cutoff}`)
+        .order("updated_at", { ascending: false })
+        .limit(3);
+
+      if (osPendentes && osPendentes.length > 0) {
+        agendamentoCtx += "\n\n# OS RECENTES DESTE CLIENTE (loja OBRIGATÓRIA se agendar)\n";
+        for (const os of osPendentes) {
+          const fluxo = (os as any).notificado_cliente_at ? "os_recebida (óculos pronto)" : "aguardando_armacao (trazer armação)";
+          const quando = (os as any).notificado_cliente_at || (os as any).aviso_armacao_enviado_at;
+          const dataAviso = quando
+            ? new Date(quando).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" })
+            : "?";
+          agendamentoCtx += `- OS ${(os as any).os_numero} na loja ${(os as any).loja_nome} — fluxo: ${fluxo} — avisado em ${dataAviso}\n`;
+        }
+        agendamentoCtx += "\n⚠️ REGRA: se o cliente pedir para agendar visita relacionada a essas OS (trazer armação, retirar óculos, passar na loja), use loja_nome da OS DIRETAMENTE na tool agendar_visita. PROIBIDO perguntar 'em qual loja prefere?' ou oferecer outras unidades — a armação/produto está fisicamente nessa loja.";
+      }
+    } catch (e) {
+      console.warn("[ai-triage] os_recebimento_loja context falhou:", e);
+    }
+
     // ── 5.05 INJECT PRESCRIPTION CONTEXT ──
     // B2.2: filtra receitas por sessão/confirmação antes de injetar no LLM.
     // Receitas não-confirmadas de sessões anteriores são "fantasmas" — não devem
