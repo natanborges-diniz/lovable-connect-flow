@@ -1,82 +1,91 @@
-## Visão Cliente 360 — Timeline unificada
+## Reconciliação D+1 do cashback — fluxo final
 
-Centraliza todo o histórico do cliente em uma página única, alimentada por tabelas já existentes (`eventos_crm`, `atendimentos`, `mensagens`, `agendamentos`, `cashback_*`, `regua_inscricao`, `regua_touchpoint`, `pagamentos_link`, `os_recebimento_loja`, `demandas_loja`, `canais`, `solicitacao_anexos`). **Zero tabelas novas** — só uma view consolidada e UI.
+### Princípio inegociável
 
-### 1. Acesso
-- **Rota dedicada** `/contatos/:id` (nova página `ContatoDetalhe.tsx`).
-- **Drawer rápido** `<Cliente360Drawer>` reaproveitável: gatilho no nome do cliente em CRM/Atendimentos/Agendamentos/Financeiro/Estoque. Drawer mostra resumo + botão "Abrir visão completa".
-- Busca global no header (telefone, nome, CPF) abrindo a página direta.
+**Cliente final não é notificado em momento algum** sobre reconciliação, divergência ou ajuste. Toda a comunicação ao cliente continua a do ato da venda: validação do PIN + mensagem amigável de boas-vindas ao cashback (saldo, validade, como usar). Os ajustes de D+1 são silenciosos: o saldo mostrado no extrato simplesmente sai de "provisório" para "disponível" quando a confirmação ocorre.
 
-### 2. Layout da página
+### Estado atual
+
+- Edge function `regua-reconciliacao` pronta (consulta bridge, calcula `valor_status`, chama `cashback_confirmar_credito`, seta âncora).
+- RPC `cashback_confirmar_credito` move provisório → confirmado.
+- **Não há cron agendado** (3 inscrições paradas).
+- **Não há fluxo de tratamento de divergência** (loja + gestor).
+
+### Fluxo definitivo aprovado
 
 ```text
-┌───────────────────────────────────────────────────────────┐
-│ HEADER: Nome • telefone • status canal • tags • estágio   │
-│ KPIs:  Cashback saldo • LTV • Última interação • NPS      │
-├────────────┬──────────────────────────────────────────────┤
-│ Sidebar    │ Tabs:                                        │
-│ - Resumo   │  [Timeline] [Cashback] [LGPD/Docs] [Canais]  │
-│ - Cards    │  [Atendimentos] [Agendamentos/OS] [Financ.]  │
-│ ativos     │                                              │
-└────────────┴──────────────────────────────────────────────┘
+Loja lança venda  ──►  PIN ao cliente (única comunicação)
+                       crédito PROVISÓRIO + inscrição "aguardando_entrega"
+                          │
+        cron 07:00 SP ────┤   (único, diário)
+                          ▼
+         regua-reconciliacao consulta bridge por nº venda + empresa
+                          │
+        ┌─────────────────┼──────────────────┐
+        ▼                 ▼                  ▼
+   valor = informado   valor diverge     venda não existe
+   (tol R$ 0,50)       > tolerância       no Firebird
+        │                 │                  │
+   APROVA AUTO        demanda interna    tentativas++;
+   status=confirmado  para a LOJA via    após 5x → notifica
+   (silencioso        Messenger Atrium   supervisor; status
+   p/ cliente)        (silencioso        = sem_venda_persistente
+                       p/ cliente)
+                          │
+        ┌─────────────────┼──────────────────┐
+        ▼                 ▼                  ▼
+   Loja: "Ajustar    Loja: "Manter     Sem resposta em
+   p/ valor sistema" lançado"          24h → escala
+        │             (precisa             gestor (mesma
+   confirma com       aprovação do          UI de auditoria)
+   valor Firebird     supervisor)
 ```
 
-### 3. Aba Timeline (núcleo)
-Lista cronológica reversa, agrupada por dia, com filtros (chips: Atendimento, Cashback, Régua, Agendamento, OS, Pagamento, Demanda, Consentimento, Canal). Busca textual e exportação CSV/PDF.
+Em **nenhum** dos ramos sai mensagem ao cliente. O cliente só vê seu saldo virar "disponível" no extrato/atendimento — sem texto, sem template, sem push.
 
-Cada item tem ícone, cor, título, snippet, atalho ("Abrir atendimento", "Ver OS"). Realtime via canal Supabase em `eventos_crm`.
+### Mudanças necessárias
 
-Fontes consolidadas via nova **view `vw_contato_timeline`** (read-only, sem dados duplicados) que faz UNION de:
-- `eventos_crm` (`contato_*`, `regua_*`, `cashback_*`)
-- `atendimentos` (início/fim)
-- `mensagens` resumidas (primeira+última de cada atendimento)
-- `agendamentos` (criado/confirmado/no-show/concluído)
-- `cashback_credito` e `cashback_resgate`
-- `regua_inscricao` + `regua_touchpoint`
-- `pagamentos_link` (criado/pago/expirado) e `pagamentos_link_eventos`
-- `os_recebimento_loja` (cadastrado/recebido)
-- `demandas_loja` (abertura/conclusão)
+**1. Cron único — 07:00 SP (10:00 UTC) diário**
+- `regua-reconciliacao-diaria` chamando a edge function. Sem outro disparo.
 
-### 4. Aba Cashback
-- Saldo atual + extrato (créditos e resgates) com loja, valor, validade.
-- Lista de vendas com PIN: status (`pin_confirmado_at`, tentativas, expiração), versão dos termos aceita, canal de consentimento.
+**2. Edge function `regua-reconciliacao` — ajustes**
+- `valor_status='ok'`: confirma automaticamente + emite evento `cashback_confirmado` na timeline (interno).
+- `valor_status='divergente'`: NÃO confirma; cria demanda interna `cashback_divergencia` para a loja `cod_empresa` com `{ valor_sistema, valor_lancado, inscricao_id, numero_venda }`; push + notificação Atrium aos vendedores; evento `cashback_divergente` (interno). **Nenhum template WhatsApp ao cliente.**
+- `sem_venda`: incrementa `tentativas_reconciliacao`; após 5x marca `sem_venda_persistente` + notifica supervisor (interno).
+- Guard explícito no código: comentário e helper que confirma que toda chamada de envio é `mensagens_internas` / `notificacoes`, nunca `send-whatsapp*`.
 
-### 5. Aba LGPD/Documentos
-- Linha por consentimento: versão (`termos_versao`), data, canal (`pin_whatsapp`/etc.), IP do consultor, link para o PDF dos termos.
-- Receitas/anexos (`solicitacao_anexos` + `metadata.receita`).
-- Comprovantes de pagamento vinculados aos `pagamentos_link`.
-- Botão "Exportar dossiê LGPD" (PDF com tudo do cliente — direito de portabilidade).
+**3. Migration**
+- `regua_inscricao`: + `tentativas_reconciliacao int default 0`, + `ultima_tentativa_at timestamptz`, + `demanda_divergencia_id uuid`.
+- Convenção `tipo_chave='cashback_divergencia'` em `demandas_loja`.
 
-### 6. Aba Canais
-Painel de saúde por canal (telefone WhatsApp): status (`nao_validado/validado/pessoa_errada/invalido/sem_resposta`), 4 contadores, último motivo de falha, validado em, versão dos termos. Ações: "Reenviar PIN", "Marcar como inválido", "Trocar telefone principal" (cria novo registro em `canais`).
+**4. RPCs novas (security definer)**
+- `cashback_aprovar_divergencia(_inscricao_id, _valor_aceito, _origem, _motivo)` — confirma silenciosamente; fecha demanda; grava `metadata.origem_decisao` (`loja_ajustou_sistema` / `loja_manteve_lancado` / `supervisor_override`). Não dispara nada ao cliente.
+- `cashback_cancelar_inscricao(_inscricao_id, _motivo)` — estorna provisório silenciosamente.
 
-### 7. Aba Atendimentos
-Lista paginada com filtros (canal, atendente, status). Cada linha abre o atendimento na rota existente.
+**5. UI — loja (Messenger / DemandaThreadView)**
+- Card `cashback_divergencia` com os 2 valores e 2 botões:
+  - "Ajustar para sistema (R$X)" → aprova na hora com `_origem='loja_ajustou_sistema'`.
+  - "Manter lançado (R$Y)" → marca demanda aguardando supervisor.
 
-### 8. Aba Agendamentos/OS
-Tabela de agendamentos (com status terminal) + lista de OS de `os_recebimento_loja` com timeline mini de cada uma.
+**6. UI — gestor (`/regua` → nova aba "Auditoria de Cashback")**
+- Filtros: divergentes pendentes, pedidos de override, `sem_venda_persistente`.
+- Ações: Aprovar sistema / Aprovar lançado / Cancelar / Reprocessar.
+- Acesso por `user_acessos.cashback_auditoria` (admin/supervisor).
 
-### 9. Aba Financeiro
-Links de pagamento, status, valor, comprovante. Soma LTV.
+**7. Memória**
+- `.lovable/memory/contatos/cashback-d1-auditoria.md`: cron 07h, aprovação automática silenciosa, demanda Atrium em divergência, **regra dura: nenhuma comunicação ao cliente durante reconciliação** — única mensagem ao cliente é o PIN no ato da venda + saldo no extrato.
 
-### 10. Integração nos pipelines (drawer)
-Adicionar botão "👤 Ver cliente" em:
-- `EditCardInfoDialog` / cards CRM
-- `Atendimentos.tsx` header da conversa
-- `PipelineAgendamentos`, `PipelineFinanceiro`, `PipelineEstoque`
-Drawer mostra resumo (KPIs + últimas 10 entradas da timeline) + link "Abrir 360".
+### Arquivos previstos
 
-### 11. Detalhes técnicos
-- **DB**: 1 migration cria `vw_contato_timeline` (VIEW) + função `contato_timeline(_contato_id uuid, _limit int, _filtros text[])` SECURITY DEFINER que retorna paginado. Grants para `authenticated`.
-- **Hooks**: `useContato360(id)`, `useContatoTimeline(id, filtros)`, `useContatoCashback(id)`, `useContatoConsentimentos(id)`, `useContatoCanais(id)`.
-- **Componentes** em `src/components/contato360/`: `Header.tsx`, `KpiBar.tsx`, `TimelineFeed.tsx`, `TimelineItem.tsx`, `CashbackTab.tsx`, `LgpdTab.tsx`, `CanaisTab.tsx`, `AtendimentosTab.tsx`, `AgendamentosTab.tsx`, `FinanceiroTab.tsx`, `Cliente360Drawer.tsx`, `BuscaClienteGlobal.tsx`.
-- **Página**: `src/pages/ContatoDetalhe.tsx` com rota em `App.tsx`.
-- **Realtime**: subscription única em `eventos_crm` filtrada por `contato_id`.
-- **Exportações**: PDF via `jspdf` (já instalado se houver, senão `pdf-lib`); CSV nativo.
-- **Memória**: criar `mem://contatos/visao-360-cliente.md` documentando view + hooks + drawer reutilizável.
+- `supabase/migrations/<ts>_cashback_auditoria.sql`
+- Cron agendado via `supabase--insert`
+- `supabase/functions/regua-reconciliacao/index.ts` (ramo divergência → demanda interna)
+- `src/pages/CashbackAuditoria.tsx` + entrada no menu Régua
+- `src/components/cashback/AuditoriaDivergencias.tsx`
+- `src/components/atendimentos/DemandaThreadView.tsx` (render `cashback_divergencia`)
+- `src/hooks/useCashbackAuditoria.ts`
+- `.lovable/memory/contatos/cashback-d1-auditoria.md`
 
-### Fora de escopo
-- NPS real (apenas placeholder no KPI; integração futura).
-- Edição de dados do contato (já existe em `Contatos.tsx`).
-- Mesclagem de contatos duplicados.
-- Atribuição de tags em massa.
+### Resposta direta
+
+Tudo blindado em backstage: cron 07h, aprovação automática quando bate, demanda interna à loja em divergência, supervisor como fallback — e nenhuma mensagem ao cliente em nenhum desses passos.

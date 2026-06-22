@@ -2712,6 +2712,7 @@ export type Database = {
           cpf: string | null
           criado_em: string
           data_entrega_ancora: string | null
+          demanda_divergencia_id: string | null
           id: string
           ip_origem_consultor: unknown
           nome_cliente: string | null
@@ -2722,7 +2723,9 @@ export type Database = {
           pin_hash: string | null
           pin_tentativas: number
           status: string
+          tentativas_reconciliacao: number
           termos_versao: string | null
+          ultima_tentativa_at: string | null
           usuario_lancamento: string | null
           valor_status: string
           valor_total_informado: number | null
@@ -2738,6 +2741,7 @@ export type Database = {
           cpf?: string | null
           criado_em?: string
           data_entrega_ancora?: string | null
+          demanda_divergencia_id?: string | null
           id?: string
           ip_origem_consultor?: unknown
           nome_cliente?: string | null
@@ -2748,7 +2752,9 @@ export type Database = {
           pin_hash?: string | null
           pin_tentativas?: number
           status?: string
+          tentativas_reconciliacao?: number
           termos_versao?: string | null
+          ultima_tentativa_at?: string | null
           usuario_lancamento?: string | null
           valor_status?: string
           valor_total_informado?: number | null
@@ -2764,6 +2770,7 @@ export type Database = {
           cpf?: string | null
           criado_em?: string
           data_entrega_ancora?: string | null
+          demanda_divergencia_id?: string | null
           id?: string
           ip_origem_consultor?: unknown
           nome_cliente?: string | null
@@ -2774,7 +2781,9 @@ export type Database = {
           pin_hash?: string | null
           pin_tentativas?: number
           status?: string
+          tentativas_reconciliacao?: number
           termos_versao?: string | null
+          ultima_tentativa_at?: string | null
           usuario_lancamento?: string | null
           valor_status?: string
           valor_total_informado?: number | null
@@ -3359,6 +3368,19 @@ export type Database = {
           _termos_versao?: string
         }
         Returns: undefined
+      }
+      cashback_aprovar_divergencia: {
+        Args: {
+          _inscricao_id: string
+          _motivo?: string
+          _origem: string
+          _valor_aceito: number
+        }
+        Returns: Json
+      }
+      cashback_cancelar_inscricao: {
+        Args: { _inscricao_id: string; _motivo?: string }
+        Returns: Json
       }
       cashback_confirmar_credito: {
         Args: { _inscricao_id: string; _valor_validado: number }

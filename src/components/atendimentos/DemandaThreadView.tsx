@@ -13,6 +13,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { MessageActionsMenu } from "@/components/shared/MessageActionsMenu";
 import { EditableMessageBubble } from "@/components/shared/EditableMessageBubble";
 import { useResponderConfirmacaoEstoque } from "@/hooks/useConfirmacoesEstoque";
+import { CashbackDivergenciaCard } from "@/components/cashback/CashbackDivergenciaCard";
+
 
 const dirColors: Record<string, string> = {
   operador_para_loja: "bg-primary text-primary-foreground ml-auto",
@@ -48,6 +50,10 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
     || demanda.metadata?.tipo_chave === "confirmacao_estoque";
   const confestId: string | undefined = demanda.metadata?.confirmacao_estoque_id;
   const confestRespondida = !!demanda.metadata?.confirmacao_respondida;
+  const isCashbackDiv = (demanda as any).tipo_chave === "cashback_divergencia"
+    || demanda.metadata?.tipo_chave === "cashback_divergencia";
+  const cashbackDecisao = demanda.metadata?.cashback_decisao as string | undefined;
+
 
   // Marca como vista
   useEffect(() => {
@@ -153,7 +159,18 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
         )}
       </div>
 
+      {isCashbackDiv && (
+        <div className="border-b px-4 py-3">
+          <CashbackDivergenciaCard
+            metadata={demanda.metadata ?? {}}
+            jaDecidida={!!cashbackDecisao || demanda.status === "encerrada"}
+            decisaoAnterior={cashbackDecisao}
+          />
+        </div>
+      )}
+
       <div className="flex-1 space-y-2 overflow-y-auto bg-app-bg px-4 py-3">
+
         {msgs.length === 0 ? (
           <p className="py-8 text-center text-xs text-muted-foreground">Sem mensagens ainda.</p>
         ) : (
