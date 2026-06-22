@@ -1,57 +1,66 @@
 ---
-name: Régua OS — aguardando armação + recebimento loja
-description: Tabela os_recebimento_loja rastreia dois fluxos: cron 07:00 SP avisa cliente quando OS entrou em codEtapa=15 (D-1) e loja confirma manualmente recebimento via EF confirmar-recebimento-os
+name: Régua OS — aguardando armação + recebimento loja (FLUXOS SEPARADOS)
+description: Fluxo 1 (aguardando armação) só dispara aviso ao cliente + agendamento via IA — log em os_avisos_armacao_log. Fluxo 2 (OS pronta na loja) é manual pela loja via EF confirmar-recebimento-os com action=preview|confirm. Tabelas separadas; nenhuma sobreposição.
 type: feature
 ---
 
-## Dois fluxos, uma tabela: `os_recebimento_loja`
+## Dois fluxos independentes, duas tabelas
 
-Tabela única com PK `(os_numero, loja_nome)` rastreando ambos:
+### Fluxo 1 — Aguardando armação (codEtapa=15)
+**Objetivo:** avisar o CLIENTE que a lente chegou e ele precisa trazer a armação.
+**Loja não recebe nada físico** — só verá o agendamento criado pela IA (via `notificar-loja-agendamento`).
 
-**Fluxo 1 — aviso D+1 "traga a armação" (codEtapa=15)**
-- Cron `regua-disparo-aguardando-armacao` roda 07:00 SP (`0 10 * * *` UTC, registrado em `cron_jobs` + pg_cron).
-- Consulta bridge Firebird: `GET {BRIDGE_URL}/api/v1/os/movimentadas?data=D-1&codEtapa=15` com header `x-service-key: INTERNAL_SERVICE_SECRET`.
-- Dedup por `(os, loja)` — bridge devolve linha por entrada em `ordemservicocaixalog`.
-- Resolve `loja_nome` via `telefones_lojas.cod_empresa` → `nome_loja` (fallback: `r.empresa`).
-- Resolve `contato_id` por `telefone` (digits-only).
-- Upsert na tabela e, se contato resolvido, dispara `send-whatsapp-template` com alias `aviso_aguardando_armacao` (params: `[primeiro_nome, os_numero, loja_nome]`).
-- Idempotente: pula se `aviso_armacao_enviado_at IS NOT NULL`.
+- Cron `regua-disparo-aguardando-armacao` roda 07:00 SP (`0 10 * * *` UTC).
+  - **Domingo** → pulado.
+  - **Segunda** → processa D-1 (domingo) + D-2 (sábado).
+  - **Demais dias** → D-1.
+- Consulta bridge: `GET {BRIDGE_URL}/api/v1/os/movimentadas?data=D-1&codEtapa=15`.
+- Resolve `loja_nome` via `telefones_lojas.cod_empresa` (fallback `r.empresa`) e `contato_id` por `telefone`.
+- Dispara `send-whatsapp-template` alias `aviso_aguardando_armacao` → cliente.
+- Persiste UMA linha em **`os_avisos_armacao_log`** (PK lógica `(os_numero, loja_nome)` via UNIQUE INDEX) — usada SÓ para idempotência. Não tem UI, não tem painel.
+- **NUNCA grava em `os_recebimento_loja`.**
 
-**Fluxo 2 — recebimento manual no Atrium Messenger**
-- EF `confirmar-recebimento-os` (verify_jwt=true) recebe `{os_numero, loja_nome}` do usuário-loja.
-- Se não houver linha, consulta bridge `/api/v1/os/consulta-status?os=...` para popular cliente/telefone.
-- Marca `recebido_at` + `recebido_por = auth.uid()`, dispara alias `os_recebida_loja` ao cliente.
+### Fluxo 2 — OS pronta na loja (manual)
+**Objetivo:** loja recebe a OS montada vinda do lab e confirma → cliente é avisado que pode retirar.
+
+- **Sem cron.** A loja digita o número da OS no Atrium Messenger.
+- EF `confirmar-recebimento-os` (verify_jwt=true) — DOIS modos:
+  - **`action: "preview"`** (body `{action:"preview", os_numero, loja_nome?}`): consulta bridge `/api/v1/os/consulta-status?os=...`, devolve `{cliente_nome, cliente_telefone, loja_nome_os, cod_empresa, cod_etapa_atual, etapa_label, produtos}` + flag `loja_confere` + `ja_recebida`. NÃO grava.
+  - **`action: "confirm"`** (default, body `{os_numero, loja_nome}`): upsert em `os_recebimento_loja` com `recebido_at` + `recebido_por`, dispara alias `os_recebida_loja` ao cliente.
 - Idempotente: já recebida → retorna `already_received` sem reenviar.
+- Tabela **`os_recebimento_loja`** é exclusiva deste fluxo agora (colunas `aviso_armacao_*` e `cod_etapa_atual` ficam ociosas — herança histórica).
+
+## Gate "loja obrigatória" (ai-triage)
+
+Cliente que respondeu a qualquer dos dois templates pedindo agendar → IA força loja da OS, **proibido** oferecer outra unidade.
+
+Query em `ai-triage` (linha ~5131) une as duas fontes:
+- `os_avisos_armacao_log WHERE contato_id=? AND enviado_at >= now()-30d` (Fluxo 1).
+- `os_recebimento_loja WHERE contato_id=? AND agendamento_id IS NULL AND notificado_cliente_at >= now()-30d` (Fluxo 2).
+
+Injeta bloco `# OS RECENTES DESTE CLIENTE (loja OBRIGATÓRIA se agendar)` no prompt.
+
+`agendar-cliente` faz o link em `os_recebimento_loja.agendamento_id` quando há match em mesma loja (Fluxo 2 sai do gate ao agendar). Fluxo 1 não tem coluna de link — gate expira por tempo (30d) ou desuso.
 
 ## Templates (rascunho — aguardando aprovação Meta)
 
-- `os_recebida_loja_v2` (UTILITY, pt_BR, PENDING) — "óculos pronto para retirada". Params `{nome, os_numero, loja}`. Alias `os_recebida_loja` → `_v2`.
-- `aviso_aguardando_armacao_v2` (UTILITY, pt_BR, PENDING) — "lentes chegaram, escolha armação e quer agendar?". Params `{nome, os_numero, loja}`. Alias `aviso_aguardando_armacao` → `_v2`.
+- `os_recebida_loja_v2` (UTILITY, pt_BR, PENDING) — params `{nome, os_numero, loja}`. Alias `os_recebida_loja`.
+- `aviso_aguardando_armacao_v2` (UTILITY, pt_BR, PENDING) — params `{nome, os_numero, loja}`. Alias `aviso_aguardando_armacao`.
 
-Catálogo em `whatsapp_templates`; gate em `send-whatsapp-template` bloqueia disparo enquanto `status != 'approved'`. Aliases permitem repointar sem redeploy.
+Gate em `send-whatsapp-template` bloqueia disparo enquanto `status != 'approved'`.
 
-### Calendário do cron `regua-disparo-aguardando-armacao`
-- **Domingo SP** → execução pulada (retorna `skipped: "domingo"`).
-- **Segunda SP** → processa D-1 (domingo) **+** D-2 (sábado), para cobrir o domingo que não rodou.
-- **Demais dias** → processa apenas D-1.
-- Override manual via body: `{data: "YYYY-MM-DD"}` ou `{datas: ["YYYY-MM-DD", ...]}`.
+## RLS
 
-## Gate "loja obrigatória" pós-template
+- `os_avisos_armacao_log`: SELECT só admin/operador (`has_role`). Service role grava.
+- `os_recebimento_loja`: admin/operador tudo; usuário `tipo_usuario='loja'` vê/atualiza só linhas das próprias `user_acessos.lojas[]`.
 
-Cliente que recebeu `aviso_aguardando_armacao_v2` ou `os_recebida_loja_v2` tem a armação/produto fisicamente naquela loja — **não pode** ser oferecida outra unidade se ele pedir para agendar.
+## UI Atrium Messenger (cross-project)
 
-- **ai-triage**: query `os_recebimento_loja WHERE contato_id=? AND agendamento_id IS NULL AND (aviso_armacao_enviado_at OR notificado_cliente_at >= now()-30d)`. Se retornar, injeta bloco `# OS RECENTES DESTE CLIENTE (loja OBRIGATÓRIA se agendar)` no prompt com a regra "use loja_nome da OS DIRETAMENTE, proibido perguntar cidade/loja".
-- **agendar-cliente**: após `INSERT` em `agendamentos`, procura `os_recebimento_loja` recente do contato na mesma loja (case-insensitive, `agendamento_id IS NULL`), faz `UPDATE agendamento_id = novo.id` e grava `agendamentos.metadata.os_origem = {os_recebimento_id, os_numero, loja_nome, fluxo}`. `fluxo` deduzido por `notificado_cliente_at` (→`os_recebida`) ou `aviso_armacao_enviado_at` (→`aguardando_armacao`).
-- Coluna `os_recebimento_loja.agendamento_id` (FK → `agendamentos.id ON DELETE SET NULL`) é a fonte da verdade do vínculo. Uma vez linkada, a OS some do bloco injetado (não força mais a loja).
-
-## RLS `os_recebimento_loja`
-
-- Admin/operador: tudo.
-- `user_acessos`: loja só vê/atualiza registros das próprias `lojas[]` (ou `acesso_total`).
-
-## UI Messenger
-
-Lista cards de `os_recebimento_loja WHERE recebido_at IS NULL` filtrados pela loja do usuário. Implementação no projeto cross-project **InFoco Messenger** (rota `/os-para-receber`) — fora do escopo do Atrium.
+Tela "Recebimento de OS" — Fluxo 2 only:
+- Input "Número da OS" → chama `confirmar-recebimento-os` `action=preview`.
+- Exibe dados retornados (cliente, loja, produto, etapa) + alerta se `loja_confere=false`.
+- Botão "Confirmar recebimento" → chama `action=confirm` → dispara template.
+- Histórico opcional: `SELECT * FROM os_recebimento_loja WHERE recebido_at IS NOT NULL` últimos 30d filtrado por `user_acessos.lojas[]`.
 
 ## Branding
 

@@ -149,29 +149,14 @@ serve(async (req) => {
           contato_id = c?.id ?? null;
         }
 
-        const { data: row, error: upErr } = await supabase
-          .from("os_recebimento_loja")
-          .upsert(
-            {
-              os_numero,
-              loja_nome,
-              cod_empresa: codEmpresa,
-              contato_id,
-              cliente_nome,
-              cliente_telefone,
-              produto_descricao,
-              cod_etapa_atual: Number(codEtapa),
-              etapa_label: r.etapa ? String(r.etapa) : "Aguardando armação",
-              data_movimentacao: dataConsulta,
-              metadata: { origem: "regua-disparo-aguardando-armacao", raw_produtos: produtos },
-            },
-            { onConflict: "os_numero,loja_nome" },
-          )
-          .select()
-          .single();
-        if (upErr) { console.error("upsert err", upErr); erros++; continue; }
-
-        if (row.aviso_armacao_enviado_at) { pulados++; continue; }
+        // Idempotência: já enviou aviso pra essa OS+loja?
+        const { data: jaEnviado } = await supabase
+          .from("os_avisos_armacao_log")
+          .select("id")
+          .eq("os_numero", os_numero)
+          .eq("loja_nome", loja_nome)
+          .maybeSingle();
+        if (jaEnviado) { pulados++; continue; }
 
         if (!contato_id) {
           detalhes.push({ data: dataConsulta, os_numero, loja_nome, skipped: "sem_contato" });
@@ -193,16 +178,30 @@ serve(async (req) => {
         const tplJson = await tplResp.json().catch(() => ({}));
 
         if (tplResp.ok && tplJson?.status === "sent") {
-          await supabase
-            .from("os_recebimento_loja")
-            .update({
-              aviso_armacao_enviado_at: new Date().toISOString(),
-              aviso_armacao_template: "aviso_aguardando_armacao",
-            })
-            .eq("id", row.id);
+          await supabase.from("os_avisos_armacao_log").insert({
+            os_numero,
+            loja_nome,
+            cod_empresa: codEmpresa,
+            contato_id,
+            cliente_telefone,
+            data_movimentacao: dataConsulta,
+            template_alias: "aviso_aguardando_armacao",
+            status: "sent",
+            payload: { cliente_nome, produto_descricao, raw_produtos: produtos },
+          });
           enviados++;
           detalhes.push({ data: dataConsulta, os_numero, loja_nome, sent: true });
         } else {
+          await supabase.from("os_avisos_armacao_log").insert({
+            os_numero,
+            loja_nome,
+            cod_empresa: codEmpresa,
+            contato_id,
+            cliente_telefone,
+            data_movimentacao: dataConsulta,
+            status: "error",
+            payload: { error: tplJson },
+          });
           erros++;
           detalhes.push({ data: dataConsulta, os_numero, loja_nome, error: tplJson });
         }
