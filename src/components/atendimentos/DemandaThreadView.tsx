@@ -159,7 +159,18 @@ export function DemandaThreadView({ demanda }: { demanda: DemandaRow }) {
         )}
       </div>
 
+      {isCashbackDiv && (
+        <div className="border-b px-4 py-3">
+          <CashbackDivergenciaCard
+            metadata={demanda.metadata ?? {}}
+            jaDecidida={!!cashbackDecisao || demanda.status === "encerrada"}
+            decisaoAnterior={cashbackDecisao}
+          />
+        </div>
+      )}
+
       <div className="flex-1 space-y-2 overflow-y-auto bg-app-bg px-4 py-3">
+
         {msgs.length === 0 ? (
           <p className="py-8 text-center text-xs text-muted-foreground">Sem mensagens ainda.</p>
         ) : (
