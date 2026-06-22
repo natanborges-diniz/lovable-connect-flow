@@ -17,14 +17,29 @@ serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const authHeader = req.headers.get("Authorization") || "";
-    const token = authHeader.replace("Bearer ", "");
-    const { data: userData } = await supabase.auth.getUser(token);
-    const user = userData?.user;
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // ── Service-call bypass: chamadas internas (reconciliação, crons) ──
+    // Header x-service-call:1 + Authorization Bearer <SERVICE_ROLE_KEY> pula auth de usuário.
+    // solicitante_id fica NULL e solicitante_nome vem do body (default "Sistema").
+    const isServiceCall = req.headers.get("x-service-call") === "1";
+    let user: { id: string; email?: string } | null = null;
+    {
+      const authHeader = req.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "");
+      if (isServiceCall) {
+        if (token !== SUPABASE_SERVICE_ROLE_KEY) {
+          return new Response(JSON.stringify({ error: "Service call requires service role token" }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        const { data: userData } = await supabase.auth.getUser(token);
+        user = userData?.user ?? null;
+        if (!user) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
     }
 
     const body = await req.json();
@@ -38,6 +53,8 @@ serve(async (req) => {
     const isGrupo = Array.isArray(lojasGrupo) && lojasGrupo.length > 0;
     const loja_telefone: string = isGrupo ? "__GRUPO__" : body.loja_telefone;
     const loja_nome: string = isGrupo ? "__GRUPO__" : body.loja_nome;
+    const tipo_chave_body: string | null = body.tipo_chave ?? null;
+    const metadata_body: Record<string, unknown> = (body.metadata && typeof body.metadata === "object") ? body.metadata : {};
 
     if (!pergunta || (!isGrupo && (!loja_telefone || !loja_nome))) {
       return new Response(JSON.stringify({ error: "pergunta e (loja_telefone+loja_nome ou lojas[]) são obrigatórios" }), {
@@ -54,7 +71,7 @@ serve(async (req) => {
         .eq("id", atendimento_id)
         .single();
       if (atErr || !at) throw new Error("Atendimento não encontrado");
-      if ((at as any).modo !== "humano") {
+      if (!isServiceCall && (at as any).modo !== "humano") {
         return new Response(JSON.stringify({ error: "Demandas vinculadas a atendimento exigem modo humano" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -62,22 +79,29 @@ serve(async (req) => {
       atendimento = at;
     }
 
-    const { data: profile } = await supabase
-      .from("profiles").select("nome").eq("id", user.id).single();
-    const operadorNome = profile?.nome || user.email || "Operador";
+    let operadorNome: string = (body.solicitante_nome as string) || "Sistema";
+    if (user) {
+      const { data: profile } = await supabase
+        .from("profiles").select("nome").eq("id", user.id).single();
+      operadorNome = profile?.nome || user.email || "Operador";
+    }
     const clienteNome = atendimento?.contatos?.nome || null;
 
     const ano = new Date().getFullYear();
 
     // Cria demanda (loja única ou grupo com snapshot)
-    const demandaMetadata: Record<string, unknown> = isGrupo
-      ? {
-          grupo: true,
-          lojas_nomes: lojasGrupo!.map((l) => l.nome_loja),
-          lojas_telefones: lojasGrupo!.map((l) => l.telefone),
-          snapshot_at: new Date().toISOString(),
-        }
-      : {};
+    const demandaMetadata: Record<string, unknown> = {
+      ...(isGrupo
+        ? {
+            grupo: true,
+            lojas_nomes: lojasGrupo!.map((l) => l.nome_loja),
+            lojas_telefones: lojasGrupo!.map((l) => l.telefone),
+            snapshot_at: new Date().toISOString(),
+          }
+        : {}),
+      ...metadata_body,
+      ...(tipo_chave_body ? { tipo_chave: tipo_chave_body } : {}),
+    };
 
     const { data: demanda, error: demErr } = await supabase
       .from("demandas_loja")
@@ -87,16 +111,18 @@ serve(async (req) => {
         contato_cliente_id: atendimento?.contato_id ?? null,
         loja_telefone,
         loja_nome,
-        solicitante_id: user.id,
+        solicitante_id: user?.id ?? null,
         solicitante_nome: operadorNome,
         assunto: assunto ?? null,
         pergunta,
         status: "aberta",
+        ...(tipo_chave_body ? { tipo_chave: tipo_chave_body } : {}),
         metadata: demandaMetadata,
       })
       .select()
       .single();
     if (demErr) throw demErr;
+
 
     const protocolo = `DEM-${ano}-${String(demanda.numero_curto).padStart(5, "0")}`;
     await supabase.from("demandas_loja").update({ protocolo }).eq("id", demanda.id);
