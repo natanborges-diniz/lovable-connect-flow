@@ -72,6 +72,71 @@ function montarProdutoResumo(
   return "";
 }
 
+// ── sanitizarArmacao ────────────────────────────────────────────────────────
+// Extrai marca+modelo legíveis da descrição crua do Firebird.
+// Remove códigos internos e cor entre parênteses; limita a 40 chars.
+function sanitizarArmacao(descricao: string): string {
+  let s = String(descricao || "").trim();
+  if (!s) return "";
+  // Remove parênteses (geralmente cor/código): "RB4171 (BLACK)" → "RB4171"
+  s = s.replace(/\([^)]*\)/g, "").trim();
+  // Title Case suave: cada palavra com inicial maiúscula
+  s = s.toLowerCase().replace(/\b([a-z0-9])([a-z0-9-]*)/g, (_, a, b) => a.toUpperCase() + b);
+  // Códigos tipo "RB4171" devem ficar maiúsculos
+  s = s.replace(/\b([A-Z]{2,4})(\d{2,5})\b/gi, (_, l, n) => `${l.toUpperCase()}${n}`);
+  return s.length > 40 ? s.slice(0, 37).trimEnd() + "…" : s;
+}
+
+// ── classificarLente ────────────────────────────────────────────────────────
+// Classifica lente em categoria + tratamentos a partir de keywords. Conservador:
+// quando incerto, devolve "lentes" simples sem inferir tecnologia.
+function classificarLente(descricao: string): string {
+  const d = String(descricao || "").toLowerCase();
+  if (!d.trim()) return "";
+
+  let categoria = "lentes monofocais";
+  if (/multifocal|progressi|varilux|eyezen|precise/.test(d)) categoria = "lentes multifocais";
+  else if (/bifocal/.test(d))                                categoria = "lentes bifocais";
+  else if (/contato|contact|gelflex|biofinity|acuvue|frequency|soflens/.test(d)) categoria = "lentes de contato";
+  else if (/visao\s*simples|vis[aã]o\s*simples|monofocal|single/.test(d))      categoria = "lentes monofocais";
+
+  const tratos: string[] = [];
+  if (/antirreflexo|anti-reflexo|\bar\b|hmc|crizal|sapphire/.test(d)) tratos.push("antirreflexo");
+  if (/transitions|fotossens|photofusion|fotocrom/.test(d))           tratos.push("fotossensíveis");
+  if (/blue|azul|filtro\s*azul/.test(d))                              tratos.push("filtro azul");
+  if (/polariz/.test(d))                                              tratos.push("polarizadas");
+
+  return tratos.length ? `${categoria} com ${tratos.join(" e ")}` : categoria;
+}
+
+// ── montarProdutoDescricao ──────────────────────────────────────────────────
+// Versão detalhada e amigável: marca da armação + categoria das lentes (dedupando OD/OE).
+// Fallback silencioso para `montarProdutoResumo` se nada legível for extraído.
+function montarProdutoDescricao(
+  produtos: Array<{ tipo: "lente_od" | "lente_oe" | "armacao"; descricao: string }>,
+): string {
+  const partes: string[] = [];
+
+  const arm = produtos.find((p) => p.tipo === "armacao" && p.descricao.trim() !== "");
+  if (arm) {
+    const nome = sanitizarArmacao(arm.descricao);
+    if (nome) partes.push(`armação ${nome}`);
+  }
+
+  const od = produtos.find((p) => p.tipo === "lente_od" && p.descricao.trim() !== "");
+  const oe = produtos.find((p) => p.tipo === "lente_oe" && p.descricao.trim() !== "");
+  const lenteOd = od ? classificarLente(od.descricao) : "";
+  const lenteOe = oe ? classificarLente(oe.descricao) : "";
+  if (lenteOd && lenteOe && lenteOd === lenteOe) {
+    partes.push(lenteOd);
+  } else {
+    if (lenteOd) partes.push(lenteOd);
+    if (lenteOe && lenteOe !== lenteOd) partes.push(lenteOe);
+  }
+
+  return partes.join(" + ");
+}
+
 // ── normalizarResultado ─────────────────────────────────────────────────────
 // Transforma uma linha crua do bridge no formato { os, cliente, empresa, vendedor, publico, interno }.
 // "interno" NUNCA é exposto ao cliente/LLM — serve para rastreio e log.
@@ -90,12 +155,13 @@ function normalizarResultado(raw: Record<string, unknown>): {
     : [];
 
   const publico: Record<string, unknown> = {
-    situacao,                                          // fonte de verdade para o ai-triage
-    etapa:           String(raw.etapa ?? "").trim(),   // rótulo textual de apoio (Firebird)
-    produtoResumo:   montarProdutoResumo(produtos),    // produtos crus NÃO vão no público
-    previsaoEntrega: formatarDataBR(raw.dataPrevisao as string | null),
-    pronto:          situacao === "pronto",
-    entregue:        situacao === "entregue",
+    situacao,                                            // fonte de verdade para o ai-triage
+    etapa:             String(raw.etapa ?? "").trim(),   // rótulo textual de apoio (Firebird)
+    produtoResumo:     montarProdutoResumo(produtos),    // genérico: "armação + lentes"
+    produtoDescricao:  montarProdutoDescricao(produtos), // amigável: "armação RB4171 + lentes multifocais com antirreflexo"
+    previsaoEntrega:   formatarDataBR(raw.dataPrevisao as string | null),
+    pronto:            situacao === "pronto",
+    entregue:          situacao === "entregue",
   };
 
   const interno: Record<string, unknown> = {

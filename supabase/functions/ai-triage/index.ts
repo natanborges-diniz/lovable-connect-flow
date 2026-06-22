@@ -917,13 +917,15 @@ async function responderStatusOS(
     entregue:          "os_entregue",
   };
   const tmplKey = SITUACAO_TO_TEMPLATE[situacao] || "os_producao_lentes";
+  const produtoDetalhado = String((pub as any).produtoDescricao || "").trim();
   const produtoResumo = String(pub.produtoResumo || "").trim();
+  const produtoFinal = produtoDetalhado || produtoResumo;
   const msg = renderMsgFixa(tmplKey, {
     nome_comma:    nomePrim ? `, ${nomePrim}` : "",
     nome:          nomePrim || "",
     os:            String(resultado.os || ""),
-    produto:       produtoResumo,
-    produto_parte: produtoResumo ? ` (${produtoResumo})` : "",
+    produto:       produtoFinal,
+    produto_parte: produtoFinal ? ` (${produtoFinal})` : "",
     loja:          String(resultado.empresa || ""),
   });
 
@@ -1034,11 +1036,13 @@ async function tratarResultadoConsultaOS(
     const itens = top2.map((res: any) => {
       const emissao = String((res.interno as any)?.dataEmissao || "");
       const ddmm = emissao.length >= 5 ? emissao.slice(0, 5) : emissao;
+      const prodDetalhe = String((res.publico as any)?.produtoDescricao || "").trim();
       const prodResumo = String((res.publico as any)?.produtoResumo || "").trim();
+      const prod = prodDetalhe || prodResumo;
       return {
         id:        `os_qual:${res.os}`,
         titulo:    `OS ${res.os}`,
-        descricao: (prodResumo ? `${prodResumo} · ${ddmm}` : ddmm).slice(0, 72),
+        descricao: (prod ? `${prod} · ${ddmm}` : ddmm).slice(0, 72),
       };
     });
     await sendInteractive(supabaseUrl, serviceKey, atId, {
@@ -1051,6 +1055,7 @@ async function tratarResultadoConsultaOS(
         ...meta,
         expected_reply: "os_aguardando_qual",
         os_opcoes: top2.map((res: any) => String(res.os)),
+        os_opcoes_snapshot: itens, // snapshot para re-render caso o cliente mande texto livre
         intent_consulta_os_at: new Date().toISOString(),
         os_tentativas: null,
       },
@@ -9962,14 +9967,14 @@ Qual dia e horário ficaria melhor pra você? 😊`,
   if (expectedReply === "os_aguardando_qual") {
     const identQ = extrairIdentificadorOS(mensagemTexto);
     if (identQ.tipo !== null) {
-      await patchMeta({ expected_reply: null, os_opcoes: null });
+      await patchMeta({ expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null });
       const { data: ctOsQ } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
       const _primQ = (ctOsQ?.nome || "").trim().split(/\s+/)[0] || "";
       await loadMensagensFixas(supabase);
       const rQ = await consultarStatusOS(supabaseUrl, serviceKey, identQ);
       const handledQ = await tratarResultadoConsultaOS(
         supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
-        _primQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null }, rQ, identQ,
+        _primQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null }, rQ, identQ,
       );
       if (handledQ === "fallback") {
         const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primQ ? `, ${_primQ}` : "" });
@@ -9987,6 +9992,16 @@ Qual dia e horário ficaria melhor pra você? 😊`,
           referencia_id: atId,
         });
       }
+      return true;
+    }
+    // Texto livre que não é OS/CPF: re-renderiza a lista interativa a partir do snapshot
+    const snapshot = Array.isArray(atendimentoMeta.os_opcoes_snapshot) ? atendimentoMeta.os_opcoes_snapshot : [];
+    if (snapshot.length > 0) {
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "list",
+        texto: "Toca em um dos pedidos abaixo pra eu te mostrar o status 😊",
+        lista: { label: "Ver pedidos", secao: "Seus pedidos", itens: snapshot },
+      });
       return true;
     }
     await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode tocar em uma das opções acima ou digitar o número da OS (5 dígitos)? 😊");
@@ -10307,14 +10322,14 @@ async function routeButtonClick(args: {
   // Seleção de cidade → envia lista de lojas dessa cidade.
   if (buttonId.startsWith("os_qual:")) {
     const osNum = buttonId.slice(8);
-    await patchMeta({ expected_reply: null, os_opcoes: null });
+    await patchMeta({ expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null });
     const { data: ctOsQ } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
     const _primOsQ = (ctOsQ?.nome || "").trim().split(/\s+/)[0] || "";
     await loadMensagensFixas(supabase);
     const rOsQ = await consultarStatusOS(supabaseUrl, serviceKey, { tipo: "os", valor: osNum });
     const handledOsQ = await tratarResultadoConsultaOS(
       supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id,
-      _primOsQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null }, rOsQ, { tipo: "os", valor: osNum },
+      _primOsQ, { ...atendimentoMeta, expected_reply: null, os_opcoes: null, os_opcoes_snapshot: null }, rOsQ, { tipo: "os", valor: osNum },
     );
     if (handledOsQ === "fallback") {
       const escMsg = renderMsgFixa("os_escala_verificacao", { nome_comma: _primOsQ ? `, ${_primOsQ}` : "" });
