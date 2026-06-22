@@ -917,13 +917,15 @@ async function responderStatusOS(
     entregue:          "os_entregue",
   };
   const tmplKey = SITUACAO_TO_TEMPLATE[situacao] || "os_producao_lentes";
+  const produtoDetalhado = String((pub as any).produtoDescricao || "").trim();
   const produtoResumo = String(pub.produtoResumo || "").trim();
+  const produtoFinal = produtoDetalhado || produtoResumo;
   const msg = renderMsgFixa(tmplKey, {
     nome_comma:    nomePrim ? `, ${nomePrim}` : "",
     nome:          nomePrim || "",
     os:            String(resultado.os || ""),
-    produto:       produtoResumo,
-    produto_parte: produtoResumo ? ` (${produtoResumo})` : "",
+    produto:       produtoFinal,
+    produto_parte: produtoFinal ? ` (${produtoFinal})` : "",
     loja:          String(resultado.empresa || ""),
   });
 
