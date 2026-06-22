@@ -9,7 +9,7 @@ type: feature
 1. Loja lança a venda em `/regua/nova-venda` → cria `regua_inscricao` via RPC `regua_registrar_venda`.
 2. Frontend abre `CashbackPinDialog` automaticamente → chama `cashback-loja` `action: gerar_pin`.
 3. Edge function gera PIN aleatório de 4 dígitos, grava `pin_hash` (sha256 com salt = inscricao_id), `pin_expira_at = now()+15min`, `pin_tentativas = 0`.
-4. Dispara template `cashback_pin_validacao` (alias) ao cliente via `send-whatsapp-template` com params `{primeiro_nome, pin, link_termos}`. Link aponta para `/termos/cashback?ins=<id>`.
+4. Dispara alias `cashback_pin_validacao` → template real **`cashback_pin_otp`** (categoria **AUTHENTICATION**, aprovado Meta). `send-whatsapp-template` detecta `categoria='AUTHENTICATION'` e monta body + botão `COPY_CODE` com o PIN (param[0]). Nome/link de termos não viajam no template OTP (regra Meta) — a página `/termos/cashback?ins=<id>` continua acessível como referência auditável.
 5. Cliente passa PIN ao consultor; consultor digita no dialog → `action: confirmar_pin`.
 6. Em sucesso, grava em `regua_inscricao`: `pin_confirmado_at`, `consentimento_status='aceito'`, `consentimento_at=now()`, `canal_consentimento='pin_whatsapp'`, `termos_versao='v1-2026-06'`, `ip_origem_consultor`.
 7. Chama RPC `canal_registrar_evento(_evento='validado')` → marca `canais.status='validado'` para aquele telefone + atualiza `validado_at`, `canal_consentimento`, `termos_versao`.
@@ -45,4 +45,4 @@ O mesmo template instrui responder `NÃO FUI EU`. `whatsapp-webhook` (ramo `0y`)
 - `src/components/cashback/CashbackPinDialog.tsx` — dialog 4-OTP + countdown + reenviar.
 - `src/pages/ReguaNovaVenda.tsx` — abre dialog após cadastrar venda.
 - `src/pages/TermosCashback.tsx` — página pública `/termos/cashback`.
-- Template `cashback_pin_validacao` em `whatsapp_templates` (status `rascunho` até aprovação Meta).
+- Template **`cashback_pin_otp`** (AUTHENTICATION, approved Meta jun/2026) + alias `cashback_pin_validacao` → `cashback_pin_otp`. Versões UTILITY (`cashback_pin_validacao`, `_v2`) foram rejeitadas e estão `descontinuado=true`.
