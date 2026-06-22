@@ -45,4 +45,4 @@ O mesmo template instrui responder `NÃO FUI EU`. `whatsapp-webhook` (ramo `0y`)
 - `src/components/cashback/CashbackPinDialog.tsx` — dialog 4-OTP + countdown + reenviar.
 - `src/pages/ReguaNovaVenda.tsx` — abre dialog após cadastrar venda.
 - `src/pages/TermosCashback.tsx` — página pública `/termos/cashback`.
-- Template `cashback_pin_validacao` em `whatsapp_templates` (status `rascunho` até aprovação Meta).
+- Template **`cashback_pin_otp`** (AUTHENTICATION, approved Meta jun/2026) + alias `cashback_pin_validacao` → `cashback_pin_otp`. Versões UTILITY (`cashback_pin_validacao`, `_v2`) foram rejeitadas e estão `descontinuado=true`.
