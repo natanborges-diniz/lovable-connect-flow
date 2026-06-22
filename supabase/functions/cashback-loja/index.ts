@@ -287,8 +287,133 @@ serve(async (req) => {
       });
     }
 
+    // ══════════════════════════════════════════════
+    // AÇÕES DE PIN — validação do telefone + LGPD
+    // ══════════════════════════════════════════════
+    const TERMOS_VERSAO = "v1-2026-06";
+
+    async function hashPin(pin: string, salt: string): Promise<string> {
+      const data = new TextEncoder().encode(`${salt}:${pin}`);
+      const buf = await crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+    function gerarPinRandomico(): string {
+      return String(Math.floor(1000 + Math.random() * 9000));
+    }
+
+    if (action === "gerar_pin" || action === "reenviar_pin") {
+      const inscricao_id = String(body.inscricao_id || "");
+      if (!inscricao_id) return jsonResp({ error: "inscricao_id obrigatório" }, 400);
+
+      const { data: insc } = await supabase
+        .from("regua_inscricao")
+        .select("id, contato_id, whatsapp, nome_cliente, pin_confirmado_at")
+        .eq("id", inscricao_id)
+        .maybeSingle();
+      if (!insc) return jsonResp({ error: "inscricao não encontrada" }, 404);
+      if ((insc as any).pin_confirmado_at) return jsonResp({ status: "ja_confirmado" });
+
+      const pin = gerarPinRandomico();
+      const pin_hash = await hashPin(pin, inscricao_id);
+      const expira = new Date(Date.now() + 15 * 60_000).toISOString();
+
+      await supabase
+        .from("regua_inscricao")
+        .update({ pin_hash, pin_expira_at: expira, pin_tentativas: 0 })
+        .eq("id", inscricao_id);
+
+      const primeiroNome = String((insc as any).nome_cliente || "cliente").trim().split(/\s+/)[0];
+      const linkTermos = `https://atrium-link.lovable.app/termos/cashback?ins=${inscricao_id}`;
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE}` },
+          body: JSON.stringify({
+            contato_id: (insc as any).contato_id,
+            template_alias: "cashback_pin_validacao",
+            template_params: [primeiroNome, pin, linkTermos],
+          }),
+        });
+      } catch (e) {
+        console.warn("[cashback-loja] falha ao disparar template PIN:", e);
+      }
+
+      return jsonResp({ status: "pin_enviado", expira_at: expira });
+    }
+
+    if (action === "confirmar_pin") {
+      const inscricao_id = String(body.inscricao_id || "");
+      const pin_informado = String(body.pin || "").replace(/\D/g, "");
+      if (!inscricao_id || pin_informado.length !== 4) {
+        return jsonResp({ error: "inscricao_id e pin (4 dígitos) obrigatórios" }, 400);
+      }
+
+      const { data: insc } = await supabase
+        .from("regua_inscricao")
+        .select("id, contato_id, whatsapp, pin_hash, pin_expira_at, pin_tentativas, pin_confirmado_at")
+        .eq("id", inscricao_id)
+        .maybeSingle();
+      if (!insc) return jsonResp({ error: "inscricao não encontrada" }, 404);
+      const i = insc as any;
+      if (i.pin_confirmado_at) return jsonResp({ status: "ja_confirmado" });
+      if (!i.pin_hash) return jsonResp({ status: "erro", motivo: "pin_nao_gerado" }, 400);
+      if (i.pin_expira_at && new Date(i.pin_expira_at) < new Date()) {
+        return jsonResp({ status: "erro", motivo: "pin_expirado" }, 410);
+      }
+      if ((i.pin_tentativas ?? 0) >= 3) {
+        return jsonResp({ status: "erro", motivo: "tentativas_excedidas" }, 429);
+      }
+
+      const hash = await hashPin(pin_informado, inscricao_id);
+      if (hash !== i.pin_hash) {
+        await supabase.from("regua_inscricao")
+          .update({ pin_tentativas: (i.pin_tentativas ?? 0) + 1 })
+          .eq("id", inscricao_id);
+        return jsonResp({
+          status: "erro",
+          motivo: "pin_incorreto",
+          tentativas_restantes: Math.max(0, 2 - (i.pin_tentativas ?? 0)),
+        }, 400);
+      }
+
+      const xff = req.headers.get("x-forwarded-for") || "";
+      const ip = xff.split(",")[0].trim() || null;
+
+      await supabase.from("regua_inscricao").update({
+        pin_confirmado_at: new Date().toISOString(),
+        consentimento_status: "aceito",
+        consentimento_at: new Date().toISOString(),
+        canal_consentimento: "pin_whatsapp",
+        termos_versao: TERMOS_VERSAO,
+        ip_origem_consultor: ip,
+      }).eq("id", inscricao_id);
+
+      if (i.whatsapp) {
+        await supabase.rpc("canal_registrar_evento", {
+          _telefone: String(i.whatsapp),
+          _evento: "validado",
+          _motivo: null,
+          _canal_consentimento: "pin_whatsapp",
+          _termos_versao: TERMOS_VERSAO,
+        });
+      }
+
+      if (i.contato_id) {
+        await supabase.from("eventos_crm").insert({
+          contato_id: i.contato_id,
+          tipo: "cashback_pin_confirmado",
+          descricao: "Cliente confirmou PIN — telefone validado, termos LGPD aceitos",
+          metadata: { inscricao_id, termos_versao: TERMOS_VERSAO, ip },
+          referencia_tipo: "regua_inscricao",
+          referencia_id: inscricao_id,
+        });
+      }
+
+      return jsonResp({ status: "validado", termos_versao: TERMOS_VERSAO });
+    }
+
     return jsonResp(
-      { error: `Ação desconhecida: "${action}". Use "consultar" ou "registrar".` },
+      { error: `Ação desconhecida: "${action}". Use "consultar" | "registrar" | "gerar_pin" | "confirmar_pin" | "reenviar_pin".` },
       400,
     );
 
