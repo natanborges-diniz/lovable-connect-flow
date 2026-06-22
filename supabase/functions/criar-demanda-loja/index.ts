@@ -130,14 +130,15 @@ serve(async (req) => {
     // Mensagem inicial direto na thread oficial (fonte de verdade do painel)
     await supabase.from("demanda_mensagens").insert({
       demanda_id: demanda.id,
-      direcao: "operador_para_loja",
-      autor_id: user.id,
+      direcao: isServiceCall ? "sistema" : "operador_para_loja",
+      autor_id: user?.id ?? null,
       autor_nome: operadorNome,
       conteudo: pergunta,
       anexo_url: anexo_url,
       anexo_mime: anexo_mime,
-      metadata: { bootstrap: true },
+      metadata: { bootstrap: true, ...(isServiceCall ? { origem: "service" } : {}) },
     });
+
 
     // Resolve destinatários internos (app Atrium Messenger)
     // Em modo grupo, união dos usuários de todas as lojas do snapshot
