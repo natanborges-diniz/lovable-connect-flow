@@ -188,6 +188,15 @@ serve(async (req) => {
       referencia_id: atendimentoId,
     });
 
+    // Telemetria de canal — registra tentativa de envio (estados delivered/read/failed
+    // chegam depois via webhook statuses).
+    try {
+      await supabase.rpc("canal_registrar_evento", {
+        _telefone: cleanPhone, _evento: "enviado", _motivo: null,
+        _canal_consentimento: null, _termos_versao: null,
+      });
+    } catch (_) { /* não bloqueia o envio */ }
+
     return new Response(JSON.stringify({
       status: "sent",
       atendimento_id: atendimentoId,

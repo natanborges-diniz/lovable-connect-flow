@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { CashbackPinDialog } from "@/components/cashback/CashbackPinDialog";
 
 const onlyDigits = (s: string) => (s || "").replace(/\D+/g, "");
 
@@ -54,6 +55,8 @@ export default function ReguaNovaVenda() {
   const [cpf, setCpf] = useState("");
   const [numeroVenda, setNumeroVenda] = useState("");
   const [valor, setValor] = useState("");
+  const [pinInscricaoId, setPinInscricaoId] = useState<string | null>(null);
+  const [pinNomeCliente, setPinNomeCliente] = useState("");
 
   const lojaUsuario = getUserLojaNames()[0] || profile?.lojas?.[0] || null;
 
@@ -99,7 +102,9 @@ export default function ReguaNovaVenda() {
         toast.warning(`Já existe inscrição para a venda ${numeroVenda.trim()}`);
         return;
       }
-      toast.success("Venda cadastrada na régua");
+      toast.success("Venda cadastrada — enviando PIN ao cliente...");
+      setPinNomeCliente(nome.trim());
+      setPinInscricaoId(res.inscricao_id);
       setNome("");
       setWhatsapp("");
       setCpf("");
@@ -240,6 +245,16 @@ export default function ReguaNovaVenda() {
           )}
         </CardContent>
       </Card>
+
+      <CashbackPinDialog
+        inscricaoId={pinInscricaoId}
+        nomeCliente={pinNomeCliente}
+        onClose={() => setPinInscricaoId(null)}
+        onConfirmed={() => {
+          setPinInscricaoId(null);
+          qc.invalidateQueries({ queryKey: ["regua_inscricao_list"] });
+        }}
+      />
     </div>
   );
 }

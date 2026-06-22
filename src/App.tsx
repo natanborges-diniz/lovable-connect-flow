@@ -25,6 +25,7 @@ import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import SomenteMessenger from "./pages/SomenteMessenger";
 import NotFound from "./pages/NotFound";
+import TermosCashback from "./pages/TermosCashback";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/termos/cashback" element={<TermosCashback />} />
             <Route path="/somente-messenger" element={<ProtectedRoute><SomenteMessenger /></ProtectedRoute>} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />

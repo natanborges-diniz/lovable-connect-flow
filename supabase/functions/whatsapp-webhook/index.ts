@@ -33,6 +33,56 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const body = await req.json();
+
+    // ─── STATUSES (Meta Cloud API: sent / delivered / read / failed) ───
+    // Processa antes de tentar normalizar como mensagem. Statuses não trazem msg.
+    try {
+      if (body?.object === "whatsapp_business_account" && Array.isArray(body.entry)) {
+        let handledStatuses = false;
+        for (const entry of body.entry) {
+          for (const change of entry.changes || []) {
+            if (change.field !== "messages") continue;
+            const statuses = change.value?.statuses;
+            if (!Array.isArray(statuses) || statuses.length === 0) continue;
+            handledStatuses = true;
+            for (const st of statuses) {
+              const phone = String(st.recipient_id || "");
+              const meta_status = String(st.status || ""); // sent | delivered | read | failed
+              const messageId = String(st.id || "");
+              let evento: string | null = null;
+              let motivo: string | null = null;
+              if (meta_status === "sent") evento = "enviado";
+              else if (meta_status === "delivered") evento = "entregue";
+              else if (meta_status === "read") evento = "lido";
+              else if (meta_status === "failed") {
+                evento = "falhou";
+                const errCode = st.errors?.[0]?.code;
+                if (errCode === 131026 || errCode === 131051) motivo = "numero_invalido";
+                else motivo = "entrega_falhou";
+              }
+              if (!evento || !phone) continue;
+              await supabase.rpc("canal_registrar_evento", {
+                _telefone: phone, _evento: evento, _motivo: motivo,
+                _canal_consentimento: null, _termos_versao: null,
+              });
+              if (messageId) {
+                await supabase.from("mensagens")
+                  .update({ metadata: { last_status: meta_status, motivo } as any })
+                  .eq("metadata->>whatsapp_message_id", messageId);
+              }
+            }
+          }
+        }
+        if (handledStatuses && !body.entry.some((e: any) => e.changes?.some((c: any) => c.value?.messages?.length))) {
+          return new Response(JSON.stringify({ status: "ok", kind: "statuses" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[STATUSES] erro processando callbacks:", e);
+    }
+
     const message = normalizeWebhookPayload(body);
 
     if (!message) {
@@ -44,6 +94,40 @@ serve(async (req) => {
     let { phone, senderName, text, messageId, mediaType, mediaId, mediaMimeType, interactiveReply } = message;
     const source = "meta_official"; // CANAL ÚNICO: webhook só aceita Meta Official.
     console.log(`[meta_official] Message from ${phone}: type=${mediaType || 'text'} ${interactiveReply ? `[btn:${interactiveReply.id}]` : ''} ${text.substring(0, 50)}`);
+
+    // ─── 0z. Sempre registrar "respondido" no canal (telemetria de efetividade) ───
+    try {
+      await supabase.rpc("canal_registrar_evento", {
+        _telefone: phone, _evento: "respondido", _motivo: null,
+        _canal_consentimento: null, _termos_versao: null,
+      });
+    } catch (_) { /* não bloqueia o webhook */ }
+
+    // ─── 0y. Detecta "NÃO FUI EU" (texto livre ou botão nao_fui_eu / sim_sou_eu) ───
+    const _norm = (text || "").trim().toLowerCase().replace(/[^a-zà-ú0-9\s]/gi, "");
+    const isBotaoNao = interactiveReply?.id === "nao_fui_eu";
+    const isTextoNao = /\bnao\s+fui\s+eu\b/.test(_norm) || /\bnão\s+fui\s+eu\b/.test(text || "");
+    const isBotaoSim = interactiveReply?.id === "sim_sou_eu";
+    if (isBotaoNao || isTextoNao) {
+      try {
+        await supabase.rpc("canal_registrar_evento", {
+          _telefone: phone, _evento: "pessoa_errada", _motivo: "pessoa_errada",
+          _canal_consentimento: null, _termos_versao: null,
+        });
+      } catch (e) { console.warn("[pessoa_errada] erro:", e); }
+      return new Response(JSON.stringify({ status: "ok", action: "marcado_pessoa_errada" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (isBotaoSim) {
+      try {
+        await supabase.rpc("canal_registrar_evento", {
+          _telefone: phone, _evento: "validado", _motivo: null,
+          _canal_consentimento: "botao_template", _termos_versao: null,
+        });
+      } catch (e) { console.warn("[sim_sou_eu] erro:", e); }
+      // segue fluxo normal — cliente confirmou identidade e pode conversar
+    }
 
     // ─── 0a. ECHO-SAUDAÇÃO FILTER ───
     // Defensivo: descarta se nosso próprio número devolver a saudação automática como inbound.
