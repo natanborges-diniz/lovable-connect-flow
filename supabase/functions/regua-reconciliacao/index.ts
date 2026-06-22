@@ -146,13 +146,30 @@ async function processarInscricao(
   }
 
   if (!venda) {
-    console.log(`[RECONCIL] Venda não encontrada insc=${insc.id} numero=${insc.numero_venda}`);
+    // ── SEM VENDA: incrementa tentativas; após 5x marca persistente + notifica supervisor (INTERNO) ──
+    const tentativas = (insc.tentativas_reconciliacao ?? 0) + 1;
+    const updates: Record<string, unknown> = {
+      tentativas_reconciliacao: tentativas,
+      ultima_tentativa_at: new Date().toISOString(),
+    };
+    if (tentativas >= 5 && insc.valor_status !== "sem_venda_persistente") {
+      updates.valor_status = "sem_venda_persistente";
+      console.warn(`[RECONCIL] insc=${insc.id} venda=${insc.numero_venda} marcada sem_venda_persistente após ${tentativas} tentativas`);
+      // Notificação INTERNA ao supervisor (sem qualquer comunicação ao cliente)
+      await supabase.from("notificacoes").insert({
+        tipo: "cashback_sem_venda_persistente",
+        titulo: "Cashback sem venda no Firebird",
+        mensagem: `Inscrição ${insc.numero_venda} (${insc.nome_cliente ?? "—"}) sem venda após ${tentativas} tentativas. Auditoria de cashback.`,
+        metadata: { inscricao_id: insc.id, numero_venda: insc.numero_venda, cod_empresa: insc.cod_empresa },
+      } as never);
+    }
+    await supabase.from("regua_inscricao").update(updates).eq("id", insc.id);
     return "sem_venda";
   }
 
   const os = venda.os ?? [];
 
-  // 1. Upsert regua_os — só colunas existentes na tabela
+  // 1. Upsert regua_os
   if (os.length > 0) {
     const { error: errOs } = await supabase
       .from("regua_os")
@@ -173,78 +190,167 @@ async function processarInscricao(
     }
   }
 
-  // 2. Valor: calcula valor_total_validado e valor_status
+  // 2. Valor
   const valorValidado = venda.valor_total ?? null;
   const valorStatus   = computeValorStatus(insc.valor_total_informado, valorValidado);
 
-  // 2.5 Confirmação de cashback no D+1
-  // Só chama quando temos valor_validado (ok ou divergente). 'sem_referencia' deixa
-  // o crédito provisório sem tocar — a RPC é idempotente com o mesmo valor_validado.
-  if (valorStatus !== "sem_referencia" && valorValidado !== null) {
+  // 2.5 CONFIRMAÇÃO DE CASHBACK D+1 — apenas auto-aprova quando bate (ou tolerância 0,50).
+  // Comunicação ao cliente é EXCLUSIVAMENTE no ato do PIN; aqui é SILENCIOSO.
+  // - valor_status='ok'         → aprova automaticamente via cashback_confirmar_credito
+  // - valor_status='divergente' → NÃO confirma; cria/atualiza demanda interna p/ a loja
+  // - valor_status='sem_referencia' → mantém provisório
+  if (valorStatus === "ok" && valorValidado !== null) {
     const { data: cbResult, error: cbErr } = await supabase.rpc(
       "cashback_confirmar_credito",
       { _inscricao_id: insc.id, _valor_validado: valorValidado },
     );
-    console.info(
-      `[RECONCIL] cashback_confirmar_credito insc=${insc.id} valor_status=${valorStatus}:`,
-      cbErr ? cbErr.message : cbResult,
-    );
+    console.info(`[RECONCIL] auto-aprovado insc=${insc.id}:`, cbErr ? cbErr.message : cbResult);
+    if (insc.contato_id) {
+      await supabase.from("eventos_crm").insert({
+        contato_id: insc.contato_id,
+        tipo: "cashback_confirmado",
+        descricao: "Cashback confirmado automaticamente após reconciliação D+1 (silencioso ao cliente)",
+        referencia_tipo: "regua_inscricao",
+        referencia_id: insc.id,
+        metadata: { numero_venda: insc.numero_venda, valor: valorValidado, automatico: true },
+      } as never);
+    }
+  } else if (valorStatus === "divergente" && valorValidado !== null) {
+    // Cria demanda interna (NÃO envia nada ao cliente)
+    if (!insc.demanda_divergencia_id) {
+      await abrirDemandaDivergencia(supabase, insc, valorValidado);
+    } else {
+      console.log(`[RECONCIL] insc=${insc.id} já possui demanda divergência ${insc.demanda_divergencia_id}`);
+    }
   }
 
-  // 3. Verificação de CPF (log divergência, sem sobrescrever)
+  // 3. CPF
   const cpfBridgeRaw = os.find((o) => o.cpf)?.cpf ?? null;
   const cpfBridge    = normalizarCpf(cpfBridgeRaw);
   const cpfInsc      = normalizarCpf(insc.cpf);
-
   if (cpfInsc && cpfBridge && cpfBridge !== cpfInsc) {
-    console.warn(
-      `[RECONCIL] CPF divergente insc=${insc.id}: informado=${cpfInsc} firebird=${cpfBridge} — sem atualização`,
-    );
+    console.warn(`[RECONCIL] CPF divergente insc=${insc.id}`);
   }
 
-  // 4. Enriquecer contatos.data_nascimento (só se NULL)
+  // 4. data_nascimento
   if (insc.contato_id) {
     const dataNasc = os.find((o) => o.data_nascimento)?.data_nascimento ?? null;
     if (dataNasc) {
-      // Só atualiza se a coluna ainda estiver vazia no contato
-      await supabase
-        .from("contatos")
+      await supabase.from("contatos")
         .update({ data_nascimento: dataNasc })
         .eq("id", insc.contato_id)
         .is("data_nascimento", null);
     }
   }
 
-  // 5. Âncora de entrega
+  // 5. Âncora
   const ancora = computeAncora(os);
 
-  // 6. Atualiza inscricao
+  // 6. Update
   const updatePayload: Record<string, unknown> = {
     valor_total_validado: valorValidado,
     valor_status:         valorStatus,
+    tentativas_reconciliacao: (insc.tentativas_reconciliacao ?? 0) + 1,
+    ultima_tentativa_at: new Date().toISOString(),
   };
-
   if (ancora) {
     updatePayload.data_entrega_ancora = ancora;
     updatePayload.status              = "ativa";
   }
 
   const { error: errUpdate } = await supabase
-    .from("regua_inscricao")
-    .update(updatePayload)
-    .eq("id", insc.id);
-
+    .from("regua_inscricao").update(updatePayload).eq("id", insc.id);
   if (errUpdate) {
-    console.error(`[RECONCIL] Erro update inscricao=${insc.id}:`, errUpdate);
+    console.error(`[RECONCIL] Erro update insc=${insc.id}:`, errUpdate);
     return "erro";
   }
 
   const resultado: ResultadoInscricao = ancora ? "anchorada" : "aguardando";
-  console.log(
-    `[RECONCIL] insc=${insc.id} venda=${insc.numero_venda} valor_status=${valorStatus} ancora=${ancora ?? "—"} resultado=${resultado}`,
-  );
+  console.log(`[RECONCIL] insc=${insc.id} valor_status=${valorStatus} ancora=${ancora ?? "—"}`);
   return resultado;
 }
+
+// ── Abrir demanda interna p/ loja em caso de divergência (SILENCIOSO ao cliente) ──
+async function abrirDemandaDivergencia(
+  supabase: ReturnType<typeof createClient>,
+  insc: Inscricao,
+  valorSistema: number,
+): Promise<void> {
+  const valorLancado = Number(insc.valor_total_informado ?? 0);
+  const diff = valorSistema - valorLancado;
+  const cliente = insc.nome_cliente ?? "cliente";
+  const pergunta = [
+    `⚠️ *Divergência de cashback* — venda ${insc.numero_venda}`,
+    ``,
+    `Cliente: *${cliente}*`,
+    `Valor lançado no Atrium: *R$ ${valorLancado.toFixed(2)}*`,
+    `Valor confirmado no sistema: *R$ ${valorSistema.toFixed(2)}*`,
+    `Diferença: *R$ ${diff.toFixed(2)}*`,
+    ``,
+    `O cashback do cliente ficou *provisório* até a loja decidir:`,
+    `✅ *Ajustar para o valor do sistema (R$ ${valorSistema.toFixed(2)})* — aprova na hora`,
+    `📝 *Manter o valor lançado (R$ ${valorLancado.toFixed(2)})* — vai para o supervisor aprovar`,
+    ``,
+    `_O cliente não recebe nenhuma mensagem sobre isso._`,
+  ].join("\n");
+
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // Reusa criar-demanda-loja com service role
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/criar-demanda-loja`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SRK}`,
+      "apikey": SRK,
+    },
+    body: JSON.stringify({
+      loja_nome: insc.cod_empresa ?? "loja",
+      loja_telefone: "__INTERNO__",
+      pergunta,
+      assunto: `Divergência cashback — venda ${insc.numero_venda}`,
+      origem: "sistema",
+    }),
+  });
+  const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+  if (!resp.ok) {
+    console.error("[RECONCIL] falha criar demanda divergência:", json);
+    return;
+  }
+  const demandaId = (json as Record<string, unknown>).demanda_id as string | undefined;
+  if (!demandaId) return;
+
+  await supabase.from("demandas_loja").update({
+    tipo_chave: "cashback_divergencia",
+    metadata: {
+      tipo_chave: "cashback_divergencia",
+      inscricao_id: insc.id,
+      numero_venda: insc.numero_venda,
+      cod_empresa: insc.cod_empresa,
+      cliente_nome: cliente,
+      valor_lancado: valorLancado,
+      valor_sistema: valorSistema,
+      diff,
+      silencioso_cliente: true,
+    },
+  }).eq("id", demandaId);
+
+  await supabase.from("regua_inscricao")
+    .update({ demanda_divergencia_id: demandaId })
+    .eq("id", insc.id);
+
+  if (insc.contato_id) {
+    await supabase.from("eventos_crm").insert({
+      contato_id: insc.contato_id,
+      tipo: "cashback_divergente",
+      descricao: "Divergência de cashback aberta com a loja (silencioso ao cliente)",
+      referencia_tipo: "regua_inscricao",
+      referencia_id: insc.id,
+      metadata: { numero_venda: insc.numero_venda, valor_lancado: valorLancado, valor_sistema: valorSistema, demanda_id: demandaId },
+    } as never);
+  }
+}
+
 
 // ── Handler principal ──────────────────────────────────────
 
