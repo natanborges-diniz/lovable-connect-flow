@@ -157,10 +157,23 @@ serve(async (req) => {
       cpf: cpfDigits ? maskCpf(cpfDigits) : null,
     });
 
-    const bridgeResp = await fetch(
-      `${BRIDGE_URL.replace(/\/$/, "")}/api/v1/os/consulta-status?${qs}`,
-      { headers: { "Content-Type": "application/json" } },
-    );
+    const bridgeController = new AbortController();
+    const bridgeTimeout = setTimeout(() => bridgeController.abort(), 38_000);
+    let bridgeResp: Response;
+    try {
+      bridgeResp = await fetch(
+        `${BRIDGE_URL.replace(/\/$/, "")}/api/v1/os/consulta-status?${qs}`,
+        { headers: { "Content-Type": "application/json" }, signal: bridgeController.signal },
+      );
+    } catch (fetchErr) {
+      clearTimeout(bridgeTimeout);
+      if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+        console.error("[os-status-public] Bridge timeout após 38s");
+        return jsonResp({ encontrado: false, indisponivel: true }, 504);
+      }
+      throw fetchErr;
+    }
+    clearTimeout(bridgeTimeout);
 
     if (!bridgeResp.ok) {
       const errBody = await bridgeResp.text().catch(() => "");

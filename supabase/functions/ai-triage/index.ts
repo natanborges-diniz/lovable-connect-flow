@@ -847,7 +847,7 @@ async function consultarStatusOS(
       valor: ident.tipo === "cpf" ? mascararCPF(ident.valor) : ident.valor,
     });
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 9_000);
+    const timer = setTimeout(() => ctrl.abort(), 40_000);
     const resp = await fetch(`${supabaseUrl}/functions/v1/os-status-public`, {
       method: "POST",
       headers: {
