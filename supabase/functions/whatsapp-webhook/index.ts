@@ -33,6 +33,56 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const body = await req.json();
+
+    // ─── STATUSES (Meta Cloud API: sent / delivered / read / failed) ───
+    // Processa antes de tentar normalizar como mensagem. Statuses não trazem msg.
+    try {
+      if (body?.object === "whatsapp_business_account" && Array.isArray(body.entry)) {
+        let handledStatuses = false;
+        for (const entry of body.entry) {
+          for (const change of entry.changes || []) {
+            if (change.field !== "messages") continue;
+            const statuses = change.value?.statuses;
+            if (!Array.isArray(statuses) || statuses.length === 0) continue;
+            handledStatuses = true;
+            for (const st of statuses) {
+              const phone = String(st.recipient_id || "");
+              const meta_status = String(st.status || ""); // sent | delivered | read | failed
+              const messageId = String(st.id || "");
+              let evento: string | null = null;
+              let motivo: string | null = null;
+              if (meta_status === "sent") evento = "enviado";
+              else if (meta_status === "delivered") evento = "entregue";
+              else if (meta_status === "read") evento = "lido";
+              else if (meta_status === "failed") {
+                evento = "falhou";
+                const errCode = st.errors?.[0]?.code;
+                if (errCode === 131026 || errCode === 131051) motivo = "numero_invalido";
+                else motivo = "entrega_falhou";
+              }
+              if (!evento || !phone) continue;
+              await supabase.rpc("canal_registrar_evento", {
+                _telefone: phone, _evento: evento, _motivo: motivo,
+                _canal_consentimento: null, _termos_versao: null,
+              });
+              if (messageId) {
+                await supabase.from("mensagens")
+                  .update({ metadata: { last_status: meta_status, motivo } as any })
+                  .eq("metadata->>whatsapp_message_id", messageId);
+              }
+            }
+          }
+        }
+        if (handledStatuses && !body.entry.some((e: any) => e.changes?.some((c: any) => c.value?.messages?.length))) {
+          return new Response(JSON.stringify({ status: "ok", kind: "statuses" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[STATUSES] erro processando callbacks:", e);
+    }
+
     const message = normalizeWebhookPayload(body);
 
     if (!message) {
