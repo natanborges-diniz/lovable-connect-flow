@@ -84,13 +84,17 @@ serve(async (req) => {
         ? body.datas.map(String)
         : datasParaProcessar();
 
-    // ── Catch-up D-N: junta gaps dos últimos 14 dias (somente quando não houve override manual)
+    // ── Catch-up curto: só recupera gaps dos últimos 3 dias (D-3).
+    // Justificativa: aviso "aguardando armação" perde validade rápido — OS antiga
+    // pode já ter saído da etapa 15 e o cliente receberia template desatualizado.
+    // A regra normal (seg processa sáb+dom) já cobre o fim de semana.
+    const CATCHUP_DIAS = Number(body?.catchup_dias ?? 3);
     let datas = datasBase;
     if (!body?.data && !(Array.isArray(body?.datas) && body.datas.length)) {
-      const gaps = await listarGaps(supabase, "armacao_codetapa15", 14, bhHojeSP());
+      const gaps = await listarGaps(supabase, "armacao_codetapa15", CATCHUP_DIAS, bhHojeSP());
       const set = new Set<string>([...gaps, ...datasBase]);
       datas = Array.from(set).sort();
-      if (gaps.length) console.log(`[regua-armacao] catch-up gaps: ${gaps.join(", ")}`);
+      if (gaps.length) console.log(`[regua-armacao] catch-up gaps (${CATCHUP_DIAS}d): ${gaps.join(", ")}`);
     }
 
     if (datas.length === 0) {
