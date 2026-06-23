@@ -142,6 +142,12 @@ serve(async (req) => {
         console.error("[regua-armacao] bridge erro", bridgeResp.status, t.slice(0, 200));
         detalhes.push({ data: dataConsulta, error: "bridge_error", status: bridgeResp.status });
         erros++;
+        await marcarSync(supabase, {
+          fonte: "armacao_codetapa15",
+          data_alvo: dataConsulta,
+          status: "bridge_down",
+          erro_msg: `HTTP ${bridgeResp.status}`,
+        });
         continue;
       }
       const bridgeJson = await bridgeResp.json();
