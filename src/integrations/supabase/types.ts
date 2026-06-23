@@ -3389,6 +3389,26 @@ export type Database = {
         }
         Relationships: []
       }
+      vw_disparos_unificados: {
+        Row: {
+          alias: string | null
+          atendimento_id: string | null
+          cliente_nome: string | null
+          contato_id: string | null
+          enviado_at: string | null
+          falha_motivo: string | null
+          fonte: string | null
+          id: string | null
+          loja_nome: string | null
+          params: Json | null
+          telefone: string | null
+          template_nome: string | null
+          wa_status: string | null
+          wa_status_at: string | null
+          whatsapp_message_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       calcular_membros_grupo: {
@@ -3456,6 +3476,43 @@ export type Database = {
       desanitize_corporate_contact: {
         Args: { _telefone: string }
         Returns: Json
+      }
+      disparos_kpis: {
+        Args: { fontes?: string[]; periodo_dias?: number }
+        Returns: Json
+      }
+      disparos_listar: {
+        Args: {
+          busca?: string
+          fontes?: string[]
+          pagina?: number
+          periodo_dias?: number
+          por_pagina?: number
+          status_filtro?: string[]
+        }
+        Returns: {
+          alias: string | null
+          atendimento_id: string | null
+          cliente_nome: string | null
+          contato_id: string | null
+          enviado_at: string | null
+          falha_motivo: string | null
+          fonte: string | null
+          id: string | null
+          loja_nome: string | null
+          params: Json | null
+          telefone: string | null
+          template_nome: string | null
+          wa_status: string | null
+          wa_status_at: string | null
+          whatsapp_message_id: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "vw_disparos_unificados"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       fn_send_push: {
         Args: {
