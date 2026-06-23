@@ -1,65 +1,53 @@
-## Diagnóstico
+## Painel de Disparos CRM (`/relatorios/disparos`) — admin-only
 
-Hoje **três crons dependem da firebird-bridge** e todos olham apenas D-1 (sem rede de segurança):
+Tela única consolidando **todo disparo outbound originado pelo CRM**, com status Meta (sent / delivered / read / failed / invalid_number), motivo de falha e atalho para a conversa do cliente. Acesso restrito a admin por enquanto; configurável depois.
 
-| Cron | Schedule | Janela bridge | O que faz se bridge cai |
-|---|---|---|---|
-| `regua-disparo-aguardando-armacao` | 07:00 SP | D-1 (seg pega D-1+D-2 do fim de semana) | Loga `erros++` no detalhe da execução, **não reprocessa** D-1 no dia seguinte. Etapa 15 daquele dia é **perdida silenciosamente**. |
-| `regua-ingestao` (pós-venda: PRIMEIRO_CONTATO, ADAPTACAO_7D, ANIVERSARIO) | **sem cron ativo** (rodada manual) | D-1 entregas / D-7 adaptação / hoje aniversário | Mesma coisa: falha = perda do dia. |
-| `regua-reconciliacao` (cashback D+1) | 07:00 SP | D-1 vendas confirmadas | Idem. |
+### Escopo de fontes (cobertura completa)
 
-Evidência: `os_avisos_armacao_log` tem **0 linhas nos últimos 7 dias** → ou bridge está fora há dias, ou o cron de armação está disparando vazio sem ninguém perceber. Não há alerta, não há retry, não há catch-up D-N.
+| Fonte | Origem técnica | Como entra na view |
+|---|---|---|
+| **Aguardando armação** | `os_avisos_armacao_log` | direto |
+| **Régua pós-venda** (primeiro contato, adaptação 7d, aniversário, NPS) | `regua_touchpoint` | direto |
+| **Cashback** (PIN de validação, confirmação de crédito, lembrete de resgate, divergência) | `mensagens` outbound com `metadata.template_name` ∈ catálogo cashback **+** eventos `cashback_credito` | join por `whatsapp_message_id` |
+| **Entrega de óculos** (aviso "pronto p/ retirar" via `confirmar-recebimento-os`, OS recebida na loja, retirada confirmada) | `mensagens` outbound com `metadata.template_name` ∈ `{os_recebida_loja, oculos_pronto_retirar, …}` **+** `os_recebimento_loja` | join + linha própria |
+| **Link de pagamento** (envio, lembrete, confirmação) | `pagamentos_link` + `pagamentos_link_eventos` | direto |
+| **Agendamento** (confirmação, lembrete véspera/1h, no-show, reativação) | `mensagens` outbound com template do catálogo de agendamento | direto |
+| **Recuperação / retomada IA** (`retomada_contexto_*`, `recuperacao_lead`, etc.) | `mensagens` outbound flag template | direto |
+| **Escalada / aviso loja** (notificar-loja-agendamento, demandas) | `mensagens` outbound + `notificacoes` | direto |
+| **Texto livre IA/operador** dentro da janela 24h | `mensagens` `direcao='outbound'` sem template | **opt-in** no filtro (off por padrão) |
 
-A função `regua-disparo-aguardando-armacao` **já aceita** `{ datas: ["YYYY-MM-DD", …] }` no body, mas hoje isso é manual. Falta orquestração.
+Critério: **se saiu do CRM para o cliente final via WhatsApp, aparece aqui.** A fonte é classificada pela tabela de origem ou pelo `metadata.template_name` (alias mapeado em `template_aliases` → grupo: `armacao | regua | cashback | entrega | pagamento | agendamento | recuperacao | escalada | outro`).
 
-## Plano de contingência
+### Backend
 
-### 1. Tabela de auditoria `bridge_sync_log`
-Uma linha por (fonte, data_alvo, executado_at) com `status: ok|bridge_down|parcial`, `linhas_recebidas`, `erro_msg`. Fonte = `armacao_codetapa15` | `ingestao_entregas` | `ingestao_aniv` | `reconciliacao_vendas`.
+1. **View `vw_disparos_unificados`** (SECURITY INVOKER, read-only) unindo as fontes acima e normalizando:
+   - `id`, `fonte` (grupo), `template_nome`, `alias`, `cliente_nome`, `telefone`, `loja_nome`, `atendimento_id`, `contato_id`, `enviado_at`, `wa_status`, `wa_status_at`, `falha_motivo`, `params`.
+   - `wa_status` derivado de `mensagens.metadata.last_status` (sent/delivered/read/failed/invalid_number) quando há `whatsapp_message_id`; senão usa o status próprio da fonte (`os_avisos_armacao_log.status`, `pagamentos_link.status`, etc.).
+2. **RPC `disparos_kpis(periodo_dias int, fontes text[])`** → entrega %, leitura %, resposta-em-24h %, número inválido %, total enviados.
+3. **Acesso**: `GRANT SELECT` só a `authenticated`; view + RPC checam `has_role(auth.uid(),'admin')`. Demais roles não leem nada agora.
+4. **Config**: chave `disparos_painel` em `app_config`:
+   ```json
+   { "fontes_ativas": ["armacao","regua","cashback","entrega","pagamento","agendamento","recuperacao","escalada"],
+     "incluir_texto_livre_default": false,
+     "periodo_default_dias": 7 }
+   ```
+   Lida pela tela; edição via UI de configurações fica para próxima entrega.
 
-### 2. Health-check da bridge antes de cada cron
-Helper `pingBridge()` (GET `/health` com timeout 5s). Se falhar:
-- Grava `bridge_sync_log(status='bridge_down')` para a data alvo.
-- Insere `notificacoes` (admin/TI) **uma única vez por dia** com link "ver gaps".
-- Retorna 200 sem processar (não polui logs com 500).
+### UI
 
-### 3. Catch-up D-N automático
-Antes de processar D-1, cada cron:
-1. Lê `bridge_sync_log` buscando datas **dos últimos N dias** (armação=14, reconciliação=7, ingestão=10) **sem linha `status='ok'`**.
-2. Monta lista `datas = [...gaps, D-1]` (ordenado).
-3. Itera; para cada data, faz a query na bridge → se OK, processa + grava `status='ok'`; se falha, mantém pendente para próxima rodada.
+- Rota `/relatorios/disparos` em `App.tsx` dentro de `<ProtectedRoute allowedRoles={["admin"]}>`.
+- Link no `AppSidebar` (grupo Configurações / Relatórios — só admin enxerga).
+- Topo: 4 cards KPI (entrega, leitura, resposta 24h, inválido) + filtros (período, fonte, template, loja, status, busca telefone/nome).
+- Tabela paginada: data | cliente+fone | loja | fonte/template | status (ícones tipo `MessageTicks`: ⏱ → ✓ → ✓✓ → ✓✓ azul; ✗ vermelho) | motivo falha | botão "Abrir conversa" → `/crm/conversas?atendimento=<id>`.
+- Toggle "incluir mensagens de texto livre" (default = config).
+- Export CSV do conjunto filtrado.
 
-Idempotência já existe nos três fluxos (UNIQUE em `os_avisos_armacao_log(os_numero,loja_nome)`, `regua_touchpoint` por contato+tipo+data, `cashback_credito` por venda). Reprocessar D-3 três dias depois não duplica nada.
+### Fora do escopo desta entrega
+- Visão por loja/supervisor (acesso restrito a admin agora).
+- Série temporal por campanha / reenvio em lote.
+- Tela de edição da chave `disparos_painel` (estrutura já fica pronta).
 
-### 4. Painel `/configuracoes/bridge-saude`
-Tabela simples mostrando últimos 30 dias × 4 fontes, célula verde/vermelha/cinza. Botão "Reprocessar manualmente" chama a edge function com `{ datas: [...] }`.
-
-### 5. Agendar `regua-ingestao` (atualmente órfã)
-`pg_cron` 07:30 SP. Mesmo health-check + catch-up.
-
-### 6. Mudança no `regua-disparo-aguardando-armacao`
-Manter a regra atual (domingo pulado, segunda processa sáb+dom) **como piso mínimo**, mas o catch-up D-N cobre lacunas adicionais. Bloco novo só na entrada da função.
-
-## Arquivos previstos
-
-- **Migração**: tabela `bridge_sync_log` + grants/RLS (admin/operador SELECT; service_role ALL) + UNIQUE `(fonte, data_alvo)`.
-- **Migração**: agendar `regua-ingestao` via `pg_cron`.
-- `supabase/functions/_shared/bridge-health.ts` — `pingBridge()`, `listarGaps(fonte, n)`, `marcarOk()`, `marcarFalha()`, `notificarAdminUmaVezPorDia()`.
-- `supabase/functions/regua-disparo-aguardando-armacao/index.ts` — integrar health-check + loop de catch-up.
-- `supabase/functions/regua-ingestao/index.ts` — idem; aceitar `datas[]` no body.
-- `supabase/functions/regua-reconciliacao/index.ts` — idem.
-- `src/pages/BridgeSaude.tsx` + entrada em `Configuracoes` (admin only).
-- `.lovable/memory/integracao/bridge-firebird-contingencia.md` — documentar política D-N e onde olhar.
-
-## Validação
-
-1. **Simular bridge fora** (mock 503 no `BRIDGE_URL`) → cron grava `bridge_down`, manda 1 notificação admin, sai sem erro.
-2. **Subir bridge no dia seguinte** → próxima execução pega gap de ontem + D-1 normal, processa as duas, grava 2× `status='ok'`.
-3. **Rodar duas vezes a mesma data** → segunda execução pula 100% por idempotência (counters: enviados=0, pulados=N).
-4. **Painel** lista os dois dias verdes após backfill.
-
-## Fora de escopo
-
-- Não muda mensagem ao cliente, templates ou tom.
-- Não toca em `bridge-mensageria` nem em `bridge-demanda` (outro domínio, sem Firebird).
-- Não tenta consertar a bridge em si — só a resiliência do nosso lado.
+### Arquivos
+- **Migration**: `vw_disparos_unificados`, RPC `disparos_kpis`, grants admin-only, chave `disparos_painel` em `app_config`.
+- **Novos**: `src/pages/RelatorioDisparos.tsx`, `src/hooks/useDisparos.ts`, `src/components/relatorios/DisparoStatusBadge.tsx`.
+- **Editar**: `src/App.tsx` (rota protegida), `src/components/layout/AppSidebar.tsx` (link admin).
