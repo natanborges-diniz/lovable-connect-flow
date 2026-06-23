@@ -11,6 +11,7 @@ import {
   listarGaps,
   marcarSync,
   notificarAdminBridgeDown,
+  janelaCatchupDinamica,
   hojeSP as bhHojeSP,
 } from "../_shared/bridge-health.ts";
 
