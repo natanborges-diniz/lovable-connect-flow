@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
   Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin, ShieldAlert, Package,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, BarChart3
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -117,6 +117,12 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
         { title: "Crons", url: "/configuracoes?tab=crons", icon: Timer },
         { title: "Recuperação", url: "/configuracoes?tab=recuperacao", icon: LifeBuoy },
         { title: "Auditoria IA", url: "/configuracoes?tab=auditoria-ia", icon: ShieldAlert },
+      ],
+    },
+    {
+      label: "Relatórios",
+      items: [
+        { title: "Disparos CRM", url: "/relatorios/disparos", icon: BarChart3 },
       ],
     },
   ],

@@ -20,6 +20,7 @@ import Tarefas from "./pages/Tarefas";
 import Mensagens from "./pages/Mensagens";
 import ReguaNovaVenda from "./pages/ReguaNovaVenda";
 import CashbackAuditoria from "./pages/CashbackAuditoria";
+import RelatorioDisparos from "./pages/RelatorioDisparos";
 
 import Demandas from "./pages/Demandas";
 import Configuracoes from "./pages/Configuracoes";
@@ -71,6 +72,11 @@ const App = () => (
               <Route path="/configuracoes/bridge-saude" element={
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <BridgeSaude />
+                </ProtectedRoute>
+              } />
+              <Route path="/relatorios/disparos" element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <RelatorioDisparos />
                 </ProtectedRoute>
               } />
             </Route>
