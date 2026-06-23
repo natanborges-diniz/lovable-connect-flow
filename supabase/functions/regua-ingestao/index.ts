@@ -344,6 +344,18 @@ serve(async (req) => {
   // ── Processa grupos ────────────────────────────────────
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
+  // Health-check + auditoria por fonte/data
+  const ping = await pingBridge(BRIDGE_URL, Deno.env.get("INTERNAL_SERVICE_SECRET") ?? "");
+  const fonteEntregas = "ingestao_entregas" as const;
+  const fonteAniv     = "ingestao_aniv" as const;
+
+  if (!ping.ok) {
+    await marcarSync(supabase, { fonte: fonteEntregas, data_alvo: ontem,   status: "bridge_down", erro_msg: ping.error });
+    await marcarSync(supabase, { fonte: fonteEntregas, data_alvo: ha7d,    status: "bridge_down", erro_msg: ping.error });
+    await marcarSync(supabase, { fonte: fonteAniv,     data_alvo: hojeIso, status: "bridge_down", erro_msg: ping.error });
+    await notificarAdminBridgeDown(supabase, fonteEntregas, ping.error ?? "");
+  }
+
   const grupos: GrupoIngestao[] = [
     { tipo: "PRIMEIRO_CONTATO", data_prevista: hojeIso, registros: registrosOntem },
     { tipo: "ADAPTACAO_7D",     data_prevista: hojeIso, registros: registros7d   },
@@ -355,6 +367,25 @@ serve(async (req) => {
     const r = await processarGrupo(supabase, grupo);
     resultados.push(r);
     console.log(`[INGESTAO] ${r.tipo}: bridge=${r.total_bridge} inscritos=${r.inscritos} tp=${r.touchpoints} cpf=${r.casados_cpf} tel=${r.casados_tel} sem_match=${r.nao_casados} erros=${r.erros}`);
+  }
+
+  // Grava sync_log por fonte quando bridge respondeu
+  if (ping.ok) {
+    if (resOntem.status === "fulfilled") {
+      await marcarSync(supabase, { fonte: fonteEntregas, data_alvo: ontem, status: registrosOntem.length === 0 ? "vazio" : "ok", linhas_recebidas: registrosOntem.length });
+    } else {
+      await marcarSync(supabase, { fonte: fonteEntregas, data_alvo: ontem, status: "bridge_down", erro_msg: String(resOntem.reason?.message ?? resOntem.reason) });
+    }
+    if (res7d.status === "fulfilled") {
+      await marcarSync(supabase, { fonte: fonteEntregas, data_alvo: ha7d, status: registros7d.length === 0 ? "vazio" : "ok", linhas_recebidas: registros7d.length });
+    } else {
+      await marcarSync(supabase, { fonte: fonteEntregas, data_alvo: ha7d, status: "bridge_down", erro_msg: String(res7d.reason?.message ?? res7d.reason) });
+    }
+    if (resAniv.status === "fulfilled") {
+      await marcarSync(supabase, { fonte: fonteAniv, data_alvo: hojeIso, status: registrosAniv.length === 0 ? "vazio" : "ok", linhas_recebidas: registrosAniv.length });
+    } else {
+      await marcarSync(supabase, { fonte: fonteAniv, data_alvo: hojeIso, status: "bridge_down", erro_msg: String(resAniv.reason?.message ?? resAniv.reason) });
+    }
   }
 
   const totalErros = resultados.reduce((s, r) => s + r.erros, 0) + errosBridge.length;
