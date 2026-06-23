@@ -29,6 +29,16 @@ Aplicado em:
   - Escalada genérica fora-de-horário existente (~linha 3616)
 - `watchdog-loop-ia/index.ts` — escalada por silêncio/loop (~linha 154)
 
+## Override escalada fora-horário (ai-triage ~linha 8316)
+Quando `precisa_humano && !isHorarioHumano()`:
+1. Troca a mensagem ao cliente por `mensagemEscaladaForaHorario()`.
+2. **Flipa `atendimentos.modo='humano'`** para travar IA até consultor assumir.
+3. Calcula `proximaAberturaHumanaDateISO()`; se a próxima abertura está a ≥23h (janela 24h Meta vai estourar), grava `metadata.reabertura_template_at = <ISO>`.
+4. `cron-reabertura-fora-horario` (a cada 10min) varre vencidos, confirma janela fechada e dispara `retomada_consultor_v1` (template approved) uma única vez. Idempotente via `metadata.reabertura_template_enviada_at`.
+
+## UX operador (Atendimentos.tsx)
+Banner amarelo acima do composer quando última inbound > 23h. Botão "Reabrir via template" abre `JanelaFechadaDialog` (não espera o erro 422 do Enviar).
+
 ## Refinamento por marca (anti-falsa-escalada)
 Antes de escalar por loop sem intent claro, o detector verifica se o cliente está apenas filtrando o orçamento por marca (ex: "Tem Varilux?" depois de receber DNZ/HOYA). Nesse caso, força `consultar_lentes` com `preferencia_marca` — não escala.
 
