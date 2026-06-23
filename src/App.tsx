@@ -23,6 +23,7 @@ import CashbackAuditoria from "./pages/CashbackAuditoria";
 
 import Demandas from "./pages/Demandas";
 import Configuracoes from "./pages/Configuracoes";
+import BridgeSaude from "./pages/BridgeSaude";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import SomenteMessenger from "./pages/SomenteMessenger";
