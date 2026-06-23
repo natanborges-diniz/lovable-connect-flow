@@ -11,6 +11,7 @@ import {
   listarGaps,
   marcarSync,
   notificarAdminBridgeDown,
+  janelaCatchupDinamica,
   hojeSP as bhHojeSP,
 } from "../_shared/bridge-health.ts";
 
@@ -84,17 +85,20 @@ serve(async (req) => {
         ? body.datas.map(String)
         : datasParaProcessar();
 
-    // ── Catch-up curto: só recupera gaps dos últimos 3 dias (D-3).
-    // Justificativa: aviso "aguardando armação" perde validade rápido — OS antiga
-    // pode já ter saído da etapa 15 e o cliente receberia template desatualizado.
-    // A regra normal (seg processa sáb+dom) já cobre o fim de semana.
-    const CATCHUP_DIAS = Number(body?.catchup_dias ?? 3);
+    // ── Catch-up dinâmico: N = dias desde o último `ok|vazio` em bridge_sync_log,
+    // limitado por `maxCap` (default 30) para segurança. Override via body.catchup_dias.
+    // Assim, se a bridge ficar fora por X dias, no próximo run o cron pega
+    // exatamente esses X dias sem refazer datas antigas já marcadas como ok.
+    const MAX_CAP = Number(body?.catchup_max ?? 30);
     let datas = datasBase;
     if (!body?.data && !(Array.isArray(body?.datas) && body.datas.length)) {
-      const gaps = await listarGaps(supabase, "armacao_codetapa15", CATCHUP_DIAS, bhHojeSP());
+      const janela = body?.catchup_dias != null
+        ? Number(body.catchup_dias)
+        : await janelaCatchupDinamica(supabase, "armacao_codetapa15", bhHojeSP(), { maxCap: MAX_CAP, minFloor: 1 });
+      const gaps = await listarGaps(supabase, "armacao_codetapa15", janela, bhHojeSP());
       const set = new Set<string>([...gaps, ...datasBase]);
       datas = Array.from(set).sort();
-      if (gaps.length) console.log(`[regua-armacao] catch-up gaps (${CATCHUP_DIAS}d): ${gaps.join(", ")}`);
+      console.log(`[regua-armacao] janela=${janela}d gaps=${gaps.length ? gaps.join(",") : "—"}`);
     }
 
     if (datas.length === 0) {
