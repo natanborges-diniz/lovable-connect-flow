@@ -419,6 +419,42 @@ export type Database = {
         }
         Relationships: []
       }
+      bridge_sync_log: {
+        Row: {
+          created_at: string
+          data_alvo: string
+          erro_msg: string | null
+          executado_at: string
+          fonte: string
+          id: string
+          linhas_recebidas: number
+          payload: Json
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          data_alvo: string
+          erro_msg?: string | null
+          executado_at?: string
+          fonte: string
+          id?: string
+          linhas_recebidas?: number
+          payload?: Json
+          status: string
+        }
+        Update: {
+          created_at?: string
+          data_alvo?: string
+          erro_msg?: string | null
+          executado_at?: string
+          fonte?: string
+          id?: string
+          linhas_recebidas?: number
+          payload?: Json
+          status?: string
+        }
+        Relationships: []
+      }
       canais: {
         Row: {
           ativo: boolean | null

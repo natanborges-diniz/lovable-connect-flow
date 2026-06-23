@@ -19,6 +19,13 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  pingBridge,
+  marcarSync,
+  notificarAdminBridgeDown,
+  hojeSP as bhHojeSP,
+  isoDate as bhIsoDate,
+} from "../_shared/bridge-health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -396,6 +403,23 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
+  // Health-check bridge (Firebird)
+  const hojeStr = bhIsoDate(bhHojeSP());
+  const ping = await pingBridge(BRIDGE_URL, Deno.env.get("INTERNAL_SERVICE_SECRET") ?? "");
+  if (!ping.ok) {
+    await marcarSync(supabase, {
+      fonte: "reconciliacao_vendas",
+      data_alvo: hojeStr,
+      status: "bridge_down",
+      erro_msg: ping.error ?? `HTTP ${ping.status ?? "?"}`,
+    });
+    await notificarAdminBridgeDown(supabase, "reconciliacao_vendas", ping.error ?? `HTTP ${ping.status}`);
+    return new Response(
+      JSON.stringify({ ok: true, bridge_down: true, mensagem: "Inscrições continuam aguardando_entrega; serão reprocessadas quando a bridge voltar." }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
   // Busca todas as inscrições pendentes (sem limite paginado — volume esperado baixo)
   let query = supabase
     .from("regua_inscricao")
@@ -488,6 +512,16 @@ serve(async (req) => {
     const res = await processarInscricao(supabase, insc, BRIDGE_URL);
     contadores[res]++;
   }
+
+  await marcarSync(supabase, {
+    fonte: "reconciliacao_vendas",
+    data_alvo: hojeStr,
+    status: contadores.erro === 0 ? "ok" : "parcial",
+    linhas_recebidas: lista.length,
+    payload: contadores,
+    erro_msg: contadores.erro > 0 ? `${contadores.erro} inscrições com erro` : null,
+  });
+
 
   return new Response(
     JSON.stringify({
