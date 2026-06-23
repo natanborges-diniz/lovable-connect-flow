@@ -196,7 +196,7 @@ export default function RelatorioDisparos() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => navigate(`/crm/conversas?atendimento=${r.atendimento_id}`)}
+                          onClick={() => navigate(`/crm/conversas?open=${r.atendimento_id}`)}
                           title="Abrir conversa"
                         >
                           <MessageSquare className="h-4 w-4" />
