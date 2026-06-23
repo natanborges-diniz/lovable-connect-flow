@@ -68,6 +68,11 @@ const App = () => (
                   <Configuracoes />
                 </ProtectedRoute>
               } />
+              <Route path="/configuracoes/bridge-saude" element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <BridgeSaude />
+                </ProtectedRoute>
+              } />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
