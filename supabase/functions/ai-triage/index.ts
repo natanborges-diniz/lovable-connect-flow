@@ -80,6 +80,29 @@ function proximaAberturaHumana(): string {
   return "amanhã às 09:00";
 }
 
+// Timestamp ISO (UTC) da próxima abertura do atendimento humano em SP.
+// Usado pelo cron de reabertura pós escalada fora-horário (janela 24h Meta).
+function proximaAberturaHumanaDateISO(): string {
+  const SP_OFFSET_MIN = -180; // SP = UTC-3 (sem DST atualmente)
+  const now = new Date();
+  const spNow = new Date(now.getTime() + (SP_OFFSET_MIN - now.getTimezoneOffset()) * 60_000);
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(spNow);
+    d.setDate(d.getDate() + i);
+    const dow = d.getDay();
+    let openHour = 0;
+    if (dow >= 1 && dow <= 5) openHour = 9;
+    else if (dow === 6) openHour = 8;
+    else continue;
+    const candidate = new Date(d);
+    candidate.setHours(openHour, 0, 0, 0);
+    if (i === 0 && candidate.getTime() <= spNow.getTime()) continue;
+    const utcMs = candidate.getTime() - SP_OFFSET_MIN * 60_000;
+    return new Date(utcMs).toISOString();
+  }
+  return new Date(Date.now() + 24 * 3600_000).toISOString();
+}
+
 // ── MENSAGENS FIXAS EDITÁVEIS (tabela ia_mensagens_fixas) ──
 // Defaults preservados como fallback caso a tabela esteja indisponível.
 const _msgFixaDefaults: Record<string, string> = {
@@ -8300,11 +8323,32 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
       validatorFlags.push("escalada_fora_horario");
       console.log("[HORARIO-HUMANO] Escalada fora do expediente — mensagem ajustada");
       try {
+        const reaberturaISO = proximaAberturaHumanaDateISO();
+        // Flip modo=humano para travar IA até consultor assumir + agenda reabertura
+        // por template caso a próxima abertura > 23h (janela 24h Meta vai estourar).
+        const horasAteAbertura =
+          (new Date(reaberturaISO).getTime() - Date.now()) / 3_600_000;
+        const novaMeta = {
+          ...(atendimento.metadata || {}),
+          escalada_fora_horario_at: new Date().toISOString(),
+          ...(horasAteAbertura >= 23
+            ? { reabertura_template_at: reaberturaISO }
+            : {}),
+        };
+        await supabase
+          .from("atendimentos")
+          .update({ modo: "humano", metadata: novaMeta })
+          .eq("id", atendimento_id);
+
         await supabase.from("eventos_crm").insert({
           contato_id: contatoId,
           tipo: "escalada_fora_horario",
           descricao: `Escalada para humano fora do expediente — próxima abertura: ${proximaAberturaHumana()}`,
-          metadata: { proxima_abertura: proximaAberturaHumana() },
+          metadata: {
+            proxima_abertura: proximaAberturaHumana(),
+            reabertura_template_at: horasAteAbertura >= 23 ? reaberturaISO : null,
+            horas_ate_abertura: Math.round(horasAteAbertura),
+          },
           referencia_tipo: "atendimento",
           referencia_id: atendimento_id,
         });

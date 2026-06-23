@@ -1,66 +1,46 @@
-## Auditoria: Cashback D+1 + Consulta OS — pode liberar?
+## Diagnóstico: por que o operador não consegue responder à Carolina
 
-### Resposta direta
-**Ainda não.** Roteador de OS e a infra de reconciliação estão prontos e os templates Meta `aviso_aguardando_armacao` e `os_recebida_loja` já estão **aprovados**, mas há 3 pontas soltas que quebram silenciosamente em produção. Plano abaixo corrige cada uma sem mexer no que já funciona.
+### Causa raiz
+O IA escalou **fora do expediente** (sábado 17:43, próxima abertura segunda 09:00 → ~40h depois). Quando o operador abre o atendimento na segunda, a Meta já passou da **janela de 24h** desde o último inbound do cliente. O `send-whatsapp` (linhas 71-93) retorna `422 outside_24h_window` e o composer de texto livre falha. O cliente só pode ser reaberto via **template aprovado** (`send-whatsapp-template`). O dialog `JanelaFechadaDialog` já existe, mas o operador precisa enviar e o cliente responder antes de continuar — passo nada óbvio na UI atual.
 
-### O que está OK (verificado)
-- **Cron único 07:00 SP** (`regua-reconciliacao-diaria-07h-sp`, schedule `0 10 * * *`) ativo. Sem cron extra de meio-dia.
-- **Cron 07:00 SP aguardando armação** (`regua-disparo-aguardando-armacao`) também ativo.
-- **Templates Meta aprovados** (`os_recebida_loja` → `os_recebida_loja_v2`, `aviso_aguardando_armacao` → `aviso_aguardando_armacao_v2`).
-- **Roteador `ai-triage`** detecta `consulta_os` antes do LLM, escala para humano, move card para coluna "Consulta de OS", trava pedido de receita/orçamento. Keywords editáveis em `configuracoes_ia.os_intent_keywords` populadas.
-- **UI auditoria gestor** (`/regua/auditoria`) e **card de divergência** no `DemandaThreadView` plugados.
-- **RPCs `cashback_aprovar_divergencia` / `cashback_cancelar_inscricao`** existem e são silenciosas ao cliente.
+Evidência no banco (`eventos_crm.tipo='escalada_fora_horario'`):
+- Carolina (`1b53d0c8`, 20/06 20:43): `modo=humano`, `status=aguardando` — janela fechou em 21/06 20:43.
+- Priscilla (`0d9919b8`, 22/06 21:12): idem — janela fechou em 23/06 21:12 (já fechada ao abrir hoje).
+- Vários outros: `modo=ia` órfãos, alguns nunca migrados para humano.
 
-### Gaps que bloqueiam produção
+Problemas secundários confirmados no código:
+1. **`ai-triage` linha 8294-8312** (override escalada fora-horário) **NÃO faz `update modo='humano'`** — cards ficam em `modo='ia'` com IA "escalada" só na mensagem. Auto-claim do operador depende dele responder; se ninguém clica, o card fica órfão.
+2. Sem alerta proativo: o operador só descobre a janela fechada quando clica Enviar e vê o erro.
+3. Sem reabertura programada: a IA promete "segunda 09:00" mas nada agenda o template `retomada_consultor_pos_janela` para sair às 09:00 — fica nas costas do operador descobrir caso a caso.
 
-**1. Divergência de cashback nunca chega à loja (bug bloqueante)**
-`regua-reconciliacao` chama `criar-demanda-loja` com a service role key, mas `criar-demanda-loja` faz `supabase.auth.getUser(token)` e devolve **401 Unauthorized** quando o token não é JWT de usuário. Resultado: na primeira divergência real a demanda nunca é criada, a inscrição fica `valor_status='divergente'` órfã e nenhuma loja é avisada.
+### Plano (cirúrgico, sem mexer no que funciona)
 
-**2. `loja_nome` enviado é o `cod_empresa` (ex.: `"18"`)**
-`resolver_destinatarios_loja(_loja_nome)` casa pelo nome textual da loja — passar o código numérico devolve lista vazia, então mesmo se o passo 1 fosse corrigido, **0 destinatários** seriam notificados via Messenger/push.
+**A. `supabase/functions/ai-triage/index.ts` — flip modo na escalada fora-horário**
+- Dentro do bloco de override (8297-8312), adicionar `update atendimentos.modo='humano'` + mover card para coluna `Humano` (mesmo padrão da escalada normal).
+- Calcular `proximaAberturaHumana()` em horas; se > 23h (ou seja, vai estourar a janela 24h), gravar `atendimento.metadata.reabertura_template_at = proximaAberturaHumana()` para a régua agendar template.
 
-**3. Loja não tem como confirmar recebimento de OS no Messenger**
-A edge function `confirmar-recebimento-os` (preview + confirm) está pronta e dispara o template aprovado, mas **nenhum componente em `src/` a chama**. Sem botão/tela, o template `os_recebida_loja` nunca sai, quebrando a régua de OS.
+**B. Novo cron/handler `cron-reabertura-pos-escalada-fora-horario`** (ou aproveitar `vendas-recuperacao-cron` que já varre atendimentos)
+- A cada 10min, busca atendimentos com `metadata.reabertura_template_at <= now()` e janela 24h fechada → dispara `send-whatsapp-template` com `retomada_consultor_pos_janela` (já no catálogo `whatsapp_templates`).
+- Marca `metadata.reabertura_template_enviada_at`; idempotente.
 
-### Correções (escopo cirúrgico)
+**C. Frontend `src/pages/Atendimentos.tsx` — alerta proativo**
+- Quando abre um atendimento com último inbound > 23h, mostrar banner amarelo acima do composer: "Janela 24h fechada — reabrir via template" + botão direto que abre `JanelaFechadaDialog` (já existe). Não esperar o erro do Enviar.
+- Lookup: `mensagens` última `direcao='inbound'` → diff em horas.
 
-```text
-A. supabase/functions/criar-demanda-loja/index.ts
-   ├─ aceitar header "x-service-call: 1" + body.solicitante_nome
-   │  → pula auth.getUser(), grava solicitante_id=NULL, solicitante_nome="Sistema"
-   └─ continua exigindo JWT para chamadas do frontend (default)
+**D. Memória**
+- Atualizar `.lovable/memory/atendimento/horario-comercial-humano.md`: documentar que escalada fora-horário SEMPRE flipa `modo=humano` e agenda reabertura por template quando >24h.
 
-B. supabase/functions/regua-reconciliacao/index.ts (criarDemandaDivergencia)
-   ├─ resolver loja_nome real: lookup em lojas_cidades por loja_id=cod_empresa
-   │  (fallback: telefones_lojas; último recurso: "Loja {cod_empresa}")
-   ├─ adicionar header "x-service-call: 1" + solicitante_nome:"Reconciliação cashback"
-   └─ log explícito quando destinatários=0 (para auditoria)
-
-C. Frontend — confirmar recebimento de OS
-   ├─ novo componente src/components/os/ConfirmarRecebimentoOSDialog.tsx
-   │  - input nº OS → action="preview" mostra cliente/loja/produto
-   │  - botão "Confirmar recebimento" → action="confirm"
-   ├─ ponto de entrada: botão no Messenger (página /mensagens) visível
-   │  para usuários com user_acessos.menu_loja=true
-   └─ toast de sucesso + refetch da lista de OS pendentes
-
-D. Memória
-   └─ atualizar mem://regua/os-aguardando-armacao-e-recebimento-loja:
-      templates já aprovados (sair de "rascunho") + entrada UI no Messenger.
-```
-
-### Smoke test antes de liberar (sem migration, sem cron novo)
-1. Inserir 1 `regua_inscricao` fake com `cod_empresa='18'`, valor divergente, rodar `regua-reconciliacao` manualmente → confirmar demanda criada, destinatários>0, push chegando, **nenhum** registro em `mensagens` (WhatsApp ao cliente).
-2. Loja clica "Ajustar para sistema" → confirmar `cashback_credito.valor` recalculado, `valor_status='ok'`, demanda fechada, **nenhum** WhatsApp ao cliente.
-3. Loja clica "Manter lançado" → demanda fica aguardando supervisor; gestor abre `/regua/auditoria` e aprova; verificar evento `cashback_confirmado` interno.
-4. No Messenger, abrir o novo diálogo de OS com um nº real → preview retorna cliente, confirmar dispara `os_recebida_loja_v2` (idempotente: 2ª chamada devolve `already_received`).
+### Validação
+1. Reabrir o atendimento da Priscilla (`0d9919b8`) na UI → banner amarelo aparece, botão "Reabrir via template" dispara `retomada_consultor_pos_janela`.
+2. Simular escalada fora-horário em ambiente: criar atendimento, mockar `isHorarioHumano()=false`, rodar `ai-triage` → confirmar `modo='humano'` + `metadata.reabertura_template_at` populado.
+3. Rodar cron manualmente avançando relógio → template sai uma única vez, cliente responde, janela reabre, operador envia texto livre normalmente.
 
 ### Arquivos previstos
-- `supabase/functions/criar-demanda-loja/index.ts` (bypass service)
-- `supabase/functions/regua-reconciliacao/index.ts` (resolver loja_nome + header service)
-- `src/components/os/ConfirmarRecebimentoOSDialog.tsx` (novo)
-- `src/pages/Mensagens.tsx` (botão de entrada)
-- `.lovable/memory/regua/os-aguardando-armacao-e-recebimento-loja.md` (status templates)
+- `supabase/functions/ai-triage/index.ts` (bloco 8294-8312)
+- `supabase/functions/vendas-recuperacao-cron/index.ts` (adicionar branch) **ou** novo `supabase/functions/cron-reabertura-fora-horario/index.ts` + cron 10min
+- `src/pages/Atendimentos.tsx` (banner janela fechada)
+- `.lovable/memory/atendimento/horario-comercial-humano.md`
 
-### Recomendação
-Aplicar A→D, rodar o smoke test, **aí sim** liberar produção. Os 3 itens são pequenos e independentes; sem eles o fluxo aparenta funcionar mas falha no primeiro caso real (divergência presa, loja não confirma OS).
+### Fora de escopo
+- Não muda mensagem ao cliente, branding ou tom — apenas backstage + UX do operador.
+- Não toca em `send-whatsapp` nem no roteador OS/cashback já liberados.

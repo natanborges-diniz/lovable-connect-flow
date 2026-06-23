@@ -687,6 +687,31 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
 
       {/* Footer fixo - composer */}
       <div className="border-t p-3 shrink-0 bg-background">
+        {(() => {
+          if (atendimento?.canal !== "whatsapp" || atendimento?.status === "encerrado") return null;
+          const lastIn = mensagens?.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.created_at;
+          if (!lastIn) return null;
+          const horas = (Date.now() - new Date(lastIn).getTime()) / 3_600_000;
+          if (horas < 23) return null;
+          return (
+            <div className="mb-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2 text-xs">
+              <span className="text-amber-900 dark:text-amber-200 flex-1">
+                ⚠️ Janela de 24h do WhatsApp fechada ({Math.round(horas)}h sem mensagem do cliente). Para retomar, envie um template aprovado.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px] px-2 border-amber-400"
+                onClick={() => {
+                  setJanelaFechadaHoras(Math.round(horas));
+                  setJanelaFechadaOpen(true);
+                }}
+              >
+                Reabrir via template
+              </Button>
+            </div>
+          );
+        })()}
         {attachmentPreview && (
           <div className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 p-2">
             <img src={attachmentPreview} alt="Pré-visualização do anexo" className="h-14 w-14 rounded object-cover" />
