@@ -1,46 +1,65 @@
-## Diagnóstico: por que o operador não consegue responder à Carolina
+## Diagnóstico
 
-### Causa raiz
-O IA escalou **fora do expediente** (sábado 17:43, próxima abertura segunda 09:00 → ~40h depois). Quando o operador abre o atendimento na segunda, a Meta já passou da **janela de 24h** desde o último inbound do cliente. O `send-whatsapp` (linhas 71-93) retorna `422 outside_24h_window` e o composer de texto livre falha. O cliente só pode ser reaberto via **template aprovado** (`send-whatsapp-template`). O dialog `JanelaFechadaDialog` já existe, mas o operador precisa enviar e o cliente responder antes de continuar — passo nada óbvio na UI atual.
+Hoje **três crons dependem da firebird-bridge** e todos olham apenas D-1 (sem rede de segurança):
 
-Evidência no banco (`eventos_crm.tipo='escalada_fora_horario'`):
-- Carolina (`1b53d0c8`, 20/06 20:43): `modo=humano`, `status=aguardando` — janela fechou em 21/06 20:43.
-- Priscilla (`0d9919b8`, 22/06 21:12): idem — janela fechou em 23/06 21:12 (já fechada ao abrir hoje).
-- Vários outros: `modo=ia` órfãos, alguns nunca migrados para humano.
+| Cron | Schedule | Janela bridge | O que faz se bridge cai |
+|---|---|---|---|
+| `regua-disparo-aguardando-armacao` | 07:00 SP | D-1 (seg pega D-1+D-2 do fim de semana) | Loga `erros++` no detalhe da execução, **não reprocessa** D-1 no dia seguinte. Etapa 15 daquele dia é **perdida silenciosamente**. |
+| `regua-ingestao` (pós-venda: PRIMEIRO_CONTATO, ADAPTACAO_7D, ANIVERSARIO) | **sem cron ativo** (rodada manual) | D-1 entregas / D-7 adaptação / hoje aniversário | Mesma coisa: falha = perda do dia. |
+| `regua-reconciliacao` (cashback D+1) | 07:00 SP | D-1 vendas confirmadas | Idem. |
 
-Problemas secundários confirmados no código:
-1. **`ai-triage` linha 8294-8312** (override escalada fora-horário) **NÃO faz `update modo='humano'`** — cards ficam em `modo='ia'` com IA "escalada" só na mensagem. Auto-claim do operador depende dele responder; se ninguém clica, o card fica órfão.
-2. Sem alerta proativo: o operador só descobre a janela fechada quando clica Enviar e vê o erro.
-3. Sem reabertura programada: a IA promete "segunda 09:00" mas nada agenda o template `retomada_consultor_pos_janela` para sair às 09:00 — fica nas costas do operador descobrir caso a caso.
+Evidência: `os_avisos_armacao_log` tem **0 linhas nos últimos 7 dias** → ou bridge está fora há dias, ou o cron de armação está disparando vazio sem ninguém perceber. Não há alerta, não há retry, não há catch-up D-N.
 
-### Plano (cirúrgico, sem mexer no que funciona)
+A função `regua-disparo-aguardando-armacao` **já aceita** `{ datas: ["YYYY-MM-DD", …] }` no body, mas hoje isso é manual. Falta orquestração.
 
-**A. `supabase/functions/ai-triage/index.ts` — flip modo na escalada fora-horário**
-- Dentro do bloco de override (8297-8312), adicionar `update atendimentos.modo='humano'` + mover card para coluna `Humano` (mesmo padrão da escalada normal).
-- Calcular `proximaAberturaHumana()` em horas; se > 23h (ou seja, vai estourar a janela 24h), gravar `atendimento.metadata.reabertura_template_at = proximaAberturaHumana()` para a régua agendar template.
+## Plano de contingência
 
-**B. Novo cron/handler `cron-reabertura-pos-escalada-fora-horario`** (ou aproveitar `vendas-recuperacao-cron` que já varre atendimentos)
-- A cada 10min, busca atendimentos com `metadata.reabertura_template_at <= now()` e janela 24h fechada → dispara `send-whatsapp-template` com `retomada_consultor_pos_janela` (já no catálogo `whatsapp_templates`).
-- Marca `metadata.reabertura_template_enviada_at`; idempotente.
+### 1. Tabela de auditoria `bridge_sync_log`
+Uma linha por (fonte, data_alvo, executado_at) com `status: ok|bridge_down|parcial`, `linhas_recebidas`, `erro_msg`. Fonte = `armacao_codetapa15` | `ingestao_entregas` | `ingestao_aniv` | `reconciliacao_vendas`.
 
-**C. Frontend `src/pages/Atendimentos.tsx` — alerta proativo**
-- Quando abre um atendimento com último inbound > 23h, mostrar banner amarelo acima do composer: "Janela 24h fechada — reabrir via template" + botão direto que abre `JanelaFechadaDialog` (já existe). Não esperar o erro do Enviar.
-- Lookup: `mensagens` última `direcao='inbound'` → diff em horas.
+### 2. Health-check da bridge antes de cada cron
+Helper `pingBridge()` (GET `/health` com timeout 5s). Se falhar:
+- Grava `bridge_sync_log(status='bridge_down')` para a data alvo.
+- Insere `notificacoes` (admin/TI) **uma única vez por dia** com link "ver gaps".
+- Retorna 200 sem processar (não polui logs com 500).
 
-**D. Memória**
-- Atualizar `.lovable/memory/atendimento/horario-comercial-humano.md`: documentar que escalada fora-horário SEMPRE flipa `modo=humano` e agenda reabertura por template quando >24h.
+### 3. Catch-up D-N automático
+Antes de processar D-1, cada cron:
+1. Lê `bridge_sync_log` buscando datas **dos últimos N dias** (armação=14, reconciliação=7, ingestão=10) **sem linha `status='ok'`**.
+2. Monta lista `datas = [...gaps, D-1]` (ordenado).
+3. Itera; para cada data, faz a query na bridge → se OK, processa + grava `status='ok'`; se falha, mantém pendente para próxima rodada.
 
-### Validação
-1. Reabrir o atendimento da Priscilla (`0d9919b8`) na UI → banner amarelo aparece, botão "Reabrir via template" dispara `retomada_consultor_pos_janela`.
-2. Simular escalada fora-horário em ambiente: criar atendimento, mockar `isHorarioHumano()=false`, rodar `ai-triage` → confirmar `modo='humano'` + `metadata.reabertura_template_at` populado.
-3. Rodar cron manualmente avançando relógio → template sai uma única vez, cliente responde, janela reabre, operador envia texto livre normalmente.
+Idempotência já existe nos três fluxos (UNIQUE em `os_avisos_armacao_log(os_numero,loja_nome)`, `regua_touchpoint` por contato+tipo+data, `cashback_credito` por venda). Reprocessar D-3 três dias depois não duplica nada.
 
-### Arquivos previstos
-- `supabase/functions/ai-triage/index.ts` (bloco 8294-8312)
-- `supabase/functions/vendas-recuperacao-cron/index.ts` (adicionar branch) **ou** novo `supabase/functions/cron-reabertura-fora-horario/index.ts` + cron 10min
-- `src/pages/Atendimentos.tsx` (banner janela fechada)
-- `.lovable/memory/atendimento/horario-comercial-humano.md`
+### 4. Painel `/configuracoes/bridge-saude`
+Tabela simples mostrando últimos 30 dias × 4 fontes, célula verde/vermelha/cinza. Botão "Reprocessar manualmente" chama a edge function com `{ datas: [...] }`.
 
-### Fora de escopo
-- Não muda mensagem ao cliente, branding ou tom — apenas backstage + UX do operador.
-- Não toca em `send-whatsapp` nem no roteador OS/cashback já liberados.
+### 5. Agendar `regua-ingestao` (atualmente órfã)
+`pg_cron` 07:30 SP. Mesmo health-check + catch-up.
+
+### 6. Mudança no `regua-disparo-aguardando-armacao`
+Manter a regra atual (domingo pulado, segunda processa sáb+dom) **como piso mínimo**, mas o catch-up D-N cobre lacunas adicionais. Bloco novo só na entrada da função.
+
+## Arquivos previstos
+
+- **Migração**: tabela `bridge_sync_log` + grants/RLS (admin/operador SELECT; service_role ALL) + UNIQUE `(fonte, data_alvo)`.
+- **Migração**: agendar `regua-ingestao` via `pg_cron`.
+- `supabase/functions/_shared/bridge-health.ts` — `pingBridge()`, `listarGaps(fonte, n)`, `marcarOk()`, `marcarFalha()`, `notificarAdminUmaVezPorDia()`.
+- `supabase/functions/regua-disparo-aguardando-armacao/index.ts` — integrar health-check + loop de catch-up.
+- `supabase/functions/regua-ingestao/index.ts` — idem; aceitar `datas[]` no body.
+- `supabase/functions/regua-reconciliacao/index.ts` — idem.
+- `src/pages/BridgeSaude.tsx` + entrada em `Configuracoes` (admin only).
+- `.lovable/memory/integracao/bridge-firebird-contingencia.md` — documentar política D-N e onde olhar.
+
+## Validação
+
+1. **Simular bridge fora** (mock 503 no `BRIDGE_URL`) → cron grava `bridge_down`, manda 1 notificação admin, sai sem erro.
+2. **Subir bridge no dia seguinte** → próxima execução pega gap de ontem + D-1 normal, processa as duas, grava 2× `status='ok'`.
+3. **Rodar duas vezes a mesma data** → segunda execução pula 100% por idempotência (counters: enviados=0, pulados=N).
+4. **Painel** lista os dois dias verdes após backfill.
+
+## Fora de escopo
+
+- Não muda mensagem ao cliente, templates ou tom.
+- Não toca em `bridge-mensageria` nem em `bridge-demanda` (outro domínio, sem Firebird).
+- Não tenta consertar a bridge em si — só a resiliência do nosso lado.
