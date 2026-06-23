@@ -244,6 +244,14 @@ serve(async (req) => {
           detalhes.push({ data: dataConsulta, os_numero, loja_nome, error: tplJson });
         }
       }
+
+      // Marca data como sincronizada com sucesso (mesmo se rows=0, foi consultada)
+      await marcarSync(supabase, {
+        fonte: "armacao_codetapa15",
+        data_alvo: dataConsulta,
+        status: rows.length === 0 ? "vazio" : "ok",
+        linhas_recebidas: rows.length,
+      });
     }
 
     console.log(`[regua-armacao] enviados=${enviados} pulados=${pulados} erros=${erros}`);
