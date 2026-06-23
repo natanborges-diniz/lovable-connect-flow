@@ -27,7 +27,7 @@ Uma linha por `(fonte, data_alvo)` UNIQUE. Status: `ok | vazio | parcial | bridg
 - `notificarAdminBridgeDown(fonte, detalhe)` → insere `notificacoes` para todos os admins **uma vez por dia** (dedup por `link=/configuracoes/bridge-saude?key=bridge_down:<fonte>:<hoje>`).
 
 ### Catch-up automático
-- **`regua-disparo-aguardando-armacao`**: antes de processar D-1, busca gaps dos últimos **14 dias** e processa todos. Cada data marca seu próprio `bridge_sync_log`. Idempotência via UNIQUE `os_avisos_armacao_log(os_numero,loja_nome)`.
+- **`regua-disparo-aguardando-armacao`**: catch-up curto de **3 dias** (D-3). Aviso "aguardando armação" perde validade rápido — OS antiga pode já ter saído da etapa 15 e o cliente receberia template desatualizado. Override via `body.catchup_dias`. A regra normal (seg processa sáb+dom) já cobre o fim de semana. Idempotência via UNIQUE `os_avisos_armacao_log(os_numero,loja_nome)`.
 - **`regua-ingestao`**: não tem catch-up automático ainda (chamada manual via painel). Grava `bridge_sync_log` para `ingestao_entregas` (D-1 e D-7) e `ingestao_aniv` (hoje) por execução.
 - **`regua-reconciliacao`**: não precisa de loop de datas — inscrições pendentes persistem em `regua_inscricao.status='aguardando_entrega'`. Apenas detecta bridge fora, grava `bridge_down` e sai 200 sem mexer nas inscrições (que serão reprocessadas na próxima rodada).
 
