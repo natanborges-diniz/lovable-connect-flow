@@ -78,17 +78,42 @@ serve(async (req) => {
     // Permite override via body (testes manuais)
     const body = await req.json().catch(() => ({}));
     const codEtapa: string = String(body?.codEtapa ?? 15);
-    const datas: string[] = body?.data
+    const datasBase: string[] = body?.data
       ? [String(body.data)]
       : Array.isArray(body?.datas) && body.datas.length
         ? body.datas.map(String)
         : datasParaProcessar();
 
+    // ── Catch-up D-N: junta gaps dos últimos 14 dias (somente quando não houve override manual)
+    let datas = datasBase;
+    if (!body?.data && !(Array.isArray(body?.datas) && body.datas.length)) {
+      const gaps = await listarGaps(supabase, "armacao_codetapa15", 14, bhHojeSP());
+      const set = new Set<string>([...gaps, ...datasBase]);
+      datas = Array.from(set).sort();
+      if (gaps.length) console.log(`[regua-armacao] catch-up gaps: ${gaps.join(", ")}`);
+    }
+
     if (datas.length === 0) {
-      console.log("[regua-armacao] domingo SP — execução pulada");
+      console.log("[regua-armacao] domingo SP + sem gaps — execução pulada");
       return json({ ok: true, skipped: "domingo", datas: [], total: 0, enviados: 0, pulados: 0, erros: 0 });
     }
     console.log(`[regua-armacao] datas a processar: ${datas.join(", ")}`);
+
+    // ── Health-check bridge: se fora, marca todas as datas como bridge_down + notifica + sai 200
+    const ping = await pingBridge(BRIDGE_URL, SVC_SECRET);
+    if (!ping.ok) {
+      console.error(`[regua-armacao] BRIDGE DOWN: ${ping.error}`);
+      for (const d of datas) {
+        await marcarSync(supabase, {
+          fonte: "armacao_codetapa15",
+          data_alvo: d,
+          status: "bridge_down",
+          erro_msg: ping.error ?? `HTTP ${ping.status ?? "?"}`,
+        });
+      }
+      await notificarAdminBridgeDown(supabase, "armacao_codetapa15", ping.error ?? `HTTP ${ping.status}`);
+      return json({ ok: true, bridge_down: true, datas, erro: ping.error });
+    }
 
     // Carrega mapa cod_empresa → loja_nome (uma única vez)
     const { data: tlojas } = await supabase
