@@ -513,6 +513,16 @@ serve(async (req) => {
     contadores[res]++;
   }
 
+  await marcarSync(supabase, {
+    fonte: "reconciliacao_vendas",
+    data_alvo: hojeStr,
+    status: contadores.erro === 0 ? "ok" : "parcial",
+    linhas_recebidas: lista.length,
+    payload: contadores,
+    erro_msg: contadores.erro > 0 ? `${contadores.erro} inscrições com erro` : null,
+  });
+
+
   return new Response(
     JSON.stringify({
       ok:    contadores.erro === 0,
