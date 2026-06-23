@@ -79,6 +79,35 @@ export async function listarGaps(
   return todas.filter((d) => !okSet.has(d));
 }
 
+/**
+ * Janela de catch-up dinâmica: dias desde a última sincronização `ok|vazio`.
+ * - Se nunca houve `ok`, devolve `maxCap` (default 30).
+ * - Se houve `ok` hoje ou ontem, devolve no mínimo `minFloor` (default 1).
+ * - Caso contrário, devolve `min(dias_desde_ultimo_ok, maxCap)`.
+ * Use para alimentar `listarGaps(..., janela, hoje)`.
+ */
+export async function janelaCatchupDinamica(
+  supabase: SupabaseClient,
+  fonte: FonteBridge,
+  hojeRefSP: Date,
+  opts: { maxCap?: number; minFloor?: number } = {},
+): Promise<number> {
+  const maxCap = opts.maxCap ?? 30;
+  const minFloor = opts.minFloor ?? 1;
+  const { data, error } = await supabase
+    .from("bridge_sync_log")
+    .select("data_alvo")
+    .eq("fonte", fonte)
+    .in("status", ["ok", "vazio"])
+    .order("data_alvo", { ascending: false })
+    .limit(1);
+  if (error || !data || data.length === 0) return maxCap;
+  const ultimo = new Date(`${data[0].data_alvo}T12:00:00`);
+  const diffMs = hojeRefSP.getTime() - ultimo.getTime();
+  const dias = Math.max(minFloor, Math.ceil(diffMs / 86_400_000));
+  return Math.min(dias, maxCap);
+}
+
 export async function marcarSync(
   supabase: SupabaseClient,
   args: {
