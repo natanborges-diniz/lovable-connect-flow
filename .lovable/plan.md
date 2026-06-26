@@ -1,53 +1,63 @@
-## Painel de Disparos CRM (`/relatorios/disparos`) — admin-only
+## Por que OS de "aguardando armação" não aparecem no painel
 
-Tela única consolidando **todo disparo outbound originado pelo CRM**, com status Meta (sent / delivered / read / failed / invalid_number), motivo de falha e atalho para a conversa do cliente. Acesso restrito a admin por enquanto; configurável depois.
+A bridge devolveu 11 OS entre 17–19/jun, mas nenhuma virou disparo. O cron `regua-disparo-aguardando-armacao` faz, em sequência:
 
-### Escopo de fontes (cobertura completa)
+1. Pega o telefone do cliente vindo da bridge.
+2. Procura em `contatos` por esse telefone.
+3. Se **não acha** → `continue` silencioso. Não envia WhatsApp, **não grava em `os_avisos_armacao_log`**, então o painel `/relatorios/disparos` nem como falha consegue mostrar.
 
-| Fonte | Origem técnica | Como entra na view |
-|---|---|---|
-| **Aguardando armação** | `os_avisos_armacao_log` | direto |
-| **Régua pós-venda** (primeiro contato, adaptação 7d, aniversário, NPS) | `regua_touchpoint` | direto |
-| **Cashback** (PIN de validação, confirmação de crédito, lembrete de resgate, divergência) | `mensagens` outbound com `metadata.template_name` ∈ catálogo cashback **+** eventos `cashback_credito` | join por `whatsapp_message_id` |
-| **Entrega de óculos** (aviso "pronto p/ retirar" via `confirmar-recebimento-os`, OS recebida na loja, retirada confirmada) | `mensagens` outbound com `metadata.template_name` ∈ `{os_recebida_loja, oculos_pronto_retirar, …}` **+** `os_recebimento_loja` | join + linha própria |
-| **Link de pagamento** (envio, lembrete, confirmação) | `pagamentos_link` + `pagamentos_link_eventos` | direto |
-| **Agendamento** (confirmação, lembrete véspera/1h, no-show, reativação) | `mensagens` outbound com template do catálogo de agendamento | direto |
-| **Recuperação / retomada IA** (`retomada_contexto_*`, `recuperacao_lead`, etc.) | `mensagens` outbound flag template | direto |
-| **Escalada / aviso loja** (notificar-loja-agendamento, demandas) | `mensagens` outbound + `notificacoes` | direto |
-| **Texto livre IA/operador** dentro da janela 24h | `mensagens` `direcao='outbound'` sem template | **opt-in** no filtro (off por padrão) |
+Causa raiz dupla:
+- **(a)** O telefone vem em formato diferente do que está salvo (com/sem 9º dígito, com/sem DDI 55, com máscara).
+- **(b)** O cliente realmente nunca foi cadastrado em `contatos` (nunca conversou no WhatsApp).
 
-Critério: **se saiu do CRM para o cliente final via WhatsApp, aparece aqui.** A fonte é classificada pela tabela de origem ou pelo `metadata.template_name` (alias mapeado em `template_aliases` → grupo: `armacao | regua | cashback | entrega | pagamento | agendamento | recuperacao | escalada | outro`).
+Também ficou claro que **23–25/jun** não tiveram OS processadas porque a bridge Firebird está retornando HTTP 500 (mesmo erro afeta entregas e aniversariantes). Quando voltar, o catch-up dinâmico processa sozinho.
 
-### Backend
+## O que vai ser feito
 
-1. **View `vw_disparos_unificados`** (SECURITY INVOKER, read-only) unindo as fontes acima e normalizando:
-   - `id`, `fonte` (grupo), `template_nome`, `alias`, `cliente_nome`, `telefone`, `loja_nome`, `atendimento_id`, `contato_id`, `enviado_at`, `wa_status`, `wa_status_at`, `falha_motivo`, `params`.
-   - `wa_status` derivado de `mensagens.metadata.last_status` (sent/delivered/read/failed/invalid_number) quando há `whatsapp_message_id`; senão usa o status próprio da fonte (`os_avisos_armacao_log.status`, `pagamentos_link.status`, etc.).
-2. **RPC `disparos_kpis(periodo_dias int, fontes text[])`** → entrega %, leitura %, resposta-em-24h %, número inválido %, total enviados.
-3. **Acesso**: `GRANT SELECT` só a `authenticated`; view + RPC checam `has_role(auth.uid(),'admin')`. Demais roles não leem nada agora.
-4. **Config**: chave `disparos_painel` em `app_config`:
-   ```json
-   { "fontes_ativas": ["armacao","regua","cashback","entrega","pagamento","agendamento","recuperacao","escalada"],
-     "incluir_texto_livre_default": false,
-     "periodo_default_dias": 7 }
-   ```
-   Lida pela tela; edição via UI de configurações fica para próxima entrega.
+### 1. Normalizar telefone antes de buscar (cobre causa A)
+Em `regua-disparo-aguardando-armacao`, criar helper `normalizarTelefoneBR(raw)` que:
+- Remove tudo que não é dígito.
+- Tira DDI `55` do início se houver.
+- Garante 9º dígito em celulares (DDD + 9 + 8 dígitos).
+- Devolve sempre no formato canônico `5582999991234`.
 
-### UI
+Aplicar em duas pontas:
+- No telefone vindo da bridge antes do `WHERE`.
+- Nova função SQL `match_contato_por_telefone(raw text)` que normaliza o lado do banco também (lida com cadastros antigos sujos).
 
-- Rota `/relatorios/disparos` em `App.tsx` dentro de `<ProtectedRoute allowedRoles={["admin"]}>`.
-- Link no `AppSidebar` (grupo Configurações / Relatórios — só admin enxerga).
-- Topo: 4 cards KPI (entrega, leitura, resposta 24h, inválido) + filtros (período, fonte, template, loja, status, busca telefone/nome).
-- Tabela paginada: data | cliente+fone | loja | fonte/template | status (ícones tipo `MessageTicks`: ⏱ → ✓ → ✓✓ → ✓✓ azul; ✗ vermelho) | motivo falha | botão "Abrir conversa" → `/crm/conversas?atendimento=<id>`.
-- Toggle "incluir mensagens de texto livre" (default = config).
-- Export CSV do conjunto filtrado.
+### 2. Criar contato a partir do payload da bridge se ainda não achar (cobre causa B)
+Se mesmo após normalização não houver contato, fazer `upsert` em `contatos` com:
+- `telefone` = telefone normalizado
+- `nome` = `cliente_nome` da bridge
+- `origem` = `'bridge_os_armacao'`
+- `created_at` = `now()`
 
-### Fora do escopo desta entrega
-- Visão por loja/supervisor (acesso restrito a admin agora).
-- Série temporal por campanha / reenvio em lote.
-- Tela de edição da chave `disparos_painel` (estrutura já fica pronta).
+Usa `ON CONFLICT (telefone) DO UPDATE SET nome = COALESCE(contatos.nome, EXCLUDED.nome)` — não sobrescreve nome existente, só preenche se estiver vazio.
 
-### Arquivos
-- **Migration**: `vw_disparos_unificados`, RPC `disparos_kpis`, grants admin-only, chave `disparos_painel` em `app_config`.
-- **Novos**: `src/pages/RelatorioDisparos.tsx`, `src/hooks/useDisparos.ts`, `src/components/relatorios/DisparoStatusBadge.tsx`.
-- **Editar**: `src/App.tsx` (rota protegida), `src/components/layout/AppSidebar.tsx` (link admin).
+Depois disso o cron segue o fluxo normal: cria atendimento, envia template, grava em `os_avisos_armacao_log` com `status='sent'`. A OS vira disparo visível e o cliente entra no Cliente 360 a partir desse primeiro contato.
+
+### 3. Tornar falhas visíveis no painel
+Mesmo com 1 + 2, podem sobrar casos de telefone inválido (5 dígitos, número fixo, lixo). Para esses, ao invés de `continue` mudo:
+- Inserir em `os_avisos_armacao_log` com `status='telefone_invalido'`, `payload={ raw_phone, motivo }`.
+- `vw_disparos_unificados` passa a expor esse status na fonte `armacao`.
+- `DisparoStatusBadge.tsx` ganha variante âmbar "Telefone inválido" com tooltip explicando.
+- Linha não tem botão "Abrir conversa" (não há atendimento).
+
+### 4. Backfill manual dos 3 dias perdidos
+Depois que (1)+(2)+(3) estiverem em produção **e** a bridge Firebird voltar, abrir `/configuracoes/bridge-saude` e clicar nas células de 17, 18 e 19/jun para reprocessar. O cron vai criar os contatos faltantes e disparar os 11 avisos retroativos. Sem migration automática — depende da bridge externa.
+
+### 5. Bridge HTTP 500 (23–25/jun)
+Fora do escopo do app (problema no serviço Firebird). O painel `/configuracoes/bridge-saude` já mostra vermelho. Posso, opcionalmente, incluir o corpo do erro retornado pela bridge na notificação aos admins para acelerar o diagnóstico do time de infra — diga se quer essa parte.
+
+## Arquivos afetados
+
+- `supabase/functions/regua-disparo-aguardando-armacao/index.ts` — helper de normalização + upsert de contato + log `telefone_invalido`.
+- Migration nova — função SQL `match_contato_por_telefone(text)` e recriação de `vw_disparos_unificados` para incluir o novo status na fonte `armacao`.
+- `src/components/relatorios/DisparoStatusBadge.tsx` — variante "Telefone inválido".
+- `src/pages/RelatorioDisparos.tsx` — filtro novo + tooltip + esconder botão "Abrir conversa" quando não há atendimento.
+
+## O que não vou mexer
+
+- Lógica de outros crons (entregas, aniversários) — eles têm o mesmo padrão mas só corrijo se você pedir, para não inflar o escopo.
+- Bridge Firebird em si.
+- Reprocessamento automático quando contato for criado depois manualmente — fica como follow-up.
