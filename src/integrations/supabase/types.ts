@@ -3638,8 +3638,10 @@ export type Database = {
         Args: { _data: string; _loja_id: string }
         Returns: Json
       }
+      match_contato_por_telefone: { Args: { raw: string }; Returns: string }
       next_contato_anonimo: { Args: never; Returns: number }
       nextval_protocolo: { Args: never; Returns: number }
+      normalize_phone_br: { Args: { raw: string }; Returns: string }
       pode_conversar_1a1: {
         Args: { _destinatario: string; _remetente: string }
         Returns: boolean
