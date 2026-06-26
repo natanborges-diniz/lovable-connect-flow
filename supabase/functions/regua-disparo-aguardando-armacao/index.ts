@@ -180,20 +180,9 @@ serve(async (req) => {
         seen.add(key);
 
         const cliente_nome = r.cliente ? String(r.cliente) : null;
-        const cliente_telefone = r.telefone ? String(r.telefone) : null;
+        const cliente_telefone_raw = r.telefone ? String(r.telefone) : null;
         const produtos = Array.isArray(r.produtos) ? r.produtos as any[] : [];
         const produto_descricao = montarProdutoDescricao(produtos);
-
-        let contato_id: string | null = null;
-        if (cliente_telefone) {
-          const clean = cliente_telefone.replace(/\D/g, "");
-          const { data: c } = await supabase
-            .from("contatos")
-            .select("id")
-            .eq("telefone", clean)
-            .maybeSingle();
-          contato_id = c?.id ?? null;
-        }
 
         // Idempotência: já enviou aviso pra essa OS+loja?
         const { data: jaEnviado } = await supabase
@@ -204,10 +193,63 @@ serve(async (req) => {
           .maybeSingle();
         if (jaEnviado) { pulados++; continue; }
 
-        if (!contato_id) {
-          detalhes.push({ data: dataConsulta, os_numero, loja_nome, skipped: "sem_contato" });
+        // 1) Normaliza telefone via RPC (lado banco também tolera formato sujo)
+        let telefoneNorm: string | null = null;
+        let contato_id: string | null = null;
+        if (cliente_telefone_raw) {
+          const { data: norm } = await supabase.rpc("normalize_phone_br", { raw: cliente_telefone_raw });
+          telefoneNorm = (norm as string | null) ?? null;
+          if (telefoneNorm) {
+            const { data: matched } = await supabase.rpc("match_contato_por_telefone", { raw: cliente_telefone_raw });
+            contato_id = (matched as string | null) ?? null;
+          }
+        }
+
+        // 2) Telefone inválido → loga e segue (visível no painel)
+        if (!telefoneNorm) {
+          await supabase.from("os_avisos_armacao_log").insert({
+            os_numero, loja_nome, cod_empresa: codEmpresa,
+            contato_id: null,
+            cliente_telefone: cliente_telefone_raw,
+            data_movimentacao: dataConsulta,
+            status: "telefone_invalido",
+            payload: { motivo: "telefone_nao_normalizavel", raw_phone: cliente_telefone_raw, cliente_nome, produto_descricao },
+          });
           pulados++;
+          detalhes.push({ data: dataConsulta, os_numero, loja_nome, skipped: "telefone_invalido" });
           continue;
+        }
+
+        // 3) Sem contato → cria a partir do payload da bridge
+        if (!contato_id) {
+          const { data: novo, error: upErr } = await supabase
+            .from("contatos")
+            .upsert(
+              {
+                telefone: telefoneNorm,
+                nome: cliente_nome || "Cliente",
+                tipo: "cliente",
+                ativo: true,
+                metadata: { origem: "bridge_os_armacao", criado_via: "regua-disparo-aguardando-armacao" },
+              },
+              { onConflict: "telefone" },
+            )
+            .select("id")
+            .maybeSingle();
+          if (upErr || !novo?.id) {
+            console.error("[regua-armacao] falha upsert contato", upErr);
+            await supabase.from("os_avisos_armacao_log").insert({
+              os_numero, loja_nome, cod_empresa: codEmpresa,
+              contato_id: null,
+              cliente_telefone: telefoneNorm,
+              data_movimentacao: dataConsulta,
+              status: "error",
+              payload: { error: upErr?.message ?? "upsert_contato_falhou", cliente_nome },
+            });
+            erros++;
+            continue;
+          }
+          contato_id = novo.id;
         }
 
         const primeiroNome = (cliente_nome ?? "").split(" ")[0] || "tudo bem";
@@ -229,7 +271,7 @@ serve(async (req) => {
             loja_nome,
             cod_empresa: codEmpresa,
             contato_id,
-            cliente_telefone,
+            cliente_telefone: telefoneNorm,
             data_movimentacao: dataConsulta,
             template_alias: "aviso_aguardando_armacao",
             status: "sent",
@@ -243,7 +285,7 @@ serve(async (req) => {
             loja_nome,
             cod_empresa: codEmpresa,
             contato_id,
-            cliente_telefone,
+            cliente_telefone: telefoneNorm,
             data_movimentacao: dataConsulta,
             status: "error",
             payload: { error: tplJson },

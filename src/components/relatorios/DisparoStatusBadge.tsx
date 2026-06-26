@@ -16,6 +16,7 @@ const LABELS: Record<string, string> = {
   error: "Erro",
   invalid_number: "Número inválido",
   invalid: "Número inválido",
+  telefone_invalido: "Telefone inválido",
   expired: "Expirado",
 };
 
@@ -45,9 +46,9 @@ export function DisparoStatusBadge({ status, className }: Props) {
       </span>
     );
   }
-  if (s === "invalid_number" || s === "invalid") {
+  if (s === "invalid_number" || s === "invalid" || s === "telefone_invalido") {
     return (
-      <span className={cn(base, "text-amber-600", className)}>
+      <span className={cn(base, "text-amber-600", className)} title={s === "telefone_invalido" ? "Telefone do cliente no ERP não é um celular BR válido — sem como disparar WhatsApp" : undefined}>
         <Ban className="h-3.5 w-3.5" /> {label}
       </span>
     );
