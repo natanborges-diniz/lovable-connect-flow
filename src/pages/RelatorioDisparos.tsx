@@ -31,6 +31,7 @@ const STATUS_OPTIONS = [
   { value: "read", label: "Lida" },
   { value: "failed", label: "Falhou" },
   { value: "invalid_number", label: "Número inválido" },
+  { value: "telefone_invalido", label: "Telefone inválido (sem disparo)" },
 ];
 
 const PERIODOS = [
