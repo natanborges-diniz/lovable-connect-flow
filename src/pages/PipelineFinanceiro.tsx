@@ -48,6 +48,7 @@ import { useAutomacoes } from "@/hooks/useAutomacoes";
 import { CardTimeline, logCardMove } from "@/components/pipeline/CardTimeline";
 import { CancelarSolicitacaoDialog, DevolverLojaDialog } from "@/components/pipeline/CardActionDialogs";
 import { ConcluirSolicitacaoDialog } from "@/components/financeiro/ConcluirSolicitacaoDialog";
+import { AnexarBoletoExtraDialog } from "@/components/financeiro/AnexarBoletoExtraDialog";
 import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
 import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
 import { useAuth } from "@/hooks/useAuth";
@@ -141,6 +142,7 @@ export default function PipelineFinanceiro() {
   const [cancelDialogId, setCancelDialogId] = useState<string | null>(null);
   const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId?: string; presets?: string[] } | null>(null);
   const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" | "boleto" | "boleto-revisao" } | null>(null);
+  const [anexarExtraId, setAnexarExtraId] = useState<string | null>(null);
 
 
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
@@ -193,7 +195,29 @@ export default function PipelineFinanceiro() {
       return;
     }
 
+    // Guarda: nunca permitir drop manual em "Boleto Enviado" sem anexo.
+    // Em vez disso, abre o dialog de conclusão de boleto para o usuário anexar.
+    if (destCol?.nome === "Boleto Enviado") {
+      const sol: any = (solicitacoes ?? []).find((s: any) => s.id === solicitacaoId);
+      const temArquivo = Array.isArray(sol?.metadata?.boleto_arquivos) && sol.metadata.boleto_arquivos.length > 0;
+      if (sol?.tipo === "boleto" && !temArquivo) {
+        toast.error("Anexe o(s) boleto(s) antes de mover. Abrindo dialog…");
+        setConcluirDialog({ id: solicitacaoId, modo: "boleto" });
+        return;
+      }
+    }
+
     updateSolicitacaoColuna.mutate({ id: solicitacaoId, pipeline_coluna_id: destColunaId });
+
+    supabase.functions.invoke("pipeline-automations", {
+      body: {
+        entity_type: "solicitacao",
+        entity_id: solicitacaoId,
+        coluna_id: destColunaId,
+        coluna_anterior_id: sourceColunaId,
+      },
+    }).catch(e => console.warn("Automation call failed:", e));
+  };
 
     supabase.functions.invoke("pipeline-automations", {
       body: {
