@@ -175,8 +175,7 @@ serve(async (req) => {
       novoMeta.boleto_enviado_por = usuario_nome;
       novoMeta.boleto_arquivos = todasUrlsAnexos;
       novoMeta.boleto_url = anexoPrincipalUrl;
-      novoMeta.boleto_impresso = !!body.boleto_impresso;
-
+      // boleto_impresso é decidido pela loja na abertura; preservar o que já está em metadata.
     }
     if (body.observacao) novoMeta.observacao_conclusao = body.observacao;
 
