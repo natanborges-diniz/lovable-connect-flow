@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2, FileCheck, Receipt, Upload, FileText, X } from "lucide-react";
+
 
 type Modo = "carta" | "comprovante_pagamento" | "boleto";
 
@@ -32,7 +32,6 @@ export function ConcluirSolicitacaoDialog({
     new Date().toISOString().slice(0, 10)
   );
   const [observacao, setObservacao] = useState("");
-  const [boletoImpresso, setBoletoImpresso] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -48,7 +47,7 @@ export function ConcluirSolicitacaoDialog({
     isComprovante
       ? "Envie o comprovante de pagamento (PDF ou imagem). NSU e valor são obrigatórios. A loja recebe o comprovante no app."
       : isBoleto
-      ? "Anexe 1 ou mais arquivos (PDF/imagem). Marque se a loja deve imprimir e entregar fisicamente. O card vai para 'Boleto Enviado' e a loja recebe os arquivos no app."
+      ? "Anexe 1 ou mais arquivos (PDF/imagem). O card vai para 'Boleto Enviado' e a loja recebe os arquivos no app. Se a loja pediu impressão na abertura, esse aviso já aparece no card — imprima e envie por malote."
       : "Envie a carta de devolução do estorno (PDF ou imagem). A loja recebe a carta no app e pode encaminhar ao cliente.";
   const accept = ".pdf,image/*";
   const Icon = isComprovante ? Receipt : isBoleto ? FileText : FileCheck;
@@ -56,9 +55,10 @@ export function ConcluirSolicitacaoDialog({
   const reset = () => {
     setFiles([]); setNsu(""); setTid(""); setValor("");
     setDataPagamento(new Date().toISOString().slice(0, 10));
-    setObservacao(""); setBoletoImpresso(false);
+    setObservacao("");
     if (fileRef.current) fileRef.current.value = "";
   };
+
 
   const canSubmit =
     files.length > 0 && !!solicitacaoId &&
@@ -103,21 +103,18 @@ export function ConcluirSolicitacaoDialog({
         payload.valor = Number(valor);
         payload.data_pagamento = dataPagamento;
       }
-      if (isBoleto) {
-        // EF grava boleto_impresso em metadata via observacao? Não — usamos observação extra.
-        // Para preservar o flag estruturado, embutimos no payload.observacao com marcador
-        // e também enviamos como metadata_extra (a EF lê em novoMeta).
-        (payload as any).boleto_impresso = boletoImpresso;
-      }
+      // boleto: nenhum campo extra — flag de impressão veio da abertura pela loja
+
       const { data, error } = await supabase.functions.invoke("concluir-solicitacao-financeiro", { body: payload });
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
 
       toast.success(
         isComprovante ? "Pagamento concluído e comprovante enviado à loja." :
-        isBoleto ? `Boleto(s) enviado(s) à loja${boletoImpresso ? " (sinalizado para impressão)" : ""}.` :
+        isBoleto ? "Boleto(s) enviado(s) à loja." :
         "Estorno concluído. Carta enviada à loja."
       );
+
       reset();
       onOpenChange(false);
       onSuccess?.();
@@ -174,23 +171,8 @@ export function ConcluirSolicitacaoDialog({
             )}
           </div>
 
-          {isBoleto && (
-            <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-2">
-              <Checkbox
-                id="boleto-impresso"
-                checked={boletoImpresso}
-                onCheckedChange={(v) => setBoletoImpresso(!!v)}
-              />
-              <div className="space-y-0.5">
-                <Label htmlFor="boleto-impresso" className="text-xs font-medium cursor-pointer">
-                  Imprimir e entregar fisicamente
-                </Label>
-                <p className="text-[10px] text-muted-foreground">
-                  Loja recebe alerta para imprimir antes da entrega ao cliente.
-                </p>
-              </div>
-            </div>
-          )}
+
+
 
           {isComprovante && (
             <>

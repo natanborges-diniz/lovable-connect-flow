@@ -495,7 +495,7 @@ export default function PipelineFinanceiro() {
                                                   </Badge>
                                                 )}
                                                 {sol.metadata?.boleto_impresso ? (
-                                                  <Badge className="text-[10px] px-1 py-0 bg-orange-100 text-orange-800 border-orange-300">🖨️ Imprimir</Badge>
+                                                  <Badge className="text-[10px] px-1 py-0 bg-orange-100 text-orange-800 border-orange-300">🖨️ Loja pediu impresso (malote)</Badge>
                                                 ) : (
                                                   <Badge className="text-[10px] px-1 py-0 bg-blue-100 text-blue-800 border-blue-300">📱 Digital</Badge>
                                                 )}
@@ -762,8 +762,8 @@ export default function PipelineFinanceiro() {
                         <span className="text-amber-700">📦 Entrega</span>
                         <span className="font-medium">
                           {selectedSolicitacao.metadata?.boleto_impresso
-                            ? "🖨️ Imprimir e entregar na loja"
-                            : "📱 Enviar digital (WhatsApp)"}
+                            ? "🖨️ Imprimir e enviar por malote (solicitado pela loja)"
+                            : "📱 Digital — anexar PDF"}
                         </span>
                       </div>
 

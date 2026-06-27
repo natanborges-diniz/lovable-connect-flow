@@ -30,8 +30,8 @@ interface Body {
   valor?: number | string;
   data_pagamento?: string;        // ISO ou dd/mm/aaaa
   observacao?: string;
-  // boleto:
-  boleto_impresso?: boolean;
+  // boleto: nenhum campo extra — flag de impressão vem da abertura pela loja
+
 }
 
 
@@ -175,8 +175,7 @@ serve(async (req) => {
       novoMeta.boleto_enviado_por = usuario_nome;
       novoMeta.boleto_arquivos = todasUrlsAnexos;
       novoMeta.boleto_url = anexoPrincipalUrl;
-      novoMeta.boleto_impresso = !!body.boleto_impresso;
-
+      // boleto_impresso é decidido pela loja na abertura; preservar o que já está em metadata.
     }
     if (body.observacao) novoMeta.observacao_conclusao = body.observacao;
 
