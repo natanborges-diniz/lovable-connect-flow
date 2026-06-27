@@ -954,6 +954,11 @@ export default function PipelineFinanceiro() {
                             🔄 Reenviar boleto revisado
                           </Button>
                         )}
+                        {isBoleto && selectedSolicitacao.metadata?.boleto_status === "enviado" && (
+                          <Button size="sm" variant="outline" onClick={() => setAnexarExtraId(selectedSolicitacao.id)}>
+                            📎 Anexar arquivo ao boleto
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"
@@ -1027,6 +1032,13 @@ export default function PipelineFinanceiro() {
         open={!!concluirDialog}
         onOpenChange={(o) => !o && setConcluirDialog(null)}
         onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }); setSelectedSolicitacao(null); }}
+      />
+
+      <AnexarBoletoExtraDialog
+        solicitacaoId={anexarExtraId}
+        open={!!anexarExtraId}
+        onOpenChange={(o) => !o && setAnexarExtraId(null)}
+        onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] }); }}
       />
 
 
