@@ -1,63 +1,65 @@
-## Por que OS de "aguardando armação" não aparecem no painel
+## Diagnóstico
 
-A bridge devolveu 11 OS entre 17–19/jun, mas nenhuma virou disparo. O cron `regua-disparo-aguardando-armacao` faz, em sequência:
+Quando a loja abre **Nova Demanda → Gerar Boleto** no Messenger, a lista de "CPFs aprovados" vem vazia. Causa raiz confirmada no banco:
 
-1. Pega o telefone do cliente vindo da bridge.
-2. Procura em `contatos` por esse telefone.
-3. Se **não acha** → `continue` silencioso. Não envia WhatsApp, **não grava em `os_avisos_armacao_log`**, então o painel `/relatorios/disparos` nem como falha consegue mostrar.
+- Toda `solicitacoes` do tipo `consulta_cpf` foi criada pelo EF `criar-solicitacao-loja` (Atrium) gravando apenas `metadata.alias_loja` (ex.: `"DINIZ STO ANTONIO"`).
+- **`metadata.loja_nome` está NULL** em 100% das consultas existentes.
+- O wizard do Messenger (e a regra documentada em `boleto-via-cpf-aprovado.md`) filtra por `metadata.loja_nome = <loja do contexto>`. Sem esse campo, nada casa → dropdown vazio.
+- O próprio gate no backend (`criar-solicitacao-loja` linha 162) já lê `meta.loja_nome` e não cai no `alias_loja`, então mesmo se a UI mandasse o id, o `LOJA_DIVERGENTE` poderia disparar errado.
 
-Causa raiz dupla:
-- **(a)** O telefone vem em formato diferente do que está salvo (com/sem 9º dígito, com/sem DDI 55, com máscara).
-- **(b)** O cliente realmente nunca foi cadastrado em `contatos` (nunca conversou no WhatsApp).
+Escopo confirmado pelo usuário: corrigir **no Messenger**, mantendo a regra **"só CPFs aprovados da mesma loja do contato"**. A correção precisa acontecer em três pontos (dois aqui no Atrium, um no Messenger).
 
-Também ficou claro que **23–25/jun** não tiveram OS processadas porque a bridge Firebird está retornando HTTP 500 (mesmo erro afeta entregas e aniversariantes). Quando voltar, o catch-up dinâmico processa sozinho.
+## Mudanças neste projeto (Atrium)
 
-## O que vai ser feito
+### 1. `supabase/functions/criar-solicitacao-loja/index.ts`
+Em todos os `insert` de `solicitacoes` (linhas ~416, ~539 e o branch de `consulta_cpf`), gravar **ambos** os campos para padronizar a partir de agora:
 
-### 1. Normalizar telefone antes de buscar (cobre causa A)
-Em `regua-disparo-aguardando-armacao`, criar helper `normalizarTelefoneBR(raw)` que:
-- Remove tudo que não é dígito.
-- Tira DDI `55` do início se houver.
-- Garante 9º dígito em celulares (DDD + 9 + 8 dígitos).
-- Devolve sempre no formato canônico `5582999991234`.
+```ts
+metadata: { ...dados, ...extraMetadata,
+  loja_nome: nomeLoja,    // ← novo, canonical p/ filtros
+  alias_loja: nomeLoja,   // legado, mantém compat
+  cod_empresa: codEmpresa,
+  origem_app: "infoco_messenger",
+}
+```
 
-Aplicar em duas pontas:
-- No telefone vindo da bridge antes do `WHERE`.
-- Nova função SQL `match_contato_por_telefone(raw text)` que normaliza o lado do banco também (lida com cadastros antigos sujos).
+No gate `gerar_boleto`, ler com fallback para não quebrar consultas antigas:
+```ts
+const lojaConsulta = String(meta.loja_nome || meta.alias_loja || "").trim().toLowerCase();
+```
 
-### 2. Criar contato a partir do payload da bridge se ainda não achar (cobre causa B)
-Se mesmo após normalização não houver contato, fazer `upsert` em `contatos` com:
-- `telefone` = telefone normalizado
-- `nome` = `cliente_nome` da bridge
-- `origem` = `'bridge_os_armacao'`
-- `created_at` = `now()`
+### 2. Migration de backfill (data-only, sem schema)
+```sql
+UPDATE public.solicitacoes
+SET metadata = metadata || jsonb_build_object('loja_nome', metadata->>'alias_loja')
+WHERE tipo = 'consulta_cpf'
+  AND (metadata->>'loja_nome') IS NULL
+  AND (metadata->>'alias_loja') IS NOT NULL;
+```
+(Roda como migration de dados; cobre as ~9 consultas existentes mostradas no diagnóstico e quaisquer outras antigas.)
 
-Usa `ON CONFLICT (telefone) DO UPDATE SET nome = COALESCE(contatos.nome, EXCLUDED.nome)` — não sobrescreve nome existente, só preenche se estiver vazio.
+## Mudança no projeto Messenger (instrução, não execução)
 
-Depois disso o cron segue o fluxo normal: cria atendimento, envia template, grava em `os_avisos_armacao_log` com `status='sent'`. A OS vira disparo visível e o cliente entra no Cliente 360 a partir desse primeiro contato.
+O dropdown de CPFs aprovados em `LojaNovaDemanda.tsx` (wizard Gerar Boleto) deve manter o filtro por loja, mas tolerar o legado:
 
-### 3. Tornar falhas visíveis no painel
-Mesmo com 1 + 2, podem sobrar casos de telefone inválido (5 dígitos, número fixo, lixo). Para esses, ao invés de `continue` mudo:
-- Inserir em `os_avisos_armacao_log` com `status='telefone_invalido'`, `payload={ raw_phone, motivo }`.
-- `vw_disparos_unificados` passa a expor esse status na fonte `armacao`.
-- `DisparoStatusBadge.tsx` ganha variante âmbar "Telefone inválido" com tooltip explicando.
-- Linha não tem botão "Abrir conversa" (não há atendimento).
+```ts
+.eq('tipo', 'consulta_cpf')
+.eq('metadata->>resultado_consulta', 'aprovado')
+.is('metadata->>boleto_solicitacao_id', null)
+.or(`metadata->>loja_nome.eq.${lojaCtx},metadata->>alias_loja.eq.${lojaCtx}`)
+.gte('created_at', now - 60d)
+```
 
-### 4. Backfill manual dos 3 dias perdidos
-Depois que (1)+(2)+(3) estiverem em produção **e** a bridge Firebird voltar, abrir `/configuracoes/bridge-saude` e clicar nas células de 17, 18 e 19/jun para reprocessar. O cron vai criar os contatos faltantes e disparar os 11 avisos retroativos. Sem migration automática — depende da bridge externa.
+Após o backfill do passo 2, o `OR` passa a ser redundante — mas deixa a UI robusta no período de transição.
 
-### 5. Bridge HTTP 500 (23–25/jun)
-Fora do escopo do app (problema no serviço Firebird). O painel `/configuracoes/bridge-saude` já mostra vermelho. Posso, opcionalmente, incluir o corpo do erro retornado pela bridge na notificação aos admins para acelerar o diagnóstico do time de infra — diga se quer essa parte.
+## Verificação
 
-## Arquivos afetados
+1. Rodar a migration e conferir: `SELECT count(*) FROM solicitacoes WHERE tipo='consulta_cpf' AND metadata->>'loja_nome' IS NULL;` deve cair para zero (ou só consultas sem `alias_loja`, que são bug de origem antigo).
+2. Criar uma nova consulta_cpf pelo Messenger e confirmar que `metadata.loja_nome` é salvo.
+3. No Messenger, abrir Nova Demanda → Gerar Boleto na loja `DINIZ STO ANTONIO` — deve listar as 3 consultas aprovadas dessa loja (07624072807, 54100657862, 18550196800).
 
-- `supabase/functions/regua-disparo-aguardando-armacao/index.ts` — helper de normalização + upsert de contato + log `telefone_invalido`.
-- Migration nova — função SQL `match_contato_por_telefone(text)` e recriação de `vw_disparos_unificados` para incluir o novo status na fonte `armacao`.
-- `src/components/relatorios/DisparoStatusBadge.tsx` — variante "Telefone inválido".
-- `src/pages/RelatorioDisparos.tsx` — filtro novo + tooltip + esconder botão "Abrir conversa" quando não há atendimento.
+## Fora do escopo
 
-## O que não vou mexer
-
-- Lógica de outros crons (entregas, aniversários) — eles têm o mesmo padrão mas só corrijo se você pedir, para não inflar o escopo.
-- Bridge Firebird em si.
-- Reprocessamento automático quando contato for criado depois manualmente — fica como follow-up.
+- Adicionar seletor de CPF aprovado no `CreateCardDialog` do Atrium (usuário descartou — emissão manual pelo operador segue sem gate de consulta).
+- Mudar a UI ou validações do `CpfApprovalDialog`.
+- Limpar/renormalizar o campo `cpf` com espaços (`" 07624072807"`).
