@@ -64,14 +64,20 @@ serve(async (req) => {
     }
 
     const body = (await req.json().catch(() => ({}))) as Body;
-    const { solicitacao_id, modo, anexo } = body;
+    const { solicitacao_id, modo } = body;
 
-    if (!solicitacao_id || !modo || !anexo?.url) {
-      return new Response(JSON.stringify({ error: "solicitacao_id, modo e anexo.url são obrigatórios" }), {
+    // Normaliza lista de anexos (modo boleto suporta múltiplos)
+    const anexosIn: AnexoIn[] = Array.isArray(body.anexos) && body.anexos.length > 0
+      ? body.anexos
+      : (body.anexo ? [body.anexo] : []);
+    const primeiroAnexo = anexosIn[0];
+
+    if (!solicitacao_id || !modo || !primeiroAnexo?.url) {
+      return new Response(JSON.stringify({ error: "solicitacao_id, modo e pelo menos um anexo são obrigatórios" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (!["carta", "comprovante_pagamento"].includes(modo)) {
+    if (!["carta", "comprovante_pagamento", "boleto"].includes(modo)) {
       return new Response(JSON.stringify({ error: "modo inválido" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -83,6 +89,7 @@ serve(async (req) => {
         });
       }
     }
+
 
     // Carrega solicitação
     const { data: sol, error: solErr } = await supabase
