@@ -30,7 +30,10 @@ interface Body {
   valor?: number | string;
   data_pagamento?: string;        // ISO ou dd/mm/aaaa
   observacao?: string;
+  // boleto:
+  boleto_impresso?: boolean;
 }
+
 
 
 serve(async (req) => {
