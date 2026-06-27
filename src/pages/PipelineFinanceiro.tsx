@@ -808,6 +808,54 @@ export default function PipelineFinanceiro() {
                         </div>
                       )}
                     </div>
+
+                    {/* Bloco de revisão pedida pela loja */}
+                    {selectedSolicitacao.metadata?.boleto_revisao?.ciclo && !selectedSolicitacao.metadata?.boleto_revisao?.atendida_em && (
+                      <div className="mt-3 border-2 border-amber-500 rounded-lg bg-amber-100/70 p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold text-amber-900 uppercase">🔄 Revisão pedida pela loja</p>
+                          <Badge className="text-[10px] bg-amber-200 text-amber-900 border-amber-500">
+                            ciclo {selectedSolicitacao.metadata.boleto_revisao.ciclo}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-amber-900 whitespace-pre-wrap">
+                          <span className="font-semibold">Motivo: </span>
+                          {String(selectedSolicitacao.metadata.boleto_revisao.motivo || "—")}
+                        </p>
+                        {Array.isArray(selectedSolicitacao.metadata.boleto_revisao.campos_revisar) && selectedSolicitacao.metadata.boleto_revisao.campos_revisar.length > 0 && (
+                          <p className="text-[11px] text-amber-800">
+                            <span className="font-semibold">Campos: </span>
+                            {selectedSolicitacao.metadata.boleto_revisao.campos_revisar.join(", ")}
+                          </p>
+                        )}
+                        {selectedSolicitacao.metadata.boleto_revisao.solicitada_por && (
+                          <p className="text-[10px] text-amber-700">
+                            Solicitado por {String(selectedSolicitacao.metadata.boleto_revisao.solicitada_por)}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Histórico de versões enviadas */}
+                    {Array.isArray(selectedSolicitacao.metadata?.boleto_anexos_historico) && selectedSolicitacao.metadata.boleto_anexos_historico.length > 0 && (
+                      <div className="mt-3 border rounded-lg p-3 bg-muted/30 space-y-2">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase">Histórico de versões</p>
+                        {(selectedSolicitacao.metadata.boleto_anexos_historico as any[]).map((h, idx) => (
+                          <div key={idx} className="text-[11px] border-l-2 border-muted pl-2">
+                            <p className="font-medium">
+                              Ciclo {h.ciclo} — {h.enviado_em ? format(new Date(h.enviado_em), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "—"}
+                            </p>
+                            <div className="flex flex-wrap gap-2 mt-0.5">
+                              {(h.urls || []).map((u: string, i: number) => (
+                                <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                                  📎 boleto {i + 1}
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -885,6 +933,11 @@ export default function PipelineFinanceiro() {
                         {isBoleto && selectedSolicitacao.metadata?.boleto_status !== "enviado" && (
                           <Button size="sm" onClick={() => setConcluirDialog({ id: selectedSolicitacao.id, modo: "boleto" })}>
                             <FileText className="h-3.5 w-3.5 mr-1" /> Anexar boleto(s) e enviar
+                          </Button>
+                        )}
+                        {isBoleto && selectedSolicitacao.metadata?.boleto_revisao?.ciclo && !selectedSolicitacao.metadata?.boleto_revisao?.atendida_em && (
+                          <Button size="sm" className="bg-amber-600 hover:bg-amber-700" onClick={() => setConcluirDialog({ id: selectedSolicitacao.id, modo: "boleto-revisao" })}>
+                            🔄 Reenviar boleto revisado
                           </Button>
                         )}
                         <Button
