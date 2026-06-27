@@ -140,7 +140,7 @@ export default function PipelineFinanceiro() {
 
   const [cancelDialogId, setCancelDialogId] = useState<string | null>(null);
   const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId?: string; presets?: string[] } | null>(null);
-  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" | "boleto" } | null>(null);
+  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" | "boleto" | "boleto-revisao" } | null>(null);
 
 
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
@@ -499,8 +499,13 @@ export default function PipelineFinanceiro() {
                                                 ) : (
                                                   <Badge className="text-[10px] px-1 py-0 bg-blue-100 text-blue-800 border-blue-300">📱 Digital</Badge>
                                                 )}
-                                              </div>
-                                            </div>
+                                               </div>
+                                               {sol.metadata?.boleto_revisao?.ciclo && !sol.metadata?.boleto_revisao?.atendida_em && (
+                                                 <Badge className="text-[10px] px-1 py-0 bg-amber-200 text-amber-900 border-amber-500">
+                                                   🔄 Revisão pedida — ciclo {sol.metadata.boleto_revisao.ciclo}
+                                                 </Badge>
+                                               )}
+                                             </div>
                                           )}
                                           {sol.metadata?.arquivado_at && (
                                             <Badge variant="outline" className="ml-6 text-[10px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">
