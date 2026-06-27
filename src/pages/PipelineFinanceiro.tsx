@@ -468,6 +468,35 @@ export default function PipelineFinanceiro() {
                                               🔑 NSU: {sol.metadata.nsu}
                                             </Badge>
                                           )}
+                                          {sol.tipo === "boleto" && (sol.metadata?.qtd_parcelas || sol.metadata?.boleto_status) && (
+                                            <div className="flex flex-wrap items-center gap-1 pl-6">
+                                              {sol.metadata?.qtd_parcelas && (
+                                                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                                                  {sol.metadata.qtd_parcelas}x R$ {Number(sol.metadata.valor_parcela || 0).toFixed(2)}
+                                                </Badge>
+                                              )}
+                                              {sol.metadata?.dia_vencimento && (
+                                                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                                                  vence dia {sol.metadata.dia_vencimento}
+                                                </Badge>
+                                              )}
+                                              {sol.metadata?.boleto_impresso && (
+                                                <Badge className="text-[10px] px-1 py-0 bg-amber-100 text-amber-800 border-amber-300">
+                                                  🖨️ Impresso
+                                                </Badge>
+                                              )}
+                                              {sol.metadata?.boleto_status === "enviado" && (
+                                                <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-800 border-green-300">
+                                                  Enviado
+                                                </Badge>
+                                              )}
+                                            </div>
+                                          )}
+                                          {sol.metadata?.arquivado_at && (
+                                            <Badge variant="outline" className="ml-6 text-[10px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">
+                                              <Archive className="h-2.5 w-2.5 mr-0.5" /> Arquivado
+                                            </Badge>
+
                                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-6">
                                             <Clock className="h-3 w-3 shrink-0" />
                                             <span>
