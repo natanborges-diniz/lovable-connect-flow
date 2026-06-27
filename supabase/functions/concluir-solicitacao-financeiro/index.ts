@@ -149,30 +149,39 @@ serve(async (req) => {
     // 2) Metadata
     const nowIso = new Date().toISOString();
     const novoMeta: Record<string, unknown> = { ...meta };
+    const anexoPrincipalUrl = primeiroAnexo.url;
+    const todasUrlsAnexos = anexosIn.map((a) => a.url);
     if (modo === "carta") {
       novoMeta.estorno_status = "concluido";
-      novoMeta.carta_estorno_url = anexo.url;
+      novoMeta.carta_estorno_url = anexoPrincipalUrl;
       novoMeta.estorno_concluido_em = nowIso;
       novoMeta.estorno_concluido_por = usuario_nome;
-    } else {
+    } else if (modo === "comprovante_pagamento") {
       novoMeta.payment_status = "PAGO";
       novoMeta.pagamento_status = "concluido";
       novoMeta.nsu = body.nsu;
       if (body.tid) novoMeta.tid = body.tid;
       novoMeta.valor_pago = body.valor;
       novoMeta.payment_confirmed_at = nowIso;
-      novoMeta.comprovante_url = anexo.url;
+      novoMeta.comprovante_url = anexoPrincipalUrl;
       novoMeta.pago_por = usuario_nome;
       if (body.data_pagamento) novoMeta.data_pagamento = body.data_pagamento;
+    } else if (modo === "boleto") {
+      novoMeta.boleto_status = "enviado";
+      novoMeta.boleto_enviado_em = nowIso;
+      novoMeta.boleto_enviado_por = usuario_nome;
+      novoMeta.boleto_arquivos = todasUrlsAnexos;
+      novoMeta.boleto_url = anexoPrincipalUrl;
     }
     if (body.observacao) novoMeta.observacao_conclusao = body.observacao;
 
     await supabase.from("solicitacoes").update({
       pipeline_coluna_id: colunaNova,
-      status: "concluida",
+      status: modo === "boleto" ? "em_atendimento" : "concluida",
       metadata: novoMeta,
       updated_at: nowIso,
     }).eq("id", solicitacao_id);
+
 
     // 3) Mensagem na thread da demanda (Messenger)
     //    Se a solicitação não tem demanda vinculada (criada direto via Messenger
