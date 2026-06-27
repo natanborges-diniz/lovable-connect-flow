@@ -468,28 +468,38 @@ export default function PipelineFinanceiro() {
                                               🔑 NSU: {sol.metadata.nsu}
                                             </Badge>
                                           )}
-                                          {sol.tipo === "boleto" && (sol.metadata?.qtd_parcelas || sol.metadata?.boleto_status) && (
-                                            <div className="flex flex-wrap items-center gap-1 pl-6">
-                                              {sol.metadata?.qtd_parcelas && (
-                                                <Badge variant="outline" className="text-[10px] px-1 py-0">
-                                                  {sol.metadata.qtd_parcelas}x R$ {Number(sol.metadata.valor_parcela || 0).toFixed(2)}
-                                                </Badge>
-                                              )}
-                                              {sol.metadata?.dia_vencimento && (
-                                                <Badge variant="outline" className="text-[10px] px-1 py-0">
-                                                  vence dia {sol.metadata.dia_vencimento}
-                                                </Badge>
-                                              )}
-                                              {sol.metadata?.boleto_impresso && (
-                                                <Badge className="text-[10px] px-1 py-0 bg-amber-100 text-amber-800 border-amber-300">
-                                                  🖨️ Impresso
-                                                </Badge>
-                                              )}
-                                              {sol.metadata?.boleto_status === "enviado" && (
-                                                <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-800 border-green-300">
-                                                  Enviado
-                                                </Badge>
-                                              )}
+                                          {sol.tipo === "boleto" && (
+                                            <div className="ml-6 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 space-y-1">
+                                              <div className="flex items-center justify-between gap-2">
+                                                <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">Boleto</span>
+                                                {sol.metadata?.boleto_status === "enviado" ? (
+                                                  <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-800 border-green-300">✓ Enviado</Badge>
+                                                ) : (
+                                                  <Badge className="text-[10px] px-1 py-0 bg-amber-100 text-amber-900 border-amber-400">Aguardando</Badge>
+                                                )}
+                                              </div>
+                                              <div className="flex items-baseline gap-1.5">
+                                                <span className="text-sm font-bold text-amber-900">
+                                                  R$ {Number(sol.metadata?.valor_total || sol.metadata?.boleto_valor_total || 0).toFixed(2)}
+                                                </span>
+                                                {sol.metadata?.qtd_parcelas && (
+                                                  <span className="text-[11px] text-amber-800">
+                                                    em {sol.metadata.qtd_parcelas}x R$ {Number(sol.metadata.valor_parcela || 0).toFixed(2)}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="flex flex-wrap items-center gap-1">
+                                                {sol.metadata?.dia_vencimento && (
+                                                  <Badge variant="outline" className="text-[10px] px-1 py-0 border-amber-400 text-amber-900">
+                                                    📅 vence dia {sol.metadata.dia_vencimento}
+                                                  </Badge>
+                                                )}
+                                                {sol.metadata?.boleto_impresso ? (
+                                                  <Badge className="text-[10px] px-1 py-0 bg-orange-100 text-orange-800 border-orange-300">🖨️ Imprimir</Badge>
+                                                ) : (
+                                                  <Badge className="text-[10px] px-1 py-0 bg-blue-100 text-blue-800 border-blue-300">📱 Digital</Badge>
+                                                )}
+                                              </div>
                                             </div>
                                           )}
                                           {sol.metadata?.arquivado_at && (
@@ -497,6 +507,7 @@ export default function PipelineFinanceiro() {
                                               <Archive className="h-2.5 w-2.5 mr-0.5" /> Arquivado
                                             </Badge>
                                           )}
+
 
 
                                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-6">
