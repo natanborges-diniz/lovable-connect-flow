@@ -159,7 +159,7 @@ serve(async (req) => {
           status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const lojaConsulta = String(meta.loja_nome || "").trim().toLowerCase();
+      const lojaConsulta = String(meta.loja_nome || meta.alias_loja || "").trim().toLowerCase();
       if (lojaConsulta && lojaConsulta !== nomeLoja.trim().toLowerCase()) {
         return new Response(JSON.stringify({ error: "A consulta pertence a outra loja.", code: "LOJA_DIVERGENTE" }), {
           status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -413,7 +413,7 @@ serve(async (req) => {
         canal_origem: "sistema",
         status: "em_atendimento",
         tipo: tipoSolicitacao,
-        metadata: { ...dados, ...extraMetadata, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
+        metadata: { ...dados, ...extraMetadata, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
         ...(colunaId ? { pipeline_coluna_id: colunaId } : {}),
       })
       .select("id")
@@ -508,7 +508,7 @@ serve(async (req) => {
       descricao: `${(fluxo as any).nome} solicitado por ${profile.nome} (${nomeLoja})`,
       referencia_tipo: "solicitacao",
       referencia_id: solicitacao.id,
-      metadata: { protocolo, alias_loja: nomeLoja, cod_empresa: codEmpresa },
+      metadata: { protocolo, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa },
     });
 
     // ── Espelha em pagamentos_link (rastreabilidade financeira) ──
@@ -536,7 +536,7 @@ serve(async (req) => {
           status: envioOk ? "enviado" : "criado",
           link_url: (extraMetadata as any).url || null,
           enviado_at: envioOk ? new Date().toISOString() : null,
-          metadata: { ...dados, ...extraMetadata, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
+          metadata: { ...dados, ...extraMetadata, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
         }, { onConflict: "payment_link_id" });
       } catch (mErr) {
         console.error("[criar-solicitacao-loja] mirror pagamentos_link falhou", mErr);
