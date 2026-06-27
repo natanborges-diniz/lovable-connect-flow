@@ -219,16 +219,6 @@ export default function PipelineFinanceiro() {
     }).catch(e => console.warn("Automation call failed:", e));
   };
 
-    supabase.functions.invoke("pipeline-automations", {
-      body: {
-        entity_type: "solicitacao",
-        entity_id: solicitacaoId,
-        coluna_id: destColunaId,
-        coluna_anterior_id: sourceColunaId,
-      },
-    }).catch(e => console.warn("Automation call failed:", e));
-  };
-
   const startEditColuna = (id: string, nome: string) => {
     setEditingColuna(id);
     setEditNome(nome);
