@@ -726,6 +726,87 @@ export default function PipelineFinanceiro() {
                   </div>
                 )}
 
+                {/* Dados estruturados — Boleto (picote) */}
+                {selectedSolicitacao.tipo === "boleto" && (
+                  <div className="pt-2 border-t">
+                    <div className="border-2 border-dashed border-amber-400 rounded-lg bg-amber-50 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-amber-900 uppercase tracking-wide">
+                          🧾 Solicitação de Boleto
+                        </p>
+                        {selectedSolicitacao.metadata?.boleto_status === "enviado" ? (
+                          <Badge className="bg-green-100 text-green-800 border-green-300 text-[10px]">✓ Enviado à loja</Badge>
+                        ) : (
+                          <Badge className="bg-amber-100 text-amber-900 border-amber-400 text-[10px]">Aguardando geração</Badge>
+                        )}
+                      </div>
+
+                      {/* Valor em destaque */}
+                      <div className="text-center py-2 border-y border-dashed border-amber-300">
+                        <p className="text-2xl font-bold text-amber-900">
+                          R$ {Number(selectedSolicitacao.metadata?.valor_total || selectedSolicitacao.metadata?.boleto_valor_total || 0).toFixed(2)}
+                        </p>
+                        {selectedSolicitacao.metadata?.qtd_parcelas && (
+                          <p className="text-xs text-amber-800 mt-0.5">
+                            {selectedSolicitacao.metadata.qtd_parcelas}x de <strong>R$ {Number(selectedSolicitacao.metadata?.valor_parcela || 0).toFixed(2)}</strong>
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Dados do cliente */}
+                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-amber-900">
+                        {selectedSolicitacao.metadata?.cliente && (<><span className="text-amber-700">👤 Cliente</span><span className="font-medium">{String(selectedSolicitacao.metadata.cliente)}</span></>)}
+                        {selectedSolicitacao.metadata?.cpf && (<><span className="text-amber-700">🆔 CPF</span><span className="font-mono font-medium">{String(selectedSolicitacao.metadata.cpf)}</span></>)}
+                        {selectedSolicitacao.metadata?.loja_nome && (<><span className="text-amber-700">🏬 Loja</span><span className="font-medium">{String(selectedSolicitacao.metadata.loja_nome)}</span></>)}
+                        {selectedSolicitacao.metadata?.dia_vencimento && (<><span className="text-amber-700">📅 Vencimento</span><span className="font-medium">Todo dia {selectedSolicitacao.metadata.dia_vencimento}</span></>)}
+                        <span className="text-amber-700">📦 Entrega</span>
+                        <span className="font-medium">
+                          {selectedSolicitacao.metadata?.boleto_impresso
+                            ? "🖨️ Imprimir e entregar na loja"
+                            : "📱 Enviar digital (WhatsApp)"}
+                        </span>
+                      </div>
+
+                      {/* Projeção das parcelas */}
+                      {Array.isArray(selectedSolicitacao.metadata?.boleto_parcelas_projecao) && selectedSolicitacao.metadata.boleto_parcelas_projecao.length > 0 && (
+                        <div className="pt-2 border-t border-dashed border-amber-300">
+                          <p className="text-[10px] font-semibold text-amber-800 uppercase mb-1.5">Parcelas a gerar</p>
+                          <div className="max-h-40 overflow-y-auto rounded border border-amber-200 bg-white/60">
+                            <table className="w-full text-xs">
+                              <thead className="bg-amber-100/80 sticky top-0">
+                                <tr className="text-amber-900">
+                                  <th className="text-left px-2 py-1 font-semibold">#</th>
+                                  <th className="text-left px-2 py-1 font-semibold">Vencimento</th>
+                                  <th className="text-right px-2 py-1 font-semibold">Valor</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(selectedSolicitacao.metadata.boleto_parcelas_projecao as any[]).map((p, idx) => (
+                                  <tr key={idx} className="border-t border-amber-100">
+                                    <td className="px-2 py-1 font-mono">{p.n ?? idx + 1}</td>
+                                    <td className="px-2 py-1">
+                                      {p.vencimento ? format(new Date(p.vencimento + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR }) : "—"}
+                                    </td>
+                                    <td className="px-2 py-1 text-right font-medium">R$ {Number(p.valor || 0).toFixed(2)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedSolicitacao.metadata?.observacao && String(selectedSolicitacao.metadata.observacao).trim() && (
+                        <div className="pt-2 border-t border-dashed border-amber-300">
+                          <p className="text-[10px] font-semibold text-amber-800 uppercase mb-0.5">Observação da loja</p>
+                          <p className="text-xs text-amber-900 whitespace-pre-wrap">{String(selectedSolicitacao.metadata.observacao)}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+
                 {/* Bloco de Ações do operador */}
                 {(() => {
                   const t = selectedSolicitacao.tipo;
