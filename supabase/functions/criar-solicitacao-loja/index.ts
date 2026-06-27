@@ -177,7 +177,53 @@ serve(async (req) => {
       (dados as any).cliente = meta.nome_cliente ?? meta.cliente ?? (dados as any).cliente;
       (dados as any).valor = meta.valor_aprovado ?? meta.valor ?? (dados as any).valor;
       (dados as any).consulta_cpf_id = consultaId;
+
+      // Validação dos detalhes do boleto enviados pela loja
+      const qtdParcelas = Number((dados as any).qtd_parcelas);
+      const diaVencimento = Number((dados as any).dia_vencimento);
+      const valorParcela = Number((dados as any).valor_parcela);
+      if (!Number.isInteger(qtdParcelas) || qtdParcelas < 1 || qtdParcelas > 24) {
+        return new Response(JSON.stringify({ error: "qtd_parcelas inválida (1-24).", code: "PARCELAS_INVALIDAS" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!Number.isInteger(diaVencimento) || diaVencimento < 1 || diaVencimento > 28) {
+        return new Response(JSON.stringify({ error: "dia_vencimento inválido (1-28).", code: "DIA_VENC_INVALIDO" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!Number.isFinite(valorParcela) || valorParcela <= 0) {
+        return new Response(JSON.stringify({ error: "valor_parcela inválido.", code: "VALOR_PARCELA_INVALIDO" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Projeção: gera datas e valores das parcelas (1ª = próximo dia X >= hoje)
+      const hoje = new Date();
+      const projecao: Array<{ n: number; vencimento: string; valor: number }> = [];
+      const baseY = hoje.getFullYear(); const baseM = hoje.getMonth();
+      let startM = baseM, startY = baseY;
+      // próximo dia diaVencimento >= hoje (se já passou, vai para mês seguinte)
+      if (hoje.getDate() > diaVencimento) {
+        startM = baseM + 1;
+        if (startM > 11) { startM = 0; startY = baseY + 1; }
+      }
+      for (let i = 0; i < qtdParcelas; i++) {
+        const m = startM + i;
+        const y = startY + Math.floor(m / 12);
+        const mm = ((m % 12) + 12) % 12;
+        const venc = new Date(Date.UTC(y, mm, diaVencimento));
+        projecao.push({
+          n: i + 1,
+          vencimento: venc.toISOString().slice(0, 10),
+          valor: Number(valorParcela.toFixed(2)),
+        });
+      }
+      (dados as any).boleto_parcelas_projecao = projecao;
+      (dados as any).boleto_impresso = Boolean((dados as any).boleto_impresso);
+      (dados as any).boleto_valor_total = Number((valorParcela * qtdParcelas).toFixed(2));
     }
+
 
     // ── Caso especial: link_pagamento via Optical Business ──
     let extraMetadata: Record<string, unknown> = {};
