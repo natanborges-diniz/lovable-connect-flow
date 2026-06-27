@@ -413,7 +413,7 @@ serve(async (req) => {
         canal_origem: "sistema",
         status: "em_atendimento",
         tipo: tipoSolicitacao,
-        metadata: { ...dados, ...extraMetadata, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
+        metadata: { ...dados, ...extraMetadata, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
         ...(colunaId ? { pipeline_coluna_id: colunaId } : {}),
       })
       .select("id")
