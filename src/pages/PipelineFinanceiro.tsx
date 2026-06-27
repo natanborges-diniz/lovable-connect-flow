@@ -146,6 +146,8 @@ export default function PipelineFinanceiro() {
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
   const filteredSolicitacoes = (solicitacoes ?? []).filter((s: any) => {
+    // Esconde arquivados por padrão (toggle controla visibilidade)
+    if (!mostrarArquivados && s.metadata?.arquivado_at) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -156,6 +158,7 @@ export default function PipelineFinanceiro() {
       s.tipo?.toLowerCase().includes(q)
     );
   });
+
 
   const solicitacoesByColuna = (colunas ?? []).map((col) => ({
     ...col,
