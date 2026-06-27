@@ -104,30 +104,47 @@ serve(async (req) => {
     const lojaNome = (meta.alias_loja || meta.loja_nome || "") as string;
     const colunaAnterior = sol.pipeline_coluna_id as string | null;
 
-    // Descobre setor da coluna atual e procura coluna "Concluído"
+    // Descobre setor da coluna atual e procura coluna destino
+    //   carta / comprovante_pagamento → "Concluído"
+    //   boleto                        → "Boleto Enviado" (com fallback p/ Concluído)
     let colunaNova: string | null = colunaAnterior;
+    const nomeColunaDestino = modo === "boleto" ? ["Boleto Enviado", "Concluído"] : ["Concluído"];
     if (colunaAnterior) {
       const { data: colAtual } = await supabase
         .from("pipeline_colunas").select("setor_id").eq("id", colunaAnterior).maybeSingle();
       if (colAtual?.setor_id) {
-        const { data: alvo } = await supabase
-          .from("pipeline_colunas").select("id")
-          .eq("setor_id", colAtual.setor_id).eq("nome", "Concluído").eq("ativo", true)
-          .limit(1).maybeSingle();
-        if (alvo?.id) colunaNova = alvo.id;
+        const { data: alvos } = await supabase
+          .from("pipeline_colunas").select("id, nome")
+          .eq("setor_id", colAtual.setor_id).in("nome", nomeColunaDestino).eq("ativo", true);
+        const found = nomeColunaDestino
+          .map((n) => (alvos || []).find((c: any) => c.nome === n))
+          .find(Boolean);
+        if (found?.id) colunaNova = found.id;
       }
     }
 
-    // 1) Anexo
-    await supabase.from("solicitacao_anexos").insert({
-      solicitacao_id,
-      tipo: modo === "carta" ? "carta_estorno" : "comprovante_pagamento",
-      descricao: modo === "carta" ? "Carta de devolução do estorno" : "Comprovante de pagamento",
-      url_publica: anexo.url,
-      storage_path: anexo.storage_path || null,
-      mime_type: anexo.mime_type || null,
-      tamanho_bytes: anexo.tamanho_bytes || null,
-    });
+    // 1) Anexos (1+ no modo boleto)
+    const tipoAnexo =
+      modo === "carta" ? "carta_estorno" :
+      modo === "comprovante_pagamento" ? "comprovante_pagamento" :
+      "boleto";
+    const descAnexoBase =
+      modo === "carta" ? "Carta de devolução do estorno" :
+      modo === "comprovante_pagamento" ? "Comprovante de pagamento" :
+      "Boleto bancário";
+    for (let i = 0; i < anexosIn.length; i++) {
+      const a = anexosIn[i];
+      await supabase.from("solicitacao_anexos").insert({
+        solicitacao_id,
+        tipo: tipoAnexo,
+        descricao: anexosIn.length > 1 ? `${descAnexoBase} (${i + 1}/${anexosIn.length})` : descAnexoBase,
+        url_publica: a.url,
+        storage_path: a.storage_path || null,
+        mime_type: a.mime_type || null,
+        tamanho_bytes: a.tamanho_bytes || null,
+      });
+    }
+
 
     // 2) Metadata
     const nowIso = new Date().toISOString();
