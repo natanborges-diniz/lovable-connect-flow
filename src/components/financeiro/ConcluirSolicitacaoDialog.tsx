@@ -171,23 +171,8 @@ export function ConcluirSolicitacaoDialog({
             )}
           </div>
 
-          {isBoleto && (
-            <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-2">
-              <Checkbox
-                id="boleto-impresso"
-                checked={boletoImpresso}
-                onCheckedChange={(v) => setBoletoImpresso(!!v)}
-              />
-              <div className="space-y-0.5">
-                <Label htmlFor="boleto-impresso" className="text-xs font-medium cursor-pointer">
-                  Imprimir e entregar fisicamente
-                </Label>
-                <p className="text-[10px] text-muted-foreground">
-                  Loja recebe alerta para imprimir antes da entrega ao cliente.
-                </p>
-              </div>
-            </div>
-          )}
+
+
 
           {isComprovante && (
             <>
