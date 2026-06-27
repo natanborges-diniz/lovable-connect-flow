@@ -496,6 +496,8 @@ export default function PipelineFinanceiro() {
                                             <Badge variant="outline" className="ml-6 text-[10px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">
                                               <Archive className="h-2.5 w-2.5 mr-0.5" /> Arquivado
                                             </Badge>
+                                          )}
+
 
                                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-6">
                                             <Clock className="h-3 w-3 shrink-0" />
