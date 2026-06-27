@@ -8,10 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2, FileCheck, Receipt, Upload, FileText, X } from "lucide-react";
+import { Loader2, FileCheck, Receipt, Upload, FileText, X, RefreshCw } from "lucide-react";
 
 
-type Modo = "carta" | "comprovante_pagamento" | "boleto";
+type Modo = "carta" | "comprovante_pagamento" | "boleto" | "boleto-revisao";
 
 interface Props {
   solicitacaoId: string | null;
@@ -37,20 +37,25 @@ export function ConcluirSolicitacaoDialog({
 
   const isComprovante = modo === "comprovante_pagamento";
   const isBoleto = modo === "boleto";
-  const allowMultiple = isBoleto;
+  const isBoletoRevisao = modo === "boleto-revisao";
+  const isBoletoLike = isBoleto || isBoletoRevisao;
+  const allowMultiple = isBoletoLike;
 
   const titulo =
     isComprovante ? "Concluir pagamento" :
+    isBoletoRevisao ? "Reenviar boleto revisado" :
     isBoleto ? "Anexar boleto(s) e enviar" :
     "Concluir com carta de estorno";
   const descricao =
     isComprovante
       ? "Envie o comprovante de pagamento (PDF ou imagem). NSU e valor são obrigatórios. A loja recebe o comprovante no app."
+      : isBoletoRevisao
+      ? "Anexe a(s) nova(s) versão(ões) do boleto. O card volta para 'Boleto Enviado' e a loja é notificada. Versões anteriores ficam no histórico."
       : isBoleto
       ? "Anexe 1 ou mais arquivos (PDF/imagem). O card vai para 'Boleto Enviado' e a loja recebe os arquivos no app. Se a loja pediu impressão na abertura, esse aviso já aparece no card — imprima e envie por malote."
       : "Envie a carta de devolução do estorno (PDF ou imagem). A loja recebe a carta no app e pode encaminhar ao cliente.";
   const accept = ".pdf,image/*";
-  const Icon = isComprovante ? Receipt : isBoleto ? FileText : FileCheck;
+  const Icon = isComprovante ? Receipt : isBoletoRevisao ? RefreshCw : isBoleto ? FileText : FileCheck;
 
   const reset = () => {
     setFiles([]); setNsu(""); setTid(""); setValor("");
@@ -111,6 +116,7 @@ export function ConcluirSolicitacaoDialog({
 
       toast.success(
         isComprovante ? "Pagamento concluído e comprovante enviado à loja." :
+        isBoletoRevisao ? "Boleto revisado enviado à loja." :
         isBoleto ? "Boleto(s) enviado(s) à loja." :
         "Estorno concluído. Carta enviada à loja."
       );
@@ -140,6 +146,7 @@ export function ConcluirSolicitacaoDialog({
           <div className="space-y-1">
             <Label className="text-xs">
               {isComprovante ? "Comprovante (PDF/imagem) *" :
+               isBoletoRevisao ? "Boleto(s) revisado(s) — 1 ou mais (PDF/imagem) *" :
                isBoleto ? "Boleto(s) — 1 ou mais (PDF/imagem) *" :
                "Carta de devolução (PDF/imagem) *"}
             </Label>
@@ -215,6 +222,7 @@ export function ConcluirSolicitacaoDialog({
           <Button onClick={handle} disabled={!canSubmit || uploading}>
             {uploading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
             {isComprovante ? "Concluir pagamento" :
+             isBoletoRevisao ? `Reenviar ${files.length || ""} boleto${files.length !== 1 ? "s" : ""}`.trim() :
              isBoleto ? `Enviar ${files.length || ""} boleto${files.length !== 1 ? "s" : ""}`.trim() :
              "Concluir e enviar carta"}
           </Button>

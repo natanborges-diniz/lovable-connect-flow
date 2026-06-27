@@ -14,7 +14,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-type Modo = "carta" | "comprovante_pagamento" | "boleto";
+type Modo = "carta" | "comprovante_pagamento" | "boleto" | "boleto-revisao";
 
 interface AnexoIn { url: string; mime_type?: string; nome?: string; storage_path?: string; tamanho_bytes?: number }
 
@@ -80,11 +80,12 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (!["carta", "comprovante_pagamento", "boleto"].includes(modo)) {
+    if (!["carta", "comprovante_pagamento", "boleto", "boleto-revisao"].includes(modo)) {
       return new Response(JSON.stringify({ error: "modo inválido" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const isBoletoLike = modo === "boleto" || modo === "boleto-revisao";
     if (modo === "comprovante_pagamento") {
       if (!body.nsu || !body.valor) {
         return new Response(JSON.stringify({ error: "NSU e valor são obrigatórios para comprovante de pagamento" }), {
@@ -111,7 +112,7 @@ serve(async (req) => {
     //   carta / comprovante_pagamento → "Concluído"
     //   boleto                        → "Boleto Enviado" (com fallback p/ Concluído)
     let colunaNova: string | null = colunaAnterior;
-    const nomeColunaDestino = modo === "boleto" ? ["Boleto Enviado", "Concluído"] : ["Concluído"];
+    const nomeColunaDestino = isBoletoLike ? ["Boleto Enviado", "Concluído"] : ["Concluído"];
     if (colunaAnterior) {
       const { data: colAtual } = await supabase
         .from("pipeline_colunas").select("setor_id").eq("id", colunaAnterior).maybeSingle();
@@ -131,9 +132,11 @@ serve(async (req) => {
       modo === "carta" ? "carta_estorno" :
       modo === "comprovante_pagamento" ? "comprovante_pagamento" :
       "boleto";
+    const cicloRevisao = modo === "boleto-revisao" ? Number((meta as any).boleto_revisao?.ciclo || 1) : 0;
     const descAnexoBase =
       modo === "carta" ? "Carta de devolução do estorno" :
       modo === "comprovante_pagamento" ? "Comprovante de pagamento" :
+      modo === "boleto-revisao" ? `Boleto revisado (ciclo ${cicloRevisao})` :
       "Boleto bancário";
     for (let i = 0; i < anexosIn.length; i++) {
       const a = anexosIn[i];
@@ -169,19 +172,31 @@ serve(async (req) => {
       novoMeta.comprovante_url = anexoPrincipalUrl;
       novoMeta.pago_por = usuario_nome;
       if (body.data_pagamento) novoMeta.data_pagamento = body.data_pagamento;
-    } else if (modo === "boleto") {
+    } else if (isBoletoLike) {
       novoMeta.boleto_status = "enviado";
       novoMeta.boleto_enviado_em = nowIso;
       novoMeta.boleto_enviado_por = usuario_nome;
       novoMeta.boleto_arquivos = todasUrlsAnexos;
       novoMeta.boleto_url = anexoPrincipalUrl;
-      // boleto_impresso é decidido pela loja na abertura; preservar o que já está em metadata.
+      // Reset do contador de auto-arquivamento ao reentregar boleto
+      novoMeta.arquivado_at = null;
+      novoMeta.entrou_terminal_em = nowIso;
+      // boleto_impresso é decidido pela loja na abertura; preservar.
+      if (modo === "boleto-revisao") {
+        const historico = Array.isArray((meta as any).boleto_anexos_historico) ? (meta as any).boleto_anexos_historico : [];
+        historico.push({ ciclo: cicloRevisao, enviado_em: nowIso, urls: todasUrlsAnexos, observacao: body.observacao || null });
+        novoMeta.boleto_anexos_historico = historico;
+        // marca ciclo como atendido
+        if ((novoMeta as any).boleto_revisao) {
+          (novoMeta as any).boleto_revisao = { ...(novoMeta as any).boleto_revisao, atendida_em: nowIso, atendida_por: usuario_nome };
+        }
+      }
     }
     if (body.observacao) novoMeta.observacao_conclusao = body.observacao;
 
     await supabase.from("solicitacoes").update({
       pipeline_coluna_id: colunaNova,
-      status: modo === "boleto" ? "em_atendimento" : "concluida",
+      status: isBoletoLike ? "em_atendimento" : "concluida",
       metadata: novoMeta,
       updated_at: nowIso,
     }).eq("id", solicitacao_id);
@@ -206,10 +221,12 @@ serve(async (req) => {
         const assuntoDem =
           modo === "carta" ? `Carta de estorno — ${sol.assunto || ""}`.slice(0, 120) :
           modo === "boleto" ? `Boleto enviado — ${sol.assunto || ""}`.slice(0, 120) :
+          modo === "boleto-revisao" ? `Boleto revisado (ciclo ${cicloRevisao}) — ${sol.assunto || ""}`.slice(0, 120) :
           `Comprovante de pagamento — ${sol.assunto || ""}`.slice(0, 120);
         const perguntaDem =
           modo === "carta" ? "Segue carta de estorno do cliente para repasse." :
           modo === "boleto" ? `Boleto(s) emitido(s) (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""}) — ${(novoMeta as any).boleto_impresso ? "imprimir e entregar fisicamente" : "envio digital"}.` :
+          modo === "boleto-revisao" ? `Boleto(s) revisado(s) — ciclo ${cicloRevisao} — ${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""}.` :
           `Comprovante de pagamento NSU ${body.nsu || ""} — R$ ${Number(body.valor || 0).toFixed(2)}`;
 
         const { data: novaDem, error: novaDemErr } = await supabase
@@ -222,7 +239,7 @@ serve(async (req) => {
             pergunta: perguntaDem,
             status: "respondida",
             origem: "operador",
-            tipo_chave: modo === "carta" ? "carta_estorno" : modo === "boleto" ? "boleto_enviado" : "comprovante_pagamento",
+            tipo_chave: modo === "carta" ? "carta_estorno" : isBoletoLike ? "boleto_enviado" : "comprovante_pagamento",
             setor_destino_id: lojaInfo.setor_destino_id,
             solicitante_id: usuario_id,
             solicitante_nome: usuario_nome,
@@ -248,6 +265,7 @@ serve(async (req) => {
       const tituloMsg =
         modo === "carta" ? `✅ Estorno concluído. Segue a carta para enviar ao cliente.` :
         modo === "boleto" ? `📄 Boleto${anexosIn.length > 1 ? "s" : ""} enviado${anexosIn.length > 1 ? "s" : ""} (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""}).${(novoMeta as any).boleto_impresso ? "\n🖨️ Imprimir e entregar fisicamente." : ""}` :
+        modo === "boleto-revisao" ? `🔄 Boleto revisado (ciclo ${cicloRevisao}) — ${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""} em anexo.${(novoMeta as any).boleto_impresso ? "\n🖨️ Imprimir e entregar fisicamente." : ""}` :
         `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}`;
 
       // Mensagem principal com primeiro anexo
@@ -300,6 +318,7 @@ serve(async (req) => {
     const comentarioMsg =
       modo === "carta" ? `✅ Estorno concluído.\n\nCarta de devolução em anexo — toque para abrir, baixar ou compartilhar por WhatsApp com o cliente.` :
       modo === "boleto" ? `📄 Boleto(s) enviado(s) — ${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""} em anexo${(novoMeta as any).boleto_impresso ? "\n\n🖨️ Imprimir e entregar fisicamente." : ""}` :
+      modo === "boleto-revisao" ? `🔄 Boleto revisado (ciclo ${cicloRevisao}) — ${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""} em anexo.${(novoMeta as any).boleto_impresso ? "\n\n🖨️ Imprimir e entregar fisicamente." : ""}` :
       `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\nComprovante em anexo.`;
 
     // Comentário principal (1º anexo)
@@ -337,12 +356,14 @@ serve(async (req) => {
       const { data: destsSol } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
       const userIdsSol = (destsSol || []).map((d: any) => d.user_id).filter(Boolean);
       if (userIdsSol.length > 0) {
-        const tipoNotif = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : "pagamento_concluido";
-        const tituloNotif = modo === "carta" ? "Carta de estorno disponível" : modo === "boleto" ? "Boleto enviado" : "Pagamento concluído";
+        const tipoNotif = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : modo === "boleto-revisao" ? "boleto_revisao_concluida" : "pagamento_concluido";
+        const tituloNotif = modo === "carta" ? "Carta de estorno disponível" : modo === "boleto" ? "Boleto enviado" : modo === "boleto-revisao" ? `Boleto revisado (ciclo ${cicloRevisao})` : "Pagamento concluído";
         const msgNotif = modo === "carta"
           ? `${sol.protocolo || "Solicitação"} — toque para baixar a carta`
           : modo === "boleto"
           ? `${sol.protocolo || "Solicitação"} — ${anexosIn.length} boleto(s)${(novoMeta as any).boleto_impresso ? " • imprimir" : ""}`
+          : modo === "boleto-revisao"
+          ? `${sol.protocolo || "Solicitação"} — boleto revisado (ciclo ${cicloRevisao})`
           : `${sol.protocolo || "Solicitação"} — R$ ${Number(body.valor).toFixed(2)} NSU ${body.nsu}`;
         await supabase.from("notificacoes").insert(userIdsSol.map((uid: string) => ({
           usuario_id: uid,
@@ -357,8 +378,8 @@ serve(async (req) => {
 
 
     // 4) Timeline
-    const tipoEvt = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : "pagamento_concluido";
-    const descEvt = modo === "carta" ? "Estorno concluído com carta" : modo === "boleto" ? `Boleto enviado (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""})` : `Pagamento concluído — NSU ${body.nsu}`;
+    const tipoEvt = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : modo === "boleto-revisao" ? "boleto_revisao_concluida" : "pagamento_concluido";
+    const descEvt = modo === "carta" ? "Estorno concluído com carta" : modo === "boleto" ? `Boleto enviado (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""})` : modo === "boleto-revisao" ? `Boleto revisado — ciclo ${cicloRevisao} (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""})` : `Pagamento concluído — NSU ${body.nsu}`;
     await supabase.from("pipeline_card_eventos").insert({
       entidade: "solicitacao",
       entidade_id: solicitacao_id,
