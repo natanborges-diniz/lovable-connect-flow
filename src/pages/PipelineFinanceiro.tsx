@@ -255,6 +255,19 @@ export default function PipelineFinanceiro() {
                 className="pl-9 w-60"
               />
             </div>
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border bg-muted/30">
+              {mostrarArquivados ? <ArchiveRestore className="h-3.5 w-3.5 text-muted-foreground" /> : <Archive className="h-3.5 w-3.5 text-muted-foreground" />}
+              <Switch
+                id="show-archived"
+                checked={mostrarArquivados}
+                onCheckedChange={setMostrarArquivados}
+                className="scale-75"
+              />
+              <Label htmlFor="show-archived" className="text-xs cursor-pointer select-none">
+                Arquivados
+              </Label>
+            </div>
+
             <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-1" /> Nova Demanda
             </Button>
