@@ -785,13 +785,19 @@ export default function PipelineFinanceiro() {
                             <CreditCard className="h-3.5 w-3.5 mr-1" /> Concluir pagamento
                           </Button>
                         )}
+                        {isBoleto && selectedSolicitacao.metadata?.boleto_status !== "enviado" && (
+                          <Button size="sm" onClick={() => setConcluirDialog({ id: selectedSolicitacao.id, modo: "boleto" })}>
+                            <FileText className="h-3.5 w-3.5 mr-1" /> Anexar boleto(s) e enviar
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => setDevolverDialog({
                             id: selectedSolicitacao.id,
-                            presets: isEstorno ? presetsEstorno : presetsPag,
+                            presets: presetsAtivos,
                           })}
+
                         >
                           ↩️ Devolver à loja
                         </Button>
