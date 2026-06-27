@@ -14,12 +14,16 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-type Modo = "carta" | "comprovante_pagamento";
+type Modo = "carta" | "comprovante_pagamento" | "boleto";
+
+interface AnexoIn { url: string; mime_type?: string; nome?: string; storage_path?: string; tamanho_bytes?: number }
 
 interface Body {
   solicitacao_id: string;
   modo: Modo;
-  anexo: { url: string; mime_type?: string; nome?: string; storage_path?: string; tamanho_bytes?: number };
+  // carta / comprovante: anexo único; boleto: 1+ via anexos[]
+  anexo?: AnexoIn;
+  anexos?: AnexoIn[];
   // comprovante_pagamento:
   nsu?: string;
   tid?: string;
@@ -27,6 +31,7 @@ interface Body {
   data_pagamento?: string;        // ISO ou dd/mm/aaaa
   observacao?: string;
 }
+
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
