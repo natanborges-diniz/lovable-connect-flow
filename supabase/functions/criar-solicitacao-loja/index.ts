@@ -508,7 +508,7 @@ serve(async (req) => {
       descricao: `${(fluxo as any).nome} solicitado por ${profile.nome} (${nomeLoja})`,
       referencia_tipo: "solicitacao",
       referencia_id: solicitacao.id,
-      metadata: { protocolo, alias_loja: nomeLoja, cod_empresa: codEmpresa },
+      metadata: { protocolo, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa },
     });
 
     // ── Espelha em pagamentos_link (rastreabilidade financeira) ──
