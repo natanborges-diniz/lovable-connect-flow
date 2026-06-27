@@ -55,9 +55,10 @@ export function ConcluirSolicitacaoDialog({
   const reset = () => {
     setFiles([]); setNsu(""); setTid(""); setValor("");
     setDataPagamento(new Date().toISOString().slice(0, 10));
-    setObservacao(""); setBoletoImpresso(false);
+    setObservacao("");
     if (fileRef.current) fileRef.current.value = "";
   };
+
 
   const canSubmit =
     files.length > 0 && !!solicitacaoId &&
@@ -102,21 +103,18 @@ export function ConcluirSolicitacaoDialog({
         payload.valor = Number(valor);
         payload.data_pagamento = dataPagamento;
       }
-      if (isBoleto) {
-        // EF grava boleto_impresso em metadata via observacao? Não — usamos observação extra.
-        // Para preservar o flag estruturado, embutimos no payload.observacao com marcador
-        // e também enviamos como metadata_extra (a EF lê em novoMeta).
-        (payload as any).boleto_impresso = boletoImpresso;
-      }
+      // boleto: nenhum campo extra — flag de impressão veio da abertura pela loja
+
       const { data, error } = await supabase.functions.invoke("concluir-solicitacao-financeiro", { body: payload });
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
 
       toast.success(
         isComprovante ? "Pagamento concluído e comprovante enviado à loja." :
-        isBoleto ? `Boleto(s) enviado(s) à loja${boletoImpresso ? " (sinalizado para impressão)" : ""}.` :
+        isBoleto ? "Boleto(s) enviado(s) à loja." :
         "Estorno concluído. Carta enviada à loja."
       );
+
       reset();
       onOpenChange(false);
       onSuccess?.();
