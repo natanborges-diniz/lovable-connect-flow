@@ -140,7 +140,8 @@ export default function PipelineFinanceiro() {
 
   const [cancelDialogId, setCancelDialogId] = useState<string | null>(null);
   const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId?: string; presets?: string[] } | null>(null);
-  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" } | null>(null);
+  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" | "boleto" } | null>(null);
+
 
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
