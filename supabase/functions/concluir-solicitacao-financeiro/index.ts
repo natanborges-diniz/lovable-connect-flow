@@ -14,19 +14,27 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-type Modo = "carta" | "comprovante_pagamento";
+type Modo = "carta" | "comprovante_pagamento" | "boleto";
+
+interface AnexoIn { url: string; mime_type?: string; nome?: string; storage_path?: string; tamanho_bytes?: number }
 
 interface Body {
   solicitacao_id: string;
   modo: Modo;
-  anexo: { url: string; mime_type?: string; nome?: string; storage_path?: string; tamanho_bytes?: number };
+  // carta / comprovante: anexo único; boleto: 1+ via anexos[]
+  anexo?: AnexoIn;
+  anexos?: AnexoIn[];
   // comprovante_pagamento:
   nsu?: string;
   tid?: string;
   valor?: number | string;
   data_pagamento?: string;        // ISO ou dd/mm/aaaa
   observacao?: string;
+  // boleto:
+  boleto_impresso?: boolean;
 }
+
+
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -59,14 +67,20 @@ serve(async (req) => {
     }
 
     const body = (await req.json().catch(() => ({}))) as Body;
-    const { solicitacao_id, modo, anexo } = body;
+    const { solicitacao_id, modo } = body;
 
-    if (!solicitacao_id || !modo || !anexo?.url) {
-      return new Response(JSON.stringify({ error: "solicitacao_id, modo e anexo.url são obrigatórios" }), {
+    // Normaliza lista de anexos (modo boleto suporta múltiplos)
+    const anexosIn: AnexoIn[] = Array.isArray(body.anexos) && body.anexos.length > 0
+      ? body.anexos
+      : (body.anexo ? [body.anexo] : []);
+    const primeiroAnexo = anexosIn[0];
+
+    if (!solicitacao_id || !modo || !primeiroAnexo?.url) {
+      return new Response(JSON.stringify({ error: "solicitacao_id, modo e pelo menos um anexo são obrigatórios" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (!["carta", "comprovante_pagamento"].includes(modo)) {
+    if (!["carta", "comprovante_pagamento", "boleto"].includes(modo)) {
       return new Response(JSON.stringify({ error: "modo inválido" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -78,6 +92,7 @@ serve(async (req) => {
         });
       }
     }
+
 
     // Carrega solicitação
     const { data: sol, error: solErr } = await supabase
@@ -92,58 +107,86 @@ serve(async (req) => {
     const lojaNome = (meta.alias_loja || meta.loja_nome || "") as string;
     const colunaAnterior = sol.pipeline_coluna_id as string | null;
 
-    // Descobre setor da coluna atual e procura coluna "Concluído"
+    // Descobre setor da coluna atual e procura coluna destino
+    //   carta / comprovante_pagamento → "Concluído"
+    //   boleto                        → "Boleto Enviado" (com fallback p/ Concluído)
     let colunaNova: string | null = colunaAnterior;
+    const nomeColunaDestino = modo === "boleto" ? ["Boleto Enviado", "Concluído"] : ["Concluído"];
     if (colunaAnterior) {
       const { data: colAtual } = await supabase
         .from("pipeline_colunas").select("setor_id").eq("id", colunaAnterior).maybeSingle();
       if (colAtual?.setor_id) {
-        const { data: alvo } = await supabase
-          .from("pipeline_colunas").select("id")
-          .eq("setor_id", colAtual.setor_id).eq("nome", "Concluído").eq("ativo", true)
-          .limit(1).maybeSingle();
-        if (alvo?.id) colunaNova = alvo.id;
+        const { data: alvos } = await supabase
+          .from("pipeline_colunas").select("id, nome")
+          .eq("setor_id", colAtual.setor_id).in("nome", nomeColunaDestino).eq("ativo", true);
+        const found = nomeColunaDestino
+          .map((n) => (alvos || []).find((c: any) => c.nome === n))
+          .find(Boolean);
+        if (found?.id) colunaNova = found.id;
       }
     }
 
-    // 1) Anexo
-    await supabase.from("solicitacao_anexos").insert({
-      solicitacao_id,
-      tipo: modo === "carta" ? "carta_estorno" : "comprovante_pagamento",
-      descricao: modo === "carta" ? "Carta de devolução do estorno" : "Comprovante de pagamento",
-      url_publica: anexo.url,
-      storage_path: anexo.storage_path || null,
-      mime_type: anexo.mime_type || null,
-      tamanho_bytes: anexo.tamanho_bytes || null,
-    });
+    // 1) Anexos (1+ no modo boleto)
+    const tipoAnexo =
+      modo === "carta" ? "carta_estorno" :
+      modo === "comprovante_pagamento" ? "comprovante_pagamento" :
+      "boleto";
+    const descAnexoBase =
+      modo === "carta" ? "Carta de devolução do estorno" :
+      modo === "comprovante_pagamento" ? "Comprovante de pagamento" :
+      "Boleto bancário";
+    for (let i = 0; i < anexosIn.length; i++) {
+      const a = anexosIn[i];
+      await supabase.from("solicitacao_anexos").insert({
+        solicitacao_id,
+        tipo: tipoAnexo,
+        descricao: anexosIn.length > 1 ? `${descAnexoBase} (${i + 1}/${anexosIn.length})` : descAnexoBase,
+        url_publica: a.url,
+        storage_path: a.storage_path || null,
+        mime_type: a.mime_type || null,
+        tamanho_bytes: a.tamanho_bytes || null,
+      });
+    }
+
 
     // 2) Metadata
     const nowIso = new Date().toISOString();
     const novoMeta: Record<string, unknown> = { ...meta };
+    const anexoPrincipalUrl = primeiroAnexo.url;
+    const todasUrlsAnexos = anexosIn.map((a) => a.url);
     if (modo === "carta") {
       novoMeta.estorno_status = "concluido";
-      novoMeta.carta_estorno_url = anexo.url;
+      novoMeta.carta_estorno_url = anexoPrincipalUrl;
       novoMeta.estorno_concluido_em = nowIso;
       novoMeta.estorno_concluido_por = usuario_nome;
-    } else {
+    } else if (modo === "comprovante_pagamento") {
       novoMeta.payment_status = "PAGO";
       novoMeta.pagamento_status = "concluido";
       novoMeta.nsu = body.nsu;
       if (body.tid) novoMeta.tid = body.tid;
       novoMeta.valor_pago = body.valor;
       novoMeta.payment_confirmed_at = nowIso;
-      novoMeta.comprovante_url = anexo.url;
+      novoMeta.comprovante_url = anexoPrincipalUrl;
       novoMeta.pago_por = usuario_nome;
       if (body.data_pagamento) novoMeta.data_pagamento = body.data_pagamento;
+    } else if (modo === "boleto") {
+      novoMeta.boleto_status = "enviado";
+      novoMeta.boleto_enviado_em = nowIso;
+      novoMeta.boleto_enviado_por = usuario_nome;
+      novoMeta.boleto_arquivos = todasUrlsAnexos;
+      novoMeta.boleto_url = anexoPrincipalUrl;
+      novoMeta.boleto_impresso = !!body.boleto_impresso;
+
     }
     if (body.observacao) novoMeta.observacao_conclusao = body.observacao;
 
     await supabase.from("solicitacoes").update({
       pipeline_coluna_id: colunaNova,
-      status: "concluida",
+      status: modo === "boleto" ? "em_atendimento" : "concluida",
       metadata: novoMeta,
       updated_at: nowIso,
     }).eq("id", solicitacao_id);
+
 
     // 3) Mensagem na thread da demanda (Messenger)
     //    Se a solicitação não tem demanda vinculada (criada direto via Messenger
@@ -161,12 +204,14 @@ serve(async (req) => {
 
       if (lojaInfo?.telefone) {
         const protocolo = `FIN-${new Date().getFullYear()}-${solicitacao_id.slice(0, 8)}`;
-        const assuntoDem = modo === "carta"
-          ? `Carta de estorno — ${sol.assunto || ""}`.slice(0, 120)
-          : `Comprovante de pagamento — ${sol.assunto || ""}`.slice(0, 120);
-        const perguntaDem = modo === "carta"
-          ? "Segue carta de estorno do cliente para repasse."
-          : `Comprovante de pagamento NSU ${body.nsu || ""} — R$ ${Number(body.valor || 0).toFixed(2)}`;
+        const assuntoDem =
+          modo === "carta" ? `Carta de estorno — ${sol.assunto || ""}`.slice(0, 120) :
+          modo === "boleto" ? `Boleto enviado — ${sol.assunto || ""}`.slice(0, 120) :
+          `Comprovante de pagamento — ${sol.assunto || ""}`.slice(0, 120);
+        const perguntaDem =
+          modo === "carta" ? "Segue carta de estorno do cliente para repasse." :
+          modo === "boleto" ? `Boleto(s) emitido(s) (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""}) — ${(novoMeta as any).boleto_impresso ? "imprimir e entregar fisicamente" : "envio digital"}.` :
+          `Comprovante de pagamento NSU ${body.nsu || ""} — R$ ${Number(body.valor || 0).toFixed(2)}`;
 
         const { data: novaDem, error: novaDemErr } = await supabase
           .from("demandas_loja")
@@ -178,7 +223,7 @@ serve(async (req) => {
             pergunta: perguntaDem,
             status: "respondida",
             origem: "operador",
-            tipo_chave: modo === "carta" ? "carta_estorno" : "comprovante_pagamento",
+            tipo_chave: modo === "carta" ? "carta_estorno" : modo === "boleto" ? "boleto_enviado" : "comprovante_pagamento",
             setor_destino_id: lojaInfo.setor_destino_id,
             solicitante_id: usuario_id,
             solicitante_nome: usuario_nome,
@@ -201,20 +246,37 @@ serve(async (req) => {
     }
 
     if (demandaId) {
-      const tituloMsg = modo === "carta"
-        ? `✅ Estorno concluído. Segue a carta para enviar ao cliente.`
-        : `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}`;
+      const tituloMsg =
+        modo === "carta" ? `✅ Estorno concluído. Segue a carta para enviar ao cliente.` :
+        modo === "boleto" ? `📄 Boleto${anexosIn.length > 1 ? "s" : ""} enviado${anexosIn.length > 1 ? "s" : ""} (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""}).${(novoMeta as any).boleto_impresso ? "\n🖨️ Imprimir e entregar fisicamente." : ""}` :
+        `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}`;
 
+      // Mensagem principal com primeiro anexo
       await supabase.from("demanda_mensagens").insert({
         demanda_id: demandaId,
         direcao: "operador_para_loja",
         autor_id: usuario_id,
         autor_nome: usuario_nome || "Financeiro",
         conteudo: tituloMsg + (body.observacao ? `\n\n📝 ${body.observacao}` : ""),
-        anexo_url: anexo.url,
-        anexo_mime: anexo.mime_type || null,
-        metadata: { tipo: "conclusao_financeiro", modo, solicitacao_id },
+        anexo_url: anexoPrincipalUrl,
+        anexo_mime: primeiroAnexo.mime_type || null,
+        metadata: { tipo: "conclusao_financeiro", modo, solicitacao_id, total_anexos: anexosIn.length },
       });
+
+      // Mensagens adicionais para anexos extras (modo boleto)
+      for (let i = 1; i < anexosIn.length; i++) {
+        const ex = anexosIn[i];
+        await supabase.from("demanda_mensagens").insert({
+          demanda_id: demandaId,
+          direcao: "operador_para_loja",
+          autor_id: usuario_id,
+          autor_nome: usuario_nome || "Financeiro",
+          conteudo: `📎 Boleto ${i + 1}/${anexosIn.length}`,
+          anexo_url: ex.url,
+          anexo_mime: ex.mime_type || null,
+          metadata: { tipo: "conclusao_financeiro", modo, solicitacao_id, indice: i },
+        });
+      }
 
       // Atualiza demanda como respondida + invalida vista
       await supabase.from("demandas_loja").update({
@@ -222,6 +284,7 @@ serve(async (req) => {
         vista_pelo_operador: true,
         ultima_mensagem_loja_at: nowIso,
       }).eq("id", demandaId);
+
 
       // (Notificações enviadas no bloco 3b com referencia_id=solicitacao_id —
       //  o Messenger abre a thread da SOL, então evitamos duplicar aqui.)
@@ -235,35 +298,58 @@ serve(async (req) => {
     //     loja realmente lê a resposta do operador.
     //     Mensagem curta + anexo estruturado (anexo_url/nome/mime) para o app
     //     renderizar como card clicável (sem URL crua no texto).
-    const comentarioMsg = modo === "carta"
-      ? `✅ Estorno concluído.\n\nCarta de devolução em anexo — toque para abrir, baixar ou compartilhar por WhatsApp com o cliente.`
-      : `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\nComprovante em anexo.`;
+    const comentarioMsg =
+      modo === "carta" ? `✅ Estorno concluído.\n\nCarta de devolução em anexo — toque para abrir, baixar ou compartilhar por WhatsApp com o cliente.` :
+      modo === "boleto" ? `📄 Boleto(s) enviado(s) — ${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""} em anexo${(novoMeta as any).boleto_impresso ? "\n\n🖨️ Imprimir e entregar fisicamente." : ""}` :
+      `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\nComprovante em anexo.`;
 
+    // Comentário principal (1º anexo)
     await supabase.from("solicitacao_comentarios").insert({
       solicitacao_id,
       autor_id: usuario_id,
       autor_nome: usuario_nome || "Financeiro",
       conteudo: comentarioMsg + (body.observacao ? `\n\n📝 ${body.observacao}` : ""),
       tipo: "operador_para_loja",
-      anexo_url: anexo.url,
-      anexo_nome: anexo.nome || (modo === "carta" ? "carta-estorno.pdf" : "comprovante.pdf"),
-      anexo_mime: anexo.mime_type || null,
-      metadata: { tipo: "conclusao_financeiro", modo, storage_path: anexo.storage_path || null },
+      anexo_url: anexoPrincipalUrl,
+      anexo_nome: primeiroAnexo.nome || (modo === "carta" ? "carta-estorno.pdf" : modo === "boleto" ? "boleto.pdf" : "comprovante.pdf"),
+      anexo_mime: primeiroAnexo.mime_type || null,
+      metadata: { tipo: "conclusao_financeiro", modo, storage_path: primeiroAnexo.storage_path || null, total_anexos: anexosIn.length },
     });
 
+    // Comentários adicionais para anexos extras (boleto multi-arquivo)
+    for (let i = 1; i < anexosIn.length; i++) {
+      const ex = anexosIn[i];
+      await supabase.from("solicitacao_comentarios").insert({
+        solicitacao_id,
+        autor_id: usuario_id,
+        autor_nome: usuario_nome || "Financeiro",
+        conteudo: `📎 Boleto ${i + 1}/${anexosIn.length}`,
+        tipo: "operador_para_loja",
+        anexo_url: ex.url,
+        anexo_nome: ex.nome || `boleto-${i + 1}.pdf`,
+        anexo_mime: ex.mime_type || null,
+        metadata: { tipo: "conclusao_financeiro", modo, storage_path: ex.storage_path || null, indice: i },
+      });
+    }
+
     // Notifica usuários da loja com referência à SOLICITAÇÃO (Messenger abre a
-    // thread da solicitação — é onde a loja vê a carta/comprovante).
+    // thread da solicitação — é onde a loja vê a carta/comprovante/boleto).
     if (lojaNome) {
       const { data: destsSol } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
       const userIdsSol = (destsSol || []).map((d: any) => d.user_id).filter(Boolean);
       if (userIdsSol.length > 0) {
+        const tipoNotif = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : "pagamento_concluido";
+        const tituloNotif = modo === "carta" ? "Carta de estorno disponível" : modo === "boleto" ? "Boleto enviado" : "Pagamento concluído";
+        const msgNotif = modo === "carta"
+          ? `${sol.protocolo || "Solicitação"} — toque para baixar a carta`
+          : modo === "boleto"
+          ? `${sol.protocolo || "Solicitação"} — ${anexosIn.length} boleto(s)${(novoMeta as any).boleto_impresso ? " • imprimir" : ""}`
+          : `${sol.protocolo || "Solicitação"} — R$ ${Number(body.valor).toFixed(2)} NSU ${body.nsu}`;
         await supabase.from("notificacoes").insert(userIdsSol.map((uid: string) => ({
           usuario_id: uid,
-          tipo: modo === "carta" ? "estorno_concluido" : "pagamento_concluido",
-          titulo: modo === "carta" ? "Carta de estorno disponível" : "Pagamento concluído",
-          mensagem: (modo === "carta"
-            ? `${sol.protocolo || "Solicitação"} — toque para baixar a carta`
-            : `${sol.protocolo || "Solicitação"} — R$ ${Number(body.valor).toFixed(2)} NSU ${body.nsu}`).slice(0, 140),
+          tipo: tipoNotif,
+          titulo: tituloNotif,
+          mensagem: msgNotif.slice(0, 140),
           referencia_id: solicitacao_id,
         })));
       }
@@ -272,17 +358,20 @@ serve(async (req) => {
 
 
     // 4) Timeline
+    const tipoEvt = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : "pagamento_concluido";
+    const descEvt = modo === "carta" ? "Estorno concluído com carta" : modo === "boleto" ? `Boleto enviado (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""})` : `Pagamento concluído — NSU ${body.nsu}`;
     await supabase.from("pipeline_card_eventos").insert({
       entidade: "solicitacao",
       entidade_id: solicitacao_id,
-      tipo: modo === "carta" ? "estorno_concluido" : "pagamento_concluido",
-      descricao: modo === "carta" ? "Estorno concluído com carta" : `Pagamento concluído — NSU ${body.nsu}`,
+      tipo: tipoEvt,
+      descricao: descEvt,
       coluna_anterior_id: colunaAnterior,
       coluna_nova_id: colunaNova,
       usuario_id,
       usuario_nome,
-      metadata: { modo, anexo_url: anexo.url, nsu: body.nsu, valor: body.valor },
+      metadata: { modo, anexo_url: anexoPrincipalUrl, total_anexos: anexosIn.length, nsu: body.nsu, valor: body.valor },
     });
+
 
     return new Response(JSON.stringify({ status: "ok", coluna_id: colunaNova, demanda_id: demandaId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

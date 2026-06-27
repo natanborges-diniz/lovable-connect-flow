@@ -2415,11 +2415,13 @@ export type Database = {
           ativo: boolean
           cor: string
           created_at: string
+          dias_auto_arquivar: number
           grupo_funil: string | null
           id: string
           nome: string
           ordem: number
           setor_id: string | null
+          terminal: boolean
           tipo_acao: string | null
           updated_at: string
         }
@@ -2427,11 +2429,13 @@ export type Database = {
           ativo?: boolean
           cor?: string
           created_at?: string
+          dias_auto_arquivar?: number
           grupo_funil?: string | null
           id?: string
           nome: string
           ordem?: number
           setor_id?: string | null
+          terminal?: boolean
           tipo_acao?: string | null
           updated_at?: string
         }
@@ -2439,11 +2443,13 @@ export type Database = {
           ativo?: boolean
           cor?: string
           created_at?: string
+          dias_auto_arquivar?: number
           grupo_funil?: string | null
           id?: string
           nome?: string
           ordem?: number
           setor_id?: string | null
+          terminal?: boolean
           tipo_acao?: string | null
           updated_at?: string
         }

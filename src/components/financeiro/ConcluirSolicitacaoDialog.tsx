@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2, FileCheck, Receipt, Upload } from "lucide-react";
+import { Loader2, FileCheck, Receipt, Upload, FileText, X } from "lucide-react";
 
-type Modo = "carta" | "comprovante_pagamento";
+type Modo = "carta" | "comprovante_pagamento" | "boleto";
 
 interface Props {
   solicitacaoId: string | null;
@@ -23,7 +24,7 @@ interface Props {
 export function ConcluirSolicitacaoDialog({
   solicitacaoId, modo, open, onOpenChange, onSuccess,
 }: Props) {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [nsu, setNsu] = useState("");
   const [tid, setTid] = useState("");
   const [valor, setValor] = useState("");
@@ -31,51 +32,69 @@ export function ConcluirSolicitacaoDialog({
     new Date().toISOString().slice(0, 10)
   );
   const [observacao, setObservacao] = useState("");
+  const [boletoImpresso, setBoletoImpresso] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const isComprovante = modo === "comprovante_pagamento";
-  const titulo = isComprovante ? "Concluir pagamento" : "Concluir com carta de estorno";
-  const descricao = isComprovante
-    ? "Envie o comprovante de pagamento (PDF ou imagem). NSU e valor são obrigatórios. A loja recebe o comprovante no app."
-    : "Envie a carta de devolução do estorno (PDF ou imagem). A loja recebe a carta no app e pode encaminhar ao cliente.";
+  const isBoleto = modo === "boleto";
+  const allowMultiple = isBoleto;
+
+  const titulo =
+    isComprovante ? "Concluir pagamento" :
+    isBoleto ? "Anexar boleto(s) e enviar" :
+    "Concluir com carta de estorno";
+  const descricao =
+    isComprovante
+      ? "Envie o comprovante de pagamento (PDF ou imagem). NSU e valor são obrigatórios. A loja recebe o comprovante no app."
+      : isBoleto
+      ? "Anexe 1 ou mais arquivos (PDF/imagem). Marque se a loja deve imprimir e entregar fisicamente. O card vai para 'Boleto Enviado' e a loja recebe os arquivos no app."
+      : "Envie a carta de devolução do estorno (PDF ou imagem). A loja recebe a carta no app e pode encaminhar ao cliente.";
   const accept = ".pdf,image/*";
-  const Icon = isComprovante ? Receipt : FileCheck;
+  const Icon = isComprovante ? Receipt : isBoleto ? FileText : FileCheck;
 
   const reset = () => {
-    setFile(null); setNsu(""); setTid(""); setValor("");
+    setFiles([]); setNsu(""); setTid(""); setValor("");
     setDataPagamento(new Date().toISOString().slice(0, 10));
-    setObservacao(""); if (fileRef.current) fileRef.current.value = "";
+    setObservacao(""); setBoletoImpresso(false);
+    if (fileRef.current) fileRef.current.value = "";
   };
 
-  const canSubmit = !!file && !!solicitacaoId &&
+  const canSubmit =
+    files.length > 0 && !!solicitacaoId &&
     (!isComprovante || (nsu.trim().length >= 3 && Number(valor) > 0));
 
   const handle = async () => {
-    if (!file || !solicitacaoId) return;
+    if (files.length === 0 || !solicitacaoId) return;
     setUploading(true);
     try {
-      // RLS exige que o 1º segmento do path seja auth.uid()
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Sessão expirada — faça login novamente.");
-      // Upload pro bucket público mensagens-anexos
-      const ext = file.name.split(".").pop() || "bin";
-      const path = `${user.id}/financeiro/${solicitacaoId}/${Date.now()}-${modo}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("mensagens-anexos").upload(path, file, { contentType: file.type, upsert: false });
-      if (upErr) throw upErr;
-      const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+
+      // Upload de cada arquivo no bucket público
+      const anexos: any[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const ext = f.name.split(".").pop() || "bin";
+        const path = `${user.id}/financeiro/${solicitacaoId}/${Date.now()}-${i}-${modo}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("mensagens-anexos").upload(path, f, { contentType: f.type, upsert: false });
+        if (upErr) throw upErr;
+        const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
+        anexos.push({
+          url: pub.publicUrl,
+          storage_path: path,
+          mime_type: f.type,
+          nome: f.name,
+          tamanho_bytes: f.size,
+        });
+      }
 
       const payload: Record<string, unknown> = {
         solicitacao_id: solicitacaoId,
         modo,
-        anexo: {
-          url: pub.publicUrl,
-          storage_path: path,
-          mime_type: file.type,
-          nome: file.name,
-          tamanho_bytes: file.size,
-        },
+        anexos,                  // novo: lista
+        anexo: anexos[0],        // compat: 1º
         observacao: observacao.trim() || undefined,
       };
       if (isComprovante) {
@@ -84,11 +103,21 @@ export function ConcluirSolicitacaoDialog({
         payload.valor = Number(valor);
         payload.data_pagamento = dataPagamento;
       }
+      if (isBoleto) {
+        // EF grava boleto_impresso em metadata via observacao? Não — usamos observação extra.
+        // Para preservar o flag estruturado, embutimos no payload.observacao com marcador
+        // e também enviamos como metadata_extra (a EF lê em novoMeta).
+        (payload as any).boleto_impresso = boletoImpresso;
+      }
       const { data, error } = await supabase.functions.invoke("concluir-solicitacao-financeiro", { body: payload });
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
 
-      toast.success(isComprovante ? "Pagamento concluído e comprovante enviado à loja." : "Estorno concluído. Carta enviada à loja.");
+      toast.success(
+        isComprovante ? "Pagamento concluído e comprovante enviado à loja." :
+        isBoleto ? `Boleto(s) enviado(s) à loja${boletoImpresso ? " (sinalizado para impressão)" : ""}.` :
+        "Estorno concluído. Carta enviada à loja."
+      );
       reset();
       onOpenChange(false);
       onSuccess?.();
@@ -113,20 +142,55 @@ export function ConcluirSolicitacaoDialog({
         <div className="space-y-3">
           <div className="space-y-1">
             <Label className="text-xs">
-              {isComprovante ? "Comprovante (PDF/imagem) *" : "Carta de devolução (PDF/imagem) *"}
+              {isComprovante ? "Comprovante (PDF/imagem) *" :
+               isBoleto ? "Boleto(s) — 1 ou mais (PDF/imagem) *" :
+               "Carta de devolução (PDF/imagem) *"}
             </Label>
             <Input
               ref={fileRef}
               type="file"
               accept={accept}
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              multiple={allowMultiple}
+              onChange={(e) => {
+                const list = Array.from(e.target.files || []);
+                setFiles(allowMultiple ? list : list.slice(0, 1));
+              }}
             />
-            {file && (
-              <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
-                <Upload className="h-3 w-3" /> {file.name} · {(file.size / 1024).toFixed(0)} KB
-              </p>
+            {files.length > 0 && (
+              <ul className="space-y-0.5">
+                {files.map((f, i) => (
+                  <li key={i} className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+                    <Upload className="h-3 w-3" /> {f.name} · {(f.size / 1024).toFixed(0)} KB
+                    <button
+                      type="button"
+                      className="ml-auto text-destructive hover:text-destructive/70"
+                      onClick={() => setFiles(files.filter((_, idx) => idx !== i))}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
+
+          {isBoleto && (
+            <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-2">
+              <Checkbox
+                id="boleto-impresso"
+                checked={boletoImpresso}
+                onCheckedChange={(v) => setBoletoImpresso(!!v)}
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="boleto-impresso" className="text-xs font-medium cursor-pointer">
+                  Imprimir e entregar fisicamente
+                </Label>
+                <p className="text-[10px] text-muted-foreground">
+                  Loja recebe alerta para imprimir antes da entrega ao cliente.
+                </p>
+              </div>
+            </div>
+          )}
 
           {isComprovante && (
             <>
@@ -168,7 +232,9 @@ export function ConcluirSolicitacaoDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={uploading}>Cancelar</Button>
           <Button onClick={handle} disabled={!canSubmit || uploading}>
             {uploading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
-            {isComprovante ? "Concluir pagamento" : "Concluir e enviar carta"}
+            {isComprovante ? "Concluir pagamento" :
+             isBoleto ? `Enviar ${files.length || ""} boleto${files.length !== 1 ? "s" : ""}`.trim() :
+             "Concluir e enviar carta"}
           </Button>
         </DialogFooter>
       </DialogContent>

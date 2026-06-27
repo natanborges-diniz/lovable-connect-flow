@@ -14,8 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Plus, Pencil, Trash2, Check, X, Search, GripVertical,
-  CreditCard, FileText, Clock, DollarSign, ShieldCheck, Zap,
+  CreditCard, FileText, Clock, DollarSign, ShieldCheck, Zap, Archive, ArchiveRestore,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -51,6 +54,8 @@ import { useAuth } from "@/hooks/useAuth";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
+  const [mostrarArquivados, setMostrarArquivados] = useState(false);
+
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
   const [selectedSolicitacao, setSelectedSolicitacao] = useState<any | null>(null);
@@ -135,11 +140,14 @@ export default function PipelineFinanceiro() {
 
   const [cancelDialogId, setCancelDialogId] = useState<string | null>(null);
   const [devolverDialog, setDevolverDialog] = useState<{ id: string; colunaId?: string; presets?: string[] } | null>(null);
-  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" } | null>(null);
+  const [concluirDialog, setConcluirDialog] = useState<{ id: string; modo: "carta" | "comprovante_pagamento" | "boleto" } | null>(null);
+
 
   const isLoading = loadingColunas || loadingSolicitacoes || !setorId;
 
   const filteredSolicitacoes = (solicitacoes ?? []).filter((s: any) => {
+    // Esconde arquivados por padrão (toggle controla visibilidade)
+    if (!mostrarArquivados && s.metadata?.arquivado_at) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -150,6 +158,7 @@ export default function PipelineFinanceiro() {
       s.tipo?.toLowerCase().includes(q)
     );
   });
+
 
   const solicitacoesByColuna = (colunas ?? []).map((col) => ({
     ...col,
@@ -246,6 +255,19 @@ export default function PipelineFinanceiro() {
                 className="pl-9 w-60"
               />
             </div>
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border bg-muted/30">
+              {mostrarArquivados ? <ArchiveRestore className="h-3.5 w-3.5 text-muted-foreground" /> : <Archive className="h-3.5 w-3.5 text-muted-foreground" />}
+              <Switch
+                id="show-archived"
+                checked={mostrarArquivados}
+                onCheckedChange={setMostrarArquivados}
+                className="scale-75"
+              />
+              <Label htmlFor="show-archived" className="text-xs cursor-pointer select-none">
+                Arquivados
+              </Label>
+            </div>
+
             <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-1" /> Nova Demanda
             </Button>
@@ -446,6 +468,37 @@ export default function PipelineFinanceiro() {
                                               🔑 NSU: {sol.metadata.nsu}
                                             </Badge>
                                           )}
+                                          {sol.tipo === "boleto" && (sol.metadata?.qtd_parcelas || sol.metadata?.boleto_status) && (
+                                            <div className="flex flex-wrap items-center gap-1 pl-6">
+                                              {sol.metadata?.qtd_parcelas && (
+                                                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                                                  {sol.metadata.qtd_parcelas}x R$ {Number(sol.metadata.valor_parcela || 0).toFixed(2)}
+                                                </Badge>
+                                              )}
+                                              {sol.metadata?.dia_vencimento && (
+                                                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                                                  vence dia {sol.metadata.dia_vencimento}
+                                                </Badge>
+                                              )}
+                                              {sol.metadata?.boleto_impresso && (
+                                                <Badge className="text-[10px] px-1 py-0 bg-amber-100 text-amber-800 border-amber-300">
+                                                  🖨️ Impresso
+                                                </Badge>
+                                              )}
+                                              {sol.metadata?.boleto_status === "enviado" && (
+                                                <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-800 border-green-300">
+                                                  Enviado
+                                                </Badge>
+                                              )}
+                                            </div>
+                                          )}
+                                          {sol.metadata?.arquivado_at && (
+                                            <Badge variant="outline" className="ml-6 text-[10px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">
+                                              <Archive className="h-2.5 w-2.5 mr-0.5" /> Arquivado
+                                            </Badge>
+                                          )}
+
+
                                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-6">
                                             <Clock className="h-3 w-3 shrink-0" />
                                             <span>
@@ -669,12 +722,16 @@ export default function PipelineFinanceiro() {
                   const encerrado = status === "concluida" || status === "cancelada";
                   const isEstorno = t === "estorno_cartao" || t === "estorno_pix_debito";
                   const isPag = t === "pagamento" || t === "reembolso";
-                  if (encerrado || (!isEstorno && !isPag)) return null;
+                  const isBoleto = t === "boleto";
+                  if (encerrado || (!isEstorno && !isPag && !isBoleto)) return null;
 
                   const presetsEstorno = ["NSU incorreto", "Valor divergente", "Falta carta do cliente", "Outro"];
                   const presetsPag = t === "pagamento"
                     ? ["Falta CNPJ do favorecido", "Chave PIX inválida", "Anexo ilegível", "Valor divergente", "Outro"]
                     : ["Comprovante ilegível", "Chave PIX inválida", "Valor divergente", "Outro"];
+                  const presetsBoleto = ["CPF inválido", "Valor divergente", "Faltam dados do cliente", "Outro"];
+                  const presetsAtivos = isEstorno ? presetsEstorno : isBoleto ? presetsBoleto : presetsPag;
+
 
                   return (
                     <div className="pt-3 border-t space-y-2">
@@ -728,13 +785,19 @@ export default function PipelineFinanceiro() {
                             <CreditCard className="h-3.5 w-3.5 mr-1" /> Concluir pagamento
                           </Button>
                         )}
+                        {isBoleto && selectedSolicitacao.metadata?.boleto_status !== "enviado" && (
+                          <Button size="sm" onClick={() => setConcluirDialog({ id: selectedSolicitacao.id, modo: "boleto" })}>
+                            <FileText className="h-3.5 w-3.5 mr-1" /> Anexar boleto(s) e enviar
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => setDevolverDialog({
                             id: selectedSolicitacao.id,
-                            presets: isEstorno ? presetsEstorno : presetsPag,
+                            presets: presetsAtivos,
                           })}
+
                         >
                           ↩️ Devolver à loja
                         </Button>
