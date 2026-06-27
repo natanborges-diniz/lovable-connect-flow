@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2, FileCheck, Receipt, Upload, FileText, X } from "lucide-react";
+
 
 type Modo = "carta" | "comprovante_pagamento" | "boleto";
 
@@ -32,7 +32,6 @@ export function ConcluirSolicitacaoDialog({
     new Date().toISOString().slice(0, 10)
   );
   const [observacao, setObservacao] = useState("");
-  const [boletoImpresso, setBoletoImpresso] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -48,7 +47,7 @@ export function ConcluirSolicitacaoDialog({
     isComprovante
       ? "Envie o comprovante de pagamento (PDF ou imagem). NSU e valor são obrigatórios. A loja recebe o comprovante no app."
       : isBoleto
-      ? "Anexe 1 ou mais arquivos (PDF/imagem). Marque se a loja deve imprimir e entregar fisicamente. O card vai para 'Boleto Enviado' e a loja recebe os arquivos no app."
+      ? "Anexe 1 ou mais arquivos (PDF/imagem). O card vai para 'Boleto Enviado' e a loja recebe os arquivos no app. Se a loja pediu impressão na abertura, esse aviso já aparece no card — imprima e envie por malote."
       : "Envie a carta de devolução do estorno (PDF ou imagem). A loja recebe a carta no app e pode encaminhar ao cliente.";
   const accept = ".pdf,image/*";
   const Icon = isComprovante ? Receipt : isBoleto ? FileText : FileCheck;
