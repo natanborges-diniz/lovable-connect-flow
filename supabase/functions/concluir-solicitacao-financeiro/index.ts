@@ -30,8 +30,8 @@ interface Body {
   valor?: number | string;
   data_pagamento?: string;        // ISO ou dd/mm/aaaa
   observacao?: string;
-  // boleto:
-  boleto_impresso?: boolean;
+  // boleto: nenhum campo extra — flag de impressão vem da abertura pela loja
+
 }
 
 
