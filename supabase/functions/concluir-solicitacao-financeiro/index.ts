@@ -199,12 +199,14 @@ serve(async (req) => {
 
       if (lojaInfo?.telefone) {
         const protocolo = `FIN-${new Date().getFullYear()}-${solicitacao_id.slice(0, 8)}`;
-        const assuntoDem = modo === "carta"
-          ? `Carta de estorno — ${sol.assunto || ""}`.slice(0, 120)
-          : `Comprovante de pagamento — ${sol.assunto || ""}`.slice(0, 120);
-        const perguntaDem = modo === "carta"
-          ? "Segue carta de estorno do cliente para repasse."
-          : `Comprovante de pagamento NSU ${body.nsu || ""} — R$ ${Number(body.valor || 0).toFixed(2)}`;
+        const assuntoDem =
+          modo === "carta" ? `Carta de estorno — ${sol.assunto || ""}`.slice(0, 120) :
+          modo === "boleto" ? `Boleto enviado — ${sol.assunto || ""}`.slice(0, 120) :
+          `Comprovante de pagamento — ${sol.assunto || ""}`.slice(0, 120);
+        const perguntaDem =
+          modo === "carta" ? "Segue carta de estorno do cliente para repasse." :
+          modo === "boleto" ? `Boleto(s) emitido(s) (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""}) — ${(novoMeta as any).boleto_impresso ? "imprimir e entregar fisicamente" : "envio digital"}.` :
+          `Comprovante de pagamento NSU ${body.nsu || ""} — R$ ${Number(body.valor || 0).toFixed(2)}`;
 
         const { data: novaDem, error: novaDemErr } = await supabase
           .from("demandas_loja")
@@ -216,7 +218,7 @@ serve(async (req) => {
             pergunta: perguntaDem,
             status: "respondida",
             origem: "operador",
-            tipo_chave: modo === "carta" ? "carta_estorno" : "comprovante_pagamento",
+            tipo_chave: modo === "carta" ? "carta_estorno" : modo === "boleto" ? "boleto_enviado" : "comprovante_pagamento",
             setor_destino_id: lojaInfo.setor_destino_id,
             solicitante_id: usuario_id,
             solicitante_nome: usuario_nome,
@@ -239,20 +241,37 @@ serve(async (req) => {
     }
 
     if (demandaId) {
-      const tituloMsg = modo === "carta"
-        ? `✅ Estorno concluído. Segue a carta para enviar ao cliente.`
-        : `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}`;
+      const tituloMsg =
+        modo === "carta" ? `✅ Estorno concluído. Segue a carta para enviar ao cliente.` :
+        modo === "boleto" ? `📄 Boleto${anexosIn.length > 1 ? "s" : ""} enviado${anexosIn.length > 1 ? "s" : ""} (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""}).${(novoMeta as any).boleto_impresso ? "\n🖨️ Imprimir e entregar fisicamente." : ""}` :
+        `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}`;
 
+      // Mensagem principal com primeiro anexo
       await supabase.from("demanda_mensagens").insert({
         demanda_id: demandaId,
         direcao: "operador_para_loja",
         autor_id: usuario_id,
         autor_nome: usuario_nome || "Financeiro",
         conteudo: tituloMsg + (body.observacao ? `\n\n📝 ${body.observacao}` : ""),
-        anexo_url: anexo.url,
-        anexo_mime: anexo.mime_type || null,
-        metadata: { tipo: "conclusao_financeiro", modo, solicitacao_id },
+        anexo_url: anexoPrincipalUrl,
+        anexo_mime: primeiroAnexo.mime_type || null,
+        metadata: { tipo: "conclusao_financeiro", modo, solicitacao_id, total_anexos: anexosIn.length },
       });
+
+      // Mensagens adicionais para anexos extras (modo boleto)
+      for (let i = 1; i < anexosIn.length; i++) {
+        const ex = anexosIn[i];
+        await supabase.from("demanda_mensagens").insert({
+          demanda_id: demandaId,
+          direcao: "operador_para_loja",
+          autor_id: usuario_id,
+          autor_nome: usuario_nome || "Financeiro",
+          conteudo: `📎 Boleto ${i + 1}/${anexosIn.length}`,
+          anexo_url: ex.url,
+          anexo_mime: ex.mime_type || null,
+          metadata: { tipo: "conclusao_financeiro", modo, solicitacao_id, indice: i },
+        });
+      }
 
       // Atualiza demanda como respondida + invalida vista
       await supabase.from("demandas_loja").update({
@@ -260,6 +279,7 @@ serve(async (req) => {
         vista_pelo_operador: true,
         ultima_mensagem_loja_at: nowIso,
       }).eq("id", demandaId);
+
 
       // (Notificações enviadas no bloco 3b com referencia_id=solicitacao_id —
       //  o Messenger abre a thread da SOL, então evitamos duplicar aqui.)
