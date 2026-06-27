@@ -722,12 +722,16 @@ export default function PipelineFinanceiro() {
                   const encerrado = status === "concluida" || status === "cancelada";
                   const isEstorno = t === "estorno_cartao" || t === "estorno_pix_debito";
                   const isPag = t === "pagamento" || t === "reembolso";
-                  if (encerrado || (!isEstorno && !isPag)) return null;
+                  const isBoleto = t === "boleto";
+                  if (encerrado || (!isEstorno && !isPag && !isBoleto)) return null;
 
                   const presetsEstorno = ["NSU incorreto", "Valor divergente", "Falta carta do cliente", "Outro"];
                   const presetsPag = t === "pagamento"
                     ? ["Falta CNPJ do favorecido", "Chave PIX inválida", "Anexo ilegível", "Valor divergente", "Outro"]
                     : ["Comprovante ilegível", "Chave PIX inválida", "Valor divergente", "Outro"];
+                  const presetsBoleto = ["CPF inválido", "Valor divergente", "Faltam dados do cliente", "Outro"];
+                  const presetsAtivos = isEstorno ? presetsEstorno : isBoleto ? presetsBoleto : presetsPag;
+
 
                   return (
                     <div className="pt-3 border-t space-y-2">
