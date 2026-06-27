@@ -14,8 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Plus, Pencil, Trash2, Check, X, Search, GripVertical,
-  CreditCard, FileText, Clock, DollarSign, ShieldCheck, Zap,
+  CreditCard, FileText, Clock, DollarSign, ShieldCheck, Zap, Archive, ArchiveRestore,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
