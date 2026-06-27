@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
-  ArrowRightLeft, MessageSquare, Undo2, Ban, CheckCircle2, Zap, Clock, RefreshCw, FileText,
+  ArrowRightLeft, MessageSquare, Undo2, Ban, CheckCircle2, Zap, Clock, RefreshCw, FileText, Paperclip, ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,8 @@ const ICON_MAP: Record<string, React.ElementType> = {
   boleto_enviado: FileText,
   boleto_revisao_solicitada: RefreshCw,
   boleto_revisao_concluida: CheckCircle2,
+  boleto_anexo_extra: Paperclip,
+  boleto_envio_bloqueado: ShieldAlert,
 };
 
 const COLOR_MAP: Record<string, string> = {
@@ -43,6 +45,8 @@ const COLOR_MAP: Record<string, string> = {
   boleto_enviado: "text-emerald-600",
   boleto_revisao_solicitada: "text-amber-600",
   boleto_revisao_concluida: "text-emerald-600",
+  boleto_anexo_extra: "text-blue-600",
+  boleto_envio_bloqueado: "text-destructive",
 };
 
 export function CardTimeline({

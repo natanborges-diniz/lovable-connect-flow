@@ -76,7 +76,18 @@ serve(async (req) => {
     const primeiroAnexo = anexosIn[0];
 
     if (!solicitacao_id || !modo || !primeiroAnexo?.url) {
-      return new Response(JSON.stringify({ error: "solicitacao_id, modo e pelo menos um anexo são obrigatórios" }), {
+      // Auditoria: tentativa de concluir boleto sem anexo
+      if (modo === "boleto" || modo === "boleto-revisao") {
+        await supabase.from("pipeline_card_eventos").insert({
+          entidade: "solicitacao",
+          entidade_id: solicitacao_id || null,
+          tipo: "boleto_envio_bloqueado",
+          descricao: "Tentativa de envio de boleto sem anexo (bloqueado pelo backend)",
+          usuario_id, usuario_nome,
+          metadata: { modo, motivo: "anexo_ausente" },
+        });
+      }
+      return new Response(JSON.stringify({ error: "Anexe pelo menos 1 arquivo de boleto antes de concluir." }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -86,6 +97,23 @@ serve(async (req) => {
       });
     }
     const isBoletoLike = modo === "boleto" || modo === "boleto-revisao";
+    // Guarda extra: cada anexo do boleto precisa ter URL e storage_path não vazios
+    if (isBoletoLike) {
+      const invalido = anexosIn.find((a) => !a?.url || !a?.storage_path);
+      if (invalido || anexosIn.length === 0) {
+        await supabase.from("pipeline_card_eventos").insert({
+          entidade: "solicitacao",
+          entidade_id: solicitacao_id,
+          tipo: "boleto_envio_bloqueado",
+          descricao: "Tentativa de envio de boleto com anexo inválido (URL/storage_path ausente)",
+          usuario_id, usuario_nome,
+          metadata: { modo, total_anexos: anexosIn.length },
+        });
+        return new Response(JSON.stringify({ error: "Anexo de boleto inválido — refaça o upload e tente novamente." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
     if (modo === "comprovante_pagamento") {
       if (!body.nsu || !body.valor) {
         return new Response(JSON.stringify({ error: "NSU e valor são obrigatórios para comprovante de pagamento" }), {
