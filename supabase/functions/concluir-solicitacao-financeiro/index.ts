@@ -293,35 +293,58 @@ serve(async (req) => {
     //     loja realmente lê a resposta do operador.
     //     Mensagem curta + anexo estruturado (anexo_url/nome/mime) para o app
     //     renderizar como card clicável (sem URL crua no texto).
-    const comentarioMsg = modo === "carta"
-      ? `✅ Estorno concluído.\n\nCarta de devolução em anexo — toque para abrir, baixar ou compartilhar por WhatsApp com o cliente.`
-      : `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\nComprovante em anexo.`;
+    const comentarioMsg =
+      modo === "carta" ? `✅ Estorno concluído.\n\nCarta de devolução em anexo — toque para abrir, baixar ou compartilhar por WhatsApp com o cliente.` :
+      modo === "boleto" ? `📄 Boleto(s) enviado(s) — ${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""} em anexo${(novoMeta as any).boleto_impresso ? "\n\n🖨️ Imprimir e entregar fisicamente." : ""}` :
+      `✅ Pagamento concluído.\n\n🔑 NSU: ${body.nsu}\n💰 Valor: R$ ${Number(body.valor).toFixed(2)}${body.data_pagamento ? `\n📅 ${body.data_pagamento}` : ""}\n\nComprovante em anexo.`;
 
+    // Comentário principal (1º anexo)
     await supabase.from("solicitacao_comentarios").insert({
       solicitacao_id,
       autor_id: usuario_id,
       autor_nome: usuario_nome || "Financeiro",
       conteudo: comentarioMsg + (body.observacao ? `\n\n📝 ${body.observacao}` : ""),
       tipo: "operador_para_loja",
-      anexo_url: anexo.url,
-      anexo_nome: anexo.nome || (modo === "carta" ? "carta-estorno.pdf" : "comprovante.pdf"),
-      anexo_mime: anexo.mime_type || null,
-      metadata: { tipo: "conclusao_financeiro", modo, storage_path: anexo.storage_path || null },
+      anexo_url: anexoPrincipalUrl,
+      anexo_nome: primeiroAnexo.nome || (modo === "carta" ? "carta-estorno.pdf" : modo === "boleto" ? "boleto.pdf" : "comprovante.pdf"),
+      anexo_mime: primeiroAnexo.mime_type || null,
+      metadata: { tipo: "conclusao_financeiro", modo, storage_path: primeiroAnexo.storage_path || null, total_anexos: anexosIn.length },
     });
 
+    // Comentários adicionais para anexos extras (boleto multi-arquivo)
+    for (let i = 1; i < anexosIn.length; i++) {
+      const ex = anexosIn[i];
+      await supabase.from("solicitacao_comentarios").insert({
+        solicitacao_id,
+        autor_id: usuario_id,
+        autor_nome: usuario_nome || "Financeiro",
+        conteudo: `📎 Boleto ${i + 1}/${anexosIn.length}`,
+        tipo: "operador_para_loja",
+        anexo_url: ex.url,
+        anexo_nome: ex.nome || `boleto-${i + 1}.pdf`,
+        anexo_mime: ex.mime_type || null,
+        metadata: { tipo: "conclusao_financeiro", modo, storage_path: ex.storage_path || null, indice: i },
+      });
+    }
+
     // Notifica usuários da loja com referência à SOLICITAÇÃO (Messenger abre a
-    // thread da solicitação — é onde a loja vê a carta/comprovante).
+    // thread da solicitação — é onde a loja vê a carta/comprovante/boleto).
     if (lojaNome) {
       const { data: destsSol } = await supabase.rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
       const userIdsSol = (destsSol || []).map((d: any) => d.user_id).filter(Boolean);
       if (userIdsSol.length > 0) {
+        const tipoNotif = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : "pagamento_concluido";
+        const tituloNotif = modo === "carta" ? "Carta de estorno disponível" : modo === "boleto" ? "Boleto enviado" : "Pagamento concluído";
+        const msgNotif = modo === "carta"
+          ? `${sol.protocolo || "Solicitação"} — toque para baixar a carta`
+          : modo === "boleto"
+          ? `${sol.protocolo || "Solicitação"} — ${anexosIn.length} boleto(s)${(novoMeta as any).boleto_impresso ? " • imprimir" : ""}`
+          : `${sol.protocolo || "Solicitação"} — R$ ${Number(body.valor).toFixed(2)} NSU ${body.nsu}`;
         await supabase.from("notificacoes").insert(userIdsSol.map((uid: string) => ({
           usuario_id: uid,
-          tipo: modo === "carta" ? "estorno_concluido" : "pagamento_concluido",
-          titulo: modo === "carta" ? "Carta de estorno disponível" : "Pagamento concluído",
-          mensagem: (modo === "carta"
-            ? `${sol.protocolo || "Solicitação"} — toque para baixar a carta`
-            : `${sol.protocolo || "Solicitação"} — R$ ${Number(body.valor).toFixed(2)} NSU ${body.nsu}`).slice(0, 140),
+          tipo: tipoNotif,
+          titulo: tituloNotif,
+          mensagem: msgNotif.slice(0, 140),
           referencia_id: solicitacao_id,
         })));
       }
@@ -330,17 +353,20 @@ serve(async (req) => {
 
 
     // 4) Timeline
+    const tipoEvt = modo === "carta" ? "estorno_concluido" : modo === "boleto" ? "boleto_enviado" : "pagamento_concluido";
+    const descEvt = modo === "carta" ? "Estorno concluído com carta" : modo === "boleto" ? `Boleto enviado (${anexosIn.length} arquivo${anexosIn.length > 1 ? "s" : ""})` : `Pagamento concluído — NSU ${body.nsu}`;
     await supabase.from("pipeline_card_eventos").insert({
       entidade: "solicitacao",
       entidade_id: solicitacao_id,
-      tipo: modo === "carta" ? "estorno_concluido" : "pagamento_concluido",
-      descricao: modo === "carta" ? "Estorno concluído com carta" : `Pagamento concluído — NSU ${body.nsu}`,
+      tipo: tipoEvt,
+      descricao: descEvt,
       coluna_anterior_id: colunaAnterior,
       coluna_nova_id: colunaNova,
       usuario_id,
       usuario_nome,
-      metadata: { modo, anexo_url: anexo.url, nsu: body.nsu, valor: body.valor },
+      metadata: { modo, anexo_url: anexoPrincipalUrl, total_anexos: anexosIn.length, nsu: body.nsu, valor: body.valor },
     });
+
 
     return new Response(JSON.stringify({ status: "ok", coluna_id: colunaNova, demanda_id: demandaId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
