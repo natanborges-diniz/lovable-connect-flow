@@ -54,6 +54,8 @@ import { useAuth } from "@/hooks/useAuth";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
+  const [mostrarArquivados, setMostrarArquivados] = useState(false);
+
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
   const [selectedSolicitacao, setSelectedSolicitacao] = useState<any | null>(null);
