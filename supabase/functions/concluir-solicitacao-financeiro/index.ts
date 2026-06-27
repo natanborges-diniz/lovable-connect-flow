@@ -175,6 +175,8 @@ serve(async (req) => {
       novoMeta.boleto_enviado_por = usuario_nome;
       novoMeta.boleto_arquivos = todasUrlsAnexos;
       novoMeta.boleto_url = anexoPrincipalUrl;
+      novoMeta.boleto_impresso = !!body.boleto_impresso;
+
     }
     if (body.observacao) novoMeta.observacao_conclusao = body.observacao;
 
