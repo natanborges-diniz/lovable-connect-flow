@@ -536,7 +536,7 @@ serve(async (req) => {
           status: envioOk ? "enviado" : "criado",
           link_url: (extraMetadata as any).url || null,
           enviado_at: envioOk ? new Date().toISOString() : null,
-          metadata: { ...dados, ...extraMetadata, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
+          metadata: { ...dados, ...extraMetadata, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
         }, { onConflict: "payment_link_id" });
       } catch (mErr) {
         console.error("[criar-solicitacao-loja] mirror pagamentos_link falhou", mErr);
