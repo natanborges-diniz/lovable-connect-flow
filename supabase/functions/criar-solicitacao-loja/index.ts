@@ -159,7 +159,7 @@ serve(async (req) => {
           status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const lojaConsulta = String(meta.loja_nome || "").trim().toLowerCase();
+      const lojaConsulta = String(meta.loja_nome || meta.alias_loja || "").trim().toLowerCase();
       if (lojaConsulta && lojaConsulta !== nomeLoja.trim().toLowerCase()) {
         return new Response(JSON.stringify({ error: "A consulta pertence a outra loja.", code: "LOJA_DIVERGENTE" }), {
           status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
