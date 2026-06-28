@@ -472,7 +472,7 @@ export default function PipelineFinanceiro() {
                                               )}
                                             </div>
                                           )}
-                                          {sol.descricao && sol.tipo !== "consulta_cpf" && (
+                                          {sol.descricao && sol.tipo !== "consulta_cpf" && sol.tipo !== "boleto" && (
                                             <p className="text-xs text-muted-foreground pl-6 truncate">
                                               {sol.descricao}
                                             </p>
