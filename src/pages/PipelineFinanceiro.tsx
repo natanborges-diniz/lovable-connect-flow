@@ -472,7 +472,7 @@ export default function PipelineFinanceiro() {
                                               )}
                                             </div>
                                           )}
-                                          {sol.descricao && sol.tipo !== "consulta_cpf" && (
+                                          {sol.descricao && sol.tipo !== "consulta_cpf" && sol.tipo !== "boleto" && (
                                             <p className="text-xs text-muted-foreground pl-6 truncate">
                                               {sol.descricao}
                                             </p>
@@ -635,7 +635,7 @@ export default function PipelineFinanceiro() {
                   <span className="text-muted-foreground">Criado</span>
                   <span>{format(new Date(selectedSolicitacao.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
                 </div>
-                {selectedSolicitacao.descricao && (
+                {selectedSolicitacao.descricao && selectedSolicitacao.tipo !== "boleto" && (
                   <div className="pt-2 border-t">
                     <p className="text-muted-foreground text-xs mb-1">Descrição</p>
                     <p className="whitespace-pre-wrap">{selectedSolicitacao.descricao}</p>
