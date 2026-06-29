@@ -3389,11 +3389,23 @@ serve(async (req) => {
           console.log(`[ROUTER] OS ident encontrado mas sem resultado único — fallback escalada (encontrado=${_osResult.encontrado}, n=${_osResult.resultados?.length ?? 0})`);
         }
 
-        // ── Sem identificador → inicia coleta (Fatia 2a) ─────────────────────
+        // ── Sem identificador → GATE DE CONFIRMAÇÃO antes de coletar ─────────
+        // Texto livre que casou matchesConsultaOs pode ser "prazo pré-venda"
+        // ("quanto tempo fica pronto SE eu fechar"), não consulta de pedido real.
         if (_osIdent.tipo === null) {
-          await iniciarColetaOS(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, contatoId, meta);
+          await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+            type: "button",
+            texto: "Você já fez uma compra e quer consultar o andamento do pedido? 😊",
+            botoes: [
+              { id: "os_confirma_sim", titulo: "✅ Sim, já comprei" },
+              { id: "os_confirma_nao", titulo: "❌ Não, é outra coisa" },
+            ],
+          });
+          await supabase.from("atendimentos").update({
+            metadata: { ...meta, expected_reply: "os_confirma_intencao", os_confirma_msg_original: currentMsg },
+          }).eq("id", atendimento_id);
           return jsonResponse({
-            status: "ok", tools_used: ["os_iniciar_coleta"],
+            status: "ok", tools_used: ["os_confirma_intencao"],
             intencao: "consulta_os", precisa_humano: false, modo: atendimento.modo,
           });
         }
@@ -9947,6 +9959,7 @@ async function routeExpectedTypedReply(args: {
     const GUARD_RECUSA_EXCLUIDOS = new Set([
       "receita_confirmacao", "recuperacao", "cashback_confirmacao",
       "os_aguardando_pertencimento", "desconto_followup", "dia_d_lembrete",
+      "os_confirma_intencao",
     ]);
     const RECUSA_RE_1 = /\b(n[aã]o\s+(quero|preciso|quero\s+mais|interessa(r)?)|agora\s+n[aã]o|mais\s+tarde|cancela(r)?|deixa\s+(pra\s+l[aá]|quieto)|esquece|esqueci|n[aã]o\s+obrigad)\b/i;
     const RECUSA_RE_2 = /\b(deixa\s+pra\s+depois|chamo?\s+depois|falo\s+depois|depois\s+(eu\s+)?(vejo|te\s+chamo|falo))\b/i;
@@ -9980,6 +9993,40 @@ async function routeExpectedTypedReply(args: {
     }
   }
   // ── FIM DO GUARD ────────────────────────────────────────────────────
+
+  // ── HANDLER: confirmação de intenção de OS (gate anti-falso-positivo prazo pré-venda) ──
+  if (expectedReply === "os_confirma_intencao") {
+    const _msgOrig = (atendimentoMeta?.os_confirma_msg_original as string) || "";
+    const tConf = _normTxt(mensagemTexto);
+
+    // Botão envia o TÍTULO como texto. Casa título normalizado OU texto livre.
+    const _sim = tConf.includes("sim, ja comprei")
+      || /\b(sim|isso|ja\s+comprei|comprei|ja\s+fiz|fiz\s+sim|exato|positivo|consultar|acompanhar)\b/.test(tConf);
+    const _nao = tConf.includes("nao, e outra coisa")
+      || /\b(nao|outra\s+coisa|ainda\s+nao|nao\s+comprei|nao\s+fiz)\b/.test(tConf);
+
+    // SIM só se NÃO casar negação (evita "não, já comprei" cair no sim)
+    if (_sim && !_nao) {
+      await patchMeta({ expected_reply: null, os_confirma_msg_original: null });
+      await iniciarColetaOS(supabase, supabaseUrl, serviceKey, atId, atendimento.contato_id, { ...atendimentoMeta, expected_reply: null, os_confirma_msg_original: null });
+      return true;
+    }
+
+    if (_nao) {
+      await patchMeta({ expected_reply: null, os_confirma_msg_original: null });
+      const _falaPrazo = /\b(quanto\s+tempo|prazo|fica\s+pronto|fica\s+ponto|demora|leva\s+quanto|fica\s+pronta)\b/.test(_normTxt(_msgOrig));
+      if (_falaPrazo) {
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, "Somos bem ágeis na produção! 🙌 Mas o prazo exato a gente só consegue confirmar depois do pedido montado e das medidas todas conferidas — varia conforme o tipo de lente e os adicionais. Na sua visita à loja a equipe te passa o prazo certinho 😊");
+      } else {
+        await sendWhatsApp(supabaseUrl, serviceKey, atId, "Ah, entendi! Então me conta, como posso te ajudar? 😊");
+      }
+      return true;
+    }
+
+    // Ambíguo → limpa e devolve pro fluxo normal
+    await patchMeta({ expected_reply: null, os_confirma_msg_original: null });
+    return false;
+  }
 
   // Fallback de texto: cliente digitou a cidade em vez de tocar na lista.
   if (expectedReply === "cidade_selecao") {
