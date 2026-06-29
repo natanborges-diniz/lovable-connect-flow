@@ -2164,7 +2164,7 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "interpretar_receita",
-      description: "Extrai dados de foto/PDF de receita oftalmológica. Retorne NÚMEROS (não strings). Se ilegível, use null. NÃO invente valores. Infira o 'label' da pessoa a quem pertence a receita pelo contexto da conversa (ex: 'cliente', 'filho', 'mãe').",
+      description: "Extrai dados de foto/PDF de receita oftalmológica. Retorne NÚMEROS (não strings). IMPORTANTE: termos ópticos que significam grau zero — 'plano', 'pl', 'neutro', 'zerado', 'zero', 'sc' — devem ser retornados como 0 (número), NUNCA null. 'null' é APENAS para campos genuinamente ilegíveis ou ausentes na imagem. Um olho marcado como 'plano' está LEGÍVEL e vale 0. NÃO invente valores. Infira o 'label' da pessoa a quem pertence a receita pelo contexto da conversa (ex: 'cliente', 'filho', 'mãe').",
       parameters: {
         type: "object",
         properties: {
@@ -2174,7 +2174,7 @@ const TOOLS = [
               od: {
                 type: "object",
                 properties: {
-                  sphere: { type: "number", description: "ESF/SPH olho direito" },
+                  sphere: { type: "number", description: "ESF/SPH olho direito. 'plano'/'pl'/'neutro'/'zerado'/'sc' = 0 (não null)" },
                   cylinder: { type: "number", description: "CIL/CYL olho direito" },
                   axis: { type: "number", description: "EIXO/AXIS olho direito" },
                   add: { type: "number", description: "ADIÇÃO/ADD olho direito" },
@@ -2184,7 +2184,7 @@ const TOOLS = [
               oe: {
                 type: "object",
                 properties: {
-                  sphere: { type: "number", description: "ESF/SPH olho esquerdo" },
+                  sphere: { type: "number", description: "ESF/SPH olho esquerdo. 'plano'/'pl'/'neutro'/'zerado'/'sc' = 0 (não null)" },
                   cylinder: { type: "number", description: "CIL/CYL olho esquerdo" },
                   axis: { type: "number", description: "EIXO/AXIS olho esquerdo" },
                   add: { type: "number", description: "ADIÇÃO/ADD olho esquerdo" },
