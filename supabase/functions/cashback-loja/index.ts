@@ -634,7 +634,16 @@ serve(async (req) => {
         });
       }
 
-      return jsonResp({ status: "validado", termos_versao: TERMOS_VERSAO });
+
+      // Boas-vindas cashback (texto livre dentro da janela 24h aberta pelo PIN)
+      let boas_vindas: any = { status: "sem_contato" };
+      if (i.contato_id && i.whatsapp) {
+        boas_vindas = await dispararBoasVindasCashback(
+          supabase, inscricao_id, String(i.contato_id), String(i.whatsapp),
+        );
+      }
+
+      return jsonResp({ status: "validado", termos_versao: TERMOS_VERSAO, boas_vindas });
     }
 
     return jsonResp(
