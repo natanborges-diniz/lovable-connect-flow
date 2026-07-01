@@ -204,11 +204,15 @@ serve(async (req) => {
       dispatch = { status: tplResp.status, body: tplJson };
 
       if (tplResp.ok && tplJson?.status === "sent") {
+        const wamid = tplJson?.whatsapp_response?.messages?.[0]?.id ?? null;
         await supabase
           .from("os_recebimento_loja")
           .update({
             notificado_cliente_at: new Date().toISOString(),
             notificado_cliente_template: "os_recebida_loja",
+            whatsapp_message_id: wamid,
+            wa_status: "sent",
+            wa_status_at: new Date().toISOString(),
           })
           .eq("id", row.id);
       }
