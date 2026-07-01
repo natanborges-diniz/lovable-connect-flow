@@ -106,6 +106,161 @@ async function disparaPin(
   }
 }
 
+// ── Envio de texto livre pela Meta (janela 24h aberta pelo template do PIN) ──
+async function sendTextViaMeta(phone: string, texto: string): Promise<any> {
+  const token = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!token || !phoneNumberId) throw new Error("WhatsApp Meta creds ausentes");
+  const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: phone,
+      type: "text",
+      text: { preview_url: true, body: texto },
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`meta ${res.status}: ${JSON.stringify(data)}`);
+  return data;
+}
+
+// ── Boas-vindas cashback (texto livre) enviado após confirmar_pin ──
+async function dispararBoasVindasCashback(
+  supabase: ReturnType<typeof createClient>,
+  inscricao_id: string,
+  contato_id: string,
+  whatsapp: string,
+): Promise<{ status: "enviado" | "sem_creds" | "falha"; motivo?: string; wamid?: string | null }> {
+  try {
+    // Dados da inscrição
+    const { data: insc } = await supabase
+      .from("regua_inscricao")
+      .select("nome_cliente, cod_empresa, valor_total_validado, valor_total_informado")
+      .eq("id", inscricao_id)
+      .maybeSingle();
+    const iAny = (insc as any) || {};
+
+    // Crédito (valor gerado, liberação, expiração)
+    const { data: cred } = await supabase
+      .from("cashback_credito")
+      .select("valor_gerado, liberado_em, data_expiracao")
+      .eq("inscricao_id", inscricao_id)
+      .order("criado_em", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const cAny = (cred as any) || {};
+
+    // Config (fator_resgate)
+    const { data: cfg } = await supabase
+      .from("cashback_config")
+      .select("fator_resgate")
+      .limit(1)
+      .maybeSingle();
+    const fator = Number((cfg as any)?.fator_resgate ?? 3);
+
+    // Nome da loja via cod_empresa
+    let lojaNome = "Óticas Diniz";
+    if (iAny.cod_empresa) {
+      const { data: tl } = await supabase
+        .from("telefones_lojas")
+        .select("nome_loja")
+        .eq("cod_empresa", String(iAny.cod_empresa))
+        .not("nome_loja", "is", null)
+        .limit(1)
+        .maybeSingle();
+      if ((tl as any)?.nome_loja) lojaNome = (tl as any).nome_loja;
+    }
+
+    const primeiroNome = String(iAny.nome_cliente || "").trim().split(/\s+/)[0] || "cliente";
+    const valorCashback = Number(cAny.valor_gerado ?? 0);
+    if (!(valorCashback > 0)) {
+      return { status: "falha", motivo: "sem_credito" };
+    }
+    const minimo = Math.max(0, valorCashback * fator);
+    const fmt = (n: number) =>
+      n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtData = (iso: string | null | undefined) => {
+      if (!iso) return "";
+      const d = new Date(iso + (iso.length === 10 ? "T00:00:00" : ""));
+      return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+    };
+
+    const validoAte = fmtData(cAny.data_expiracao);
+    const liberadoEm = cAny.liberado_em ? new Date(cAny.liberado_em + "T00:00:00") : null;
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const jaLiberado = !liberadoEm || liberadoEm <= hoje;
+    const linhaValidade = jaLiberado
+      ? `📅 Disponível agora, válido até ${validoAte || "a data informada"}`
+      : `📅 Válido de ${fmtData(cAny.liberado_em)} até ${validoAte || "a data informada"}`;
+
+    const texto =
+      `Olá, ${primeiroNome} 👋\n\n` +
+      `Sua compra na ${lojaNome} te garantiu um cashback exclusivo de R$ ${fmt(valorCashback)}! 🎁\n\n` +
+      `${linhaValidade}\n` +
+      `🛒 Na próxima compra a partir de R$ ${fmt(minimo)}\n\n` +
+      `✅ Use pelo WhatsApp — é só me responder aqui.\n\n` +
+      `⚡ Regras completas: https://atrium-link.lovable.app/termos/cashback`;
+
+    // Envia via Meta (janela aberta pelo template AUTHENTICATION do PIN)
+    const phone = String(whatsapp).replace(/\D/g, "");
+    let wamid: string | null = null;
+    try {
+      const r = await sendTextViaMeta(phone, texto);
+      wamid = r?.messages?.[0]?.id || null;
+    } catch (e) {
+      const msg = (e as Error).message || "";
+      if (msg.includes("creds ausentes")) return { status: "sem_creds" };
+      console.warn("[cashback-loja] boas_vindas Meta erro:", msg);
+      return { status: "falha", motivo: msg.slice(0, 200) };
+    }
+
+    // Loga em mensagens (se houver atendimento aberto p/ o contato) — não bloqueia se falhar
+    const { data: atendAberto } = await supabase
+      .from("atendimentos")
+      .select("id")
+      .eq("contato_id", contato_id)
+      .eq("status", "aberto")
+      .order("iniciado_em", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if ((atendAberto as any)?.id) {
+      await supabase.from("mensagens").insert({
+        atendimento_id: (atendAberto as any).id,
+        direcao: "outbound",
+        conteudo: texto,
+        tipo_conteudo: "text",
+        remetente_nome: "Sistema Cashback",
+        provedor: "meta_official",
+        metadata: {
+          whatsapp_message_id: wamid,
+          provedor: "meta_official",
+          categoria: "cashback_boas_vindas",
+          inscricao_id,
+        },
+      });
+    }
+
+    // Trilha CRM
+    await supabase.from("eventos_crm").insert({
+      contato_id,
+      tipo: "cashback_boas_vindas_enviado",
+      descricao: `Boas-vindas cashback enviadas (R$ ${fmt(valorCashback)} até ${validoAte})`,
+      metadata: { inscricao_id, wamid, loja: lojaNome, valor_cashback: valorCashback, minimo },
+      referencia_tipo: "regua_inscricao",
+      referencia_id: inscricao_id,
+    });
+
+    return { status: "enviado", wamid };
+  } catch (e) {
+    const msg = (e as Error).message || "erro";
+    console.warn("[cashback-loja] dispararBoasVindasCashback erro:", msg);
+    return { status: "falha", motivo: msg.slice(0, 200) };
+  }
+}
+
+
 
 
 
