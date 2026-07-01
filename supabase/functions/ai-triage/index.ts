@@ -6707,6 +6707,7 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
     let pipeline_coluna = "Novo Contato";
     let setor_sugerido = "";
     let validatorFlags: string[] = [];
+    let motivoEscalada: string | null = null;
     let direcionarAgendamentoLoja = false;
 
     const toolCalls = choice.message?.tool_calls || [];
@@ -6876,6 +6877,10 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
 
         resposta = args.resposta;
         precisa_humano = true;
+        motivoEscalada = args.motivo
+          || (explicitHumanRequest ? "cliente_pediu_atendente"
+              : freshComplaint ? "reclamacao"
+              : "nao_classificado");
         // Keep contact in current column — human intervention is managed via modo='humano' flag
         pipeline_coluna = "Novo Contato"; // Will be ignored since precisa_humano skips column move
         setor_sugerido = args.setor || "";
@@ -8641,12 +8646,18 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
     await supabase.from("contatos").update(contatoUpdates).eq("id", contatoId);
 
     // ── 12. STRUCTURED LOG (Phase 6) ──
+    const _motivoFinal = precisa_humano
+      ? (validatorFlags.some((f: string) => /ocr|interpretar_receita|failsafe/.test(f)) ? "ocr_falha_leitura"
+         : validatorFlags.includes("no_tool_deterministic") ? "fallback_sem_tool"
+         : motivoEscalada
+         || "nao_classificado")
+      : null;
     await supabase.from("eventos_crm").insert({
       contato_id: contatoId,
       tipo: precisa_humano ? "escalonamento_humano" : "triagem_ia",
       descricao: `IA: "${intencao}" → ${pipeline_coluna}`,
       metadata: {
-        intencao, pipeline_coluna, setor_sugerido,
+        intencao, pipeline_coluna, setor_sugerido, motivo: _motivoFinal,
         modo: newModo || atendimento.modo,
         history_window: `${contextWindow.length}/${allMsgs.length}`,
         history_range: historyRange,
