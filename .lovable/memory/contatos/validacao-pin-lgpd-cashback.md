@@ -1,8 +1,16 @@
 ---
 name: Validação de telefone via PIN + LGPD no cashback
-description: No lançamento da venda do cashback, gera PIN 4 dígitos em regua_inscricao, envia template cashback_pin_validacao, consultor confirma no balcão; aceite registra termos LGPD e marca canais.status='validado'.
+description: Loja gera PIN 4 dígitos, cliente confirma via WhatsApp, aceite grava consentimento LGPD (transacional+marketing, TERMOS_VERSAO v2-2026-07) e dispara boas-vindas em texto livre com valor, validade início/fim e mínimo de compra.
 type: feature
 ---
+
+## Pós-confirmação: boas-vindas em texto livre (sem template)
+
+Ao confirmar PIN (`action: confirmar_pin`), `dispararBoasVindasCashback` envia texto livre via Meta Graph aproveitando a janela 24h aberta pelo `cashback_pin_otp` (AUTHENTICATION). Fonte: `regua_inscricao.nome_cliente/cod_empresa`, `cashback_credito.valor_gerado/liberado_em/data_expiracao`, `cashback_config.fator_resgate`, `telefones_lojas.nome_loja` via cod_empresa. Loga em `mensagens` se houver atendimento aberto e em `eventos_crm` tipo `cashback_boas_vindas_enviado`. Falha não invalida a confirmação.
+
+Consentimento LGPD versionado: `TERMOS_VERSAO=v2-2026-07` cobre mensagens transacionais E de marketing; opt-out por `SAIR`. Página `/termos/cashback?ins=<id>`. Trilha jurídica: `regua_inscricao` (pin_confirmado_at, consentimento_at, canal_consentimento, termos_versao, ip_origem_consultor) + `canais.status=validado` + `eventos_crm`.
+
+
 
 ## Fluxo
 
