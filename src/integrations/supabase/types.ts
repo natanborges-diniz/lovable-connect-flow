@@ -2131,6 +2131,7 @@ export type Database = {
           updated_at: string
           wa_status: string | null
           wa_status_at: string | null
+          wa_status_reason: string | null
           whatsapp_message_id: string | null
         }
         Insert: {
@@ -2157,6 +2158,7 @@ export type Database = {
           updated_at?: string
           wa_status?: string | null
           wa_status_at?: string | null
+          wa_status_reason?: string | null
           whatsapp_message_id?: string | null
         }
         Update: {
@@ -2183,6 +2185,7 @@ export type Database = {
           updated_at?: string
           wa_status?: string | null
           wa_status_at?: string | null
+          wa_status_reason?: string | null
           whatsapp_message_id?: string | null
         }
         Relationships: [
