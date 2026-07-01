@@ -58,6 +58,57 @@ async function resolverContato(
   return null;
 }
 
+// Helpers PIN (compartilhados entre "registrar" e "gerar_pin"/"reenviar_pin")
+async function hashPin(pin: string, salt: string): Promise<string> {
+  const data = new TextEncoder().encode(`${salt}:${pin}`);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function gerarPinRandomico(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+async function disparaPin(
+  supabase: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceKey: string,
+  inscricao_id: string,
+): Promise<{ status: "enviado" | "falha"; expira_at: string | null }> {
+  const { data: insc } = await supabase
+    .from("regua_inscricao")
+    .select("contato_id")
+    .eq("id", inscricao_id)
+    .maybeSingle();
+  if (!insc) return { status: "falha", expira_at: null };
+
+  const pin = gerarPinRandomico();
+  const pin_hash = await hashPin(pin, inscricao_id);
+  const expira = new Date(Date.now() + 15 * 60_000).toISOString();
+
+  await supabase
+    .from("regua_inscricao")
+    .update({ pin_hash, pin_expira_at: expira, pin_tentativas: 0 })
+    .eq("id", inscricao_id);
+
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/send-whatsapp-template`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({
+        contato_id: (insc as any).contato_id,
+        template_alias: "cashback_pin_validacao",
+        template_params: [pin],
+      }),
+    });
+    return { status: "enviado", expira_at: expira };
+  } catch (e) {
+    console.warn("[cashback-loja] disparaPin falhou:", (e as Error).message);
+    return { status: "falha", expira_at: expira };
+  }
+}
+
+
+
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -254,6 +305,33 @@ serve(async (req) => {
 
       const r = resgate as any;
 
+      // ── Integração com régua/PIN/LGPD ─────────────────────────────
+      // O balcão passa a criar/atualizar regua_inscricao e disparar o PIN
+      // automaticamente, unificando com o fluxo /regua/nova-venda.
+      let inscricao_id: string | null = null;
+      let pin_status: "enviado" | "ja_confirmado" | "falha" | null = null;
+      let pin_expira_at: string | null = null;
+      try {
+        const telDigits = (telefone || "").replace(/\D/g, "");
+        const cpfDigits = (cpf || "").replace(/\D/g, "");
+        const { data: reg, error: eReg } = await supabaseAsUser.rpc("regua_registrar_venda", {
+          p_nome:                nome || contato.nome || "Cliente",
+          p_whatsapp_digits:     telDigits,
+          p_cpf_digits:          cpfDigits,
+          p_numero_venda:        String(numero_venda),
+          p_valor:               Number(valor_informado),
+          p_cod_empresa:         codEmpresa || null,
+          p_usuario_lancamento:  profile?.nome || user.email || null,
+        });
+        if (eReg) {
+          console.warn("[cashback-loja] regua_registrar_venda erro:", eReg.message);
+        } else {
+          inscricao_id = (reg as any)?.inscricao_id ?? null;
+        }
+      } catch (e) {
+        console.warn("[cashback-loja] regua_registrar_venda exception:", (e as Error).message);
+      }
+
       // Loga evento CRM
       await supabase.from("eventos_crm").insert({
         contato_id:      contato.id,
@@ -268,14 +346,36 @@ serve(async (req) => {
           usuario_id:     user.id,
           ja_processado:  r?.ja_existia_inscricao ?? false,
           credito_gerado: r?.credito_gerado ?? null,
+          inscricao_id,
         },
         referencia_tipo: "contato",
         referencia_id:   contato.id,
       });
 
+      // Dispara PIN se houve inscrição e ainda não confirmada
+      if (inscricao_id) {
+        try {
+          const { data: insc } = await supabase
+            .from("regua_inscricao")
+            .select("pin_confirmado_at")
+            .eq("id", inscricao_id)
+            .maybeSingle();
+          if ((insc as any)?.pin_confirmado_at) {
+            pin_status = "ja_confirmado";
+          } else {
+            const p = await disparaPin(supabase, SUPABASE_URL, SERVICE, inscricao_id);
+            pin_status = p.status;
+            pin_expira_at = p.expira_at;
+          }
+        } catch (e) {
+          console.warn("[cashback-loja] falha ao disparar PIN pós-registro:", (e as Error).message);
+          pin_status = "falha";
+        }
+      }
+
       console.log(
         `[cashback-loja] OK contato=${contato.id} venda=${numero_venda} ` +
-        `cashback_usado=${cashback_usado} ja_processado=${r?.ja_existia_inscricao}`,
+        `cashback_usado=${cashback_usado} ja_processado=${r?.ja_existia_inscricao} pin=${pin_status}`,
       );
 
       return jsonResp({
@@ -284,6 +384,9 @@ serve(async (req) => {
         ja_processado:  r?.ja_existia_inscricao ?? false,
         credito_gerado: r?.credito_gerado ?? null,
         saldo_atual:    Number(r?.saldo_total_atual ?? 0),
+        inscricao_id,
+        pin_status,
+        pin_expira_at,
       });
     }
 
@@ -292,51 +395,20 @@ serve(async (req) => {
     // ══════════════════════════════════════════════
     const TERMOS_VERSAO = "v1-2026-06";
 
-    async function hashPin(pin: string, salt: string): Promise<string> {
-      const data = new TextEncoder().encode(`${salt}:${pin}`);
-      const buf = await crypto.subtle.digest("SHA-256", data);
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
-    }
-    function gerarPinRandomico(): string {
-      return String(Math.floor(1000 + Math.random() * 9000));
-    }
-
     if (action === "gerar_pin" || action === "reenviar_pin") {
       const inscricao_id = String(body.inscricao_id || "");
       if (!inscricao_id) return jsonResp({ error: "inscricao_id obrigatório" }, 400);
 
       const { data: insc } = await supabase
         .from("regua_inscricao")
-        .select("id, contato_id, whatsapp, nome_cliente, pin_confirmado_at")
+        .select("id, pin_confirmado_at")
         .eq("id", inscricao_id)
         .maybeSingle();
       if (!insc) return jsonResp({ error: "inscricao não encontrada" }, 404);
       if ((insc as any).pin_confirmado_at) return jsonResp({ status: "ja_confirmado" });
 
-      const pin = gerarPinRandomico();
-      const pin_hash = await hashPin(pin, inscricao_id);
-      const expira = new Date(Date.now() + 15 * 60_000).toISOString();
-
-      await supabase
-        .from("regua_inscricao")
-        .update({ pin_hash, pin_expira_at: expira, pin_tentativas: 0 })
-        .eq("id", inscricao_id);
-
-      try {
-        await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE}` },
-          body: JSON.stringify({
-            contato_id: (insc as any).contato_id,
-            template_alias: "cashback_pin_validacao",
-            template_params: [pin],
-          }),
-        });
-      } catch (e) {
-        console.warn("[cashback-loja] falha ao disparar template PIN:", e);
-      }
-
-      return jsonResp({ status: "pin_enviado", expira_at: expira });
+      const p = await disparaPin(supabase, SUPABASE_URL, SERVICE, inscricao_id);
+      return jsonResp({ status: p.status === "enviado" ? "pin_enviado" : "erro", expira_at: p.expira_at });
     }
 
     if (action === "confirmar_pin") {
