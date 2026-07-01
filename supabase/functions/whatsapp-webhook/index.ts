@@ -83,6 +83,10 @@ serve(async (req) => {
                     .update({ metadata: merged as any })
                     .eq("id", msgRow.id);
                 }
+                // Propaga status para a régua de OS recebida (loja vê se cliente leu/agendou).
+                await supabase.from("os_recebimento_loja")
+                  .update({ wa_status: meta_status, wa_status_at: new Date().toISOString() })
+                  .eq("whatsapp_message_id", messageId);
               }
             }
           }
