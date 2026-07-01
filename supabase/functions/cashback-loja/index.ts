@@ -395,51 +395,20 @@ serve(async (req) => {
     // ══════════════════════════════════════════════
     const TERMOS_VERSAO = "v1-2026-06";
 
-    async function hashPin(pin: string, salt: string): Promise<string> {
-      const data = new TextEncoder().encode(`${salt}:${pin}`);
-      const buf = await crypto.subtle.digest("SHA-256", data);
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
-    }
-    function gerarPinRandomico(): string {
-      return String(Math.floor(1000 + Math.random() * 9000));
-    }
-
     if (action === "gerar_pin" || action === "reenviar_pin") {
       const inscricao_id = String(body.inscricao_id || "");
       if (!inscricao_id) return jsonResp({ error: "inscricao_id obrigatório" }, 400);
 
       const { data: insc } = await supabase
         .from("regua_inscricao")
-        .select("id, contato_id, whatsapp, nome_cliente, pin_confirmado_at")
+        .select("id, pin_confirmado_at")
         .eq("id", inscricao_id)
         .maybeSingle();
       if (!insc) return jsonResp({ error: "inscricao não encontrada" }, 404);
       if ((insc as any).pin_confirmado_at) return jsonResp({ status: "ja_confirmado" });
 
-      const pin = gerarPinRandomico();
-      const pin_hash = await hashPin(pin, inscricao_id);
-      const expira = new Date(Date.now() + 15 * 60_000).toISOString();
-
-      await supabase
-        .from("regua_inscricao")
-        .update({ pin_hash, pin_expira_at: expira, pin_tentativas: 0 })
-        .eq("id", inscricao_id);
-
-      try {
-        await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE}` },
-          body: JSON.stringify({
-            contato_id: (insc as any).contato_id,
-            template_alias: "cashback_pin_validacao",
-            template_params: [pin],
-          }),
-        });
-      } catch (e) {
-        console.warn("[cashback-loja] falha ao disparar template PIN:", e);
-      }
-
-      return jsonResp({ status: "pin_enviado", expira_at: expira });
+      const p = await disparaPin(supabase, SUPABASE_URL, SERVICE, inscricao_id);
+      return jsonResp({ status: p.status === "enviado" ? "pin_enviado" : "erro", expira_at: p.expira_at });
     }
 
     if (action === "confirmar_pin") {
