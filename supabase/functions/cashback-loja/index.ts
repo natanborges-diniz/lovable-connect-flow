@@ -58,6 +58,58 @@ async function resolverContato(
   return null;
 }
 
+// Helpers PIN (compartilhados entre "registrar" e "gerar_pin"/"reenviar_pin")
+async function hashPin(pin: string, salt: string): Promise<string> {
+  const data = new TextEncoder().encode(`${salt}:${pin}`);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function gerarPinRandomico(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+async function disparaPin(
+  supabase: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceKey: string,
+  inscricao_id: string,
+): Promise<{ status: "enviado" | "falha"; expira_at: string | null }> {
+  const { data: insc } = await supabase
+    .from("regua_inscricao")
+    .select("contato_id")
+    .eq("id", inscricao_id)
+    .maybeSingle();
+  if (!insc) return { status: "falha", expira_at: null };
+
+  const pin = gerarPinRandomico();
+  const pin_hash = await hashPin(pin, inscricao_id);
+  const expira = new Date(Date.now() + 15 * 60_000).toISOString();
+
+  await supabase
+    .from("regua_inscricao")
+    .update({ pin_hash, pin_expira_at: expira, pin_tentativas: 0 })
+    .eq("id", inscricao_id);
+
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/send-whatsapp-template`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({
+        contato_id: (insc as any).contato_id,
+        template_alias: "cashback_pin_validacao",
+        template_params: [pin],
+      }),
+    });
+    return { status: "enviado", expira_at: expira };
+  } catch (e) {
+    console.warn("[cashback-loja] disparaPin falhou:", (e as Error).message);
+    return { status: "falha", expira_at: expira };
+  }
+}
+
+function _endOfHelpers() {
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
