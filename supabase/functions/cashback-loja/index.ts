@@ -254,6 +254,33 @@ serve(async (req) => {
 
       const r = resgate as any;
 
+      // ── Integração com régua/PIN/LGPD ─────────────────────────────
+      // O balcão passa a criar/atualizar regua_inscricao e disparar o PIN
+      // automaticamente, unificando com o fluxo /regua/nova-venda.
+      let inscricao_id: string | null = null;
+      let pin_status: "enviado" | "ja_confirmado" | "falha" | null = null;
+      let pin_expira_at: string | null = null;
+      try {
+        const telDigits = (telefone || "").replace(/\D/g, "");
+        const cpfDigits = (cpf || "").replace(/\D/g, "");
+        const { data: reg, error: eReg } = await supabaseAsUser.rpc("regua_registrar_venda", {
+          p_nome:                nome || contato.nome || "Cliente",
+          p_whatsapp_digits:     telDigits,
+          p_cpf_digits:          cpfDigits,
+          p_numero_venda:        String(numero_venda),
+          p_valor:               Number(valor_informado),
+          p_cod_empresa:         codEmpresa || null,
+          p_usuario_lancamento:  profile?.nome || user.email || null,
+        });
+        if (eReg) {
+          console.warn("[cashback-loja] regua_registrar_venda erro:", eReg.message);
+        } else {
+          inscricao_id = (reg as any)?.inscricao_id ?? null;
+        }
+      } catch (e) {
+        console.warn("[cashback-loja] regua_registrar_venda exception:", (e as Error).message);
+      }
+
       // Loga evento CRM
       await supabase.from("eventos_crm").insert({
         contato_id:      contato.id,
@@ -268,14 +295,36 @@ serve(async (req) => {
           usuario_id:     user.id,
           ja_processado:  r?.ja_existia_inscricao ?? false,
           credito_gerado: r?.credito_gerado ?? null,
+          inscricao_id,
         },
         referencia_tipo: "contato",
         referencia_id:   contato.id,
       });
 
+      // Dispara PIN se houve inscrição e ainda não confirmada
+      if (inscricao_id) {
+        try {
+          const { data: insc } = await supabase
+            .from("regua_inscricao")
+            .select("pin_confirmado_at")
+            .eq("id", inscricao_id)
+            .maybeSingle();
+          if ((insc as any)?.pin_confirmado_at) {
+            pin_status = "ja_confirmado";
+          } else {
+            const p = await disparaPin(supabase, SUPABASE_URL, SERVICE, inscricao_id);
+            pin_status = p.status;
+            pin_expira_at = p.expira_at;
+          }
+        } catch (e) {
+          console.warn("[cashback-loja] falha ao disparar PIN pós-registro:", (e as Error).message);
+          pin_status = "falha";
+        }
+      }
+
       console.log(
         `[cashback-loja] OK contato=${contato.id} venda=${numero_venda} ` +
-        `cashback_usado=${cashback_usado} ja_processado=${r?.ja_existia_inscricao}`,
+        `cashback_usado=${cashback_usado} ja_processado=${r?.ja_existia_inscricao} pin=${pin_status}`,
       );
 
       return jsonResp({
@@ -284,6 +333,9 @@ serve(async (req) => {
         ja_processado:  r?.ja_existia_inscricao ?? false,
         credito_gerado: r?.credito_gerado ?? null,
         saldo_atual:    Number(r?.saldo_total_atual ?? 0),
+        inscricao_id,
+        pin_status,
+        pin_expira_at,
       });
     }
 
