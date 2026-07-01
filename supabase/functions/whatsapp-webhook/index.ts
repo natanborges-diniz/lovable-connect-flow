@@ -66,9 +66,27 @@ serve(async (req) => {
                 _canal_consentimento: null, _termos_versao: null,
               });
               if (messageId) {
-                await supabase.from("mensagens")
-                  .update({ metadata: { last_status: meta_status, motivo } as any })
-                  .eq("metadata->>whatsapp_message_id", messageId);
+                // Merge — NUNCA sobrescrever metadata (perde template_name/whatsapp_message_id).
+                const { data: msgRow } = await supabase
+                  .from("mensagens")
+                  .select("id, metadata")
+                  .eq("metadata->>whatsapp_message_id", messageId)
+                  .maybeSingle();
+                if (msgRow?.id) {
+                  const merged = {
+                    ...(msgRow.metadata as any || {}),
+                    last_status: meta_status,
+                    last_status_at: new Date().toISOString(),
+                    motivo,
+                  };
+                  await supabase.from("mensagens")
+                    .update({ metadata: merged as any })
+                    .eq("id", msgRow.id);
+                }
+                // Propaga status para a régua de OS recebida (loja vê se cliente leu/agendou).
+                await supabase.from("os_recebimento_loja")
+                  .update({ wa_status: meta_status, wa_status_at: new Date().toISOString() })
+                  .eq("whatsapp_message_id", messageId);
               }
             }
           }
