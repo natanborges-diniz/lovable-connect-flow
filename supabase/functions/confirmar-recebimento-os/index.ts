@@ -1,7 +1,13 @@
 // confirmar-recebimento-os
 // Loja confirma manualmente no Atrium Messenger que recebeu a OS.
 // Marca recebido_at e dispara template `os_recebida_loja` (alias) ao cliente.
-// Idempotente: se já recebida, retorna 200 sem reenviar.
+// Idempotente: se já recebida, retorna 200 sem reenviar (exceto action=resend).
+//
+// Actions:
+//   - preview : consulta bridge, devolve dados; não grava.
+//   - confirm : upsert + dispara template (default).
+//   - resend  : reenvia template ao cliente para uma linha já existente
+//               (útil quando wa_status='failed' ou 'no_dispatch').
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -17,6 +23,67 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+async function dispatchTemplate(opts: {
+  SUPABASE_URL: string;
+  SERVICE_KEY: string;
+  supabase: any;
+  rowId: string;
+  contato_id: string;
+  cliente_nome: string | null;
+  os_numero: string;
+  loja_nome: string;
+}) {
+  const { SUPABASE_URL, SERVICE_KEY, supabase, rowId, contato_id, cliente_nome, os_numero, loja_nome } = opts;
+  const primeiroNome = (cliente_nome ?? "").split(" ")[0] || "tudo bem";
+  const tplResp = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SERVICE_KEY}`,
+    },
+    body: JSON.stringify({
+      contato_id,
+      template_alias: "os_recebida_loja",
+      template_params: [primeiroNome, os_numero, loja_nome],
+      language: "pt_BR",
+    }),
+  });
+  const tplJson = await tplResp.json().catch(() => ({}));
+  const now = new Date().toISOString();
+
+  if (tplResp.ok && tplJson?.status === "sent") {
+    const wamid = tplJson?.whatsapp_response?.messages?.[0]?.id ?? null;
+    await supabase
+      .from("os_recebimento_loja")
+      .update({
+        notificado_cliente_at: now,
+        notificado_cliente_template: "os_recebida_loja",
+        whatsapp_message_id: wamid,
+        wa_status: "sent",
+        wa_status_at: now,
+        wa_status_reason: null,
+      })
+      .eq("id", rowId);
+    return { status: tplResp.status, body: tplJson, wamid };
+  }
+
+  // falha explícita — grava motivo para a loja ver
+  const reason =
+    tplJson?.error?.message ??
+    tplJson?.error ??
+    tplJson?.message ??
+    `dispatch_http_${tplResp.status}`;
+  await supabase
+    .from("os_recebimento_loja")
+    .update({
+      wa_status: "failed",
+      wa_status_at: now,
+      wa_status_reason: String(reason).slice(0, 500),
+    })
+    .eq("id", rowId);
+  return { status: tplResp.status, body: tplJson, error: reason };
 }
 
 serve(async (req) => {
@@ -37,20 +104,18 @@ serve(async (req) => {
     const userId = authData?.user?.id ?? null;
 
     const body = await req.json().catch(() => ({}));
-    const action = String(body.action ?? "confirm").toLowerCase(); // "preview" | "confirm"
+    const action = String(body.action ?? "confirm").toLowerCase(); // "preview" | "confirm" | "resend"
     const os_numero = String(body.os_numero ?? "").trim();
     const loja_nome = String(body.loja_nome ?? "").trim();
 
     if (!os_numero) {
       return json({ error: "os_numero é obrigatório" }, 400);
     }
-    if (action === "confirm" && !loja_nome) {
-      return json({ error: "loja_nome é obrigatório para confirmar" }, 400);
+    if ((action === "confirm" || action === "resend") && !loja_nome) {
+      return json({ error: "loja_nome é obrigatório" }, 400);
     }
 
     // ── MODO PREVIEW ──
-    // Loja digita o número da OS no Messenger; backend consulta a bridge
-    // e devolve cliente/loja/produto/etapa para a tela exibir antes de confirmar.
     if (action === "preview") {
       if (!BRIDGE_URL || !SVC_SECRET) {
         return json({ error: "bridge_indisponivel" }, 503);
@@ -67,11 +132,9 @@ serve(async (req) => {
       const r = rows[0] ?? null;
       if (!r) return json({ error: "os_nao_encontrada", os_numero }, 404);
 
-      // Loja informada x loja da OS — só alerta, não bloqueia (admin pode receber em qualquer).
       const lojaOs = r.empresa ? String(r.empresa) : null;
       const lojaConfere = loja_nome ? loja_nome.toLowerCase() === (lojaOs || "").toLowerCase() : null;
 
-      // Já recebida?
       const { data: existente } = await supabase
         .from("os_recebimento_loja")
         .select("recebido_at, recebido_por, loja_nome")
@@ -98,7 +161,40 @@ serve(async (req) => {
       });
     }
 
-    // 1) Procura linha existente (pode ter sido criada pelo cron de codEtapa=15)
+    // ── MODO RESEND ──
+    if (action === "resend") {
+      const { data: row, error } = await supabase
+        .from("os_recebimento_loja")
+        .select("*")
+        .eq("os_numero", os_numero)
+        .eq("loja_nome", loja_nome)
+        .maybeSingle();
+      if (error) throw error;
+      if (!row) return json({ error: "os_nao_registrada" }, 404);
+      if (!row.contato_id) {
+        await supabase
+          .from("os_recebimento_loja")
+          .update({
+            wa_status: "no_dispatch",
+            wa_status_at: new Date().toISOString(),
+            wa_status_reason: "sem_contato_id_para_reenvio",
+          })
+          .eq("id", row.id);
+        return json({ error: "sem_contato_id" }, 422);
+      }
+      const dispatch = await dispatchTemplate({
+        SUPABASE_URL, SERVICE_KEY, supabase,
+        rowId: row.id,
+        contato_id: row.contato_id,
+        cliente_nome: row.cliente_nome,
+        os_numero, loja_nome,
+      });
+      const { data: fresh } = await supabase
+        .from("os_recebimento_loja").select("*").eq("id", row.id).single();
+      return json({ status: "resent", row: fresh, dispatch });
+    }
+
+    // ── MODO CONFIRM (default) ──
     const { data: existente } = await supabase
       .from("os_recebimento_loja")
       .select("*")
@@ -111,12 +207,10 @@ serve(async (req) => {
         status: "already_received",
         os_numero,
         loja_nome,
-        recebido_at: existente.recebido_at,
-        notificado_cliente_at: existente.notificado_cliente_at,
+        row: existente,
       });
     }
 
-    // 2) Se ainda não temos cliente/telefone, consulta a bridge
     let cliente_nome     = existente?.cliente_nome   ?? null;
     let cliente_telefone = existente?.cliente_telefone ?? null;
     let contato_id       = existente?.contato_id     ?? null;
@@ -146,7 +240,6 @@ serve(async (req) => {
       }
     }
 
-    // 3) Resolve contato_id por telefone (se ainda não temos)
     if (!contato_id && cliente_telefone) {
       const clean = cliente_telefone.replace(/\D/g, "");
       const { data: c } = await supabase
@@ -160,7 +253,6 @@ serve(async (req) => {
       }
     }
 
-    // 4) Upsert na tabela com recebido_at
     const now = new Date().toISOString();
     const { data: row, error: upErr } = await supabase
       .from("os_recebimento_loja")
@@ -183,39 +275,29 @@ serve(async (req) => {
       .single();
     if (upErr) throw upErr;
 
-    // 5) Dispara template ao cliente (se houver contato resolvido)
-    let dispatch: any = { skipped: true, reason: "sem_contato_id" };
+    // Dispara template ao cliente (se houver contato resolvido)
+    let dispatch: any;
     if (contato_id) {
-      const primeiroNome = (cliente_nome ?? "").split(" ")[0] || "tudo bem";
-      const tplResp = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SERVICE_KEY}`,
-        },
-        body: JSON.stringify({
-          contato_id,
-          template_alias: "os_recebida_loja",
-          template_params: [primeiroNome, os_numero, loja_nome],
-          language: "pt_BR",
-        }),
+      dispatch = await dispatchTemplate({
+        SUPABASE_URL, SERVICE_KEY, supabase,
+        rowId: row.id,
+        contato_id,
+        cliente_nome,
+        os_numero, loja_nome,
       });
-      const tplJson = await tplResp.json().catch(() => ({}));
-      dispatch = { status: tplResp.status, body: tplJson };
-
-      if (tplResp.ok && tplJson?.status === "sent") {
-        const wamid = tplJson?.whatsapp_response?.messages?.[0]?.id ?? null;
-        await supabase
-          .from("os_recebimento_loja")
-          .update({
-            notificado_cliente_at: new Date().toISOString(),
-            notificado_cliente_template: "os_recebida_loja",
-            whatsapp_message_id: wamid,
-            wa_status: "sent",
-            wa_status_at: new Date().toISOString(),
-          })
-          .eq("id", row.id);
-      }
+    } else {
+      const reason = cliente_telefone
+        ? "contato_nao_encontrado_para_telefone"
+        : "sem_telefone_na_bridge";
+      await supabase
+        .from("os_recebimento_loja")
+        .update({
+          wa_status: "no_dispatch",
+          wa_status_at: now,
+          wa_status_reason: reason,
+        })
+        .eq("id", row.id);
+      dispatch = { skipped: true, reason };
     }
 
     await supabase.from("eventos_crm").insert({
@@ -227,7 +309,9 @@ serve(async (req) => {
       metadata: { os_numero, loja_nome, dispatch },
     });
 
-    return json({ status: "ok", row, dispatch });
+    const { data: fresh } = await supabase
+      .from("os_recebimento_loja").select("*").eq("id", row.id).single();
+    return json({ status: "ok", row: fresh, dispatch });
   } catch (e) {
     console.error("confirmar-recebimento-os error:", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
