@@ -2129,6 +2129,9 @@ export type Database = {
           recebido_at: string | null
           recebido_por: string | null
           updated_at: string
+          wa_status: string | null
+          wa_status_at: string | null
+          whatsapp_message_id: string | null
         }
         Insert: {
           agendamento_id?: string | null
@@ -2152,6 +2155,9 @@ export type Database = {
           recebido_at?: string | null
           recebido_por?: string | null
           updated_at?: string
+          wa_status?: string | null
+          wa_status_at?: string | null
+          whatsapp_message_id?: string | null
         }
         Update: {
           agendamento_id?: string | null
@@ -2175,6 +2181,9 @@ export type Database = {
           recebido_at?: string | null
           recebido_por?: string | null
           updated_at?: string
+          wa_status?: string | null
+          wa_status_at?: string | null
+          whatsapp_message_id?: string | null
         }
         Relationships: [
           {
