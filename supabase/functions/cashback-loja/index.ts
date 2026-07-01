@@ -548,7 +548,7 @@ serve(async (req) => {
     // ══════════════════════════════════════════════
     // AÇÕES DE PIN — validação do telefone + LGPD
     // ══════════════════════════════════════════════
-    const TERMOS_VERSAO = "v1-2026-06";
+    const TERMOS_VERSAO = "v2-2026-07";
 
     if (action === "gerar_pin" || action === "reenviar_pin") {
       const inscricao_id = String(body.inscricao_id || "");
