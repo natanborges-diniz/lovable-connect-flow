@@ -106,9 +106,8 @@ async function disparaPin(
   }
 }
 
-function _endOfHelpers() {
-  return null;
-}
+
+
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
