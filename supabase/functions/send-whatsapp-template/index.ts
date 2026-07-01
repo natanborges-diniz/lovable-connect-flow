@@ -96,16 +96,16 @@ serve(async (req) => {
     };
 
     if (catalogo?.categoria === "AUTHENTICATION") {
-      // Template OTP: param[0] = código. Body + botão COPY_CODE recebem o mesmo código.
+      // Template AUTH: param[0] = código. Body + botão URL (substitui {{1}} na URL) recebem o mesmo código.
       const code = String(template_params?.[0] ?? "").trim();
       if (!code) throw new Error("Template AUTHENTICATION requer o código no template_params[0]");
       templateBody.template.components = [
         { type: "body", parameters: [{ type: "text", text: code }] },
         {
           type: "button",
-          sub_type: "copy_code",
+          sub_type: "url",
           index: "0",
-          parameters: [{ type: "coupon_code", coupon_code: code }],
+          parameters: [{ type: "text", text: code }],
         },
       ];
     } else if (template_params?.length) {
