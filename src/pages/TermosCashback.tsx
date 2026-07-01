@@ -1,6 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 
-const TERMOS_VERSAO = "v1-2026-06";
+const TERMOS_VERSAO = "v2-2026-07";
 
 export default function TermosCashback() {
   const [sp] = useSearchParams();
@@ -34,11 +34,15 @@ export default function TermosCashback() {
             consentimento (art. 7º, I).
           </p>
 
-          <h2 className="text-lg font-semibold">3. Comunicações</h2>
+          <h2 className="text-lg font-semibold">3. Comunicações — transacionais e de marketing</h2>
           <p>
-            Você receberá mensagens transacionais sobre o seu saldo, vencimento e oportunidades de uso
-            do cashback. A qualquer momento poderá pedir o cancelamento respondendo
-            <strong> SAIR </strong> ao WhatsApp.
+            Ao confirmar o PIN você autoriza expressamente a Óticas Diniz a enviar, pelo WhatsApp
+            informado, tanto <strong>mensagens transacionais</strong> (aviso de crédito, saldo,
+            liberação, vencimento, uso do cashback) quanto <strong>mensagens de marketing</strong>
+            do programa (ofertas exclusivas, novos benefícios, lembretes de saldo a expirar e
+            campanhas relacionadas). Esse consentimento é livre e pode ser revogado a qualquer
+            momento respondendo <strong> SAIR </strong> ao WhatsApp — a revogação não afeta o
+            cashback já creditado, apenas encerra o envio de novas mensagens de marketing.
           </p>
 
           <h2 className="text-lg font-semibold">4. Validade do PIN</h2>
@@ -47,7 +51,14 @@ export default function TermosCashback() {
             reenviar.
           </p>
 
-          <h2 className="text-lg font-semibold">5. Contato</h2>
+          <h2 className="text-lg font-semibold">5. Retenção de registros</h2>
+          <p>
+            O registro do aceite (data, hora, telefone, versão dos termos e IP do consultor) é
+            mantido pelo prazo mínimo de 5 anos, para fins de auditoria e cumprimento de obrigações
+            legais (art. 27 CDC, LGPD art. 16, II).
+          </p>
+
+          <h2 className="text-lg font-semibold">6. Contato</h2>
           <p>
             Dúvidas: fale com a loja em que foi feita a compra ou com o atendimento oficial da Óticas
             Diniz pelo WhatsApp.
