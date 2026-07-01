@@ -1,41 +1,43 @@
-## Boleto: anexo extra + guarda obrigatória na conclusão
+## Objetivo
 
-### Parte A — Guarda "sem anexo = não envia" (corrigir o bug que aconteceu hoje)
+Dar ao supervisor multi-loja três recursos no **InFoco Messenger** (projeto `desktop-joy-app`, id `2d68a67b-8187-4e4e-9d36-8dcf8e39cebb`) para trabalhar com clareza quando ele acessa mais de uma loja via `user_acessos`.
 
-Hoje o card foi para "Boleto Enviado" sem arquivo. Causa provável: `concluir-solicitacao-financeiro` no modo `boleto` aceitou payload com `anexos: []` (ou request sem upload concluído) e mesmo assim moveu o card. O front (`ConcluirSolicitacaoDialog`) já valida `files.length > 0`, mas o backend não bloqueia.
+## Cenários
 
-**Correções:**
-- **EF `concluir-solicitacao-financeiro`** (modos `boleto` e `boleto-revisao`):
-  - Validar `Array.isArray(anexos) && anexos.length > 0`; cada item precisa ter `url` e `storage_path` não vazios.
-  - Se falhar → retornar 400 `"Anexe pelo menos 1 arquivo de boleto antes de concluir."` **antes** de qualquer update no card.
-  - Log em `pipeline_card_eventos` com `tipo='boleto_envio_bloqueado'` quando bloquear (para auditoria).
-- **`ConcluirSolicitacaoDialog.tsx`**: já bloqueia, mas adicionar guarda extra — desabilitar o botão durante o upload (já faz) **e** não permitir click se algum upload retornou erro silencioso (rejeitar promise no `try` já cobre; reforçar com toast caso `anexos.length === 0` após o loop).
-- **Backfill / auditoria**: rodar `read_query` para listar cards em "Boleto Enviado" sem `metadata.boleto_arquivos` → reportar para o usuário decidir (mover de volta para "Aguardando Boleto" ou anexar manual via Parte B).
+### 1. Filtro/tabs por loja no topo do Messenger
+- Ler `user_acessos` do usuário logado → lista de lojas permitidas + opção **"Todas"**.
+- Barra de chips persistente no topo do feed de demandas e da fila de OS a confirmar:
+  - 1 loja → esconde a barra (sem ruído).
+  - 2+ lojas → chips clicáveis (Todas · Diniz Carapicuíba · Diniz Osasco · …).
+  - Estado salvo em `localStorage` (`messenger:filtro_loja`).
+- Aplica o filtro nas queries de:
+  - `demandas_loja` (por `loja_nome`).
+  - `os_recebimento_loja` (por `loja_nome`, pendentes de confirmação).
+  - Aba histórico.
 
-### Parte B — Anexar arquivos depois do boleto enviado (complemento, não substituição)
+### 2. Badges de contagem por loja no menu lateral
+- Cada loja no menu lateral ganha dois contadores pequenos:
+  - **Demandas não vistas** — `demandas_loja` com `vista_pelo_loja=false` e `status != encerrada`.
+  - **OS a confirmar** — `os_recebimento_loja` com `confirmado_at IS NULL`.
+- Item **"Todas"** mostra a soma.
+- Realtime: **um único** channel Supabase por sessão, com filtro server-side `loja_nome=in.(...)`, atualizando badges sem refresh.
+- Bolinha "novo" sutil quando entra item enquanto a aba já está aberta.
 
-Mesmo com a guarda, às vezes o financeiro precisa mandar 1 PDF a mais (segunda via, comprovante de envio, etc.). Liberar isso sem gastar ciclo de revisão.
+### 3. Selector de loja ao abrir demanda nova pelo Messenger
+- No dialog "Nova demanda / Nova solicitação":
+  - 1 loja → carimba automaticamente (comportamento atual).
+  - 2+ lojas → `<Select>` obrigatório **"Falando em nome da loja"** no topo, pré-selecionado com o filtro ativo do cenário 1 pra reduzir cliques.
+  - A escolha vai para `loja_nome` / `loja_telefone` da demanda ou solicitação, garantindo que a resposta do setor volte carimbada.
+- Mesma regra na tela **"Confirmar OS Recebida"**: a loja escolhida no selector valida que a OS consultada pertence a ela.
 
-**Backend:**
-- Nova EF **`anexar-boleto-extra`** (Financeiro):
-  - Recebe `solicitacao_id` + `anexos[]` (≥1) + `observacao?`.
-  - Valida coluna "Boleto Enviado" ou "Boleto em Revisão" e `metadata.boleto_status === 'enviado'`.
-  - Append em `metadata.boleto_arquivos[]` e registra em `metadata.boleto_anexos_historico[]` com `{tipo: 'extra', enviado_em, urls[]}`.
-  - **Não** muda coluna, **não** zera `entrou_terminal_em`.
-  - Espelha mensagem na thread Messenger ("📎 Arquivo adicional do boleto") e notifica loja.
-  - Evento `boleto_anexo_extra` em `pipeline_card_eventos`.
+## Detalhes técnicos
+- **Hook único** `useLojasDoUsuario()` lendo `user_acessos` (ativo=true), reutilizado nos 3 cenários.
+- **Contexto** `FiltroLojaProvider` no root do Messenger: `{ lojaSelecionada, setLojaSelecionada, lojasDoUsuario }`.
+- Queries passam a usar `.in("loja_nome", lojas)` para "Todas" e `.eq(...)` para específica.
+- **RLS já cobre a segurança** (`user_acessos`); o filtro é UX — o `<Select>` só oferece lojas às quais o usuário tem acesso.
+- Trabalho é 100% no projeto **InFoco Messenger**; nada muda no Atrium (nem tabelas, nem EFs, nem RLS).
 
-**Frontend (Atrium):**
-- `PipelineFinanceiro.tsx` — botão **"Anexar arquivo ao boleto"** no dialog, visível quando `boleto_status === 'enviado'`.
-- Novo `AnexarBoletoExtraDialog.tsx` (input multiple + observação).
-- Lista de anexos no dialog separa "Originais" / "Adicionais".
-- `CardTimeline.tsx` — ícone 📎 para `boleto_anexo_extra` e ⛔ para `boleto_envio_bloqueado`.
-
-### Instruções para o Messenger
-- Renderizar mensagens com tag "📎 Arquivo adicional do boleto" como anexo extra (badge cinza "complemento"), mesma UI dos arquivos originais.
-- Sem ação nova da loja — só receber.
-
-### Regras
-- Anexo extra: sem limite, enquanto card não arquivado/cancelado.
-- Substituição completa → continua via ciclo de revisão (max 3).
-- Conclusão de boleto: **bloqueada server-side** sem anexo.
+## Fora do escopo
+- Backfill de histórico (`loja_nome` já é gravado).
+- Notificações push segmentadas por loja (fica para depois se pedido).
+- Mudanças no lado do setor recebendo (segue vendo tudo).
