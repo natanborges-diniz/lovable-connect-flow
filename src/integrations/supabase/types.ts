@@ -3456,6 +3456,25 @@ export type Database = {
         Args: { _inscricao_id: string; _motivo?: string }
         Returns: Json
       }
+      cashback_clientes_consolidado: {
+        Args: { _busca?: string; _limit?: number; _lojas?: string[] }
+        Returns: {
+          contato_id: string
+          cpf: string
+          creditos: Json
+          nome: string
+          proxima_expiracao: string
+          saldo_a_vencer: number
+          saldo_utilizado: number
+          saldo_vencido: number
+          total_vendas: number
+          ultima_loja: string
+          ultima_venda_em: string
+          valor_total_vendas: number
+          vendas: Json
+          whatsapp: string
+        }[]
+      }
       cashback_confirmar_credito: {
         Args: { _inscricao_id: string; _valor_validado: number }
         Returns: Json
