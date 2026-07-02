@@ -538,6 +538,53 @@ export default function ReguaNovaVenda() {
           qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
         }}
       />
+
+      <AlertDialog
+        open={!!cancelAlvo}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancelAlvo(null);
+            setCancelMotivo("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar inscrição de cashback?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Venda <strong>{cancelAlvo?.numeroVenda}</strong> de{" "}
+              <strong>{cancelAlvo?.nomeCliente}</strong>. Esta ação{" "}
+              <strong>invalida o crédito</strong> vinculado (saldo vai a zero) e é{" "}
+              <strong>silenciosa para o cliente</strong>. Se já houver resgate, o cancelamento
+              será bloqueado — use a Auditoria D+1.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="motivo-cancel">Motivo (obrigatório)</Label>
+            <Textarea
+              id="motivo-cancel"
+              value={cancelMotivo}
+              onChange={(e) => setCancelMotivo(e.target.value)}
+              placeholder="Ex.: venda cancelada no PDV, cliente desistiu, duplicidade..."
+              rows={3}
+              maxLength={300}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                cancelar.mutate();
+              }}
+              disabled={cancelar.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {cancelar.isPending ? "Cancelando..." : "Cancelar inscrição"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
