@@ -61,18 +61,29 @@ export default function ReguaNovaVenda() {
 
   const lojaUsuario = getUserLojaNames()[0] || profile?.lojas?.[0] || null;
 
-  const { data: inscricoes, isLoading } = useQuery({
-    queryKey: ["regua_inscricao_list"],
+  const [busca, setBusca] = useState("");
+  const [buscaAtiva, setBuscaAtiva] = useState("");
+  const [expandido, setExpandido] = useState<Record<string, boolean>>({});
+
+  const { data: clientes, isLoading } = useQuery({
+    queryKey: ["cashback_clientes_consolidado", buscaAtiva],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("regua_inscricao")
-        .select("id, nome_cliente, numero_venda, valor_total_informado, status, consentimento_status, criado_em, cod_empresa")
-        .order("criado_em", { ascending: false })
-        .limit(100);
+      const { data, error } = await supabase.rpc("cashback_clientes_consolidado", {
+        _busca: buscaAtiva || null,
+        _lojas: null,
+        _limit: 200,
+      });
       if (error) throw error;
-      return data || [];
+      return (data as any[]) || [];
     },
   });
+
+  const brl = (v: any) =>
+    Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const fmtCpf = (v?: string | null) => (v ? formatCPF(v) : "-");
+  const fmtFone = (v?: string | null) => (v ? formatPhone(v) : "-");
+  const fmtData = (v?: string | null) =>
+    v ? new Date(v + (v.length === 10 ? "T00:00:00" : "")).toLocaleDateString("pt-BR") : "-";
 
   const salvar = useMutation({
     mutationFn: async () => {
