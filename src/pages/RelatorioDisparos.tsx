@@ -197,10 +197,19 @@ export default function RelatorioDisparos() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => navigate(`/crm/conversas?open=${r.atendimento_id}`)}
-                          title="Abrir conversa"
+                          onClick={() => window.open(`/crm/conversas?open=${r.atendimento_id}`, "_blank")}
+                          title="Abrir conversa em nova aba"
                         >
                           <MessageSquare className="h-4 w-4" />
+                        </Button>
+                      ) : r.contato_id ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => window.open(`/crm/contatos/${r.contato_id}`, "_blank")}
+                          title="Sem atendimento vinculado — abrir ficha do cliente"
+                        >
+                          <MessageSquare className="h-4 w-4 opacity-60" />
                         </Button>
                       ) : null}
                     </TableCell>
