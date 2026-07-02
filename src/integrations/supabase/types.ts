@@ -3669,6 +3669,26 @@ export type Database = {
         Returns: boolean
       }
       pode_gerenciar_usuarios: { Args: { _uid: string }; Returns: boolean }
+      regua_listar_pins_por_usuario: {
+        Args: { p_aba?: string }
+        Returns: {
+          cashback_ativado: number
+          cashback_libera: string
+          cod_empresa: string
+          cpf: string
+          criado_em: string
+          id: string
+          nome_cliente: string
+          nome_loja: string
+          numero_venda: string
+          pin_confirmado_at: string
+          pin_expira_at: string
+          pin_tentativas: number
+          status: string
+          valor_total_informado: number
+          whatsapp: string
+        }[]
+      }
       regua_registrar_venda: {
         Args: {
           p_cod_empresa: string
