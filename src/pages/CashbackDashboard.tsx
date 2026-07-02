@@ -1,11 +1,15 @@
 import { useMemo, useState } from "react";
-import { useCashbackDashboard } from "@/hooks/useCashbackDashboard";
+import { useCashbackDashboard, useCashbackLojas } from "@/hooks/useCashbackDashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 import { format, subDays } from "date-fns";
+import { Store, X } from "lucide-react";
 
 const fmtBRL = (n: number) => (n ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtN = (n: number) => (n ?? 0).toLocaleString("pt-BR");
