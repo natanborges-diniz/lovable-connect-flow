@@ -613,6 +613,21 @@ serve(async (req) => {
         ip_origem_consultor: ip,
       }).eq("id", inscricao_id);
 
+      // Promove crédito de 'pendente_pin' → 'ativo' agora que o cliente confirmou
+      try {
+        const { data: promo, error: promoErr } = await supabase.rpc(
+          "cashback_promover_creditos_por_inscricao",
+          { _inscricao_id: inscricao_id },
+        );
+        if (promoErr) {
+          console.warn("[cashback-loja] promover creditos falhou:", promoErr.message);
+        } else {
+          console.log("[cashback-loja] creditos promovidos:", promo);
+        }
+      } catch (e) {
+        console.warn("[cashback-loja] promover creditos exception:", e);
+      }
+
       if (i.whatsapp) {
         await supabase.rpc("canal_registrar_evento", {
           _telefone: String(i.whatsapp),
