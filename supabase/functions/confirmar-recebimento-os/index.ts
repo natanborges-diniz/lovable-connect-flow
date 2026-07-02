@@ -289,6 +289,7 @@ serve(async (req) => {
         rowId: row.id,
         contato_id: row.contato_id,
         cliente_nome: row.cliente_nome,
+        cliente_telefone: row.cliente_telefone,
         os_numero, loja_nome,
       });
       const { data: fresh } = await supabase
