@@ -1,4 +1,5 @@
 import { Fragment, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,7 +11,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { CashbackPinDialog } from "@/components/cashback/CashbackPinDialog";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Search, Send, ExternalLink, XCircle } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 const onlyDigits = (s: string) => (s || "").replace(/\D+/g, "");
 
@@ -127,12 +139,63 @@ export default function ReguaNovaVenda() {
     onError: (e: any) => toast.error(e.message || "Erro ao cadastrar"),
   });
 
+  // ---- Ações operacionais por venda ----
+  const [cancelAlvo, setCancelAlvo] = useState<{ inscricaoId: string; numeroVenda: string; nomeCliente: string } | null>(null);
+  const [cancelMotivo, setCancelMotivo] = useState("");
+  const [reenviandoId, setReenviandoId] = useState<string | null>(null);
+
+  const reenviarPin = async (inscricaoId: string) => {
+    try {
+      setReenviandoId(inscricaoId);
+      const { data, error } = await supabase.functions.invoke("cashback-loja", {
+        body: { action: "reenviar_pin", inscricao_id: inscricaoId },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast.success("PIN reenviado ao cliente via WhatsApp.");
+      qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
+    } catch (e: any) {
+      toast.error(e.message || "Falha ao reenviar PIN");
+    } finally {
+      setReenviandoId(null);
+    }
+  };
+
+  const cancelar = useMutation({
+    mutationFn: async () => {
+      if (!cancelAlvo) throw new Error("Selecione uma venda");
+      if (!cancelMotivo.trim() || cancelMotivo.trim().length < 5) {
+        throw new Error("Informe um motivo (mínimo 5 caracteres)");
+      }
+      const { data, error } = await supabase.rpc("cashback_cancelar_inscricao", {
+        _inscricao_id: cancelAlvo.inscricaoId,
+        _motivo: cancelMotivo.trim(),
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (res: any) => {
+      if (res?.ja_cancelada) {
+        toast.info("Esta inscrição já estava cancelada.");
+      } else {
+        toast.success("Inscrição cancelada e crédito invalidado.");
+      }
+      setCancelAlvo(null);
+      setCancelMotivo("");
+      qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
+    },
+    onError: (e: any) => toast.error(e.message || "Falha ao cancelar inscrição"),
+  });
+
+
+
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold">Novo cliente (cashback)</h1>
+        <h1 className="text-2xl font-bold">Clientes &amp; Vendas</h1>
         <p className="text-sm text-muted-foreground">
-          Cadastro do cliente e da venda para iniciar a régua de cashback.
+          Cadastro de vendas na régua de cashback e acompanhamento consolidado por cliente.
+          Correções em campos sensíveis (valor, CPF, nº venda) só via <strong>Auditoria D+1</strong>.
         </p>
       </div>
 
@@ -377,34 +440,79 @@ export default function ReguaNovaVenda() {
                                       <TableHead className="h-8">PIN</TableHead>
                                       <TableHead className="h-8">Status</TableHead>
                                       <TableHead className="h-8">Data</TableHead>
+                                      <TableHead className="h-8 text-right">Ações</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {(c.vendas || []).map((v: any) => (
-                                      <TableRow key={v.inscricao_id}>
-                                        <TableCell className="font-mono text-xs">
-                                          {v.numero_venda}
-                                        </TableCell>
-                                        <TableCell className="text-xs text-right">
-                                          {brl(v.valor)}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge
-                                            variant={
-                                              v.pin_confirmado_at ? "default" : "outline"
-                                            }
-                                          >
-                                            {v.pin_confirmado_at ? "confirmado" : "pendente"}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge variant="secondary">{v.status}</Badge>
-                                        </TableCell>
-                                        <TableCell className="text-xs text-muted-foreground">
-                                          {new Date(v.criado_em).toLocaleDateString("pt-BR")}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
+                                    {(c.vendas || []).map((v: any) => {
+                                      const cancelada = v.status === "cancelada";
+                                      const pinConfirmado = !!v.pin_confirmado_at;
+                                      return (
+                                        <TableRow key={v.inscricao_id}>
+                                          <TableCell className="font-mono text-xs">
+                                            {v.numero_venda}
+                                          </TableCell>
+                                          <TableCell className="text-xs text-right">
+                                            {brl(v.valor)}
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant={pinConfirmado ? "default" : "outline"}>
+                                              {pinConfirmado ? "confirmado" : "pendente"}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant={cancelada ? "destructive" : "secondary"}>
+                                              {v.status}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell className="text-xs text-muted-foreground">
+                                            {new Date(v.criado_em).toLocaleDateString("pt-BR")}
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                              {!pinConfirmado && !cancelada && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="ghost"
+                                                  title="Reenviar PIN ao cliente"
+                                                  disabled={reenviandoId === v.inscricao_id}
+                                                  onClick={() => reenviarPin(v.inscricao_id)}
+                                                >
+                                                  <Send className="w-3.5 h-3.5" />
+                                                </Button>
+                                              )}
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                title="Ver contato no CRM"
+                                                asChild
+                                              >
+                                                <Link to={`/crm/contatos/${c.contato_id}`}>
+                                                  <ExternalLink className="w-3.5 h-3.5" />
+                                                </Link>
+                                              </Button>
+                                              {!cancelada && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="ghost"
+                                                  title="Cancelar inscrição (invalida o crédito)"
+                                                  className="text-destructive hover:text-destructive"
+                                                  onClick={() =>
+                                                    setCancelAlvo({
+                                                      inscricaoId: v.inscricao_id,
+                                                      numeroVenda: v.numero_venda,
+                                                      nomeCliente: c.nome || "",
+                                                    })
+                                                  }
+                                                >
+                                                  <XCircle className="w-3.5 h-3.5" />
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
                                   </TableBody>
                                 </Table>
                               </div>
@@ -430,6 +538,53 @@ export default function ReguaNovaVenda() {
           qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
         }}
       />
+
+      <AlertDialog
+        open={!!cancelAlvo}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancelAlvo(null);
+            setCancelMotivo("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar inscrição de cashback?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Venda <strong>{cancelAlvo?.numeroVenda}</strong> de{" "}
+              <strong>{cancelAlvo?.nomeCliente}</strong>. Esta ação{" "}
+              <strong>invalida o crédito</strong> vinculado (saldo vai a zero) e é{" "}
+              <strong>silenciosa para o cliente</strong>. Se já houver resgate, o cancelamento
+              será bloqueado — use a Auditoria D+1.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="motivo-cancel">Motivo (obrigatório)</Label>
+            <Textarea
+              id="motivo-cancel"
+              value={cancelMotivo}
+              onChange={(e) => setCancelMotivo(e.target.value)}
+              placeholder="Ex.: venda cancelada no PDV, cliente desistiu, duplicidade..."
+              rows={3}
+              maxLength={300}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                cancelar.mutate();
+              }}
+              disabled={cancelar.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {cancelar.isPending ? "Cancelando..." : "Cancelar inscrição"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

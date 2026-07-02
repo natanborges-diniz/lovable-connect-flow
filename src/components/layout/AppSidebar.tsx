@@ -140,7 +140,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "Cashback",
       items: [
         { title: "Dashboard", url: "/cashback/dashboard", icon: BarChart3 },
-        { title: "Novo Cliente", url: "/cashback/nova-venda", icon: PlusCircle },
+        { title: "Clientes & Vendas", url: "/cashback/nova-venda", icon: PlusCircle },
         { title: "Auditoria D+1", url: "/cashback/auditoria", icon: ShieldCheck },
       ],
     },
