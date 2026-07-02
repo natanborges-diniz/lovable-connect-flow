@@ -39,13 +39,18 @@ function Kpi({ title, value, hint, tone }: { title: string; value: string; hint?
 
 export default function CashbackDashboard() {
   const [days, setDays] = useState(30);
+  const [lojasSel, setLojasSel] = useState<string[]>([]);
   const { de, ate } = useMemo(() => ({
     de: format(subDays(new Date(), days), "yyyy-MM-dd"),
     ate: format(new Date(), "yyyy-MM-dd"),
   }), [days]);
 
-  const { data, isLoading, error, refetch } = useCashbackDashboard(de, ate);
+  const { data, isLoading, error, refetch } = useCashbackDashboard(de, ate, lojasSel);
+  const { data: lojasDisponiveis = [] } = useCashbackLojas();
   const k = data?.kpis;
+
+  const toggleLoja = (nome: string) =>
+    setLojasSel((prev) => (prev.includes(nome) ? prev.filter((n) => n !== nome) : [...prev, nome]));
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
@@ -56,7 +61,38 @@ export default function CashbackDashboard() {
             Eficiência do programa: geração, ativação, resgate e conversão.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-2">
+                <Store className="w-4 h-4" />
+                {lojasSel.length === 0 ? "Todas as lojas" : `${lojasSel.length} loja(s)`}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-0" align="end">
+              <div className="p-2 border-b flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">Filtrar por loja</span>
+                {lojasSel.length > 0 && (
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setLojasSel([])}>
+                    Limpar
+                  </Button>
+                )}
+              </div>
+              <ScrollArea className="h-72">
+                <div className="p-2 space-y-1">
+                  {lojasDisponiveis.length === 0 && (
+                    <p className="text-xs text-muted-foreground px-2 py-4 text-center">Nenhuma loja disponível</p>
+                  )}
+                  {lojasDisponiveis.map((nome) => (
+                    <label key={nome} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer text-sm">
+                      <Checkbox checked={lojasSel.includes(nome)} onCheckedChange={() => toggleLoja(nome)} />
+                      <span className="truncate">{nome}</span>
+                    </label>
+                  ))}
+                </div>
+              </ScrollArea>
+            </PopoverContent>
+          </Popover>
           {PRESETS.map((p) => (
             <Button key={p.days} size="sm" variant={days === p.days ? "default" : "outline"} onClick={() => setDays(p.days)}>
               {p.label}
@@ -65,6 +101,19 @@ export default function CashbackDashboard() {
           <Button size="sm" variant="ghost" onClick={() => refetch()}>Atualizar</Button>
         </div>
       </div>
+
+      {lojasSel.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {lojasSel.map((nome) => (
+            <Badge key={nome} variant="secondary" className="gap-1 pr-1">
+              {nome}
+              <button onClick={() => toggleLoja(nome)} className="ml-1 rounded hover:bg-muted-foreground/20 p-0.5">
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">Erro: {(error as any).message}</p>}
       {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
