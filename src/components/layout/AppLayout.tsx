@@ -6,7 +6,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useAtendimentoNotifier } from "@/hooks/useAtendimentoNotifier";
 
-export type ModuleKey = "dashboard" | "crm" | "financeiro" | "lojas" | "ti" | "interno" | "estoque" | "tarefas" | "mensagens" | "configuracoes";
+export type ModuleKey = "dashboard" | "crm" | "financeiro" | "lojas" | "ti" | "interno" | "estoque" | "tarefas" | "mensagens" | "cashback" | "configuracoes";
 
 export const moduleFromPath = (pathname: string): ModuleKey => {
   if (pathname.startsWith("/lojas")) return "lojas";
@@ -17,6 +17,7 @@ export const moduleFromPath = (pathname: string): ModuleKey => {
   if (pathname.startsWith("/estoque")) return "estoque";
   if (pathname.startsWith("/tarefas")) return "tarefas";
   if (pathname.startsWith("/mensagens") || pathname.startsWith("/demandas")) return "mensagens";
+  if (pathname.startsWith("/cashback") || pathname.startsWith("/regua")) return "cashback";
   if (pathname.startsWith("/configuracoes")) return "configuracoes";
   return "dashboard";
 };

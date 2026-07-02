@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, Settings, LogOut, DollarSign, Bell, Mail, Store, Monitor, ListTodo, Headset, Package } from "lucide-react";
+import { LayoutDashboard, Users, Settings, LogOut, DollarSign, Bell, Mail, Store, Monitor, ListTodo, Headset, Package, Gift } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,6 +28,7 @@ const allModules: { key: ModuleKey; label: string; icon: React.ElementType; defa
   { key: "estoque", label: "Estoque", icon: Package, defaultPath: "/estoque" },
   { key: "tarefas", label: "Tarefas", icon: ListTodo, defaultPath: "/tarefas" },
   { key: "mensagens", label: "Mensagens", icon: Mail, defaultPath: "/mensagens" },
+  { key: "cashback", label: "Cashback", icon: Gift, defaultPath: "/cashback/dashboard" },
   { key: "configuracoes", label: "Config", icon: Settings, defaultPath: "/configuracoes" },
 ];
 
