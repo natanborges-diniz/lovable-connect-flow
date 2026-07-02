@@ -440,34 +440,79 @@ export default function ReguaNovaVenda() {
                                       <TableHead className="h-8">PIN</TableHead>
                                       <TableHead className="h-8">Status</TableHead>
                                       <TableHead className="h-8">Data</TableHead>
+                                      <TableHead className="h-8 text-right">Ações</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {(c.vendas || []).map((v: any) => (
-                                      <TableRow key={v.inscricao_id}>
-                                        <TableCell className="font-mono text-xs">
-                                          {v.numero_venda}
-                                        </TableCell>
-                                        <TableCell className="text-xs text-right">
-                                          {brl(v.valor)}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge
-                                            variant={
-                                              v.pin_confirmado_at ? "default" : "outline"
-                                            }
-                                          >
-                                            {v.pin_confirmado_at ? "confirmado" : "pendente"}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge variant="secondary">{v.status}</Badge>
-                                        </TableCell>
-                                        <TableCell className="text-xs text-muted-foreground">
-                                          {new Date(v.criado_em).toLocaleDateString("pt-BR")}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
+                                    {(c.vendas || []).map((v: any) => {
+                                      const cancelada = v.status === "cancelada";
+                                      const pinConfirmado = !!v.pin_confirmado_at;
+                                      return (
+                                        <TableRow key={v.inscricao_id}>
+                                          <TableCell className="font-mono text-xs">
+                                            {v.numero_venda}
+                                          </TableCell>
+                                          <TableCell className="text-xs text-right">
+                                            {brl(v.valor)}
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant={pinConfirmado ? "default" : "outline"}>
+                                              {pinConfirmado ? "confirmado" : "pendente"}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant={cancelada ? "destructive" : "secondary"}>
+                                              {v.status}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell className="text-xs text-muted-foreground">
+                                            {new Date(v.criado_em).toLocaleDateString("pt-BR")}
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                              {!pinConfirmado && !cancelada && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="ghost"
+                                                  title="Reenviar PIN ao cliente"
+                                                  disabled={reenviandoId === v.inscricao_id}
+                                                  onClick={() => reenviarPin(v.inscricao_id)}
+                                                >
+                                                  <Send className="w-3.5 h-3.5" />
+                                                </Button>
+                                              )}
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                title="Ver contato no CRM"
+                                                asChild
+                                              >
+                                                <Link to={`/crm/contatos/${c.contato_id}`}>
+                                                  <ExternalLink className="w-3.5 h-3.5" />
+                                                </Link>
+                                              </Button>
+                                              {!cancelada && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="ghost"
+                                                  title="Cancelar inscrição (invalida o crédito)"
+                                                  className="text-destructive hover:text-destructive"
+                                                  onClick={() =>
+                                                    setCancelAlvo({
+                                                      inscricaoId: v.inscricao_id,
+                                                      numeroVenda: v.numero_venda,
+                                                      nomeCliente: c.nome || "",
+                                                    })
+                                                  }
+                                                >
+                                                  <XCircle className="w-3.5 h-3.5" />
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
                                   </TableBody>
                                 </Table>
                               </div>
