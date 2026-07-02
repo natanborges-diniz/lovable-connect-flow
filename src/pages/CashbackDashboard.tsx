@@ -155,6 +155,17 @@ export default function CashbackDashboard() {
             </div>
           </div>
 
+          {/* Linha 4 — Impacto em vendas */}
+          <div>
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Impacto em vendas</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Kpi title="Vendas geradas com cashback" value={fmtN(k.vendas_com_resgate_qtd)} hint={fmtBRL(k.vendas_com_resgate_valor) + " faturados"} tone="ok" />
+              <Kpi title="Desconto concedido" value={fmtBRL(k.desconto_concedido_valor)} hint="cashback resgatado no período" tone="warn" />
+              <Kpi title="Ticket médio (venda c/ resgate)" value={fmtBRL(k.ticket_medio_venda_resgate)} />
+              <Kpi title="Desconto médio" value={`${k.desconto_medio_pct}%`} hint="resgate / valor da venda" tone="muted" />
+            </div>
+          </div>
+
           {/* Gráfico */}
           <Card>
             <CardHeader>
