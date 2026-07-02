@@ -139,6 +139,56 @@ export default function ReguaNovaVenda() {
     onError: (e: any) => toast.error(e.message || "Erro ao cadastrar"),
   });
 
+  // ---- Ações operacionais por venda ----
+  const [cancelAlvo, setCancelAlvo] = useState<{ inscricaoId: string; numeroVenda: string; nomeCliente: string } | null>(null);
+  const [cancelMotivo, setCancelMotivo] = useState("");
+  const [reenviandoId, setReenviandoId] = useState<string | null>(null);
+
+  const reenviarPin = async (inscricaoId: string) => {
+    try {
+      setReenviandoId(inscricaoId);
+      const { data, error } = await supabase.functions.invoke("cashback-loja", {
+        body: { action: "reenviar_pin", inscricao_id: inscricaoId },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast.success("PIN reenviado ao cliente via WhatsApp.");
+      qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
+    } catch (e: any) {
+      toast.error(e.message || "Falha ao reenviar PIN");
+    } finally {
+      setReenviandoId(null);
+    }
+  };
+
+  const cancelar = useMutation({
+    mutationFn: async () => {
+      if (!cancelAlvo) throw new Error("Selecione uma venda");
+      if (!cancelMotivo.trim() || cancelMotivo.trim().length < 5) {
+        throw new Error("Informe um motivo (mínimo 5 caracteres)");
+      }
+      const { data, error } = await supabase.rpc("cashback_cancelar_inscricao", {
+        _inscricao_id: cancelAlvo.inscricaoId,
+        _motivo: cancelMotivo.trim(),
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (res: any) => {
+      if (res?.ja_cancelada) {
+        toast.info("Esta inscrição já estava cancelada.");
+      } else {
+        toast.success("Inscrição cancelada e crédito invalidado.");
+      }
+      setCancelAlvo(null);
+      setCancelMotivo("");
+      qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
+    },
+    onError: (e: any) => toast.error(e.message || "Falha ao cancelar inscrição"),
+  });
+
+
+
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
