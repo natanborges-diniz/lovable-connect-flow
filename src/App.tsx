@@ -20,6 +20,7 @@ import Tarefas from "./pages/Tarefas";
 import Mensagens from "./pages/Mensagens";
 import ReguaNovaVenda from "./pages/ReguaNovaVenda";
 import CashbackAuditoria from "./pages/CashbackAuditoria";
+import CashbackDashboard from "./pages/CashbackDashboard";
 import RelatorioDisparos from "./pages/RelatorioDisparos";
 
 import Demandas from "./pages/Demandas";
@@ -62,6 +63,10 @@ const App = () => (
               <Route path="/mensagens" element={<Mensagens />} />
               <Route path="/regua/nova-venda" element={<ReguaNovaVenda />} />
               <Route path="/regua/auditoria" element={<CashbackAuditoria />} />
+              <Route path="/cashback" element={<ProtectedRoute allowedRoles={["admin"]}><CashbackDashboard /></ProtectedRoute>} />
+              <Route path="/cashback/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><CashbackDashboard /></ProtectedRoute>} />
+              <Route path="/cashback/auditoria" element={<ProtectedRoute allowedRoles={["admin"]}><CashbackAuditoria /></ProtectedRoute>} />
+              <Route path="/cashback/nova-venda" element={<ReguaNovaVenda />} />
 
               <Route path="/demandas" element={<Demandas />} />
               <Route path="/configuracoes" element={

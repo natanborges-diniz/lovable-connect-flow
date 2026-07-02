@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
   Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin, ShieldAlert, Package,
-  ChevronLeft, ChevronRight, BarChart3
+  ChevronLeft, ChevronRight, BarChart3, Gift, ShieldCheck, PlusCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -132,6 +132,16 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       items: [
         { title: "Conversas", url: "/mensagens", icon: MessageSquare },
         { title: "Demandas", url: "/demandas", icon: Pin },
+      ],
+    },
+  ],
+  cashback: [
+    {
+      label: "Cashback",
+      items: [
+        { title: "Dashboard", url: "/cashback/dashboard", icon: BarChart3 },
+        { title: "Nova Venda", url: "/cashback/nova-venda", icon: PlusCircle },
+        { title: "Auditoria D+1", url: "/cashback/auditoria", icon: ShieldCheck },
       ],
     },
   ],
