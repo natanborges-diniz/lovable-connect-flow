@@ -92,6 +92,17 @@ export function TimelineFeed({ items, loading, compact }: Props) {
                     {it.descricao && (
                       <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">{it.descricao}</p>
                     )}
+                    {it.fonte === "lgpd" && (it.metadata as any)?.evidencia_url && (
+                      <a
+                        href={(it.metadata as any).evidencia_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 mt-1 text-[11px] text-primary hover:underline"
+                      >
+                        Ver termos aceitos
+                        {(it.metadata as any)?.termos_versao ? ` (${(it.metadata as any).termos_versao})` : ""}
+                      </a>
+                    )}
                   </div>
                 </li>
               );
