@@ -122,7 +122,7 @@ export default function ReguaNovaVenda() {
       setCpf("");
       setNumeroVenda("");
       setValor("");
-      qc.invalidateQueries({ queryKey: ["regua_inscricao_list"] });
+      qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
     },
     onError: (e: any) => toast.error(e.message || "Erro ao cadastrar"),
   });
