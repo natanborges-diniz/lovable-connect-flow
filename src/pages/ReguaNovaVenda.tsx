@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { CashbackPinDialog } from "@/components/cashback/CashbackPinDialog";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 
 const onlyDigits = (s: string) => (s || "").replace(/\D+/g, "");
 
