@@ -203,7 +203,7 @@ export default function CashbackDashboard() {
                     const conv = r.cashback_gerado > 0 ? (r.cashback_resgatado / r.cashback_gerado) * 100 : 0;
                     return (
                       <TableRow key={r.cod_empresa ?? "sem-loja"}>
-                        <TableCell className="font-mono text-xs">{r.cod_empresa ?? "—"}</TableCell>
+                        <TableCell className="text-xs font-medium">{r.nome_loja ?? "—"}</TableCell>
                         <TableCell className="text-right text-xs">{fmtN(r.vendas)}</TableCell>
                         <TableCell className="text-right text-xs">{fmtBRL(Number(r.valor_lancado))}</TableCell>
                         <TableCell className="text-center"><Badge variant="outline" className="text-emerald-600">{r.match}</Badge></TableCell>
