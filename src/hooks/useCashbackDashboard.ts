@@ -24,6 +24,7 @@ export type CashbackKpis = {
 
 export type CashbackPorLoja = {
   cod_empresa: string | null;
+  nome_loja: string | null;
   vendas: number;
   valor_lancado: number;
   match: number;
@@ -43,13 +44,28 @@ export type CashbackDashboardData = {
   serie_semanal: CashbackSerie[];
 };
 
-export function useCashbackDashboard(de: string, ate: string) {
+export function useCashbackDashboard(de: string, ate: string, lojas?: string[]) {
+  const lojasKey = (lojas ?? []).slice().sort().join("|");
   return useQuery<CashbackDashboardData>({
-    queryKey: ["cashback-dashboard", de, ate],
+    queryKey: ["cashback-dashboard", de, ate, lojasKey],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("cashback_dashboard_kpis", { _de: de, _ate: ate });
+      const params: Record<string, unknown> = { _de: de, _ate: ate };
+      if (lojas && lojas.length > 0) params._lojas = lojas;
+      const { data, error } = await supabase.rpc("cashback_dashboard_kpis", params as any);
       if (error) throw error;
       return data as unknown as CashbackDashboardData;
     },
+  });
+}
+
+export function useCashbackLojas() {
+  return useQuery<string[]>({
+    queryKey: ["cashback-lojas"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("cashback_listar_lojas");
+      if (error) throw error;
+      return ((data ?? []) as { nome_loja: string }[]).map((r) => r.nome_loja).filter(Boolean);
+    },
+    staleTime: 5 * 60 * 1000,
   });
 }
