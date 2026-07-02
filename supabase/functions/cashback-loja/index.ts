@@ -75,7 +75,7 @@ async function disparaPin(
 ): Promise<{ status: "enviado" | "falha"; expira_at: string | null }> {
   const { data: insc } = await supabase
     .from("regua_inscricao")
-    .select("contato_id")
+    .select("contato_id, whatsapp, nome_cliente")
     .eq("id", inscricao_id)
     .maybeSingle();
   if (!insc) return { status: "falha", expira_at: null };
@@ -99,6 +99,23 @@ async function disparaPin(
         template_params: [pin],
       }),
     });
+
+    // Aviso LGPD em sequência ao PIN — cliente precisa saber ANTES de informar o código
+    // que digitar o PIN equivale a aceitar os termos (consentimento válido)
+    try {
+      const primeiro = String((insc as any).nome_cliente || "").trim().split(/\s+/)[0] || "";
+      const saudacao = primeiro ? `${primeiro}, ` : "";
+      const aviso =
+        `🔐 ${saudacao}o código de 4 dígitos que você acabou de receber confirma seu WhatsApp e ativa seu cashback.\n\n` +
+        `Ao informar o PIN, você concorda com nossos Termos de Uso e Política de Privacidade (LGPD) do programa de cashback das Óticas Diniz.\n\n` +
+        `📄 Leia antes de confirmar: https://atrium-link.lovable.app/termos/cashback\n\n` +
+        `Se não reconhece esta compra, é só ignorar esta mensagem — nada será ativado sem o PIN.`;
+      const phone = String((insc as any).whatsapp || "").replace(/\D/g, "");
+      if (phone) await sendTextViaMeta(phone, aviso);
+    } catch (e) {
+      console.warn("[cashback-loja] aviso LGPD pós-PIN falhou:", (e as Error).message);
+    }
+
     return { status: "enviado", expira_at: expira };
   } catch (e) {
     console.warn("[cashback-loja] disparaPin falhou:", (e as Error).message);
@@ -200,8 +217,7 @@ async function dispararBoasVindasCashback(
       `Sua compra na ${lojaNome} te garantiu um cashback exclusivo de R$ ${fmt(valorCashback)}! 🎁\n\n` +
       `${linhaValidade}\n` +
       `🛒 Na próxima compra a partir de R$ ${fmt(minimo)}\n\n` +
-      `✅ Use pelo WhatsApp — é só me responder aqui.\n\n` +
-      `⚡ Regras completas: https://atrium-link.lovable.app/termos/cashback`;
+      `✅ Use pelo WhatsApp — é só me responder aqui.`;
 
     // Envia via Meta (janela aberta pelo template AUTHENTICATION do PIN)
     const phone = String(whatsapp).replace(/\D/g, "");
