@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public.cashback_dashboard_kpis(date, date);
