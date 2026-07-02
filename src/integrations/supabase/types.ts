@@ -3461,6 +3461,10 @@ export type Database = {
         Returns: Json
       }
       cashback_consultar_saldo: { Args: { _contato_id: string }; Returns: Json }
+      cashback_promover_creditos_por_inscricao: {
+        Args: { _inscricao_id: string }
+        Returns: Json
+      }
       cashback_registrar_resgate: {
         Args: {
           _cashback_usado: number
