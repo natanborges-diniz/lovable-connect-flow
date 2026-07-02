@@ -118,9 +118,9 @@ export default function ReguaNovaVenda() {
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold">Nova venda (régua)</h1>
+        <h1 className="text-2xl font-bold">Novo cliente (cashback)</h1>
         <p className="text-sm text-muted-foreground">
-          Cadastro de venda para a régua de relacionamento pós-venda.
+          Cadastro do cliente e da venda para iniciar a régua de cashback.
         </p>
       </div>
 

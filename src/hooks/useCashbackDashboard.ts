@@ -19,6 +19,11 @@ export type CashbackKpis = {
   resgates_qtd: number;
   resgates_valor: number;
   ticket_medio_resgate: number;
+  vendas_com_resgate_qtd: number;
+  vendas_com_resgate_valor: number;
+  desconto_concedido_valor: number;
+  ticket_medio_venda_resgate: number;
+  desconto_medio_pct: number;
   conversao_pct: number;
 };
 
