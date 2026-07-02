@@ -142,9 +142,10 @@ export default function ReguaNovaVenda() {
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold">Novo cliente (cashback)</h1>
+        <h1 className="text-2xl font-bold">Clientes &amp; Vendas</h1>
         <p className="text-sm text-muted-foreground">
-          Cadastro do cliente e da venda para iniciar a régua de cashback.
+          Cadastro de vendas na régua de cashback e acompanhamento consolidado por cliente.
+          Correções em campos sensíveis (valor, CPF, nº venda) só via <strong>Auditoria D+1</strong>.
         </p>
       </div>
 
