@@ -386,6 +386,7 @@ serve(async (req) => {
         rowId: row.id,
         contato_id,
         cliente_nome,
+        cliente_telefone,
         os_numero, loja_nome,
       });
     } else {
