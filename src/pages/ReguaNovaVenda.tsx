@@ -412,7 +412,7 @@ export default function ReguaNovaVenda() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </TableBody>
