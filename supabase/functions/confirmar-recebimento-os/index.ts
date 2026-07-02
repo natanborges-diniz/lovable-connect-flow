@@ -25,6 +25,94 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// ── Envio de texto livre pela Meta (janela 24h aberta pelo template) ──
+async function sendTextViaMeta(phone: string, texto: string): Promise<any> {
+  const token = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!token || !phoneNumberId) throw new Error("WhatsApp Meta creds ausentes");
+  const clean = String(phone).replace(/\D/g, "");
+  const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: clean,
+      type: "text",
+      text: { preview_url: false, body: texto },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`meta ${res.status}: ${JSON.stringify(data)}`);
+  return data;
+}
+
+// ── Follow-up: pergunta se cliente quer marcar horário de retirada ──
+// Enviado logo após o template `os_recebida_loja` para dar ao cliente um
+// próximo passo claro (agendar retirada). Se ele responder positivamente, o
+// gate de loja obrigatória em ai-triage já vai usar a loja da OS direto na
+// tool agendar_visita, sem perguntar unidade.
+async function enviarFollowupRetirada(opts: {
+  supabase: any;
+  contato_id: string;
+  cliente_nome: string | null;
+  cliente_telefone: string | null;
+  os_numero: string;
+  loja_nome: string;
+  rowId: string;
+}) {
+  const { supabase, contato_id, cliente_nome, cliente_telefone, os_numero, loja_nome, rowId } = opts;
+  if (!cliente_telefone) return { status: "skipped", motivo: "sem_telefone" };
+  const primeiroNome = String(cliente_nome ?? "").trim().split(/\s+/)[0] || "";
+  const saud = primeiroNome ? `${primeiroNome}, ` : "";
+  const texto =
+    `${saud}quer que eu já reserve um horário para você passar na *${loja_nome}* para retirar? 😊\n\n` +
+    `Se sim, me diga o *dia* e o *período* (manhã ou tarde) que fica melhor pra você — eu confirmo com a loja.\n\n` +
+    `Se preferir passar sem hora marcada, também tudo bem, é só nos avisar quando estiver a caminho.`;
+  let wamid: string | null = null;
+  try {
+    const r = await sendTextViaMeta(cliente_telefone, texto);
+    wamid = r?.messages?.[0]?.id || null;
+  } catch (e) {
+    const msg = (e as Error).message || "";
+    console.warn("[confirmar-recebimento-os] followup retirada falhou:", msg);
+    return { status: "falha", motivo: msg.slice(0, 200) };
+  }
+
+  // Loga em mensagens (se houver atendimento aberto p/ o contato)
+  try {
+    const { data: atendAberto } = await supabase
+      .from("atendimentos")
+      .select("id")
+      .eq("contato_id", contato_id)
+      .eq("status", "aberto")
+      .order("iniciado_em", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if ((atendAberto as any)?.id) {
+      await supabase.from("mensagens").insert({
+        atendimento_id: (atendAberto as any).id,
+        direcao: "outbound",
+        conteudo: texto,
+        tipo_conteudo: "text",
+        remetente_nome: "Óticas Diniz",
+        provedor: "meta_official",
+        metadata: {
+          whatsapp_message_id: wamid,
+          provedor: "meta_official",
+          categoria: "os_recebida_followup_retirada",
+          os_numero,
+          loja_nome,
+          os_recebimento_id: rowId,
+        },
+      });
+    }
+  } catch (e) {
+    console.warn("[confirmar-recebimento-os] log followup mensagem falhou:", (e as Error).message);
+  }
+
+  return { status: "enviado", wamid };
+}
+
 async function dispatchTemplate(opts: {
   SUPABASE_URL: string;
   SERVICE_KEY: string;
@@ -32,10 +120,11 @@ async function dispatchTemplate(opts: {
   rowId: string;
   contato_id: string;
   cliente_nome: string | null;
+  cliente_telefone: string | null;
   os_numero: string;
   loja_nome: string;
 }) {
-  const { SUPABASE_URL, SERVICE_KEY, supabase, rowId, contato_id, cliente_nome, os_numero, loja_nome } = opts;
+  const { SUPABASE_URL, SERVICE_KEY, supabase, rowId, contato_id, cliente_nome, cliente_telefone, os_numero, loja_nome } = opts;
   const primeiroNome = (cliente_nome ?? "").split(" ")[0] || "tudo bem";
   const tplResp = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
     method: "POST",
@@ -66,7 +155,20 @@ async function dispatchTemplate(opts: {
         wa_status_reason: null,
       })
       .eq("id", rowId);
-    return { status: tplResp.status, body: tplJson, wamid };
+
+    // Follow-up de retirada (texto livre — janela 24h aberta pelo template acima).
+    // Não bloqueia o retorno se falhar; apenas registra no dispatch.
+    const followup = await enviarFollowupRetirada({
+      supabase,
+      contato_id,
+      cliente_nome,
+      cliente_telefone,
+      os_numero,
+      loja_nome,
+      rowId,
+    });
+
+    return { status: tplResp.status, body: tplJson, wamid, followup };
   }
 
   // falha explícita — grava motivo para a loja ver
@@ -187,6 +289,7 @@ serve(async (req) => {
         rowId: row.id,
         contato_id: row.contato_id,
         cliente_nome: row.cliente_nome,
+        cliente_telefone: row.cliente_telefone,
         os_numero, loja_nome,
       });
       const { data: fresh } = await supabase
@@ -283,6 +386,7 @@ serve(async (req) => {
         rowId: row.id,
         contato_id,
         cliente_nome,
+        cliente_telefone,
         os_numero, loja_nome,
       });
     } else {
