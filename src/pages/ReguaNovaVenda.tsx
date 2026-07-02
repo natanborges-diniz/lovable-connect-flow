@@ -204,54 +204,217 @@ export default function ReguaNovaVenda() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Vendas na régua</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <CardTitle>Clientes na régua</CardTitle>
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setBuscaAtiva(busca.trim());
+            }}
+          >
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Nome, CPF ou telefone"
+                className="pl-8 w-64"
+              />
+            </div>
+            <Button type="submit" variant="secondary" size="sm">
+              Buscar
+            </Button>
+            {buscaAtiva && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setBusca("");
+                  setBuscaAtiva("");
+                }}
+              >
+                Limpar
+              </Button>
+            )}
+          </form>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Carregando...</p>
-          ) : !inscricoes || inscricoes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhuma venda cadastrada ainda.</p>
+          ) : !clientes || clientes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {buscaAtiva ? "Nenhum cliente encontrado para a busca." : "Nenhum cliente cadastrado ainda."}
+            </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8"></TableHead>
                   <TableHead>Cliente</TableHead>
-                  <TableHead>Nº Venda</TableHead>
-                  <TableHead>Valor</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Consentimento</TableHead>
+                  <TableHead>CPF</TableHead>
+                  <TableHead>WhatsApp</TableHead>
+                  <TableHead className="text-right">Vendas</TableHead>
+                  <TableHead className="text-right">A vencer</TableHead>
+                  <TableHead className="text-right">Vencido</TableHead>
+                  <TableHead className="text-right">Utilizado</TableHead>
+                  <TableHead>Próx. vencimento</TableHead>
                   <TableHead>Loja</TableHead>
-                  <TableHead>Criado em</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {inscricoes.map((i: any) => (
-                  <TableRow key={i.id}>
-                    <TableCell>{i.nome_cliente || "-"}</TableCell>
-                    <TableCell className="font-mono text-xs">{i.numero_venda}</TableCell>
-                    <TableCell>
-                      {i.valor_total_informado != null
-                        ? Number(i.valor_total_informado).toLocaleString("pt-BR", {
-                            style: "currency",
-                            currency: "BRL",
-                          })
-                        : "-"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{i.status}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={i.consentimento_status === "aceito" ? "default" : "outline"}>
-                        {i.consentimento_status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{i.cod_empresa || "-"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Date(i.criado_em).toLocaleString("pt-BR")}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {clientes.map((c: any) => {
+                  const open = !!expandido[c.contato_id];
+                  return (
+                    <>
+                      <TableRow
+                        key={c.contato_id}
+                        className="cursor-pointer"
+                        onClick={() =>
+                          setExpandido((prev) => ({ ...prev, [c.contato_id]: !prev[c.contato_id] }))
+                        }
+                      >
+                        <TableCell>
+                          {open ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">{c.nome || "-"}</TableCell>
+                        <TableCell className="font-mono text-xs">{fmtCpf(c.cpf)}</TableCell>
+                        <TableCell className="font-mono text-xs">{fmtFone(c.whatsapp)}</TableCell>
+                        <TableCell className="text-right">
+                          <div>{c.total_vendas}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {brl(c.valor_total_vendas)}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right text-emerald-600 font-medium">
+                          {brl(c.saldo_a_vencer)}
+                        </TableCell>
+                        <TableCell className="text-right text-destructive font-medium">
+                          {brl(c.saldo_vencido)}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {brl(c.saldo_utilizado)}
+                        </TableCell>
+                        <TableCell>{fmtData(c.proxima_expiracao)}</TableCell>
+                        <TableCell className="text-xs">{c.ultima_loja || "-"}</TableCell>
+                      </TableRow>
+                      {open && (
+                        <TableRow key={`${c.contato_id}-det`}>
+                          <TableCell colSpan={10} className="bg-muted/30">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 py-3">
+                              <div>
+                                <div className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                  Créditos
+                                </div>
+                                {(!c.creditos || c.creditos.length === 0) ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    Nenhum crédito lançado.
+                                  </p>
+                                ) : (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead className="h-8">Gerado</TableHead>
+                                        <TableHead className="h-8">Vence</TableHead>
+                                        <TableHead className="h-8 text-right">Valor</TableHead>
+                                        <TableHead className="h-8 text-right">Saldo</TableHead>
+                                        <TableHead className="h-8">Status</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {c.creditos.map((cr: any) => (
+                                        <TableRow key={cr.id}>
+                                          <TableCell className="text-xs">
+                                            {fmtData(cr.data_geracao)}
+                                          </TableCell>
+                                          <TableCell
+                                            className={
+                                              "text-xs " +
+                                              (cr.vencido ? "text-destructive font-medium" : "")
+                                            }
+                                          >
+                                            {fmtData(cr.data_expiracao)}
+                                          </TableCell>
+                                          <TableCell className="text-xs text-right">
+                                            {brl(cr.valor_gerado)}
+                                          </TableCell>
+                                          <TableCell className="text-xs text-right">
+                                            {brl(cr.saldo)}
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge
+                                              variant={
+                                                cr.vencido
+                                                  ? "destructive"
+                                                  : cr.status === "ativo"
+                                                  ? "default"
+                                                  : "outline"
+                                              }
+                                            >
+                                              {cr.vencido ? "vencido" : cr.status}
+                                            </Badge>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold uppercase text-muted-foreground mb-2">
+                                  Vendas
+                                </div>
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="h-8">Nº Venda</TableHead>
+                                      <TableHead className="h-8 text-right">Valor</TableHead>
+                                      <TableHead className="h-8">PIN</TableHead>
+                                      <TableHead className="h-8">Status</TableHead>
+                                      <TableHead className="h-8">Data</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(c.vendas || []).map((v: any) => (
+                                      <TableRow key={v.inscricao_id}>
+                                        <TableCell className="font-mono text-xs">
+                                          {v.numero_venda}
+                                        </TableCell>
+                                        <TableCell className="text-xs text-right">
+                                          {brl(v.valor)}
+                                        </TableCell>
+                                        <TableCell>
+                                          <Badge
+                                            variant={
+                                              v.pin_confirmado_at ? "default" : "outline"
+                                            }
+                                          >
+                                            {v.pin_confirmado_at ? "confirmado" : "pendente"}
+                                          </Badge>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Badge variant="secondary">{v.status}</Badge>
+                                        </TableCell>
+                                        <TableCell className="text-xs text-muted-foreground">
+                                          {new Date(v.criado_em).toLocaleDateString("pt-BR")}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
