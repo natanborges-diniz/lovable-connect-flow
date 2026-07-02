@@ -427,7 +427,7 @@ export default function ReguaNovaVenda() {
         onClose={() => setPinInscricaoId(null)}
         onConfirmed={() => {
           setPinInscricaoId(null);
-          qc.invalidateQueries({ queryKey: ["regua_inscricao_list"] });
+          qc.invalidateQueries({ queryKey: ["cashback_clientes_consolidado"] });
         }}
       />
     </div>
