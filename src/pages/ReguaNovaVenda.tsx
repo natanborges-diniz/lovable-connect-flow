@@ -267,7 +267,7 @@ export default function ReguaNovaVenda() {
                 {clientes.map((c: any) => {
                   const open = !!expandido[c.contato_id];
                   return (
-                    <>
+                    <Fragment key={c.contato_id}>
                       <TableRow
                         key={c.contato_id}
                         className="cursor-pointer"
