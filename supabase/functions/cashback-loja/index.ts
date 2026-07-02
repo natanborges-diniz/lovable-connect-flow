@@ -217,8 +217,7 @@ async function dispararBoasVindasCashback(
       `Sua compra na ${lojaNome} te garantiu um cashback exclusivo de R$ ${fmt(valorCashback)}! 🎁\n\n` +
       `${linhaValidade}\n` +
       `🛒 Na próxima compra a partir de R$ ${fmt(minimo)}\n\n` +
-      `✅ Use pelo WhatsApp — é só me responder aqui.\n\n` +
-      `⚡ Regras completas: https://atrium-link.lovable.app/termos/cashback`;
+      `✅ Use pelo WhatsApp — é só me responder aqui.`;
 
     // Envia via Meta (janela aberta pelo template AUTHENTICATION do PIN)
     const phone = String(whatsapp).replace(/\D/g, "");
