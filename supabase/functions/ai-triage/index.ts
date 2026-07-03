@@ -3049,6 +3049,60 @@ serve(async (req) => {
       }
     }
 
+    // ── PRE-LLM CONFIRMAÇÃO DE AGENDAMENTO (blindagem contra LLM formatar hora errada) ──
+    // Se o inbound é um texto curto de confirmação E existe agendamento ativo com
+    // lembrete enviado nas últimas 48h sem cliente_confirmou_at, roda o handler
+    // determinístico direto (mesma lógica de show_confirma) e retorna sem LLM.
+    try {
+      const _msgConf = String(mensagem_texto || "").trim();
+      const _CONF_RE = /^(?:\s*)(?:✅|👍|👌|👏|🙌)?\s*(?:sim|s|ok|okay|okey|confirmo|confirmado|confirma|confirmada|pode confirmar|pode ser|combinado|positivo|isso|é isso|eh isso|estarei|estarei lá|vou sim|vou|tô indo|to indo|estou indo|beleza|blz|perfeito|👍|✅)(?:[!.\s✅👍👌🙌]*)$/i;
+      const _isEmojiOnly = /^[\s✅👍👌👏🙌]+$/.test(_msgConf);
+      if (
+        (atendimento.modo === "ia" || atendimento.modo === "hibrido") &&
+        _msgConf &&
+        (_CONF_RE.test(_msgConf) || _isEmojiOnly)
+      ) {
+        const { data: _agConf } = await supabase
+          .from("agendamentos")
+          .select("id, data_horario, loja_nome, metadata, status")
+          .eq("contato_id", atendimento.contato_id)
+          .in("status", ["lembrete_enviado", "agendado"])
+          .order("data_horario", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        const _mdAg = (_agConf?.metadata || {}) as Record<string, any>;
+        const _lembAt = _mdAg.lembrete_enviado_at ? Date.parse(_mdAg.lembrete_enviado_at) : 0;
+        const _confAt = _mdAg.cliente_confirmou_at ? Date.parse(_mdAg.cliente_confirmou_at) : 0;
+        const _within48h = _lembAt && (Date.now() - _lembAt) < 48 * 3600 * 1000;
+        if (_agConf?.id && _within48h && !_confAt) {
+          console.log(`[PRE-LLM CONFIRMA] matched text="${_msgConf}" agendamento=${_agConf.id} — bypassing LLM`);
+          await supabase.from("agendamentos").update({
+            status: "confirmado",
+            confirmacao_enviada: true,
+            metadata: { ..._mdAg, cliente_confirmou_at: new Date().toISOString(), via: "pre_llm_text_router" },
+          }).eq("id", _agConf.id);
+          const _dt = new Date(_agConf.data_horario);
+          const _hora = _dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+          const _dataFmt = _dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, `✅ Confirmado! Te esperamos ${_dataFmt} às ${_hora} na ${_agConf.loja_nome}. Até lá! 😊`);
+          const _atMetaClr = (atendimento.metadata as Record<string, any>) || {};
+          await supabase.from("atendimentos").update({
+            metadata: { ..._atMetaClr, expected_reply: null, agendamento_confirmado_at: new Date().toISOString() },
+          }).eq("id", atendimento_id);
+          fetch(`${SUPABASE_URL}/functions/v1/notificar-loja-agendamento`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ agendamento_id: _agConf.id }),
+          }).catch(() => {});
+          return jsonResponse({ status: "ok", route: "pre_llm_confirma", agendamento_id: _agConf.id });
+        }
+      }
+    } catch (e) {
+      console.warn("[PRE-LLM CONFIRMA] erro:", e);
+    }
+
+
+
     // ── PRE-SKIP: Consulta de OS roda em QUALQUER modo (ia/hibrido/humano/ponte) ──
     // Em humano/ponte: apenas marca flag + evento para o operador ver o contexto. NÃO envia mensagem.
     // Em ia/hibrido: escala completa (flag + mensagem + move card).
