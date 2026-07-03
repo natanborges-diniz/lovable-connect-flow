@@ -8510,6 +8510,39 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
     if (isReceitaConfirmText(resposta)) {
       await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
     } else {
+      // ── SANITIZER: hora de agendamento alucinada pelo LLM ─────────────────
+      // Se resposta contém "às HH:MM" ou "às HHh" e existe agendamento ativo
+      // cuja hora SP diverge, substitui por template determinístico e audita.
+      try {
+        const _horaMatch = String(resposta || "").match(/[àa]s\s+\*?\s*(\d{1,2})\s*[:h]\s*(\d{0,2})/i);
+        if (_horaMatch && Array.isArray(agendamentosAtivos) && agendamentosAtivos.length > 0) {
+          const _horaLLM = String(_horaMatch[1]).padStart(2, "0");
+          const _minLLM = (_horaMatch[2] || "00").padStart(2, "0");
+          const _horaLLMTxt = `${_horaLLM}:${_minLLM}`;
+          const _agAtivo = (agendamentosAtivos as any[]).find((a: any) =>
+            ["agendado", "lembrete_enviado", "confirmado"].includes(a.status) && a.data_horario
+          );
+          if (_agAtivo?.data_horario) {
+            const _dtReal = new Date(_agAtivo.data_horario);
+            const _horaRealTxt = _dtReal.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+            if (_horaRealTxt !== _horaLLMTxt) {
+              console.warn(`[SANITIZER-HORA] LLM="${_horaLLMTxt}" real_SP="${_horaRealTxt}" ag=${_agAtivo.id} — substituindo resposta`);
+              const _dataFmtReal = _dtReal.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+              const _respostaOriginal = resposta;
+              resposta = `✅ Confirmado! Te esperamos ${_dataFmtReal} às ${_horaRealTxt} na ${_agAtivo.loja_nome}. Até lá! 😊`;
+              supabase.from("ia_feedbacks").insert({
+                atendimento_id,
+                avaliacao: "hora_alucinada",
+                motivo: `LLM disse ${_horaLLMTxt}, real SP=${_horaRealTxt}, agendamento=${_agAtivo.id}`,
+                resposta_corrigida: resposta,
+              }).then(() => undefined, () => undefined);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[SANITIZER-HORA] falhou:", e);
+      }
+
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
       if (direcionarAgendamentoLoja && !precisa_humano) {
         await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta);
