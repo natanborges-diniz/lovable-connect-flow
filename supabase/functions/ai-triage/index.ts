@@ -3049,6 +3049,60 @@ serve(async (req) => {
       }
     }
 
+    // ── PRE-LLM CONFIRMAÇÃO DE AGENDAMENTO (blindagem contra LLM formatar hora errada) ──
+    // Se o inbound é um texto curto de confirmação E existe agendamento ativo com
+    // lembrete enviado nas últimas 48h sem cliente_confirmou_at, roda o handler
+    // determinístico direto (mesma lógica de show_confirma) e retorna sem LLM.
+    try {
+      const _msgConf = String(mensagem_texto || "").trim();
+      const _CONF_RE = /^(?:\s*)(?:✅|👍|👌|👏|🙌)?\s*(?:sim|s|ok|okay|okey|confirmo|confirmado|confirma|confirmada|pode confirmar|pode ser|combinado|positivo|isso|é isso|eh isso|estarei|estarei lá|vou sim|vou|tô indo|to indo|estou indo|beleza|blz|perfeito|👍|✅)(?:[!.\s✅👍👌🙌]*)$/i;
+      const _isEmojiOnly = /^[\s✅👍👌👏🙌]+$/.test(_msgConf);
+      if (
+        (atendimento.modo === "ia" || atendimento.modo === "hibrido") &&
+        _msgConf &&
+        (_CONF_RE.test(_msgConf) || _isEmojiOnly)
+      ) {
+        const { data: _agConf } = await supabase
+          .from("agendamentos")
+          .select("id, data_horario, loja_nome, metadata, status")
+          .eq("contato_id", atendimento.contato_id)
+          .in("status", ["lembrete_enviado", "agendado"])
+          .order("data_horario", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        const _mdAg = (_agConf?.metadata || {}) as Record<string, any>;
+        const _lembAt = _mdAg.lembrete_enviado_at ? Date.parse(_mdAg.lembrete_enviado_at) : 0;
+        const _confAt = _mdAg.cliente_confirmou_at ? Date.parse(_mdAg.cliente_confirmou_at) : 0;
+        const _within48h = _lembAt && (Date.now() - _lembAt) < 48 * 3600 * 1000;
+        if (_agConf?.id && _within48h && !_confAt) {
+          console.log(`[PRE-LLM CONFIRMA] matched text="${_msgConf}" agendamento=${_agConf.id} — bypassing LLM`);
+          await supabase.from("agendamentos").update({
+            status: "confirmado",
+            confirmacao_enviada: true,
+            metadata: { ..._mdAg, cliente_confirmou_at: new Date().toISOString(), via: "pre_llm_text_router" },
+          }).eq("id", _agConf.id);
+          const _dt = new Date(_agConf.data_horario);
+          const _hora = _dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+          const _dataFmt = _dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+          await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, `✅ Confirmado! Te esperamos ${_dataFmt} às ${_hora} na ${_agConf.loja_nome}. Até lá! 😊`);
+          const _atMetaClr = (atendimento.metadata as Record<string, any>) || {};
+          await supabase.from("atendimentos").update({
+            metadata: { ..._atMetaClr, expected_reply: null, agendamento_confirmado_at: new Date().toISOString() },
+          }).eq("id", atendimento_id);
+          fetch(`${SUPABASE_URL}/functions/v1/notificar-loja-agendamento`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ agendamento_id: _agConf.id }),
+          }).catch(() => {});
+          return jsonResponse({ status: "ok", route: "pre_llm_confirma", agendamento_id: _agConf.id });
+        }
+      }
+    } catch (e) {
+      console.warn("[PRE-LLM CONFIRMA] erro:", e);
+    }
+
+
+
     // ── PRE-SKIP: Consulta de OS roda em QUALQUER modo (ia/hibrido/humano/ponte) ──
     // Em humano/ponte: apenas marca flag + evento para o operador ver o contexto. NÃO envia mensagem.
     // Em ia/hibrido: escala completa (flag + mensagem + move card).
@@ -8456,6 +8510,39 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
     if (isReceitaConfirmText(resposta)) {
       await sendReceitaConfirmInteractive(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
     } else {
+      // ── SANITIZER: hora de agendamento alucinada pelo LLM ─────────────────
+      // Se resposta contém "às HH:MM" ou "às HHh" e existe agendamento ativo
+      // cuja hora SP diverge, substitui por template determinístico e audita.
+      try {
+        const _horaMatch = String(resposta || "").match(/[àa]s\s+\*?\s*(\d{1,2})\s*[:h]\s*(\d{0,2})/i);
+        if (_horaMatch && Array.isArray(agendamentosAtivos) && agendamentosAtivos.length > 0) {
+          const _horaLLM = String(_horaMatch[1]).padStart(2, "0");
+          const _minLLM = (_horaMatch[2] || "00").padStart(2, "0");
+          const _horaLLMTxt = `${_horaLLM}:${_minLLM}`;
+          const _agAtivo = (agendamentosAtivos as any[]).find((a: any) =>
+            ["agendado", "lembrete_enviado", "confirmado"].includes(a.status) && a.data_horario
+          );
+          if (_agAtivo?.data_horario) {
+            const _dtReal = new Date(_agAtivo.data_horario);
+            const _horaRealTxt = _dtReal.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+            if (_horaRealTxt !== _horaLLMTxt) {
+              console.warn(`[SANITIZER-HORA] LLM="${_horaLLMTxt}" real_SP="${_horaRealTxt}" ag=${_agAtivo.id} — substituindo resposta`);
+              const _dataFmtReal = _dtReal.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+              const _respostaOriginal = resposta;
+              resposta = `✅ Confirmado! Te esperamos ${_dataFmtReal} às ${_horaRealTxt} na ${_agAtivo.loja_nome}. Até lá! 😊`;
+              supabase.from("ia_feedbacks").insert({
+                atendimento_id,
+                avaliacao: "hora_alucinada",
+                motivo: `LLM disse ${_horaLLMTxt}, real SP=${_horaRealTxt}, agendamento=${_agAtivo.id}`,
+                resposta_corrigida: resposta,
+              }).then(() => undefined, () => undefined);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[SANITIZER-HORA] falhou:", e);
+      }
+
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, resposta);
       if (direcionarAgendamentoLoja && !precisa_humano) {
         await sendListaCidades(supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, atendimentoMeta);
