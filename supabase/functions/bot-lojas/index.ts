@@ -329,6 +329,7 @@ serve(async (req) => {
               valor: dados.valor,
               descricao: dados.descricao,
               parcelas_max: dados.parcelas || 1,
+              parcelas_fixas: dados.parcelas || 1,
               cliente_nome: dados.cliente || null,
               origem: "CHATBOT",
               origem_ref: atendimento_id,
