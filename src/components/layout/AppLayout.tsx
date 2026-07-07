@@ -5,6 +5,7 @@ import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useAtendimentoNotifier } from "@/hooks/useAtendimentoNotifier";
+import { TabBadgeManager } from "./TabBadgeManager";
 
 export type ModuleKey = "dashboard" | "crm" | "financeiro" | "lojas" | "ti" | "interno" | "estoque" | "tarefas" | "mensagens" | "cashback" | "configuracoes";
 
@@ -93,6 +94,7 @@ export function AppLayout() {
   return (
     <SidebarProvider style={{ "--sidebar-width": "12rem" } as React.CSSProperties}>
       <div className="min-h-screen flex flex-col w-full bg-app-bg">
+        <TabBadgeManager />
         <TopNavigation activeModule={activeModule} />
         <div className="flex flex-1 w-full">
           <AppSidebar activeModule={activeModule} />
