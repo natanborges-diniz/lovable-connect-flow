@@ -37,7 +37,7 @@ export function useNotificacoes() {
   useEffect(() => {
     if (!user) return;
     const channel = supabase
-      .channel("notificacoes-realtime")
+      .channel(`notificacoes-realtime-${user.id}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes" as any,
         { event: "INSERT", schema: "public", table: "notificacoes" },
