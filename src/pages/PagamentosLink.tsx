@@ -272,7 +272,7 @@ export default function PagamentosLink() {
 
                 <Field label="Cliente" value={`${selected.cliente_nome || "—"} (${selected.cliente_telefone || "—"})`} />
                 <Field label="Loja" value={selected.loja_nome || "—"} />
-                <Field label="Valor" value={`${brl(Number(selected.valor))}${selected.parcelas ? ` em ${selected.parcelas}x` : ""}`} />
+                <Field label="Valor" value={`${brl(Number(selected.valor))}${selected.parcelas ? ` em ${selected.parcelas}x${(selected as any).metadata?.parcelas_fixas ? " (fixo)" : ""}` : ""}`} />
                 <Field label="Descrição" value={selected.descricao || "—"} />
                 <Field label="TID" value={selected.tid || "—"} mono />
                 <Field label="NSU" value={selected.nsu || "—"} mono />
