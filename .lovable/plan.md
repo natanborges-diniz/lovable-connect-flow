@@ -1,55 +1,43 @@
-# Contador de não lidos na aba do navegador
+# Item 4 — onde realmente mora o campo "Parcelas" do link de pagamento
 
-Objetivo: quando chegar mensagem interna nova, demanda nova de loja ou notificação, o título da aba passa a mostrar `(N) InFoco Messenger` — igual ao WhatsApp Web da imagem. Assim o usuário vê o número mesmo com a aba em segundo plano.
+## Diagnóstico
 
-## O que muda pro usuário
+O Messenger tem razão: **não existe form hardcoded de link_pagamento** em lugar nenhum dos dois projetos. O único wizard com parcelas hardcoded é o de **boleto bancário** (`LojaNovaDemanda.tsx` linhas 1186-1208) — esse não é o fluxo do link.
 
-- Título da aba passa de `InFoco Messenger` para `(3) InFoco Messenger` quando houver 3 itens não vistos.
-- Contador some assim que o usuário volta pra aba **e** abre o item (mensagem/demanda/notificação).
-- Também pisca o favicon com um pontinho vermelho (opcional, mesmo padrão do WhatsApp).
-- Se o navegador/SO suportar (Chrome desktop, PWA instalado), aparece o número no ícone do app na barra de tarefas / dock via Badging API.
+O fluxo `link_pagamento` no Messenger é **dinâmico**: ele renderiza etapas configuradas em `bot_fluxos.etapas` (JSONB), no loop `fluxoAtivo.etapas.map(...)` (linha ~929). O label "Parcelas" que a loja vê hoje vem de `bot_fluxos.etapas[].label` — está no **banco**, não no código.
 
-## Escopo do que conta como "não lido"
+Prova: aqui no Atrium a UI que edita isso é o `BotFluxosCard.tsx` (linha 380 mostra o `tipo_solicitacao: "link_pagamento"` sendo configurado etapa a etapa).
 
-Somando três fontes já existentes no sistema:
+## O que fazer (nenhum código muda)
 
-1. **Mensagens internas não lidas** — soma de `nao_lidas` do hook `useMensagensInternas` (1-a-1 + grupos).
-2. **Demandas de loja pendentes pro usuário** — itens ativos em `demandas_loja` que o usuário precisa agir (mesma regra que hoje já pinta o badge do menu Demandas).
-3. **Notificações não lidas** — `notificacoes.lida = false` do usuário logado (hook `useNotificacoes`).
+Editar via UI, aqui mesmo no Atrium:
 
-O número no título é a **soma dos três**. Não separa por tipo (fica igual WhatsApp: um número só).
+1. Ir em **Configurações → Bot / Fluxos das Lojas**
+2. Abrir o fluxo cujo `tipo_solicitacao = link_pagamento`
+3. Localizar a etapa com `campo = "parcelas"`
+4. Trocar o `label` de `"Parcelas"` para:
+   `"Parcelas (fixas — o cliente pagará exatamente neste número)"`
+5. Salvar
 
-## Como será feito (técnico)
+O Messenger passa a mostrar o novo label imediatamente (ele lê `bot_fluxos` sob demanda).
 
-1. Novo hook `useUnreadTotal()` em `src/hooks/useUnreadTotal.ts`:
-   - Consome `useMensagensInternas`, `useNotificacoes` e uma query leve de demandas pendentes.
-   - Devolve `{ total, porFonte }`.
-   - Reaproveita os canais realtime já existentes (nada de nova subscription duplicada).
+## E o helper "Cliente não poderá alterar…"?
 
-2. Novo componente `TabBadgeManager` (sem UI) montado no `AppLayout`:
-   - Escuta `useUnreadTotal`.
-   - Atualiza `document.title` prefixando `(N) ` quando `total > 0`.
-   - Chama `navigator.setAppBadge(total)` / `clearAppBadge()` quando disponível (silenciosamente ignora se não suportado).
-   - Troca o favicon por versão com "dot" vermelho quando `total > 0` (2 arquivos SVG em `public/`).
+O schema atual de `bot_fluxos.etapas` provavelmente **não tem campo `helper_text`** (só `label`, `campo`, `tipo`, `mensagem`). Duas opções:
 
-3. Detecção de foco:
-   - Usa `document.visibilityState` — quando o usuário está com a aba ativa E já viu tudo, limpa. A limpeza natural acontece porque os próprios hooks (`marcarLidas`, abrir demanda, marcar notificação lida) já derrubam o contador.
+**Opção A — sem código (recomendada agora):** juntar tudo no label:
+`"Parcelas (fixas — cliente NÃO poderá alterar. Para 'até Nx com escolha' abra chamado)"`
 
-4. Título base:
-   - Lê do `<title>` atual (definido em `index.html`) pra não hardcodar "InFoco Messenger" no componente.
+**Opção B — proper helper cinza abaixo do campo:** exige mudança nos dois projetos:
+- Atrium: `BotFluxosCard` ganha input "Texto de ajuda" que grava em `etapas[i].helper_text`
+- Messenger: no loop `fluxoAtivo.etapas.map`, se `et.helper_text`, renderiza `<p class="text-xs text-muted-foreground">…</p>` abaixo do input
 
-## Fora de escopo (fica pra depois se pedir)
+Ambas opções não precisam migração — `etapas` já é JSONB livre.
 
-- Som de notificação na aba.
-- Notificação nativa do navegador (Web Push já existe em outro fluxo — não mexo aqui).
-- Separar contador por seção no menu lateral (isso já existe hoje item a item).
-- Mudar cor do favicon por tipo de item.
+## Recomendação
 
-## Arquivos que serão criados/editados
+Faz a **Opção A** agora (só editar o label pela UI, 30 segundos, resolve). Se depois quiser o helper separado em cinza claro, me avise e eu preparo as mudanças da Opção B nos dois projetos.
 
-- **criar** `src/hooks/useUnreadTotal.ts`
-- **criar** `src/components/layout/TabBadgeManager.tsx`
-- **criar** `public/favicon-badge.svg` (favicon com dot vermelho)
-- **editar** `src/components/layout/AppLayout.tsx` (montar `<TabBadgeManager />`)
+## Nenhum arquivo alterado neste plano
 
-Nenhuma mudança de banco, nenhuma edge function nova, nenhuma migration.
+Só orientação — a mudança é feita pela UI existente de configuração de fluxos.
