@@ -855,8 +855,10 @@ function extrairIdentificadorOS(texto: string): { tipo: "os" | "cpf" | null; val
       return { tipo: "cpf", valor: digits };
     }
   }
-  // OS: exatamente 5 dígitos isolados (não adjacentes a mais dígitos — evita falso match em CPF/telefone)
-  const osRe = /(?<!\d)\d{5}(?!\d)/g;
+  // OS: 5 ou 6 dígitos isolados (Jul/2026: sequencial virou 6 dígitos; legado 5 mantido).
+  // Não adjacentes a mais dígitos — evita falso match em CPF/telefone.
+  const osRe = /(?<!\d)\d{5,6}(?!\d)/g;
+
   while ((m = osRe.exec(texto)) !== null) {
     return { tipo: "os", valor: m[0] };
   }
