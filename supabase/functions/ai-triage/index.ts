@@ -4378,6 +4378,35 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       console.log(`[RX-NEW-PENDING] Nova imagem de receita detectada (imageAt=${lastInboundImageAt} > rxAt=${lastReceitaAt}, declaredNew=${declaredNewRx}) — força OCR`);
     }
 
+    // ── Guarda: imagem de PRODUTO/ACESSÓRIO (não é receita) ──
+    // Caso Nobre (Jul/2026): cliente perguntou "Tem esse anti embaçante" e mandou foto
+    // do produto. Sem esta guarda o fluxo força interpretar_receita → OCR falha →
+    // manda MSG_PEDIR_RECEITA_TEXTO ("me passa OD/OE por texto") — resposta absurda.
+    // Se a intenção recente mira acessório/produto avulso e NÃO há sinal de receita,
+    // suprime o pipeline de OCR e escala para humano (IA não cota acessório).
+    const PRODUTO_ACESSORIO_RE = /\b(anti[- ]?emba[çc]ante|desemba[çc]ante|spray|flanela|toalhinha|kit\s+limpeza|limpador|limpa\s+lente|cordinha|cord[aã]o|estojo|case|capinha|porta[- ]?[oó]culos|clip[- ]?on|adaptador|charuto|nose\s?pad|plaqueta|parafuso|haste|charneira|corrente|straps?)\b/i;
+    const RECEITA_SIGNAL_RE = /\breceita|grau|of[t]?almo|prescri[cç][aã]o|esf[eé]rico|cil[íi]ndrico|eixo|adi[cç][aã]o|OD\b|OE\b|OS\b|dioptria/i;
+    const clienteAcessorioIntent = PRODUTO_ACESSORIO_RE.test(recentInboundText)
+      && !RECEITA_SIGNAL_RE.test(recentInboundText);
+    if (lastIsImage && clienteAcessorioIntent) {
+      const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
+      const respAcessorio = isHorarioHumano()
+        ? `Recebi sua imagem, ${_np || "amigo(a)"}! 🙌 Pra esse tipo de acessório/produto vou te conectar com um Consultor pra confirmar disponibilidade e valor certinho, tá?`
+        : mensagemEscaladaForaHorario(_np);
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respAcessorio);
+      await supabase.from("eventos_crm").insert({
+        contato_id: contatoId,
+        tipo: "imagem_produto_escalada",
+        descricao: "Imagem interpretada como produto/acessório (não receita) — escalando pra humano",
+        metadata: { last_inbound: lastInboundText.slice(0, 200), recent_inbound: recentInboundText.slice(0, 300) },
+        referencia_tipo: "atendimento", referencia_id: atendimento_id,
+      }).then(() => undefined, () => undefined);
+      console.log("[IMG-PRODUTO] Imagem de acessório detectada — escalando humano, pulando OCR");
+      return jsonResponse({ status: "ok", tools_used: ["imagem_produto_escalada"], intencao: "duvida_produto", precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
+    }
+
+
+
     // ── Cliente recusou digitar valores após pedido (MSG_PEDIR_RECEITA_TEXTO) → escala humano ──
     // Caso Emerson (12/05/2026): se IA pediu pra digitar OD/OE e cliente responde que
     // não consegue/não sabe/precisa de ajuda, não adianta insistir — chama humano.
