@@ -10327,7 +10327,7 @@ Qual dia e horário ficaria melhor pra você? 😊`,
       });
       return true;
     }
-    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode tocar em uma das opções acima ou digitar o número da OS (5 dígitos)? 😊");
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode tocar em uma das opções acima ou digitar o número da OS (5 ou 6 dígitos)? 😊");
     return true;
   }
 
