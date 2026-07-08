@@ -443,7 +443,8 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="interno">Nota interna</SelectItem>
-              <SelectItem value="resposta_cliente">Responder via WhatsApp</SelectItem>
+              <SelectItem value="retorno_setor">Enviar observação para a loja</SelectItem>
+              <SelectItem value="resposta_cliente">Responder cliente via WhatsApp</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -453,7 +454,11 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
             onChange={(e) => setTexto(e.target.value)}
             rows={2}
             className="text-sm"
-            placeholder={tipo === "resposta_cliente" ? "Mensagem que será enviada ao solicitante via WhatsApp..." : "Nota interna (visível apenas para a equipe)..."}
+            placeholder={
+              tipo === "resposta_cliente" ? "Mensagem que será enviada ao solicitante via WhatsApp..." :
+              tipo === "retorno_setor" ? "Ex.: Recebido. Vamos processar amanhã pela manhã." :
+              "Nota interna (visível apenas para a equipe)..."
+            }
           />
           <Button
             size="icon"
