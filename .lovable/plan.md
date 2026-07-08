@@ -1,43 +1,39 @@
-# Item 4 — onde realmente mora o campo "Parcelas" do link de pagamento
+## Problema
 
-## Diagnóstico
+Hoje o setor Financeiro só tem duas ações estruturadas numa solicitação da loja: **concluir** (com ou sem anexo) ou **pedir revisão/rejeitar**. Não existe um caminho para o setor apenas *comentar* algo do tipo *"vamos processar amanhã"* sem mudar o status — e a loja também não tem como responder a esse comentário. O que aparece hoje na thread da loja (`solicitacao_comentarios` com `tipo='retorno_setor'`) é criado só automaticamente pelo `pipeline-automations` a partir de templates WhatsApp; não há botão manual.
 
-O Messenger tem razão: **não existe form hardcoded de link_pagamento** em lugar nenhum dos dois projetos. O único wizard com parcelas hardcoded é o de **boleto bancário** (`LojaNovaDemanda.tsx` linhas 1186-1208) — esse não é o fluxo do link.
+## Proposta: diálogo livre setor ↔ loja dentro da solicitação
 
-O fluxo `link_pagamento` no Messenger é **dinâmico**: ele renderiza etapas configuradas em `bot_fluxos.etapas` (JSONB), no loop `fluxoAtivo.etapas.map(...)` (linha ~929). O label "Parcelas" que a loja vê hoje vem de `bot_fluxos.etapas[].label` — está no **banco**, não no código.
+Reaproveitar o que já existe (`solicitacao_comentarios` + `notificacoes` + push) e habilitar troca manual de mensagens dentro da própria demanda, sem alterar o status do card.
 
-Prova: aqui no Atrium a UI que edita isso é o `BotFluxosCard.tsx` (linha 380 mostra o `tipo_solicitacao: "link_pagamento"` sendo configurado etapa a etapa).
+### 1. Setor → Loja (novo)
+No drawer/detalhe da solicitação (Financeiro), adicionar campo "Comentar com a loja" + botão **Enviar observação**. Cria:
+- `solicitacao_comentarios` com `tipo='retorno_setor'`, autor = operador logado.
+- 1 `notificacoes` por usuário da loja (via `resolver_destinatarios_loja`) — push automático já dispara.
+- Não muda status, não move card.
 
-## O que fazer (nenhum código muda)
+### 2. Loja → Setor (novo, opcional na mesma entrega)
+Na tela da loja onde ela vê a solicitação (Messenger — `Solicitacoes`/thread), permitir **responder** ao comentário. Cria:
+- `solicitacao_comentarios` com novo `tipo='resposta_loja'`, autor = usuário loja.
+- 1 `notificacoes` para o operador responsável pela solicitação (ou fallback: todos com acesso à fila do setor).
 
-Editar via UI, aqui mesmo no Atrium:
+### 3. Thread unificada
+A lista de comentários (ordenada por `created_at`) fica visível dos dois lados, mostrando autor + horário + tipo (badge "Setor Financeiro" / "Loja X"). Nada de WhatsApp — 100% dentro do app (respeitando o Canal Único).
 
-1. Ir em **Configurações → Bot / Fluxos das Lojas**
-2. Abrir o fluxo cujo `tipo_solicitacao = link_pagamento`
-3. Localizar a etapa com `campo = "parcelas"`
-4. Trocar o `label` de `"Parcelas"` para:
-   `"Parcelas (fixas — o cliente pagará exatamente neste número)"`
-5. Salvar
+## Detalhes técnicos
 
-O Messenger passa a mostrar o novo label imediatamente (ele lê `bot_fluxos` sob demanda).
+- **Backend:** nova Edge Function `comentar-solicitacao` (setor→loja e loja→setor), que insere `solicitacao_comentarios` e cria as `notificacoes`. Mantém `pipeline-automations` como está para os retornos automáticos.
+- **RLS:** garantir que loja consegue INSERT em `solicitacao_comentarios` da própria solicitação (hoje é read-only para loja). Ajuste em policy.
+- **UI Atrium (setor):** `src/pages/Solicitacoes.tsx` (drawer) — textarea + botão + render da thread.
+- **UI Messenger (loja):** tela de detalhe da solicitação — mesma thread + campo de resposta. (Ajuste no projeto Messenger.)
+- **Sem migração de schema nova** — `tipo` é texto livre; só adicionamos os valores `resposta_loja` (e mantemos `retorno_setor`).
 
-## E o helper "Cliente não poderá alterar…"?
+## Fora do escopo
 
-O schema atual de `bot_fluxos.etapas` provavelmente **não tem campo `helper_text`** (só `label`, `campo`, `tipo`, `mensagem`). Duas opções:
+- Anexos no comentário (fica para depois se pedirem).
+- Marcar comentário como "resolvido".
+- Notificar por WhatsApp — proibido pelo Canal Único para B2B.
 
-**Opção A — sem código (recomendada agora):** juntar tudo no label:
-`"Parcelas (fixas — cliente NÃO poderá alterar. Para 'até Nx com escolha' abra chamado)"`
+## Pergunta antes de implementar
 
-**Opção B — proper helper cinza abaixo do campo:** exige mudança nos dois projetos:
-- Atrium: `BotFluxosCard` ganha input "Texto de ajuda" que grava em `etapas[i].helper_text`
-- Messenger: no loop `fluxoAtivo.etapas.map`, se `et.helper_text`, renderiza `<p class="text-xs text-muted-foreground">…</p>` abaixo do input
-
-Ambas opções não precisam migração — `etapas` já é JSONB livre.
-
-## Recomendação
-
-Faz a **Opção A** agora (só editar o label pela UI, 30 segundos, resolve). Se depois quiser o helper separado em cinza claro, me avise e eu preparo as mudanças da Opção B nos dois projetos.
-
-## Nenhum arquivo alterado neste plano
-
-Só orientação — a mudança é feita pela UI existente de configuração de fluxos.
+Confirma que quer **os dois sentidos** (setor→loja **e** loja→setor) na mesma entrega, ou prefere começar só com setor→loja para destravar o caso do Financeiro agora?
