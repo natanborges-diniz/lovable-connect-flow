@@ -10363,7 +10363,7 @@ Qual dia e horário ficaria melhor pra você? 😊`,
       return true;
     }
     // Não identificou OS nem CPF — reprompt gentil, transição para aguardando_identificador
-    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me passar o número da OS (5 dígitos do comprovante) ou seu CPF? 😊");
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me passar o número da OS (5 ou 6 dígitos do comprovante) ou seu CPF? 😊");
     await patchMeta({ expected_reply: "os_aguardando_identificador" });
     return true;
   }
