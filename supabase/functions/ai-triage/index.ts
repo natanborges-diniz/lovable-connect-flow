@@ -3409,7 +3409,7 @@ serve(async (req) => {
     }
 
     // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
-    // Se cliente informou OS (5 dígitos) ou CPF válido: consulta bridge e responde por template (mantém modo IA).
+    // Se cliente informou OS (5 ou 6 dígitos) ou CPF válido: consulta bridge e responde por template (mantém modo IA).
     // Fallback (sem identificador / não encontrado / múltiplos resultados): escala para humano (comportamento anterior).
     {
       const osKw = await loadOsKeywords(supabase);
