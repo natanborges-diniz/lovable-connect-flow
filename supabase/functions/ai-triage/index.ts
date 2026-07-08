@@ -1126,7 +1126,7 @@ async function tratarResultadoConsultaOS(
   if (tentativas === 0) {
     const msg = ident.tipo === "cpf"
       ? "Não localizei nenhum pedido nesse CPF 🤔 Você tem o número da OS aí? Pelo comprovante a busca é mais certeira 😊"
-      : "Não localizei essa OS 🤔 Me confirma o número (5 dígitos do comprovante)? Ou, se preferir, me passa seu CPF 😊";
+      : "Não localizei essa OS 🤔 Me confirma o número (5 ou 6 dígitos do comprovante)? Ou, se preferir, me passa seu CPF 😊";
     await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
     await supabase.from("atendimentos").update({
       metadata: { ...meta, os_tentativas: 1, expected_reply: "os_aguardando_identificador", intent_consulta_os_at: new Date().toISOString() },
