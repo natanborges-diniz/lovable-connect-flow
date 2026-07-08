@@ -375,7 +375,7 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
   const { data: comentarios, isLoading } = useSolicitacaoComentarios(solicitacaoId);
   const createComentario = useCreateComentario();
   const [texto, setTexto] = useState("");
-  const [tipo, setTipo] = useState<"interno" | "resposta_cliente">("interno");
+  const [tipo, setTipo] = useState<"interno" | "resposta_cliente" | "retorno_setor">("interno");
 
   const handleSend = () => {
     if (!texto.trim()) return;
@@ -402,7 +402,10 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
                 key={c.id}
                 className={cn(
                   "rounded-lg px-3 py-2 text-sm",
-                  c.tipo === "resposta_cliente" ? "bg-primary/10 border border-primary/20" : "bg-muted/50"
+                  c.tipo === "resposta_cliente" && "bg-primary/10 border border-primary/20",
+                  c.tipo === "retorno_setor" && "bg-amber-500/10 border border-amber-500/30",
+                  c.tipo === "resposta_loja" && "bg-emerald-500/10 border border-emerald-500/30",
+                  (c.tipo === "interno" || !c.tipo) && "bg-muted/50"
                 )}
               >
                 <div className="flex items-center justify-between mb-1">
@@ -410,6 +413,12 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
                   <div className="flex items-center gap-1.5">
                     {c.tipo === "resposta_cliente" && (
                       <Badge variant="outline" className="text-[9px] h-4 px-1">WhatsApp</Badge>
+                    )}
+                    {c.tipo === "retorno_setor" && (
+                      <Badge variant="outline" className="text-[9px] h-4 px-1 border-amber-500/50 text-amber-700">→ Loja</Badge>
+                    )}
+                    {c.tipo === "resposta_loja" && (
+                      <Badge variant="outline" className="text-[9px] h-4 px-1 border-emerald-500/50 text-emerald-700">Loja</Badge>
                     )}
                     <span className="text-[10px] text-muted-foreground">
                       {format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}
@@ -434,7 +443,8 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="interno">Nota interna</SelectItem>
-              <SelectItem value="resposta_cliente">Responder via WhatsApp</SelectItem>
+              <SelectItem value="retorno_setor">Enviar observação para a loja</SelectItem>
+              <SelectItem value="resposta_cliente">Responder cliente via WhatsApp</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -444,7 +454,11 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
             onChange={(e) => setTexto(e.target.value)}
             rows={2}
             className="text-sm"
-            placeholder={tipo === "resposta_cliente" ? "Mensagem que será enviada ao solicitante via WhatsApp..." : "Nota interna (visível apenas para a equipe)..."}
+            placeholder={
+              tipo === "resposta_cliente" ? "Mensagem que será enviada ao solicitante via WhatsApp..." :
+              tipo === "retorno_setor" ? "Ex.: Recebido. Vamos processar amanhã pela manhã." :
+              "Nota interna (visível apenas para a equipe)..."
+            }
           />
           <Button
             size="icon"
