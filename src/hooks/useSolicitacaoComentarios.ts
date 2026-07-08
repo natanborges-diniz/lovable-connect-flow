@@ -39,9 +39,19 @@ export function useCreateComentario() {
     }: {
       solicitacao_id: string;
       conteudo: string;
-      tipo: "interno" | "resposta_cliente";
+      tipo: "interno" | "resposta_cliente" | "retorno_setor" | "resposta_loja";
     }) => {
-      // Insert comment
+      // Diálogo setor↔loja: via edge function (insere + notifica o outro lado)
+      if (tipo === "retorno_setor" || tipo === "resposta_loja") {
+        const destino = tipo === "retorno_setor" ? "loja" : "setor";
+        const { data, error } = await supabase.functions.invoke("comentar-solicitacao", {
+          body: { solicitacao_id, conteudo, destino },
+        });
+        if (error) throw error;
+        return data;
+      }
+
+      // Insert comment (interno / resposta_cliente)
       const { data, error } = await (supabase as any)
         .from("solicitacao_comentarios")
         .insert({
@@ -55,7 +65,6 @@ export function useCreateComentario() {
         .single();
       if (error) throw error;
 
-      // If response to client, call the edge function
       if (tipo === "resposta_cliente") {
         const { error: fnError } = await supabase.functions.invoke("responder-solicitacao", {
           body: { solicitacao_id, mensagem: conteudo },
@@ -67,7 +76,12 @@ export function useCreateComentario() {
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ["solicitacao_comentarios", vars.solicitacao_id] });
-      toast.success(vars.tipo === "resposta_cliente" ? "Resposta enviada ao solicitante via WhatsApp" : "Comentário adicionado");
+      const msg =
+        vars.tipo === "resposta_cliente" ? "Resposta enviada ao solicitante via WhatsApp" :
+        vars.tipo === "retorno_setor" ? "Observação enviada à loja" :
+        vars.tipo === "resposta_loja" ? "Resposta enviada ao setor" :
+        "Comentário adicionado";
+      toast.success(msg);
     },
     onError: (error: any) => {
       toast.error("Erro: " + error.message);
