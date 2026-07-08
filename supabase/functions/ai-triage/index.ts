@@ -855,8 +855,10 @@ function extrairIdentificadorOS(texto: string): { tipo: "os" | "cpf" | null; val
       return { tipo: "cpf", valor: digits };
     }
   }
-  // OS: exatamente 5 dígitos isolados (não adjacentes a mais dígitos — evita falso match em CPF/telefone)
-  const osRe = /(?<!\d)\d{5}(?!\d)/g;
+  // OS: 5 ou 6 dígitos isolados (Jul/2026: sequencial virou 6 dígitos; legado 5 mantido).
+  // Não adjacentes a mais dígitos — evita falso match em CPF/telefone.
+  const osRe = /(?<!\d)\d{5,6}(?!\d)/g;
+
   while ((m = osRe.exec(texto)) !== null) {
     return { tipo: "os", valor: m[0] };
   }
@@ -1124,7 +1126,7 @@ async function tratarResultadoConsultaOS(
   if (tentativas === 0) {
     const msg = ident.tipo === "cpf"
       ? "Não localizei nenhum pedido nesse CPF 🤔 Você tem o número da OS aí? Pelo comprovante a busca é mais certeira 😊"
-      : "Não localizei essa OS 🤔 Me confirma o número (5 dígitos do comprovante)? Ou, se preferir, me passa seu CPF 😊";
+      : "Não localizei essa OS 🤔 Me confirma o número (5 ou 6 dígitos do comprovante)? Ou, se preferir, me passa seu CPF 😊";
     await sendWhatsApp(supabaseUrl, serviceKey, atId, msg);
     await supabase.from("atendimentos").update({
       metadata: { ...meta, os_tentativas: 1, expected_reply: "os_aguardando_identificador", intent_consulta_os_at: new Date().toISOString() },
@@ -3407,7 +3409,7 @@ serve(async (req) => {
     }
 
     // ── 2.5.OS PRE-LLM ROUTER: Consulta de status de OS / óculos pronto ──
-    // Se cliente informou OS (5 dígitos) ou CPF válido: consulta bridge e responde por template (mantém modo IA).
+    // Se cliente informou OS (5 ou 6 dígitos) ou CPF válido: consulta bridge e responde por template (mantém modo IA).
     // Fallback (sem identificador / não encontrado / múltiplos resultados): escala para humano (comportamento anterior).
     {
       const osKw = await loadOsKeywords(supabase);
@@ -10325,7 +10327,7 @@ Qual dia e horário ficaria melhor pra você? 😊`,
       });
       return true;
     }
-    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode tocar em uma das opções acima ou digitar o número da OS (5 dígitos)? 😊");
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode tocar em uma das opções acima ou digitar o número da OS (5 ou 6 dígitos)? 😊");
     return true;
   }
 
@@ -10361,7 +10363,7 @@ Qual dia e horário ficaria melhor pra você? 😊`,
       return true;
     }
     // Não identificou OS nem CPF — reprompt gentil, transição para aguardando_identificador
-    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me passar o número da OS (5 dígitos do comprovante) ou seu CPF? 😊");
+    await sendWhatsApp(supabaseUrl, serviceKey, atId, "Pode me passar o número da OS (5 ou 6 dígitos do comprovante) ou seu CPF? 😊");
     await patchMeta({ expected_reply: "os_aguardando_identificador" });
     return true;
   }
