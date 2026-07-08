@@ -375,7 +375,7 @@ function ComentariosSection({ solicitacaoId }: { solicitacaoId: string }) {
   const { data: comentarios, isLoading } = useSolicitacaoComentarios(solicitacaoId);
   const createComentario = useCreateComentario();
   const [texto, setTexto] = useState("");
-  const [tipo, setTipo] = useState<"interno" | "resposta_cliente">("interno");
+  const [tipo, setTipo] = useState<"interno" | "resposta_cliente" | "retorno_setor">("interno");
 
   const handleSend = () => {
     if (!texto.trim()) return;
