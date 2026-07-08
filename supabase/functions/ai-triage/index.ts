@@ -4378,32 +4378,40 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
       console.log(`[RX-NEW-PENDING] Nova imagem de receita detectada (imageAt=${lastInboundImageAt} > rxAt=${lastReceitaAt}, declaredNew=${declaredNewRx}) — força OCR`);
     }
 
-    // ── Guarda: imagem de PRODUTO/ACESSÓRIO (não é receita) ──
-    // Caso Nobre (Jul/2026): cliente perguntou "Tem esse anti embaçante" e mandou foto
-    // do produto. Sem esta guarda o fluxo força interpretar_receita → OCR falha →
-    // manda MSG_PEDIR_RECEITA_TEXTO ("me passa OD/OE por texto") — resposta absurda.
-    // Se a intenção recente mira acessório/produto avulso e NÃO há sinal de receita,
-    // suprime o pipeline de OCR e escala para humano (IA não cota acessório).
+    // ── Guarda: imagem NÃO é receita (produto/armação/acessório/print) ──
+    // Casos: cliente pergunta "Tem esse anti embaçante" + foto do produto;
+    //        cliente manda foto de armação/modelo perguntando "tem essa?";
+    //        cliente manda print de site/anúncio pedindo preço.
+    // Sem esta guarda, qualquer imagem força interpretar_receita → OCR falha →
+    // manda MSG_PEDIR_RECEITA_TEXTO ("me passa OD/OE por texto") — absurdo.
+    // Se o texto recente indica intenção de PRODUTO/ARMAÇÃO/ACESSÓRIO e NÃO há
+    // sinal de receita/grau, pula OCR e escala para humano.
     const PRODUTO_ACESSORIO_RE = /\b(anti[- ]?emba[çc]ante|desemba[çc]ante|spray|flanela|toalhinha|kit\s+limpeza|limpador|limpa\s+lente|cordinha|cord[aã]o|estojo|case|capinha|porta[- ]?[oó]culos|clip[- ]?on|adaptador|charuto|nose\s?pad|plaqueta|parafuso|haste|charneira|corrente|straps?)\b/i;
-    const RECEITA_SIGNAL_RE = /\breceita|grau|of[t]?almo|prescri[cç][aã]o|esf[eé]rico|cil[íi]ndrico|eixo|adi[cç][aã]o|OD\b|OE\b|OS\b|dioptria/i;
-    const clienteAcessorioIntent = PRODUTO_ACESSORIO_RE.test(recentInboundText)
-      && !RECEITA_SIGNAL_RE.test(recentInboundText);
-    if (lastIsImage && clienteAcessorioIntent) {
+    const ARMACAO_MODELO_RE = /\b(arma[çc][aã]o|arma[çc][oõ]es|[oó]culos|modelo|modelinho|esse\s+[oó]culos|essa\s+arma[çc][aã]o|esse\s+modelo|esta\s+arma[çc][aã]o|solar|de\s+sol|ray.?ban|oakley|vogue|prada|gucci|carolina|hb|chilli|colcci|kipling|atitude|absurda|tommy|hugo\s*boss)\b/i;
+    const REFERENCIA_FOTO_RE = /\btem\s+(esse|essa|esses|essas|esta|este)|(quanto\s+(custa|é)|pre[çc]o|valor)\s+(desse|dessa|deste|desta|desses|dessas)|(gostei|curti|amei)\s+(desse|dessa|deste|desta)|(igual|parecid[oa])\s+(a|ao)\s+(esse|essa|este|esta)|(vi\s+no\s+)?(site|instagram|insta|facebook|anúncio|anuncio|propaganda)/i;
+    const RECEITA_SIGNAL_RE = /\breceita|\bgrau\b|of[t]?almo|prescri[cç][aã]o|esf[eé]rico|cil[íi]ndrico|\beixo\b|adi[cç][aã]o|\bOD\b|\bOE\b|\bOS\b|dioptria/i;
+    const clienteNaoReceitaIntent = (
+      PRODUTO_ACESSORIO_RE.test(recentInboundText)
+      || ARMACAO_MODELO_RE.test(recentInboundText)
+      || REFERENCIA_FOTO_RE.test(recentInboundText)
+    ) && !RECEITA_SIGNAL_RE.test(recentInboundText);
+    if (lastIsImage && clienteNaoReceitaIntent) {
       const _np = (contatoNomeAtual || "").split(/\s+/)[0] || "";
-      const respAcessorio = isHorarioHumano()
-        ? `Recebi sua imagem, ${_np || "amigo(a)"}! 🙌 Pra esse tipo de acessório/produto vou te conectar com um Consultor pra confirmar disponibilidade e valor certinho, tá?`
+      const respNaoReceita = isHorarioHumano()
+        ? `Recebi sua imagem, ${_np || "amigo(a)"}! 🙌 Pra esse tipo de consulta vou te conectar com um Consultor pra confirmar disponibilidade e valor certinho, tá?`
         : mensagemEscaladaForaHorario(_np);
-      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respAcessorio);
+      await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respNaoReceita);
       await supabase.from("eventos_crm").insert({
         contato_id: contatoId,
-        tipo: "imagem_produto_escalada",
-        descricao: "Imagem interpretada como produto/acessório (não receita) — escalando pra humano",
+        tipo: "imagem_nao_receita_escalada",
+        descricao: "Imagem interpretada como produto/armação/acessório (não receita) — escalando pra humano",
         metadata: { last_inbound: lastInboundText.slice(0, 200), recent_inbound: recentInboundText.slice(0, 300) },
         referencia_tipo: "atendimento", referencia_id: atendimento_id,
       }).then(() => undefined, () => undefined);
-      console.log("[IMG-PRODUTO] Imagem de acessório detectada — escalando humano, pulando OCR");
-      return jsonResponse({ status: "ok", tools_used: ["imagem_produto_escalada"], intencao: "duvida_produto", precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
+      console.log("[IMG-NAO-RECEITA] Imagem sem intenção de receita — escalando humano, pulando OCR");
+      return jsonResponse({ status: "ok", tools_used: ["imagem_nao_receita_escalada"], intencao: "duvida_produto", precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
     }
+
 
 
 
