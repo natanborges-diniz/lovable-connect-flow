@@ -99,8 +99,13 @@ export function TopNavigation({ activeModule }: TopNavigationProps) {
 
   const handleNotifClick = (notif: any) => {
     if (!notif.lida) marcarLida.mutate(notif.id);
-    if (notif.referencia_id && notif.tipo === "solicitacao") {
-      navigate("/financeiro");
+    if (
+      notif.referencia_id &&
+      (notif.tipo === "solicitacao" ||
+        notif.tipo === "retorno_setor" ||
+        notif.tipo === "resposta_loja")
+    ) {
+      navigate(`/financeiro?sol=${notif.referencia_id}`);
     }
     setPopoverOpen(false);
   };

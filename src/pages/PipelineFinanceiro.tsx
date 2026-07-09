@@ -52,6 +52,8 @@ import { AnexarBoletoExtraDialog } from "@/components/financeiro/AnexarBoletoExt
 import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
 import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { useSearchParams } from "react-router-dom";
+import { SolicitacaoThreadPanel } from "@/components/financeiro/SolicitacaoThreadPanel";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
@@ -115,6 +117,20 @@ export default function PipelineFinanceiro() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
+
+  // Deep-link: /financeiro?sol=<id> abre o drawer automaticamente
+  const [searchParams, setSearchParams] = useSearchParams();
+  const solParam = searchParams.get("sol");
+  useEffect(() => {
+    if (!solParam || !solicitacoes) return;
+    const found = (solicitacoes as any[]).find((s) => s.id === solParam);
+    if (found) {
+      setSelectedSolicitacao(found);
+      const next = new URLSearchParams(searchParams);
+      next.delete("sol");
+      setSearchParams(next, { replace: true });
+    }
+  }, [solParam, solicitacoes, searchParams, setSearchParams]);
 
   const updateColuna = useUpdatePipelineColuna();
   const createColuna = useCreatePipelineColuna();
@@ -977,6 +993,15 @@ export default function PipelineFinanceiro() {
                     </div>
                   );
                 })()}
+
+                {/* Diálogo setor ↔ loja (mensagens livres, não move card) */}
+                {(selectedSolicitacao.contato?.tipo === "loja" ||
+                  selectedSolicitacao.contato?.tipo === "colaborador") && (
+                  <SolicitacaoThreadPanel
+                    solicitacaoId={selectedSolicitacao.id}
+                    perspectiva="setor"
+                  />
+                )}
               </div>
             </div>
           )}
