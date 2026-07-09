@@ -122,14 +122,36 @@ export default function PipelineFinanceiro() {
   const [searchParams, setSearchParams] = useSearchParams();
   const solParam = searchParams.get("sol");
   useEffect(() => {
-    if (!solParam || !solicitacoes) return;
-    const found = (solicitacoes as any[]).find((s) => s.id === solParam);
-    if (found) {
-      setSelectedSolicitacao(found);
+    if (!solParam) return;
+    let cancelled = false;
+    const clearParam = () => {
       const next = new URLSearchParams(searchParams);
       next.delete("sol");
       setSearchParams(next, { replace: true });
+    };
+    const found = (solicitacoes as any[] | undefined)?.find((s) => s.id === solParam);
+    if (found) {
+      setSelectedSolicitacao(found);
+      clearParam();
+      return;
     }
+    // fallback: busca direta (card pode estar em coluna oculta / arquivada / outro setor)
+    (async () => {
+      const { data, error } = await supabase
+        .from("solicitacoes")
+        .select("*, contato:contatos(id, nome, telefone, tipo)")
+        .eq("id", solParam)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error || !data) {
+        toast.error("Solicitação não encontrada");
+        clearParam();
+        return;
+      }
+      setSelectedSolicitacao(data);
+      clearParam();
+    })();
+    return () => { cancelled = true; };
   }, [solParam, solicitacoes, searchParams, setSearchParams]);
 
   const updateColuna = useUpdatePipelineColuna();
