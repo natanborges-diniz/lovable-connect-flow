@@ -258,7 +258,9 @@ serve(async (req) => {
         receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
         receiptMsg += `💳 ${cartaoLinha ? `${cartaoLinha} ` : ""}**** ${last4Fmt} — ${installmentsFmt}x`;
 
-        const lojaNome = contato?.nome || "Loja";
+        // Nome da LOJA (nunca do cliente) — alias_loja/loja_nome no metadata.
+        const lojaNome = ((existingMeta.alias_loja as string) || (existingMeta.loja_nome as string) || contato?.nome || "Loja").trim();
+
         const { data: dests } = await supabase
           .rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
         const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
@@ -274,12 +276,80 @@ serve(async (req) => {
           });
         }
 
+        // Comentário sistema no ticket (Messenger "Minhas demandas" lê daqui)
         await supabase.from("solicitacao_comentarios").insert({
           solicitacao_id: solicitacao.id,
           tipo: "sistema",
           autor_nome: "Sistema Financeiro",
           conteudo: receiptMsg,
         });
+
+        // ── Garante que a loja receba o CARD no Messenger via demandas_loja ──
+        // Se a solicitação não tem demanda vinculada (link criado direto pelo
+        // painel financeiro sem passar por demandas_loja), auto-cria uma
+        // demanda + mensagem para a loja receber o comprovante no app.
+        try {
+          let demandaId = (existingMeta.demanda_id as string) || null;
+
+          if (!demandaId) {
+            const { data: lojaInfo } = await supabase
+              .from("telefones_lojas")
+              .select("telefone, setor_destino_id")
+              .ilike("nome_loja", lojaNome)
+              .eq("ativo", true)
+              .maybeSingle();
+
+            if (lojaInfo?.telefone) {
+              const protocolo = `FIN-${new Date().getFullYear()}-${String(solicitacao.id).slice(0, 8)}`;
+              const { data: novaDem, error: novaDemErr } = await supabase
+                .from("demandas_loja")
+                .insert({
+                  protocolo,
+                  loja_nome: lojaNome,
+                  loja_telefone: lojaInfo.telefone,
+                  assunto: `Comprovante de pagamento — ${clienteName}`.slice(0, 120),
+                  pergunta: `Pagamento confirmado NSU ${nsuFmt} — ${valorFmt}`,
+                  status: "respondida",
+                  origem: "sistema",
+                  tipo_chave: "comprovante_pagamento",
+                  setor_destino_id: lojaInfo.setor_destino_id,
+                  solicitante_nome: "Sistema Financeiro",
+                  metadata: { solicitacao_id: solicitacao.id, auto_created_from: "payment-webhook", payment_link_id },
+                })
+                .select("id")
+                .single();
+
+              if (novaDemErr) {
+                console.error("[payment-webhook] auto-create demanda failed:", novaDemErr);
+              } else if (novaDem?.id) {
+                demandaId = novaDem.id;
+                // Backfill demanda_id no metadata da solicitação
+                await supabase.from("solicitacoes")
+                  .update({ metadata: { ...updatedMeta, demanda_id: demandaId } })
+                  .eq("id", solicitacao.id);
+              }
+            } else {
+              console.warn(`[payment-webhook] sem telefone cadastrado para loja "${lojaNome}" — demanda não criada`);
+            }
+          }
+
+          if (demandaId) {
+            await supabase.from("demanda_mensagens").insert({
+              demanda_id: demandaId,
+              direcao: "sistema",
+              autor_nome: "Sistema Financeiro",
+              conteudo: receiptMsg,
+              metadata: { tipo: "comprovante_pagamento", solicitacao_id: solicitacao.id, payment_link_id, nsu, tid },
+            });
+
+            await supabase.from("demandas_loja").update({
+              status: "respondida",
+              ultima_mensagem_loja_at: now.toISOString(),
+            }).eq("id", demandaId);
+          }
+        } catch (demErr) {
+          console.error("[payment-webhook] Failed to create/post demanda:", demErr);
+        }
 
         console.log(`[payment-webhook] Picote entregue via app para ${list.length} destinatário(s) — loja "${lojaNome}"`);
       } catch (notifyErr) {
