@@ -742,7 +742,10 @@ export default function PipelineFinanceiro() {
                             : "N/A"}
                         </span>
                         <span className="text-green-700">💳 Cartão</span>
-                        <span className="font-medium">**** {selectedSolicitacao.metadata?.last4 || "****"}</span>
+                        <span className="font-medium">
+                          {selectedSolicitacao.metadata?.brand ? `${selectedSolicitacao.metadata.brand} ` : ""}
+                          **** {selectedSolicitacao.metadata?.last4 || "****"}
+                        </span>
                         <span className="text-green-700">📦 Parcelas</span>
                         <span className="font-medium">{selectedSolicitacao.metadata?.installments || 1}x</span>
                       </div>

@@ -80,37 +80,58 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
         <ScrollArea className="max-h-56">
           <div className="space-y-2 pr-2">
             {comentarios
-              .filter((c) => c.tipo === "retorno_setor" || c.tipo === "resposta_loja")
-              .map((c) => (
-                <div
-                  key={c.id}
-                  className={cn(
-                    "rounded-lg px-3 py-2 text-sm",
-                    c.tipo === "retorno_setor" && "bg-amber-500/10 border border-amber-500/30",
-                    c.tipo === "resposta_loja" && "bg-emerald-500/10 border border-emerald-500/30",
-                  )}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-medium">{c.autor_nome || "Sistema"}</span>
-                    <div className="flex items-center gap-1.5">
-                      {c.tipo === "retorno_setor" && (
-                        <Badge variant="outline" className="text-[9px] h-4 px-1 border-amber-500/50 text-amber-700">
-                          Setor
-                        </Badge>
-                      )}
-                      {c.tipo === "resposta_loja" && (
-                        <Badge variant="outline" className="text-[9px] h-4 px-1 border-emerald-500/50 text-emerald-700">
-                          Loja
-                        </Badge>
-                      )}
-                      <span className="text-[10px] text-muted-foreground">
-                        {format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}
-                      </span>
+              .filter((c) =>
+                ["retorno_setor", "resposta_loja", "sistema", "operador_para_loja"].includes(c.tipo as string),
+              )
+              .map((c) => {
+                const isSistema = c.tipo === "sistema" || c.tipo === "operador_para_loja";
+                return (
+                  <div
+                    key={c.id}
+                    className={cn(
+                      "rounded-lg px-3 py-2 text-sm",
+                      c.tipo === "retorno_setor" && "bg-amber-500/10 border border-amber-500/30",
+                      c.tipo === "resposta_loja" && "bg-emerald-500/10 border border-emerald-500/30",
+                      isSistema && "bg-muted/40 border border-border",
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium">{c.autor_nome || "Sistema"}</span>
+                      <div className="flex items-center gap-1.5">
+                        {c.tipo === "retorno_setor" && (
+                          <Badge variant="outline" className="text-[9px] h-4 px-1 border-amber-500/50 text-amber-700">
+                            Setor
+                          </Badge>
+                        )}
+                        {c.tipo === "resposta_loja" && (
+                          <Badge variant="outline" className="text-[9px] h-4 px-1 border-emerald-500/50 text-emerald-700">
+                            Loja
+                          </Badge>
+                        )}
+                        {isSistema && (
+                          <Badge variant="outline" className="text-[9px] h-4 px-1">
+                            Sistema
+                          </Badge>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">
+                          {format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                        </span>
+                      </div>
                     </div>
+                    <p className="text-sm whitespace-pre-wrap">{c.conteudo}</p>
+                    {(c as any).anexo_url && (
+                      <a
+                        href={(c as any).anexo_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-block text-xs text-primary underline break-all"
+                      >
+                        📎 {(c as any).anexo_nome || "Anexo"}
+                      </a>
+                    )}
                   </div>
-                  <p className="text-sm whitespace-pre-wrap">{c.conteudo}</p>
-                </div>
-              ))}
+                );
+              })}
           </div>
         </ScrollArea>
       ) : (
