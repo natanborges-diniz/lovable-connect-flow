@@ -118,6 +118,20 @@ export default function PipelineFinanceiro() {
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
+  // Deep-link: /financeiro?sol=<id> abre o drawer automaticamente
+  const [searchParams, setSearchParams] = useSearchParams();
+  const solParam = searchParams.get("sol");
+  useEffect(() => {
+    if (!solParam || !solicitacoes) return;
+    const found = (solicitacoes as any[]).find((s) => s.id === solParam);
+    if (found) {
+      setSelectedSolicitacao(found);
+      const next = new URLSearchParams(searchParams);
+      next.delete("sol");
+      setSearchParams(next, { replace: true });
+    }
+  }, [solParam, solicitacoes, searchParams, setSearchParams]);
+
   const updateColuna = useUpdatePipelineColuna();
   const createColuna = useCreatePipelineColuna();
   const deleteColuna = useDeletePipelineColuna();
