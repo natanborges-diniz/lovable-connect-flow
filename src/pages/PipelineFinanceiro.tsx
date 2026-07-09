@@ -648,7 +648,7 @@ export default function PipelineFinanceiro() {
 
       {/* Generic detail dialog (non-CPF, non-PIX) */}
       <Dialog open={!!selectedSolicitacao && selectedSolicitacao?.tipo !== "consulta_cpf" && selectedSolicitacao?.tipo !== "confirmacao_pix"} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           {selectedSolicitacao && selectedSolicitacao.tipo !== "consulta_cpf" && selectedSolicitacao.tipo !== "confirmacao_pix" && (
             <div className="space-y-4">
               <DialogHeader>
@@ -656,6 +656,17 @@ export default function PipelineFinanceiro() {
                   {tipoIcon(selectedSolicitacao.tipo)}
                   {selectedSolicitacao.assunto}
                 </DialogTitle>
+                <DialogDescription className="flex flex-wrap items-center gap-2 text-xs">
+                  {selectedSolicitacao.protocolo && (
+                    <span className="font-mono">{selectedSolicitacao.protocolo}</span>
+                  )}
+                  {selectedSolicitacao.status === "concluida" && (
+                    <Badge variant="outline" className="text-[10px]">Concluída</Badge>
+                  )}
+                  {(selectedSolicitacao.metadata as any)?.arquivado_at && (
+                    <Badge variant="outline" className="text-[10px]">Arquivada</Badge>
+                  )}
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-2 text-sm">
                 {selectedSolicitacao.contato && (
