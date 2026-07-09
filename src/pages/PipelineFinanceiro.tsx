@@ -1034,7 +1034,9 @@ export default function PipelineFinanceiro() {
 
                 {/* Diálogo setor ↔ loja (mensagens livres, não move card) */}
                 {(selectedSolicitacao.contato?.tipo === "loja" ||
-                  selectedSolicitacao.contato?.tipo === "colaborador") && (
+                  selectedSolicitacao.contato?.tipo === "colaborador" ||
+                  !!(selectedSolicitacao.metadata as any)?.loja_nome ||
+                  !!(selectedSolicitacao.metadata as any)?.alias_loja) && (
                   <SolicitacaoThreadPanel
                     solicitacaoId={selectedSolicitacao.id}
                     perspectiva="setor"
