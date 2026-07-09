@@ -52,6 +52,8 @@ import { AnexarBoletoExtraDialog } from "@/components/financeiro/AnexarBoletoExt
 import { Tabs as TabsRoot, TabsContent, TabsList as TabsListUI, TabsTrigger as TabsTriggerUI } from "@/components/ui/tabs";
 import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { useSearchParams } from "react-router-dom";
+import { SolicitacaoThreadPanel } from "@/components/financeiro/SolicitacaoThreadPanel";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
