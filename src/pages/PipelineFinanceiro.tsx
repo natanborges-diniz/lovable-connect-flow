@@ -445,7 +445,12 @@ export default function PipelineFinanceiro() {
                                               <GripVertical className="h-4 w-4" />
                                             </div>
                                             <div className="min-w-0 flex-1">
-                                              {/* Loja solicitante - primeiro campo */}
+                                              {sol.protocolo && (
+                                                <p className="font-mono text-[10px] text-muted-foreground truncate leading-tight">
+                                                  {sol.protocolo}
+                                                </p>
+                                              )}
+                                              {/* Loja solicitante */}
                                               {sol.metadata?.loja_nome && (
                                                 <p className="text-xs font-semibold text-primary truncate mb-0.5">
                                                   🏪 {sol.metadata.loja_nome}
