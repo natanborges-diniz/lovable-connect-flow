@@ -993,6 +993,15 @@ export default function PipelineFinanceiro() {
                     </div>
                   );
                 })()}
+
+                {/* Diálogo setor ↔ loja (mensagens livres, não move card) */}
+                {(selectedSolicitacao.contato?.tipo === "loja" ||
+                  selectedSolicitacao.contato?.tipo === "colaborador") && (
+                  <SolicitacaoThreadPanel
+                    solicitacaoId={selectedSolicitacao.id}
+                    perspectiva="setor"
+                  />
+                )}
               </div>
             </div>
           )}
