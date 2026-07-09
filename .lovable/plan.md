@@ -1,50 +1,45 @@
 ## Diagnóstico
 
-Duas peças ficaram faltando na entrega do diálogo setor↔loja:
+Confirmado no banco: `SOL-2026-00115` e `SOL-2026-00117` estão `status='concluida'` (não arquivadas), sentadas na coluna terminal "Concluídas" do Financeiro. Estão no kanban, mas invisíveis à primeira vista por três razões:
 
-1. **Notificação não é clicável.** `TopNavigation.handleNotifClick` só navega quando `notif.tipo === "solicitacao"`. As notificações criadas por `comentar-solicitacao` chegam com `tipo` = `retorno_setor` / `resposta_loja`, então o clique não faz nada.
-2. **UI do setor não expõe a thread.** O setor Financeiro opera no kanban `/financeiro` (`PipelineFinanceiro.tsx`) e abre um `Dialog` genérico do card (linha 607+). Esse dialog **não** renderiza `useSolicitacaoComentarios` nem tem o campo "Comentar com a loja". A tela `src/pages/Solicitacoes.tsx` — onde a thread e o campo já existem — **não está registrada em `App.tsx`**, ou seja, ninguém acessa. Além disso, mesmo se acessasse, ela não lê query param para abrir o item vindo da notificação.
-
-Resultado: o setor recebe a notificação, mas não tem como ler nem responder.
+1. **Protocolo não aparece no rosto do card.** O `CardContent` (linha 416) mostra loja, ícone do tipo, `assunto` e nome do contato — mas nunca renderiza `sol.protocolo`. O único lugar que exibe o código é o título do modal de edição (linha 1077, admin). Sem o `SOL-YYYY-NNNNN` na frente, o operador não bate o olho na notificação e localiza o card.
+2. **Deep-link falha silenciosamente.** O `useEffect` do `/financeiro?sol=<id>` procura o card **apenas** na lista já filtrada. Se estiver em coluna oculta, filtrado por busca, ou (no futuro) arquivado, `found` é `undefined` e o dialog nunca abre — sem toast, sem log visível.
+3. **Dialog do card não rola.** O `DialogContent` do drawer não tem `max-h` nem `overflow`, então o painel de diálogo com a loja fica abaixo da dobra em telas menores — "corta logo acima da caixa de diálogo".
+4. **Gate do painel de thread muito restritivo.** `SolicitacaoThreadPanel` só renderiza quando `contato.tipo ∈ {loja, colaborador}`. Solicitações abertas em nome do cliente final mas com vínculo em `metadata.alias_loja`/`loja_nome` (o caso das duas SOLs) escondem a thread inteira.
 
 ## Plano
 
-### 1. Deep-link da notificação (setor e loja)
-Ajustar `handleNotifClick` em `src/components/layout/TopNavigation.tsx` para:
-- Reconhecer `tipo ∈ {solicitacao, retorno_setor, resposta_loja}`.
-- Navegar para `/financeiro?sol=<referencia_id>` (setor). Para loja/Messenger não muda nada aqui — a app Messenger tem o próprio handler.
+### 1. Protocolo visível no card (`PipelineFinanceiro.tsx`, ~L425)
+Adicionar linha compacta no topo do `min-w-0 flex-1`, antes da loja:
+```
+<span className="font-mono text-[10px] text-muted-foreground">{sol.protocolo}</span>
+```
+Mantém a hierarquia visual (loja em destaque, assunto principal) mas dá ao operador o código para casar com a notificação.
 
-### 2. Abrir o card automaticamente ao chegar via link
-Em `PipelineFinanceiro.tsx`:
-- Ler `?sol=<id>` com `useSearchParams`.
-- Quando a lista de solicitações carregar, achar a solicitação pelo id e chamar `setSelectedSolicitacao(sol)` (uma vez, com guarda).
-- Limpar o query param após abrir.
+### 2. Deep-link resiliente (`PipelineFinanceiro.tsx`)
+- Se `?sol=<id>` chegar e o card não estiver na lista renderizada, buscar direto:
+  `supabase.from("solicitacoes").select("*, contato:contatos(id,nome,telefone,tipo)").eq("id", id).single()`.
+- Popular `selectedSolicitacao` com o resultado — abre o drawer mesmo se o card estiver em coluna oculta/arquivada.
+- Erro → `toast.error("Solicitação não encontrada")` e limpa `?sol`.
+- Se vier arquivada, exibir badge "Arquivado" no header do drawer.
 
-### 3. Thread de comentários dentro do drawer do card
-No `Dialog` genérico (linha 607+) do `PipelineFinanceiro.tsx`, adicionar uma seção "Diálogo com a loja":
-- Render de `useSolicitacaoComentarios(selectedSolicitacao.id)` com badges "Setor" / "Loja" / "Interno" — mesmo visual que já existe em `Solicitacoes.tsx` (reaproveitar componente).
-- Campo `Textarea` + botão **"Enviar observação para a loja"** que chama `useCreateComentario` com `tipo: "retorno_setor"` (invoca `comentar-solicitacao`).
-- Não muda status, não move o card.
-- Aparece apenas quando o contato da solicitação é `loja` / `colaborador` (mesma regra do `pipeline-automations`).
+### 3. Dialog rolável (`PipelineFinanceiro.tsx`)
+- `max-h-[90vh] overflow-y-auto` no `DialogContent` do card.
+- `<DialogDescription className="sr-only">…</DialogDescription>` para calar o warning de a11y.
 
-Para evitar duplicar JSX, extrair um pequeno componente `SolicitacaoThreadPanel` em `src/components/financeiro/SolicitacaoThreadPanel.tsx` reutilizado tanto pelo `PipelineFinanceiro` quanto pelo `Solicitacoes.tsx` já existente.
+### 4. Painel de thread com regra correta (`PipelineFinanceiro.tsx`)
+Renderizar `SolicitacaoThreadPanel` quando **qualquer**:
+- `contato.tipo` for `loja`/`colaborador`;
+- `metadata.alias_loja` ou `metadata.loja_nome` preenchidos;
+- já existir comentário `retorno_setor`/`resposta_loja` (checagem interna).
 
-### 4. Realtime opcional (rápido)
-Assinar `postgres_changes` em `solicitacao_comentarios` filtrando por `solicitacao_id` para o painel atualizar sozinho quando a loja responder, sem depender de refetch por foco.
-
-### 5. Espelho na app da loja (fora deste repo)
-Esta parte já foi entregue no backend (edge function + `resposta_loja` no hook). A UI da loja (projeto Messenger) precisa:
-- No clique da notificação `resposta_loja`/`retorno_setor`, abrir o detalhe da solicitação.
-- Renderizar `solicitacao_comentarios` como thread e permitir enviar `tipo: "resposta_loja"` via `comentar-solicitacao` (já está no hook compartilhado).
-
-Deixo isso listado aqui para ser feito no repo do Messenger — não faz parte deste patch.
-
-## Fora do escopo
-- Anexos no comentário.
-- Marcar comentário como resolvido.
-- Rota dedicada `/solicitacoes` — o setor continua operando pelo kanban `/financeiro`; a página `Solicitacoes.tsx` fica como fallback administrativo (podemos registrá-la depois se quiser).
+### 5. Highlight opcional
+Ring animado ~2s no card quando aberto via `?sol=<id>` e presente no kanban — para o operador achar a origem visual, útil em "Concluídas" que exige rolagem.
 
 ## Detalhes técnicos
-- Arquivos alterados: `src/components/layout/TopNavigation.tsx`, `src/pages/PipelineFinanceiro.tsx`, novo `src/components/financeiro/SolicitacaoThreadPanel.tsx`, refactor leve em `src/pages/Solicitacoes.tsx` para usar o mesmo componente.
-- Sem migração de schema. Sem mudança em edge functions (a `comentar-solicitacao` já está no ar).
-- Notificação já traz `referencia_id = solicitacao_id`; nada muda no backend.
+- Arquivos: `src/pages/PipelineFinanceiro.tsx`, `src/components/financeiro/SolicitacaoThreadPanel.tsx`.
+- Sem migração, sem edge function.
+
+## Fora do escopo
+- Rota `/solicitacoes/:id`.
+- Espelho no Messenger da loja.

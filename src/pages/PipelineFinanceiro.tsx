@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
   Plus, Pencil, Trash2, Check, X, Search, GripVertical,
   CreditCard, FileText, Clock, DollarSign, ShieldCheck, Zap, Archive, ArchiveRestore,
@@ -122,14 +122,36 @@ export default function PipelineFinanceiro() {
   const [searchParams, setSearchParams] = useSearchParams();
   const solParam = searchParams.get("sol");
   useEffect(() => {
-    if (!solParam || !solicitacoes) return;
-    const found = (solicitacoes as any[]).find((s) => s.id === solParam);
-    if (found) {
-      setSelectedSolicitacao(found);
+    if (!solParam) return;
+    let cancelled = false;
+    const clearParam = () => {
       const next = new URLSearchParams(searchParams);
       next.delete("sol");
       setSearchParams(next, { replace: true });
+    };
+    const found = (solicitacoes as any[] | undefined)?.find((s) => s.id === solParam);
+    if (found) {
+      setSelectedSolicitacao(found);
+      clearParam();
+      return;
     }
+    // fallback: busca direta (card pode estar em coluna oculta / arquivada / outro setor)
+    (async () => {
+      const { data, error } = await supabase
+        .from("solicitacoes")
+        .select("*, contato:contatos(id, nome, telefone, tipo)")
+        .eq("id", solParam)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error || !data) {
+        toast.error("Solicitação não encontrada");
+        clearParam();
+        return;
+      }
+      setSelectedSolicitacao(data);
+      clearParam();
+    })();
+    return () => { cancelled = true; };
   }, [solParam, solicitacoes, searchParams, setSearchParams]);
 
   const updateColuna = useUpdatePipelineColuna();
@@ -423,7 +445,12 @@ export default function PipelineFinanceiro() {
                                               <GripVertical className="h-4 w-4" />
                                             </div>
                                             <div className="min-w-0 flex-1">
-                                              {/* Loja solicitante - primeiro campo */}
+                                              {sol.protocolo && (
+                                                <p className="font-mono text-[10px] text-muted-foreground truncate leading-tight">
+                                                  {sol.protocolo}
+                                                </p>
+                                              )}
+                                              {/* Loja solicitante */}
                                               {sol.metadata?.loja_nome && (
                                                 <p className="text-xs font-semibold text-primary truncate mb-0.5">
                                                   🏪 {sol.metadata.loja_nome}
@@ -621,7 +648,7 @@ export default function PipelineFinanceiro() {
 
       {/* Generic detail dialog (non-CPF, non-PIX) */}
       <Dialog open={!!selectedSolicitacao && selectedSolicitacao?.tipo !== "consulta_cpf" && selectedSolicitacao?.tipo !== "confirmacao_pix"} onOpenChange={(open) => !open && setSelectedSolicitacao(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           {selectedSolicitacao && selectedSolicitacao.tipo !== "consulta_cpf" && selectedSolicitacao.tipo !== "confirmacao_pix" && (
             <div className="space-y-4">
               <DialogHeader>
@@ -629,6 +656,17 @@ export default function PipelineFinanceiro() {
                   {tipoIcon(selectedSolicitacao.tipo)}
                   {selectedSolicitacao.assunto}
                 </DialogTitle>
+                <DialogDescription className="flex flex-wrap items-center gap-2 text-xs">
+                  {selectedSolicitacao.protocolo && (
+                    <span className="font-mono">{selectedSolicitacao.protocolo}</span>
+                  )}
+                  {selectedSolicitacao.status === "concluida" && (
+                    <Badge variant="outline" className="text-[10px]">Concluída</Badge>
+                  )}
+                  {(selectedSolicitacao.metadata as any)?.arquivado_at && (
+                    <Badge variant="outline" className="text-[10px]">Arquivada</Badge>
+                  )}
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-2 text-sm">
                 {selectedSolicitacao.contato && (
@@ -996,7 +1034,9 @@ export default function PipelineFinanceiro() {
 
                 {/* Diálogo setor ↔ loja (mensagens livres, não move card) */}
                 {(selectedSolicitacao.contato?.tipo === "loja" ||
-                  selectedSolicitacao.contato?.tipo === "colaborador") && (
+                  selectedSolicitacao.contato?.tipo === "colaborador" ||
+                  !!(selectedSolicitacao.metadata as any)?.loja_nome ||
+                  !!(selectedSolicitacao.metadata as any)?.alias_loja) && (
                   <SolicitacaoThreadPanel
                     solicitacaoId={selectedSolicitacao.id}
                     perspectiva="setor"
