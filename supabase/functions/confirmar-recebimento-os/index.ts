@@ -356,27 +356,39 @@ serve(async (req) => {
       }
     }
 
-    // Se não achou contato mas temos telefone, cria (padrão regua-disparo-aguardando-armacao)
+    // Se não achou contato mas temos telefone, cria.
+    // NOTA: `contatos.telefone` tem índice UNIQUE PARCIAL (WHERE telefone IS NOT NULL),
+    // que o PostgREST não aceita em ON CONFLICT. Fazemos insert simples + fallback
+    // de select em caso de race/duplicidade — nunca engolir erro silenciosamente.
+    let createContatoError: string | null = null;
     if (!contato_id && cliente_telefone) {
       const telClean = cliente_telefone.replace(/\D/g, "");
       const { data: novoContato, error: contatoErr } = await supabase
         .from("contatos")
-        .upsert(
-          {
-            telefone: telClean,
-            nome: cliente_nome || "Cliente",
-            tipo: "cliente",
-            ativo: true,
-            metadata: { origem: "bridge_os_recebimento", criado_via: "confirmar-recebimento-os" },
-          },
-          { onConflict: "telefone" },
-        )
+        .insert({
+          telefone: telClean,
+          nome: cliente_nome || "Cliente",
+          tipo: "cliente",
+          ativo: true,
+          metadata: { origem: "bridge_os_recebimento", criado_via: "confirmar-recebimento-os" },
+        })
         .select("id")
         .maybeSingle();
-      if (contatoErr) {
-        console.warn("[confirmar-recebimento-os] upsert contato falhou:", contatoErr);
-      } else if (novoContato) {
+      if (novoContato?.id) {
         contato_id = novoContato.id;
+      } else if (contatoErr) {
+        // Race: outro processo criou entre o select e o insert → re-consulta.
+        const { data: cRetry } = await supabase
+          .from("contatos")
+          .select("id")
+          .eq("telefone", telClean)
+          .maybeSingle();
+        if (cRetry?.id) {
+          contato_id = cRetry.id;
+        } else {
+          createContatoError = String(contatoErr.message || contatoErr).slice(0, 300);
+          console.error("[confirmar-recebimento-os] create contato falhou:", contatoErr);
+        }
       }
     }
 
@@ -414,7 +426,9 @@ serve(async (req) => {
         os_numero, loja_nome,
       });
     } else {
-      const reason = cliente_telefone
+      const reason = createContatoError
+        ? `falha_criar_contato: ${createContatoError}`
+        : cliente_telefone
         ? "contato_nao_encontrado_para_telefone"
         : "sem_telefone_na_bridge";
       await supabase
