@@ -426,7 +426,9 @@ serve(async (req) => {
         os_numero, loja_nome,
       });
     } else {
-      const reason = cliente_telefone
+      const reason = createContatoError
+        ? `falha_criar_contato: ${createContatoError}`
+        : cliente_telefone
         ? "contato_nao_encontrado_para_telefone"
         : "sem_telefone_na_bridge";
       await supabase
