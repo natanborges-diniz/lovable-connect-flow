@@ -356,6 +356,30 @@ serve(async (req) => {
       }
     }
 
+    // Se não achou contato mas temos telefone, cria (padrão regua-disparo-aguardando-armacao)
+    if (!contato_id && cliente_telefone) {
+      const telClean = cliente_telefone.replace(/\D/g, "");
+      const { data: novoContato, error: contatoErr } = await supabase
+        .from("contatos")
+        .upsert(
+          {
+            telefone: telClean,
+            nome: cliente_nome || "Cliente",
+            tipo: "cliente",
+            ativo: true,
+            metadata: { origem: "bridge_os_recebimento", criado_via: "confirmar-recebimento-os" },
+          },
+          { onConflict: "telefone" },
+        )
+        .select("id")
+        .maybeSingle();
+      if (contatoErr) {
+        console.warn("[confirmar-recebimento-os] upsert contato falhou:", contatoErr);
+      } else if (novoContato) {
+        contato_id = novoContato.id;
+      }
+    }
+
     const now = new Date().toISOString();
     const { data: row, error: upErr } = await supabase
       .from("os_recebimento_loja")
@@ -404,18 +428,27 @@ serve(async (req) => {
       dispatch = { skipped: true, reason };
     }
 
-    await supabase.from("eventos_crm").insert({
-      contato_id,
-      tipo: "os_recebida_loja",
-      descricao: `Loja ${loja_nome} confirmou recebimento da OS ${os_numero}`,
-      referencia_tipo: "os_recebimento_loja",
-      referencia_id: row.id,
-      metadata: { os_numero, loja_nome, dispatch },
-    });
+    if (contato_id) {
+      await supabase.from("eventos_crm").insert({
+        contato_id,
+        tipo: "os_recebida_loja",
+        descricao: `Loja ${loja_nome} confirmou recebimento da OS ${os_numero}`,
+        referencia_tipo: "os_recebimento_loja",
+        referencia_id: row.id,
+        metadata: { os_numero, loja_nome, dispatch },
+      });
+    }
 
     const { data: fresh } = await supabase
       .from("os_recebimento_loja").select("*").eq("id", row.id).single();
-    return json({ status: "ok", row: fresh, dispatch });
+    const notificado = fresh?.wa_status === "sent";
+    return json({
+      status: notificado ? "ok" : "recebido_sem_notificacao",
+      notificado_cliente: notificado,
+      motivo: notificado ? null : (fresh?.wa_status_reason || fresh?.wa_status || null),
+      row: fresh,
+      dispatch,
+    });
   } catch (e) {
     console.error("confirmar-recebimento-os error:", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
