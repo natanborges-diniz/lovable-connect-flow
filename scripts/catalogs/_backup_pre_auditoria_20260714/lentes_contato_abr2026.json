@@ -1,0 +1,1955 @@
+{
+  "catalogo": {
+    "id": "lentes_contato_abr2026",
+    "nome": "Tabela de Lentes de Contato — Abr/2026",
+    "categoria": "lente_de_contato",
+    "data_vigencia": "2026-04-01",
+    "moeda": "BRL",
+    "total_skus": 51,
+    "nota": "Preços por caixa. Lentes de contato requerem prescrição e acompanhamento oftalmológico.",
+    "fornecedores_presentes": [
+      "Alcon",
+      "Coopervision",
+      "Johnson & Johnson",
+      "Solótica"
+    ],
+    "glossario": {
+      "materiais": {
+        "silicone_hidrogel": {
+          "nome": "Silicone Hidrogel",
+          "descricao": "Material de última geração que permite maior passagem de oxigênio para a córnea. Reduz hipoxia, vermelhidão e complicações por uso prolongado.",
+          "vantagens": [
+            "Alta permeabilidade ao O2",
+            "Maior conforto em uso prolongado",
+            "Menor risco de hipoxia",
+            "Alguns modelos aprovados para uso noturno/contínuo"
+          ]
+        },
+        "hidrogel": {
+          "nome": "Hidrogel (HEMA)",
+          "descricao": "Material clássico de lentes de contato com alta hidratação. Indicado para uso diário com descarte frequente.",
+          "vantagens": [
+            "Boa hidratação inicial",
+            "Custo mais acessível",
+            "Conforto para usos de curta duração"
+          ],
+          "limitacoes": [
+            "Menor permeabilidade ao O2 que silicone hidrogel"
+          ]
+        }
+      },
+      "tipos_de_lente": {
+        "esferica": "Correção de miopia ou hipermetropia sem astigmatismo.",
+        "torica": "Correção simultânea de grau esférico e cilíndrico (astigmatismo). Possui estabilização rotacional.",
+        "multifocal": "Para presbitas — corrige longe, intermediário e perto.",
+        "colorida_ou_especial": "Lente colorida (estética ou correção de daltonismo) ou com filtro especial.",
+        "especial": "Para indicações clínicas específicas: ceratocone, afacia pediátrica, irregularidades corneanas."
+      },
+      "dk": "Coeficiente de permeabilidade ao oxigênio do material. Quanto maior o DK, mais oxigênio passa para a córnea.",
+      "descarte": {
+        "diario": "Descartada ao final de cada dia. Máxima higiene — não exige solução de limpeza.",
+        "quinzenal": "Trocada a cada 15 dias com limpeza diária.",
+        "mensal": "Usada por até 30 dias com limpeza e armazenamento em solução multipropósito.",
+        "trimestral": "Uso por 3 meses com cuidados de higienização rigorosos.",
+        "anual": "Trocada anualmente. Exige protocolo de higienização estrito.",
+        "mensal_ou_semanal": "Pode ser usada em regime semanal (uso contínuo) ou mensal (uso diário)."
+      }
+    },
+    "produtos": [
+      {
+        "id": "lc_coopervision_biofinity_energys",
+        "nome": "Biofinity Energys",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 128.0
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 310.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=128.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_coopervision_biofinity",
+        "nome": "Biofinity",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 128.0
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 285.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=128.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_coopervision_biofinity_xr",
+        "nome": "Biofinity XR",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 128.0
+        },
+        "parametros": {
+          "esferico_min": -20.0,
+          "esferico_max": 15.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 310.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=128.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_coopervision_biofinity_toric",
+        "nome": "Biofinity Toric",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 128.0
+        },
+        "parametros": {
+          "esferico_min": -10.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75 / -2.25"
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 390.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "torica",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=128.0). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -0.75 / -1.25 / -1.75 / -2.25."
+        }
+      },
+      {
+        "id": "lc_coopervision_biofinity_xr_toric",
+        "nome": "Biofinity XR Toric",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 128.0
+        },
+        "parametros": {
+          "esferico_min": -20.0,
+          "esferico_max": 20.0,
+          "cilindrico_disponivel": "-2.75 / -3.25 / -3.75 / -4.25 / -4.75 / -5.25 / -5.75 / -0.75 / -1.25 / -1.75 / -2.25 (para os graus +8.50 a +20.00 e de -10.50 a -20.00)"
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 655.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "torica",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=128.0). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -2.75 / -3.25 / -3.75 / -4.25 / -4.75 / -5.25 / -5.75 / -0.75 / -1.25 / -1.75 / -2.25 (para os graus +8.50 a +20.00 e de -10.50 a -20.00)."
+        }
+      },
+      {
+        "id": "lc_coopervision_clariti_1_day",
+        "nome": "Clariti 1 Day",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 60.0
+        },
+        "parametros": {
+          "esferico_min": -10.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 215.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "diario",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=60.0). Descarte diário."
+        }
+      },
+      {
+        "id": "lc_coopervision_clariti_1_day_toric",
+        "nome": "Clariti 1 Day Toric",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 60.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 4.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75 / -2.25"
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 265.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "diario",
+          "torica",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=60.0). para correção de astigmatismo. Descarte diário. Cilindros disponíveis: -0.75 / -1.25 / -1.75 / -2.25."
+        }
+      },
+      {
+        "id": "lc_coopervision_avaira_vitality",
+        "nome": "Avaira Vitality",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 90.0
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 235.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "diario",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=90.0). Descarte diário."
+        }
+      },
+      {
+        "id": "lc_coopervision_proclear",
+        "nome": "Proclear",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Hidrogel",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 27.0
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 240.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "esferica",
+          "hidrogel",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=27.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_coopervision_proclear_xr",
+        "nome": "Proclear XR",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Hidrogel",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 27.0
+        },
+        "parametros": {
+          "esferico_min": -20.0,
+          "esferico_max": 20.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 245.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "esferica",
+          "hidrogel",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=27.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_coopervision_proclear_1_day",
+        "nome": "Proclear 1 Day",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Hidrogel",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 25.0
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 200.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "esferica",
+          "diario",
+          "hidrogel",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=25.0). Descarte diário."
+        }
+      },
+      {
+        "id": "lc_coopervision_biomedics_55_evolution",
+        "nome": "Biomedics 55 Evolution",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Hidrogel",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 19.0
+        },
+        "parametros": {
+          "esferico_min": -10.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 220.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "esferica",
+          "hidrogel",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=19.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_alcon_air_optix_for_astigmatism",
+        "nome": "Air Optix for Astigmatism",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Lotrafilcon B",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 110.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75 / -2.25"
+        },
+        "uso": {
+          "descarte": "mensal_ou_semanal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 363.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal_ou_semanal",
+          "silicone_hidrogel",
+          "alcon",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=110.0). para correção de astigmatismo. Descarte mensal ou semanal. Cilindros disponíveis: -0.75 / -1.25 / -1.75 / -2.25."
+        }
+      },
+      {
+        "id": "lc_alcon_air_optix_plus_hydraglide",
+        "nome": "Air Optix Plus Hydraglide",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Lotrafilcon B",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 138.0
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": "-0.75 / -2.25"
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 290.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "alcon",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=138.0). Descarte mensal. Cilindros disponíveis: -0.75 / -2.25."
+        }
+      },
+      {
+        "id": "lc_alcon_air_optix_aqua",
+        "nome": "Air Optix Aqua",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Lotrafilcon B",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 138.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 200.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "alcon",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=138.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_alcon_air_optix_night&day_aqua",
+        "nome": "Air Optix Night&Day Aqua",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Lotrafilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 175.0
+        },
+        "parametros": {
+          "esferico_min": -8.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 446.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "alcon",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=175.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_alcon_air_optix_plus_hydraglyde_for_astigmatism",
+        "nome": "Air Optix plus HydraGlyde for Astigmatism",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Lotrafilcon B",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 138.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 0.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75 / -2.25"
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 425.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "alcon",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=138.0). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -0.75 / -1.25 / -1.75 / -2.25."
+        }
+      },
+      {
+        "id": "lc_alcon_dailies_aquacomfort_plus",
+        "nome": "Dailies AquaComfort Plus",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Nelfilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 26.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 10
+        },
+        "preco": {
+          "valor": 320.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "diario",
+          "alcon",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=26.0). Descarte diário."
+        }
+      },
+      {
+        "id": "lc_alcon_dailies_aquacomfort_plus_toric",
+        "nome": "Dailies AquaComfort Plus Toric",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Nelfilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 26.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 4.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75"
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 240.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "diario",
+          "alcon",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=26.0). para correção de astigmatismo. Descarte diário. Cilindros disponíveis: -0.75 / -1.25 / -1.75."
+        }
+      },
+      {
+        "id": "lc_alcon_air_optix_colors",
+        "nome": "Air Optix Colors",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Lotrafilcon B",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 138.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 2
+        },
+        "preco": {
+          "valor": 210.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "colorida_ou_especial",
+          "alcon",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=138.0). colorida ou de uso especial/estético. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_alcon_freshlook_colorblends",
+        "nome": "FreshLook COLORBLENDS",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Phenfilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 20.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 2
+        },
+        "preco": {
+          "valor": 205.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "colorida_ou_especial",
+          "alcon",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=20.0). colorida ou de uso especial/estético. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_alcon_freshlook_one_day_color",
+        "nome": "FreshLook ONE-DAY COLOR",
+        "fornecedor": "Alcon",
+        "marca": "Alcon",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Nelfilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 26.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 0.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 10
+        },
+        "preco": {
+          "valor": 200.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "diario",
+          "colorida_ou_especial",
+          "alcon",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=26.0). colorida ou de uso especial/estético. Descarte diário."
+        }
+      },
+      {
+        "id": "lc_johnson_e_johnson_acuvue_2",
+        "nome": "Acuvue 2",
+        "fornecedor": "Johnson & Johnson",
+        "marca": "Johnson & Johnson",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Etafilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": "25,5"
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "quinzenal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 219.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "jnj",
+          "quinzenal",
+          "lente_de_contato",
+          "acuvue"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=25,5). Descarte quinzenal."
+        }
+      },
+      {
+        "id": "lc_johnson_e_johnson_acuvue_oasys_1_day_com_hydraluxe",
+        "nome": "Acuvue Oasys 1-Day com HydraLuxe",
+        "fornecedor": "Johnson & Johnson",
+        "marca": "Johnson & Johnson",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Senofilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 121.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 274.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "jnj",
+          "diario",
+          "lente_de_contato",
+          "acuvue"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=121.0). Descarte diário."
+        }
+      },
+      {
+        "id": "lc_johnson_e_johnson_1_day_acuvue_moist",
+        "nome": "1-Day Acuvue Moist",
+        "fornecedor": "Johnson & Johnson",
+        "marca": "Johnson & Johnson",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Etafilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": "25,5"
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 269.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "jnj",
+          "diario",
+          "lente_de_contato",
+          "acuvue"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=25,5). Descarte diário."
+        }
+      },
+      {
+        "id": "lc_johnson_e_johnson_acuvue_oasys_com_hydraclear_plus",
+        "nome": "Acuvue Oasys com Hydraclear Plus",
+        "fornecedor": "Johnson & Johnson",
+        "marca": "Johnson & Johnson",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Senofilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 147.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "quinzenal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 294.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "jnj",
+          "quinzenal",
+          "lente_de_contato",
+          "acuvue"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=147.0). Descarte quinzenal."
+        }
+      },
+      {
+        "id": "lc_johnson_e_johnson_acuvue_oasys_1_day_hydraluxe_astigmatismo",
+        "nome": "Acuvue Oasys 1-Day HydraLuxe Astigmatismo",
+        "fornecedor": "Johnson & Johnson",
+        "marca": "Johnson & Johnson",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Senofilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 129.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 4.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75"
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 369.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "jnj",
+          "diario",
+          "torica",
+          "lente_de_contato",
+          "acuvue"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=129.0). para correção de astigmatismo. Descarte diário. Cilindros disponíveis: -0.75 / -1.25 / -1.75."
+        }
+      },
+      {
+        "id": "lc_johnson_e_johnson_acuvue_oasys_para_astigmatismo",
+        "nome": "Acuvue Oasys para Astigmatismo",
+        "fornecedor": "Johnson & Johnson",
+        "marca": "Johnson & Johnson",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Senofilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 129.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75 / -2.25 / -2.75"
+        },
+        "uso": {
+          "descarte": "quinzenal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 404.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "jnj",
+          "quinzenal",
+          "torica",
+          "lente_de_contato",
+          "acuvue"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=129.0). para correção de astigmatismo. Descarte quinzenal. Cilindros disponíveis: -0.75 / -1.25 / -1.75 / -2.25 / -2.75."
+        }
+      },
+      {
+        "id": "lc_johnson_e_johnson_1_day_acuvue_mois_para_astigmatismo",
+        "nome": "1-Day Acuvue Mois para Astigmatismo",
+        "fornecedor": "Johnson & Johnson",
+        "marca": "Johnson & Johnson",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Etafilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": "23,8"
+        },
+        "parametros": {
+          "esferico_min": 6.0,
+          "esferico_max": 4.0,
+          "cilindrico_disponivel": "-0.75 / -1.25 / -1.75 / -2.25"
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 30
+        },
+        "preco": {
+          "valor": 369.9,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "jnj",
+          "diario",
+          "torica",
+          "lente_de_contato",
+          "acuvue"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=23,8). para correção de astigmatismo. Descarte diário. Cilindros disponíveis: -0.75 / -1.25 / -1.75 / -2.25."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidroblue_uv_esf_rica",
+        "nome": "Hidroblue UV Esférica",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Filcon I2",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 15.0
+        },
+        "parametros": {
+          "esferico_min": -25.0,
+          "esferico_max": 25.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 178.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=15.0). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidroblue_k__ceratogel",
+        "nome": "Hidroblue K (Ceratogel)",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "especial",
+        "tecnologia_material": {
+          "nome": "Filcon I2",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 15.0
+        },
+        "parametros": {
+          "esferico_min": -25.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 738.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "especial",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=15.0). para indicação especial — ceratocone ou afacia. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidroblue_k__ceratogel__toric",
+        "nome": "Hidroblue K (Ceratogel) Toric",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Filcon I2",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 15.0
+        },
+        "parametros": {
+          "esferico_min": -20.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": "-0.75 / -5.00"
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 1090.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=15.0). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -0.75 / -5.00."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidroblue_uv_afacia_pedi_trica",
+        "nome": "Hidroblue UV Afacia Pediátrica",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "especial",
+        "tecnologia_material": {
+          "nome": "Filcon I2",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 15.0
+        },
+        "parametros": {
+          "esferico_min": 0.0,
+          "esferico_max": 25.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 558.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "especial",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=15.0). para indicação especial — ceratocone ou afacia. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidroblue_uv_toric",
+        "nome": "Hidroblue UV Toric",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Filcon I2",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": 15.0
+        },
+        "parametros": {
+          "esferico_min": -20.0,
+          "esferico_max": 10.0,
+          "cilindrico_disponivel": "-0.75 / -7.00"
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 595.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=15.0). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -0.75 / -7.00."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidrosoft",
+        "nome": "Hidrosoft",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 9.0
+        },
+        "parametros": {
+          "esferico_min": -25.0,
+          "esferico_max": 25.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 188.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "esferica",
+          "anual",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=9.0). Descarte anual."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidrosol",
+        "nome": "Hidrosol",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 9.0
+        },
+        "parametros": {
+          "esferico_min": -25.0,
+          "esferico_max": 25.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 308.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "esferica",
+          "anual",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=9.0). Descarte anual."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidrosol_filtrante",
+        "nome": "Hidrosol Filtrante",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": "2026-08-09 00:00:00"
+        },
+        "parametros": {
+          "esferico_min": -25.0,
+          "esferico_max": 25.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 1020.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "anual",
+          "colorida_ou_especial",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=2026-08-09 00:00:00). colorida ou de uso especial/estético. Descarte anual."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidrosol_daltonismo",
+        "nome": "Hidrosol Daltonismo",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": "2026-08-09 00:00:00"
+        },
+        "parametros": {
+          "esferico_min": -25.0,
+          "esferico_max": 25.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 1020.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "anual",
+          "colorida_ou_especial",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=2026-08-09 00:00:00). colorida ou de uso especial/estético. Descarte anual."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidrocor",
+        "nome": "Hidrocor",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 9.0
+        },
+        "parametros": {
+          "esferico_min": -15.0,
+          "esferico_max": 15.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 170.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "anual",
+          "colorida_ou_especial",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=9.0). colorida ou de uso especial/estético. Descarte anual."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidrocor_t_rica",
+        "nome": "Hidrocor Tórica",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 9.0
+        },
+        "parametros": {
+          "esferico_min": -20.0,
+          "esferico_max": 10.0,
+          "cilindrico_disponivel": "-0.75 / -7.00"
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 815.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "anual",
+          "hidrogel",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=9.0). para correção de astigmatismo. Descarte anual. Cilindros disponíveis: -0.75 / -7.00."
+        }
+      },
+      {
+        "id": "lc_sol_tica_natural_colors",
+        "nome": "Natural Colors",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 9.0
+        },
+        "parametros": {
+          "esferico_min": -15.0,
+          "esferico_max": 15.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 170.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "anual",
+          "colorida_ou_especial",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=9.0). colorida ou de uso especial/estético. Descarte anual."
+        }
+      },
+      {
+        "id": "lc_sol_tica_natural_colors_t_rica",
+        "nome": "Natural Colors Tórica",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 9.0
+        },
+        "parametros": {
+          "esferico_min": -20.0,
+          "esferico_max": 10.0,
+          "cilindrico_disponivel": "-0.75 / -7.00"
+        },
+        "uso": {
+          "descarte": "anual",
+          "numero_lentes_caixa": 1
+        },
+        "preco": {
+          "valor": 815.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "anual",
+          "hidrogel",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=9.0). para correção de astigmatismo. Descarte anual. Cilindros disponíveis: -0.75 / -7.00."
+        }
+      },
+      {
+        "id": "lc_sol_tica_aquarella",
+        "nome": "Aquarella",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 62%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": 15.0
+        },
+        "parametros": {
+          "esferico_min": -6.0,
+          "esferico_max": 0.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "trimestral",
+          "numero_lentes_caixa": 2
+        },
+        "preco": {
+          "valor": 175.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "colorida_ou_especial",
+          "hidrogel",
+          "trimestral",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=15.0). colorida ou de uso especial/estético. Descarte trimestral."
+        }
+      },
+      {
+        "id": "lc_sol_tica_solflex_natural_colors",
+        "nome": "Solflex Natural Colors",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": "11,25"
+        },
+        "parametros": {
+          "esferico_min": -1.0,
+          "esferico_max": -5.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 2
+        },
+        "preco": {
+          "valor": 168.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "colorida_ou_especial",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=11,25). colorida ou de uso especial/estético. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_sol_tica_hidrocor_mensal",
+        "nome": "Hidrocor Mensal",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": "2026-11-12 00:00:00"
+        },
+        "parametros": {
+          "esferico_min": -1.0,
+          "esferico_max": -5.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 2
+        },
+        "preco": {
+          "valor": 168.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "colorida_ou_especial",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=2026-11-12 00:00:00). colorida ou de uso especial/estético. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_sol_tica_solflex_color_hype",
+        "nome": "Solflex Color Hype",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "colorida_ou_especial",
+        "tecnologia_material": {
+          "nome": "Polymacon 38%",
+          "tipo": "hidrogel",
+          "dk_permeabilidade_o2": "11,25"
+        },
+        "parametros": {
+          "esferico_min": "Plana",
+          "esferico_max": "Plana",
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 2
+        },
+        "preco": {
+          "valor": 178.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "colorida_ou_especial",
+          "hidrogel",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de hidrogel. (DK=11,25). colorida ou de uso especial/estético. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_sol_tica_solflex_cl",
+        "nome": "Solflex CL",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Methafilcon 45%",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": "26,9"
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 0.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 208.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=26,9). Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_sol_tica_solflex_toric",
+        "nome": "Solflex Toric",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "torica",
+        "tecnologia_material": {
+          "nome": "Hioxifilcon 43%",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": "21-24"
+        },
+        "parametros": {
+          "esferico_min": -8.0,
+          "esferico_max": 4.0,
+          "cilindrico_disponivel": "-0.75 / -2.75"
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 418.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "torica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=21-24). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -0.75 / -2.75."
+        }
+      },
+      {
+        "id": "lc_sol_tica_solflex_sihy",
+        "nome": "Solflex SIHY",
+        "fornecedor": "Solótica",
+        "marca": "Solótica",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Avefilcon A",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": null
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 230.0,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "solotica",
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "lente_de_contato"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_coopervision_dnz_mensal",
+        "nome": "DNZ Mensal",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": null
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 6.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "mensal",
+          "numero_lentes_caixa": 6
+        },
+        "preco": {
+          "valor": 204.99,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "mensal",
+          "silicone_hidrogel",
+          "esferica",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. Descarte mensal."
+        }
+      },
+      {
+        "id": "lc_coopervision_dnz_1_day",
+        "nome": "DNZ 1 Day",
+        "fornecedor": "Coopervision",
+        "marca": "Coopervision",
+        "categoria": "lente_de_contato",
+        "subcategoria": "esferica",
+        "tecnologia_material": {
+          "nome": "Silícone Hidrogel de 3ª Geração",
+          "tipo": "silicone_hidrogel",
+          "dk_permeabilidade_o2": null
+        },
+        "parametros": {
+          "esferico_min": -12.0,
+          "esferico_max": 8.0,
+          "cilindrico_disponivel": null
+        },
+        "uso": {
+          "descarte": "diario",
+          "numero_lentes_caixa": 15
+        },
+        "preco": {
+          "valor": 204.99,
+          "moeda": "BRL",
+          "unidade": "caixa"
+        },
+        "tags": [
+          "silicone_hidrogel",
+          "esferica",
+          "diario",
+          "lente_de_contato",
+          "coopervision"
+        ],
+        "informativo": {
+          "descricao": "Lente de silicone hidrogel — alta permeabilidade ao oxigênio. Descarte diário."
+        }
+      }
+    ]
+  }
+}
