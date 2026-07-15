@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSolicitacaoAnexos } from "@/hooks/useSolicitacaoAnexos";
+import { SolicitacaoThreadPanel } from "./SolicitacaoThreadPanel";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, User, Store, DollarSign, FileText, Loader2, RotateCcw,
