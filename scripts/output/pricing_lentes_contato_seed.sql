@@ -1,6 +1,6 @@
 -- Auto-gerado por transform-catalogs.js — lentes de contato
 -- Total de registros: 51
--- Gerado em: 2026-07-15T05:35:46.914Z
+-- Gerado em: 2026-07-15T06:23:21.679Z
 
 -- Adiciona UNIQUE constraint se não existir
 DO $$ BEGIN

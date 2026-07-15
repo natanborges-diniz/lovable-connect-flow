@@ -40976,7 +40976,7 @@
    },
    {
     "id": "hoya_enroute_prog_1_67_ll_inc",
-    "nome": "Hoyalux EnRoute (Progressiva) EYNOA 1.67 Hi-Vision LongLife",
+    "nome": "Hoyalux EnRoute (Progressiva) EYNOA 1.67 Antirreflexo EnRoute",
     "design_base": "Hoyalux EnRoute (Progressiva)",
     "design_id": "hoya_enroute_prog",
     "fornecedor": "HOYA Vision Care",
@@ -40989,9 +40989,9 @@
      "indice_refracao": 1.67
     },
     "antirreflexo": {
-     "codigo": "LL",
-     "nome": "Hi-Vision LongLife",
-     "nivel": "Alto"
+     "codigo": "EnRoute",
+     "nome": "Antirreflexo EnRoute",
+     "nivel": "Especial"
     },
     "adicional": {
      "tipo": "incolor",
@@ -41023,7 +41023,7 @@
    },
    {
     "id": "hoya_enroute_prog_1_6_ll_inc",
-    "nome": "Hoyalux EnRoute (Progressiva) EYAS 2.0 1.60 Hi-Vision LongLife",
+    "nome": "Hoyalux EnRoute (Progressiva) EYAS 2.0 1.60 Antirreflexo EnRoute",
     "design_base": "Hoyalux EnRoute (Progressiva)",
     "design_id": "hoya_enroute_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41036,9 +41036,9 @@
      "indice_refracao": 1.6
     },
     "antirreflexo": {
-     "codigo": "LL",
-     "nome": "Hi-Vision LongLife",
-     "nivel": "Alto"
+     "codigo": "EnRoute",
+     "nome": "Antirreflexo EnRoute",
+     "nivel": "Especial"
     },
     "adicional": {
      "tipo": "incolor",
@@ -41070,7 +41070,7 @@
    },
    {
     "id": "hoya_nulux_enroute_1_67_ll_inc",
-    "nome": "Nulux EnRoute (Monofocal) EYNOA 1.67 Hi-Vision LongLife",
+    "nome": "Nulux EnRoute (Monofocal) EYNOA 1.67 Antirreflexo EnRoute",
     "design_base": "Nulux EnRoute (Monofocal)",
     "design_id": "hoya_nulux_enroute",
     "fornecedor": "HOYA Vision Care",
@@ -41083,9 +41083,9 @@
      "indice_refracao": 1.67
     },
     "antirreflexo": {
-     "codigo": "LL",
-     "nome": "Hi-Vision LongLife",
-     "nivel": "Alto"
+     "codigo": "EnRoute",
+     "nome": "Antirreflexo EnRoute",
+     "nivel": "Especial"
     },
     "adicional": {
      "tipo": "incolor",
@@ -41116,7 +41116,7 @@
    },
    {
     "id": "hoya_nulux_enroute_1_6_ll_inc",
-    "nome": "Nulux EnRoute (Monofocal) EYAS 2.0 1.60 Hi-Vision LongLife",
+    "nome": "Nulux EnRoute (Monofocal) EYAS 2.0 1.60 Antirreflexo EnRoute",
     "design_base": "Nulux EnRoute (Monofocal)",
     "design_id": "hoya_nulux_enroute",
     "fornecedor": "HOYA Vision Care",
@@ -41129,9 +41129,9 @@
      "indice_refracao": 1.6
     },
     "antirreflexo": {
-     "codigo": "LL",
-     "nome": "Hi-Vision LongLife",
-     "nivel": "Alto"
+     "codigo": "EnRoute",
+     "nome": "Antirreflexo EnRoute",
+     "nivel": "Especial"
     },
     "adicional": {
      "tipo": "incolor",
@@ -41162,7 +41162,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_56_llblue_inc",
-    "nome": "MAXXEE Progressiva MR-8 1.56 Hi-Vision LongLife BlueControl",
+    "nome": "MAXXEE Progressiva MR-8 1.56 UV++ HMC Blue",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41175,8 +41175,8 @@
      "indice_refracao": 1.56
     },
     "antirreflexo": {
-     "codigo": "LLBlue",
-     "nome": "Hi-Vision LongLife BlueControl",
+     "codigo": "UVHMCBlue",
+     "nome": "UV++ HMC Blue",
      "nivel": "Alto"
     },
     "adicional": {
@@ -41208,7 +41208,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_59_ll_inc",
-    "nome": "MAXXEE Progressiva Policarbonato Hi-Vision LongLife",
+    "nome": "MAXXEE Progressiva Policarbonato HMC Blue",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41221,9 +41221,9 @@
      "indice_refracao": 1.59
     },
     "antirreflexo": {
-     "codigo": "LL",
-     "nome": "Hi-Vision LongLife",
-     "nivel": "Alto"
+     "codigo": "HMCBlue",
+     "nome": "HMC Blue",
+     "nivel": "Médio"
     },
     "adicional": {
      "tipo": "incolor",
@@ -41254,7 +41254,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_5_ll_inc",
-    "nome": "MAXXEE Progressiva Orgânico 1.50 Hi-Vision LongLife",
+    "nome": "MAXXEE Progressiva Orgânico 1.50 HMC Blue",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41267,9 +41267,9 @@
      "indice_refracao": 1.5
     },
     "antirreflexo": {
-     "codigo": "LL",
-     "nome": "Hi-Vision LongLife",
-     "nivel": "Alto"
+     "codigo": "HMCBlue",
+     "nome": "HMC Blue",
+     "nivel": "Médio"
     },
     "adicional": {
      "tipo": "incolor",
@@ -41300,7 +41300,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_59_ce_inc",
-    "nome": "MAXXEE Progressiva Policarbonato CleanExtra",
+    "nome": "MAXXEE Progressiva Policarbonato HMC",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41313,8 +41313,8 @@
      "indice_refracao": 1.59
     },
     "antirreflexo": {
-     "codigo": "CE",
-     "nome": "CleanExtra",
+     "codigo": "HMC",
+     "nome": "HMC",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41346,7 +41346,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_56_ce_inc",
-    "nome": "MAXXEE Progressiva MR-8 1.56 CleanExtra",
+    "nome": "MAXXEE Progressiva MR-8 1.56 HMC",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41359,8 +41359,8 @@
      "indice_refracao": 1.56
     },
     "antirreflexo": {
-     "codigo": "CE",
-     "nome": "CleanExtra",
+     "codigo": "HMC",
+     "nome": "HMC",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41392,7 +41392,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_5_ce_inc",
-    "nome": "MAXXEE Progressiva Orgânico 1.50 CleanExtra",
+    "nome": "MAXXEE Progressiva Orgânico 1.50 HMC",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41405,8 +41405,8 @@
      "indice_refracao": 1.5
     },
     "antirreflexo": {
-     "codigo": "CE",
-     "nome": "CleanExtra",
+     "codigo": "HMC",
+     "nome": "HMC",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41438,7 +41438,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_59_hard_inc",
-    "nome": "MAXXEE Progressiva Policarbonato Hi-Vision Hard",
+    "nome": "MAXXEE Progressiva Policarbonato Hard",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41452,7 +41452,7 @@
     },
     "antirreflexo": {
      "codigo": "Hard",
-     "nome": "Hi-Vision Hard",
+     "nome": "Hard",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41484,7 +41484,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_56_hard_inc",
-    "nome": "MAXXEE Progressiva MR-8 1.56 Hi-Vision Hard",
+    "nome": "MAXXEE Progressiva MR-8 1.56 Hard",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41498,7 +41498,7 @@
     },
     "antirreflexo": {
      "codigo": "Hard",
-     "nome": "Hi-Vision Hard",
+     "nome": "Hard",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41530,7 +41530,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_5_hard_inc",
-    "nome": "MAXXEE Progressiva Orgânico 1.50 Hi-Vision Hard",
+    "nome": "MAXXEE Progressiva Orgânico 1.50 Hard",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41544,7 +41544,7 @@
     },
     "antirreflexo": {
      "codigo": "Hard",
-     "nome": "Hi-Vision Hard",
+     "nome": "Hard",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41576,7 +41576,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_56_llblue_s2",
-    "nome": "MAXXEE Progressiva MR-8 1.56 Hi-Vision LongLife BlueControl Sensity 2",
+    "nome": "MAXXEE Progressiva MR-8 1.56 UV++ HMC Blue Sensity 2",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41589,8 +41589,8 @@
      "indice_refracao": 1.56
     },
     "antirreflexo": {
-     "codigo": "LLBlue",
-     "nome": "Hi-Vision LongLife BlueControl",
+     "codigo": "UVHMCBlue",
+     "nome": "UV++ HMC Blue",
      "nivel": "Alto"
     },
     "adicional": {
@@ -41623,7 +41623,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_56_ce_s2",
-    "nome": "MAXXEE Progressiva MR-8 1.56 CleanExtra Sensity 2",
+    "nome": "MAXXEE Progressiva MR-8 1.56 HMC Sensity 2",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41636,8 +41636,8 @@
      "indice_refracao": 1.56
     },
     "antirreflexo": {
-     "codigo": "CE",
-     "nome": "CleanExtra",
+     "codigo": "HMC",
+     "nome": "HMC",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41670,7 +41670,7 @@
    },
    {
     "id": "hoya_maxxee_prog_1_56_hard_s2",
-    "nome": "MAXXEE Progressiva MR-8 1.56 Hi-Vision Hard Sensity 2",
+    "nome": "MAXXEE Progressiva MR-8 1.56 Hard Sensity 2",
     "design_base": "MAXXEE Progressiva",
     "design_id": "hoya_maxxee_prog",
     "fornecedor": "HOYA Vision Care",
@@ -41684,7 +41684,7 @@
     },
     "antirreflexo": {
      "codigo": "Hard",
-     "nome": "Hi-Vision Hard",
+     "nome": "Hard",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41717,7 +41717,7 @@
    },
    {
     "id": "hoya_maxxee_vs_1_56_llblue_inc",
-    "nome": "MAXXEE Visão Simples MR-8 1.56 Hi-Vision LongLife BlueControl",
+    "nome": "MAXXEE Visão Simples MR-8 1.56 UV++ HMC Blue",
     "design_base": "MAXXEE Visão Simples",
     "design_id": "hoya_maxxee_vs",
     "fornecedor": "HOYA Vision Care",
@@ -41730,8 +41730,8 @@
      "indice_refracao": 1.56
     },
     "antirreflexo": {
-     "codigo": "LLBlue",
-     "nome": "Hi-Vision LongLife BlueControl",
+     "codigo": "UVHMCBlue",
+     "nome": "UV++ HMC Blue",
      "nivel": "Alto"
     },
     "adicional": {
@@ -41763,7 +41763,7 @@
    },
    {
     "id": "hoya_maxxee_vs_1_56_ce_inc",
-    "nome": "MAXXEE Visão Simples MR-8 1.56 CleanExtra",
+    "nome": "MAXXEE Visão Simples MR-8 1.56 HMC",
     "design_base": "MAXXEE Visão Simples",
     "design_id": "hoya_maxxee_vs",
     "fornecedor": "HOYA Vision Care",
@@ -41776,8 +41776,8 @@
      "indice_refracao": 1.56
     },
     "antirreflexo": {
-     "codigo": "CE",
-     "nome": "CleanExtra",
+     "codigo": "HMC",
+     "nome": "HMC",
      "nivel": "Básico"
     },
     "adicional": {
@@ -41809,7 +41809,7 @@
    },
    {
     "id": "hoya_maxxee_vs_1_56_llblue_s2",
-    "nome": "MAXXEE Visão Simples MR-8 1.56 Hi-Vision LongLife BlueControl Sensity 2",
+    "nome": "MAXXEE Visão Simples MR-8 1.56 UV++ HMC Blue Sensity 2",
     "design_base": "MAXXEE Visão Simples",
     "design_id": "hoya_maxxee_vs",
     "fornecedor": "HOYA Vision Care",
@@ -41822,8 +41822,8 @@
      "indice_refracao": 1.56
     },
     "antirreflexo": {
-     "codigo": "LLBlue",
-     "nome": "Hi-Vision LongLife BlueControl",
+     "codigo": "UVHMCBlue",
+     "nome": "UV++ HMC Blue",
      "nivel": "Alto"
     },
     "adicional": {
