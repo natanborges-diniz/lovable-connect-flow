@@ -477,6 +477,9 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
               </Button>
             )}
           </div>
+
+          {/* Diálogo setor ↔ loja — sempre visível para trocas livres de mensagens */}
+          <SolicitacaoThreadPanel solicitacaoId={solicitacao.id} perspectiva="setor" />
         </div>
       </DialogContent>
     </Dialog>
