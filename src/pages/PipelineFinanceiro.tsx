@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
