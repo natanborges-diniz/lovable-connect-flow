@@ -757,6 +757,9 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
               </div>
             </div>
           )}
+
+          {/* Diálogo setor ↔ loja — sempre visível para trocas livres de mensagens */}
+          <SolicitacaoThreadPanel solicitacaoId={solicitacao.id} perspectiva="setor" />
         </div>
       </DialogContent>
 
