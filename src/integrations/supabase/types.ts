@@ -3429,6 +3429,7 @@ export type Database = {
       }
     }
     Functions: {
+      apply_pricing_seed: { Args: { rows: Json }; Returns: number }
       calcular_membros_grupo: {
         Args: { _ref: string; _tipo: string }
         Returns: string[]
@@ -3693,6 +3694,7 @@ export type Database = {
       next_contato_anonimo: { Args: never; Returns: number }
       nextval_protocolo: { Args: never; Returns: number }
       normalize_phone_br: { Args: { raw: string }; Returns: string }
+      normalize_pricing_brand_hoya: { Args: never; Returns: number }
       pode_conversar_1a1: {
         Args: { _destinatario: string; _remetente: string }
         Returns: boolean
