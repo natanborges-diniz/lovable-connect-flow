@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -65,6 +65,22 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const [dadosSelecionados, setDadosSelecionados] = useState<string[]>([]);
   const [observacaoIncompletos, setObservacaoIncompletos] = useState("");
   const [excecaoOpen, setExcecaoOpen] = useState(false);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const params = new URLSearchParams(window.location.search);
+    const viaDeeplink = !!params.get("sol");
+    const t = setTimeout(() => {
+      threadRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: viaDeeplink ? "start" : "nearest",
+      });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [open, solicitacao?.id]);
+
+
 
   const meta = solicitacao?.metadata || {};
   const nomeCliente = meta.nome_cliente || "—";
@@ -759,7 +775,9 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           )}
 
           {/* Diálogo setor ↔ loja — sempre visível para trocas livres de mensagens */}
-          <SolicitacaoThreadPanel solicitacaoId={solicitacao.id} perspectiva="setor" />
+          <div ref={threadRef} className="scroll-mt-4">
+            <SolicitacaoThreadPanel solicitacaoId={solicitacao.id} perspectiva="setor" />
+          </div>
         </div>
       </DialogContent>
 

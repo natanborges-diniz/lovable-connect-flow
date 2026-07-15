@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,20 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
   const [brokenImgIds, setBrokenImgIds] = useState<Set<string>>(new Set());
   const [evidencia, setEvidencia] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const params = new URLSearchParams(window.location.search);
+    const viaDeeplink = !!params.get("sol");
+    const t = setTimeout(() => {
+      threadRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: viaDeeplink ? "start" : "nearest",
+      });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [open, solicitacao?.id]);
   const { data: anexos } = useSolicitacaoAnexos(solicitacao?.id);
 
   if (!solicitacao) return null;
@@ -479,7 +493,9 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
           </div>
 
           {/* Diálogo setor ↔ loja — sempre visível para trocas livres de mensagens */}
-          <SolicitacaoThreadPanel solicitacaoId={solicitacao.id} perspectiva="setor" />
+          <div ref={threadRef} className="scroll-mt-4">
+            <SolicitacaoThreadPanel solicitacaoId={solicitacao.id} perspectiva="setor" />
+          </div>
         </div>
       </DialogContent>
     </Dialog>
