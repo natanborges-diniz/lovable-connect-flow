@@ -1,0 +1,1 @@
+GRANT UPDATE ON public.pricing_table_lentes TO sandbox_exec;
