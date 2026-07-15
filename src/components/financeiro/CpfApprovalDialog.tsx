@@ -394,15 +394,16 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) resetForm(); onOpenChange(o); }}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0">
+        <DialogHeader className="sticky top-0 z-10 bg-background border-b px-6 py-4">
           <DialogTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5 text-primary" />
             {solicitacao.assunto}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 px-6 pb-6 pt-4">
+
           {/* Info grid */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             {solicitacao.contato && (
