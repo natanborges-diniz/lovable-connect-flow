@@ -27,6 +27,8 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
   const createComentario = useCreateComentario();
   const [texto, setTexto] = useState("");
   const queryClient = useQueryClient();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   // Realtime: recarrega ao chegar comentário novo (loja respondeu, etc.)
   useEffect(() => {
@@ -76,8 +78,11 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
       {isLoading ? (
         <p className="text-xs text-muted-foreground">Carregando…</p>
       ) : comentarios && comentarios.length > 0 ? (
-        <ScrollArea className="max-h-56">
-          <div className="space-y-2 pr-2">
+        <div
+          ref={scrollRef}
+          className="max-h-72 overflow-y-auto rounded-md border border-border/50 bg-muted/20 p-2"
+        >
+          <div className="space-y-2 pr-1">
             {comentarios
               .filter((c) =>
                 ["retorno_setor", "resposta_loja", "sistema", "operador_para_loja"].includes(c.tipo as string),
@@ -131,8 +136,10 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
                   </div>
                 );
               })}
+            <div ref={bottomRef} />
           </div>
-        </ScrollArea>
+        </div>
+
       ) : (
         <p className="text-xs text-muted-foreground">Nenhuma mensagem ainda.</p>
       )}
