@@ -167,6 +167,10 @@ export default function PipelineFinanceiro() {
     return () => clearTimeout(t);
   }, [openedViaDeeplink, selectedSolicitacao]);
 
+  useEffect(() => {
+    if (!selectedSolicitacao) setOpenedViaDeeplink(false);
+  }, [selectedSolicitacao]);
+
   const updateColuna = useUpdatePipelineColuna();
   const createColuna = useCreatePipelineColuna();
   const deleteColuna = useDeletePipelineColuna();
