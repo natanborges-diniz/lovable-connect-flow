@@ -1,6 +1,6 @@
 -- Auto-gerado por transform-catalogs.js — lentes de contato
 -- Total de registros: 51
--- Gerado em: 2026-05-15T13:15:47.131Z
+-- Gerado em: 2026-07-15T05:35:46.914Z
 
 -- Adiciona UNIQUE constraint se não existir
 DO $$ BEGIN
@@ -52,15 +52,15 @@ VALUES
   ('Solótica', 'Hidroblue UV Toric', 'Filcon I2', 15, -20, 10, -7, -0.75, '-0.75 / -7.00', 'mensal', 30, 1, 595, true, false, false, 10, false, true, 'Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=15.0). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -0.75 / -7.00.'),
   ('Solótica', 'Hidrosoft', 'Polymacon 38%', 9, -25, 25, NULL, NULL, NULL, 'anual', 365, 1, 188, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=9.0). Descarte anual.'),
   ('Solótica', 'Hidrosol', 'Polymacon 38%', 9, -25, 25, NULL, NULL, NULL, 'anual', 365, 1, 308, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=9.0). Descarte anual.'),
-  ('Solótica', 'Hidrosol Filtrante', 'Polymacon 38%', NULL, -25, 25, NULL, NULL, NULL, 'anual', 365, 1, 1020, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=2026-08-09 00:00:00). colorida ou de uso especial/estético. Descarte anual.'),
-  ('Solótica', 'Hidrosol Daltonismo', 'Polymacon 38%', NULL, -25, 25, NULL, NULL, NULL, 'anual', 365, 1, 1020, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=2026-08-09 00:00:00). colorida ou de uso especial/estético. Descarte anual.'),
+  ('Solótica', 'Hidrosol Filtrante', 'Polymacon 38%', 9, -25, 25, NULL, NULL, NULL, 'anual', 365, 1, 1020, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=2026-08-09 00:00:00). colorida ou de uso especial/estético. Descarte anual.'),
+  ('Solótica', 'Hidrosol Daltonismo', 'Polymacon 38%', 9, -25, 25, NULL, NULL, NULL, 'anual', 365, 1, 1020, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=2026-08-09 00:00:00). colorida ou de uso especial/estético. Descarte anual.'),
   ('Solótica', 'Hidrocor', 'Polymacon 38%', 9, -15, 15, NULL, NULL, NULL, 'anual', 365, 1, 170, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=9.0). colorida ou de uso especial/estético. Descarte anual.'),
   ('Solótica', 'Hidrocor Tórica', 'Polymacon 38%', 9, -20, 10, -7, -0.75, '-0.75 / -7.00', 'anual', 365, 1, 815, true, false, false, 10, false, true, 'Lente de hidrogel. (DK=9.0). para correção de astigmatismo. Descarte anual. Cilindros disponíveis: -0.75 / -7.00.'),
   ('Solótica', 'Natural Colors', 'Polymacon 38%', 9, -15, 15, NULL, NULL, NULL, 'anual', 365, 1, 170, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=9.0). colorida ou de uso especial/estético. Descarte anual.'),
   ('Solótica', 'Natural Colors Tórica', 'Polymacon 38%', 9, -20, 10, -7, -0.75, '-0.75 / -7.00', 'anual', 365, 1, 815, true, false, false, 10, false, true, 'Lente de hidrogel. (DK=9.0). para correção de astigmatismo. Descarte anual. Cilindros disponíveis: -0.75 / -7.00.'),
   ('Solótica', 'Aquarella', 'Polymacon 62%', 15, -6, 0, NULL, NULL, NULL, 'trimestral', 90, 2, 175, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=15.0). colorida ou de uso especial/estético. Descarte trimestral.'),
   ('Solótica', 'Solflex Natural Colors', 'Polymacon 38%', 11.25, -1, -5, NULL, NULL, NULL, 'mensal', 30, 2, 168, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=11,25). colorida ou de uso especial/estético. Descarte mensal.'),
-  ('Solótica', 'Hidrocor Mensal', 'Polymacon 38%', NULL, -1, -5, NULL, NULL, NULL, 'mensal', 30, 2, 168, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=2026-11-12 00:00:00). colorida ou de uso especial/estético. Descarte mensal.'),
+  ('Solótica', 'Hidrocor Mensal', 'Polymacon 38%', 11.5, -1, -5, NULL, NULL, NULL, 'mensal', 30, 2, 168, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=2026-11-12 00:00:00). colorida ou de uso especial/estético. Descarte mensal.'),
   ('Solótica', 'Solflex Color Hype', 'Polymacon 38%', 11.25, 0, 0, NULL, NULL, NULL, 'mensal', 30, 2, 178, false, false, false, 10, false, true, 'Lente de hidrogel. (DK=11,25). colorida ou de uso especial/estético. Descarte mensal.'),
   ('Solótica', 'Solflex CL', 'Methafilcon 45%', 26.9, -12, 0, NULL, NULL, NULL, 'mensal', 30, 6, 208, false, false, false, 10, false, true, 'Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=26,9). Descarte mensal.'),
   ('Solótica', 'Solflex Toric', 'Hioxifilcon 43%', NULL, -8, 4, -2.75, -0.75, '-0.75 / -2.75', 'mensal', 30, 6, 418, true, false, false, 10, false, true, 'Lente de silicone hidrogel — alta permeabilidade ao oxigênio. (DK=21-24). para correção de astigmatismo. Descarte mensal. Cilindros disponíveis: -0.75 / -2.75.'),

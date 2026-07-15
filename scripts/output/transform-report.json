@@ -3,23 +3,23 @@
     {
       "arquivo": "hoya_abr2025_expandido.json",
       "fornecedor": "HOYA Vision Care",
-      "total_json": 677,
-      "importados": 677,
+      "total_json": 898,
+      "importados": 898,
       "ignorados": 0
     },
     {
       "arquivo": "zeiss_consumidor_2026_expandido.json",
       "fornecedor": "Carl Zeiss Vision Brasil",
-      "total_json": 955,
-      "importados": 955,
+      "total_json": 951,
+      "importados": 951,
       "ignorados": 0
     },
     {
       "arquivo": "essilor_pvc_abr2026_expandido.json",
       "fornecedor": "Essilor / EssilorLuxottica",
-      "total_json": 360,
-      "importados": 360,
-      "ignorados": 0
+      "total_json": 426,
+      "importados": 413,
+      "ignorados": 13
     },
     {
       "arquivo": "diniz_dmax_pvc_maio2025.json",
@@ -29,24 +29,35 @@
       "ignorados": 0
     }
   ],
-  "erros": [],
-  "total": 2275,
-  "duplicatas_removidas": 367,
+  "erros": [
+    "essilor_vs_pronta_s174_sapphire_incolor: sphere_min/max nulo",
+    "essilor_vs_pronta_s167_sapphire_blueuv: sphere_min/max nulo",
+    "essilor_vs_pronta_airwear_sapphire_tgen_cinza: sphere_min/max nulo",
+    "essilor_vs_pronta_airwear_semar_tgen_cinza: sphere_min/max nulo",
+    "essilor_vs_pronta_airwear_sapphire_blueuv: sphere_min/max nulo",
+    "essilor_vs_pronta_airwear_rock_blueuv: sphere_min/max nulo",
+    "essilor_vs_pronta_airwear_easypro_blueuv: sphere_min/max nulo",
+    "essilor_vs_pronta_orma_easypro_tgen_cinza: sphere_min/max nulo",
+    "essilor_vs_pronta_orma_semar_tgen_cinza: sphere_min/max nulo",
+    "essilor_vs_pronta_orma_prevencia_blueuv: sphere_min/max nulo",
+    "essilor_vs_pronta_orma_sapphire_blueuv: sphere_min/max nulo",
+    "essilor_vs_pronta_orma_rock_blueuv: sphere_min/max nulo",
+    "essilor_vs_pronta_orma_easypro_blueuv: sphere_min/max nulo"
+  ],
+  "total": 2414,
+  "duplicatas_removidas": 498,
   "lentes_contato": {
     "arquivo": "lentes_contato_abr2026.json",
     "total_json": 51,
     "importados": 51,
     "ignorados": 0,
     "duplicatas_removidas": 0,
-    "campos_sanitizados": 12,
+    "campos_sanitizados": 9,
     "sanitize_log": [
       "dk sanitizado: produto=\"Acuvue 2\" raw=\"25,5\" → 25.5",
       "dk sanitizado: produto=\"1-Day Acuvue Moist\" raw=\"25,5\" → 25.5",
       "dk sanitizado: produto=\"1-Day Acuvue Mois para Astigmatismo\" raw=\"23,8\" → 23.8",
-      "dk sanitizado: produto=\"Hidrosol Filtrante\" raw=\"2026-08-09 00:00:00\" → null",
-      "dk sanitizado: produto=\"Hidrosol Daltonismo\" raw=\"2026-08-09 00:00:00\" → null",
       "dk sanitizado: produto=\"Solflex Natural Colors\" raw=\"11,25\" → 11.25",
-      "dk sanitizado: produto=\"Hidrocor Mensal\" raw=\"2026-11-12 00:00:00\" → null",
       "dk sanitizado: produto=\"Solflex Color Hype\" raw=\"11,25\" → 11.25",
       "sphere_min sanitizado: produto=\"Solflex Color Hype\" raw=\"Plana\" → 0",
       "sphere_max sanitizado: produto=\"Solflex Color Hype\" raw=\"Plana\" → 0",
