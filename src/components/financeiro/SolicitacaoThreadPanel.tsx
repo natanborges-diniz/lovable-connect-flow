@@ -53,6 +53,17 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
     };
   }, [solicitacaoId, queryClient]);
 
+  // Auto-scroll para a mensagem mais recente sempre que a lista mudar
+  useEffect(() => {
+    if (!comentarios || comentarios.length === 0) return;
+    const t = setTimeout(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+      bottomRef.current?.scrollIntoView({ block: "nearest" });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [comentarios]);
+
   const tipoEnvio = perspectiva === "setor" ? "retorno_setor" : "resposta_loja";
   const labelBotao = perspectiva === "setor" ? "Enviar à loja" : "Responder ao setor";
   const placeholder =
