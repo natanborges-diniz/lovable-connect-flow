@@ -63,6 +63,8 @@ export default function PipelineFinanceiro() {
   const { isAdmin } = useAuth();
   const [selectedSolicitacao, setSelectedSolicitacao] = useState<any | null>(null);
   const [editingCard, setEditingCard] = useState<any | null>(null);
+  const dialogoLojaRef = useRef<HTMLDivElement | null>(null);
+  const [openedViaDeeplink, setOpenedViaDeeplink] = useState(false);
 
   // Get Financeiro setor id
   const { data: financeiroSetor } = useQuery({
