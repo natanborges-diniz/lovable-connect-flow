@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
@@ -63,6 +63,8 @@ export default function PipelineFinanceiro() {
   const { isAdmin } = useAuth();
   const [selectedSolicitacao, setSelectedSolicitacao] = useState<any | null>(null);
   const [editingCard, setEditingCard] = useState<any | null>(null);
+  const dialogoLojaRef = useRef<HTMLDivElement | null>(null);
+  const [openedViaDeeplink, setOpenedViaDeeplink] = useState(false);
 
   // Get Financeiro setor id
   const { data: financeiroSetor } = useQuery({
@@ -132,6 +134,7 @@ export default function PipelineFinanceiro() {
     const found = (solicitacoes as any[] | undefined)?.find((s) => s.id === solParam);
     if (found) {
       setSelectedSolicitacao(found);
+      setOpenedViaDeeplink(true);
       clearParam();
       return;
     }
@@ -149,10 +152,24 @@ export default function PipelineFinanceiro() {
         return;
       }
       setSelectedSolicitacao(data);
+      setOpenedViaDeeplink(true);
       clearParam();
     })();
     return () => { cancelled = true; };
   }, [solParam, solicitacoes, searchParams, setSearchParams]);
+
+  // Auto-scroll até o painel de diálogo quando aberto via notificação (?sol=)
+  useEffect(() => {
+    if (!openedViaDeeplink || !selectedSolicitacao) return;
+    const t = setTimeout(() => {
+      dialogoLojaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [openedViaDeeplink, selectedSolicitacao]);
+
+  useEffect(() => {
+    if (!selectedSolicitacao) setOpenedViaDeeplink(false);
+  }, [selectedSolicitacao]);
 
   const updateColuna = useUpdatePipelineColuna();
   const createColuna = useCreatePipelineColuna();
@@ -1035,16 +1052,16 @@ export default function PipelineFinanceiro() {
                   );
                 })()}
 
-                {/* Diálogo setor ↔ loja (mensagens livres, não move card) */}
-                {(selectedSolicitacao.contato?.tipo === "loja" ||
-                  selectedSolicitacao.contato?.tipo === "colaborador" ||
-                  !!(selectedSolicitacao.metadata as any)?.loja_nome ||
-                  !!(selectedSolicitacao.metadata as any)?.alias_loja) && (
+                {/* Diálogo setor ↔ loja (mensagens livres, não move card).
+                    Sempre renderizado — todo card financeiro pode ter thread com a loja,
+                    e o gate por tipo/metadata escondia painéis mesmo quando a loja já havia
+                    respondido (ex.: notificação "Loja respondeu — SOL-…" abria o card vazio). */}
+                <div id="dialogo-loja-panel" ref={dialogoLojaRef}>
                   <SolicitacaoThreadPanel
                     solicitacaoId={selectedSolicitacao.id}
                     perspectiva="setor"
                   />
-                )}
+                </div>
               </div>
             </div>
           )}
