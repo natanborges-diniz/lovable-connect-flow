@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSolicitacaoComentarios, useCreateComentario } from "@/hooks/useSolicitacaoComentarios";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageSquare, Send, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -28,6 +27,8 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
   const createComentario = useCreateComentario();
   const [texto, setTexto] = useState("");
   const queryClient = useQueryClient();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   // Realtime: recarrega ao chegar comentário novo (loja respondeu, etc.)
   useEffect(() => {
@@ -51,6 +52,17 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
       supabase.removeChannel(channel);
     };
   }, [solicitacaoId, queryClient]);
+
+  // Auto-scroll para a mensagem mais recente sempre que a lista mudar
+  useEffect(() => {
+    if (!comentarios || comentarios.length === 0) return;
+    const t = setTimeout(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+      bottomRef.current?.scrollIntoView({ block: "nearest" });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [comentarios]);
 
   const tipoEnvio = perspectiva === "setor" ? "retorno_setor" : "resposta_loja";
   const labelBotao = perspectiva === "setor" ? "Enviar à loja" : "Responder ao setor";
@@ -77,8 +89,11 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
       {isLoading ? (
         <p className="text-xs text-muted-foreground">Carregando…</p>
       ) : comentarios && comentarios.length > 0 ? (
-        <ScrollArea className="max-h-56">
-          <div className="space-y-2 pr-2">
+        <div
+          ref={scrollRef}
+          className="max-h-72 overflow-y-auto rounded-md border border-border/50 bg-muted/20 p-2"
+        >
+          <div className="space-y-2 pr-1">
             {comentarios
               .filter((c) =>
                 ["retorno_setor", "resposta_loja", "sistema", "operador_para_loja"].includes(c.tipo as string),
@@ -132,8 +147,10 @@ export function SolicitacaoThreadPanel({ solicitacaoId, perspectiva = "setor", t
                   </div>
                 );
               })}
+            <div ref={bottomRef} />
           </div>
-        </ScrollArea>
+        </div>
+
       ) : (
         <p className="text-xs text-muted-foreground">Nenhuma mensagem ainda.</p>
       )}
