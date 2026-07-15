@@ -17,6 +17,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { SolicitarAutorizacaoDialog } from "./SolicitarAutorizacaoDialog";
+import { SolicitacaoThreadPanel } from "./SolicitacaoThreadPanel";
 import { Shield } from "lucide-react";
 
 interface CpfApprovalDialogProps {
@@ -756,6 +757,9 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
               </div>
             </div>
           )}
+
+          {/* Diálogo setor ↔ loja — sempre visível para trocas livres de mensagens */}
+          <SolicitacaoThreadPanel solicitacaoId={solicitacao.id} perspectiva="setor" />
         </div>
       </DialogContent>
 
