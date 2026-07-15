@@ -1,0 +1,1 @@
+REVOKE UPDATE ON public.pricing_table_lentes FROM sandbox_exec;
