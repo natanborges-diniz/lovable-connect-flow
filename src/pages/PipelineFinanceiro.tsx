@@ -134,6 +134,7 @@ export default function PipelineFinanceiro() {
     const found = (solicitacoes as any[] | undefined)?.find((s) => s.id === solParam);
     if (found) {
       setSelectedSolicitacao(found);
+      setOpenedViaDeeplink(true);
       clearParam();
       return;
     }
@@ -151,10 +152,20 @@ export default function PipelineFinanceiro() {
         return;
       }
       setSelectedSolicitacao(data);
+      setOpenedViaDeeplink(true);
       clearParam();
     })();
     return () => { cancelled = true; };
   }, [solParam, solicitacoes, searchParams, setSearchParams]);
+
+  // Auto-scroll até o painel de diálogo quando aberto via notificação (?sol=)
+  useEffect(() => {
+    if (!openedViaDeeplink || !selectedSolicitacao) return;
+    const t = setTimeout(() => {
+      dialogoLojaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [openedViaDeeplink, selectedSolicitacao]);
 
   const updateColuna = useUpdatePipelineColuna();
   const createColuna = useCreatePipelineColuna();
