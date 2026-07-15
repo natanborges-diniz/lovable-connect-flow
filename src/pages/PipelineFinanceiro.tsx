@@ -1035,16 +1035,16 @@ export default function PipelineFinanceiro() {
                   );
                 })()}
 
-                {/* Diálogo setor ↔ loja (mensagens livres, não move card) */}
-                {(selectedSolicitacao.contato?.tipo === "loja" ||
-                  selectedSolicitacao.contato?.tipo === "colaborador" ||
-                  !!(selectedSolicitacao.metadata as any)?.loja_nome ||
-                  !!(selectedSolicitacao.metadata as any)?.alias_loja) && (
+                {/* Diálogo setor ↔ loja (mensagens livres, não move card).
+                    Sempre renderizado — todo card financeiro pode ter thread com a loja,
+                    e o gate por tipo/metadata escondia painéis mesmo quando a loja já havia
+                    respondido (ex.: notificação "Loja respondeu — SOL-…" abria o card vazio). */}
+                <div id="dialogo-loja-panel" ref={dialogoLojaRef}>
                   <SolicitacaoThreadPanel
                     solicitacaoId={selectedSolicitacao.id}
                     perspectiva="setor"
                   />
-                )}
+                </div>
               </div>
             </div>
           )}
