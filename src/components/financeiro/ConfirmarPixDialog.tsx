@@ -283,15 +283,16 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0">
+        <DialogHeader className="sticky top-0 z-10 bg-background border-b px-6 py-4">
           <DialogTitle className="flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-primary" />
             Confirmação de PIX — {solicitacao.protocolo || solicitacao.assunto}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 px-6 pb-6 pt-4">
+
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="flex items-center gap-2">
               <Store className="h-4 w-4 text-muted-foreground" />
