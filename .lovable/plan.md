@@ -1,45 +1,65 @@
-## Diagnóstico
+# Fila humana não recebe cards escalados a partir de modo=ponte
 
-Confirmado no banco: `SOL-2026-00115` e `SOL-2026-00117` estão `status='concluida'` (não arquivadas), sentadas na coluna terminal "Concluídas" do Financeiro. Estão no kanban, mas invisíveis à primeira vista por três razões:
+## Diagnóstico (confirmado no banco)
 
-1. **Protocolo não aparece no rosto do card.** O `CardContent` (linha 416) mostra loja, ícone do tipo, `assunto` e nome do contato — mas nunca renderiza `sol.protocolo`. O único lugar que exibe o código é o título do modal de edição (linha 1077, admin). Sem o `SOL-YYYY-NNNNN` na frente, o operador não bate o olho na notificação e localiza o card.
-2. **Deep-link falha silenciosamente.** O `useEffect` do `/financeiro?sol=<id>` procura o card **apenas** na lista já filtrada. Se estiver em coluna oculta, filtrado por busca, ou (no futuro) arquivado, `found` é `undefined` e o dialog nunca abre — sem toast, sem log visível.
-3. **Dialog do card não rola.** O `DialogContent` do drawer não tem `max-h` nem `overflow`, então o painel de diálogo com a loja fica abaixo da dobra em telas menores — "corta logo acima da caixa de diálogo".
-4. **Gate do painel de thread muito restritivo.** `SolicitacaoThreadPanel` só renderiza quando `contato.tipo ∈ {loja, colaborador}`. Solicitações abertas em nome do cliente final mas com vínculo em `metadata.alias_loja`/`loja_nome` (o caso das duas SOLs) escondem a thread inteira.
+Caso Cairo (contato `ea2c593f…`, atendimento `5d6ccfa5…`):
+- Cliente digitou **"Quero falar com atendente"** às 14:40:08.
+- Atendimento está em `modo = 'ponte'`, sem `atendente_user_id`, sem `atendente_nome`.
+- A fila humana em `src/pages/Pipeline.tsx` (linha 397) filtra por `at?.modo === "humano"` → card não aparece.
 
-## Plano
+Causa raiz em `supabase/functions/ai-triage/index.ts`:
 
-### 1. Protocolo visível no card (`PipelineFinanceiro.tsx`, ~L425)
-Adicionar linha compacta no topo do `min-w-0 flex-1`, antes da loja:
+```text
+linha 3285: if (atendimento.modo === "ponte") { return skipped; }
+linha 3405: if (matchesEscalation(currentMsg)) { handleEscalation(...) }
 ```
-<span className="font-mono text-[10px] text-muted-foreground">{sol.protocolo}</span>
+
+O router de escalada (`matchesEscalation` → `handleEscalation`, que faz `UPDATE modo='humano'`) fica **depois** do skip de ponte. Toda mensagem em modo ponte é descartada antes de checar palavras-chave de escalada. Resultado: `modo` permanece `ponte` para sempre.
+
+## Correção
+
+Adicionar um **pre-router de escalada** logo antes dos skips de `humano`/`ponte` em `ai-triage/index.ts` (por volta da linha 3141, antes do bloco "PRE-ROUTER: Retomar IA quando cliente digita receita após escalada"):
+
+```ts
+{
+  const _msgEsc = String(mensagem_texto || "").trim();
+  if (_msgEsc
+      && (atendimento.modo === "ponte" || atendimento.modo === "hibrido")
+      && matchesEscalation(_msgEsc)) {
+    const { data: _ct } = await supabase
+      .from("contatos").select("nome")
+      .eq("id", contato_id || atendimento.contato_id).maybeSingle();
+    const _prim = (_ct?.nome || "").trim().split(/\s+/)[0] || "";
+    return await handleEscalation(
+      supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+      atendimento_id, contato_id || atendimento.contato_id,
+      _msgEsc, "keyword_pre_ponte", _prim,
+    );
+  }
+}
 ```
-Mantém a hierarquia visual (loja em destaque, assunto principal) mas dá ao operador o código para casar com a notificação.
 
-### 2. Deep-link resiliente (`PipelineFinanceiro.tsx`)
-- Se `?sol=<id>` chegar e o card não estiver na lista renderizada, buscar direto:
-  `supabase.from("solicitacoes").select("*, contato:contatos(id,nome,telefone,tipo)").eq("id", id).single()`.
-- Popular `selectedSolicitacao` com o resultado — abre o drawer mesmo se o card estiver em coluna oculta/arquivada.
-- Erro → `toast.error("Solicitação não encontrada")` e limpa `?sol`.
-- Se vier arquivada, exibir badge "Arquivado" no header do drawer.
+`handleEscalation` já:
+- envia mensagem canônica ao cliente (ou aviso fora do expediente),
+- faz `UPDATE atendimentos SET modo='humano'`,
+- dispara `summarize-atendimento`,
+- registra `eventos_crm.tipo='escalonamento_humano'`.
 
-### 3. Dialog rolável (`PipelineFinanceiro.tsx`)
-- `max-h-[90vh] overflow-y-auto` no `DialogContent` do card.
-- `<DialogDescription className="sr-only">…</DialogDescription>` para calar o warning de a11y.
+Com isso, o card entra imediatamente na "Fila de Atendimento Humano" do CRM.
 
-### 4. Painel de thread com regra correta (`PipelineFinanceiro.tsx`)
-Renderizar `SolicitacaoThreadPanel` quando **qualquer**:
-- `contato.tipo` for `loja`/`colaborador`;
-- `metadata.alias_loja` ou `metadata.loja_nome` preenchidos;
-- já existir comentário `retorno_setor`/`resposta_loja` (checagem interna).
+## Saneamento do caso Cairo
 
-### 5. Highlight opcional
-Ring animado ~2s no card quando aberto via `?sol=<id>` e presente no kanban — para o operador achar a origem visual, útil em "Concluídas" que exige rolagem.
+Rodar 1x manualmente:
 
-## Detalhes técnicos
-- Arquivos: `src/pages/PipelineFinanceiro.tsx`, `src/components/financeiro/SolicitacaoThreadPanel.tsx`.
-- Sem migração, sem edge function.
+```sql
+UPDATE atendimentos SET modo='humano'
+ WHERE id='5d6ccfa5-8e68-4cfd-b34e-4ee18b4e75f6';
+```
 
-## Fora do escopo
-- Rota `/solicitacoes/:id`.
-- Espelho no Messenger da loja.
+Não é preciso reenviar mensagem — o cliente já recebeu "Vou te conectar com um Consultor…" às 14:42.
+
+## Fora de escopo (mantido igual)
+
+- Não altero o filtro do `Pipeline.tsx` — a fila é `modo=humano` por design (ponte = operador atende via app externo, não deve poluir a fila).
+- Não altero `handleEscalation`.
+- Não mexo em outros modos (`ia` continua caindo no router original da linha 3405; `humano` continua no bloco de retomada por receita).
