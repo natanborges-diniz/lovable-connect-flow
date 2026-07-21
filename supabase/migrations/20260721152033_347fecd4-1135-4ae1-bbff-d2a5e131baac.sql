@@ -1,0 +1,1 @@
+UPDATE atendimentos SET modo='humano' WHERE id='5d6ccfa5-8e68-4cfd-b34e-4ee18b4e75f6' AND modo='ponte';

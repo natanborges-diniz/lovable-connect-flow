@@ -3139,6 +3139,24 @@ serve(async (req) => {
       console.warn("[OS-PRESKIP] falhou:", (e as Error)?.message);
     }
 
+    // ── PRE-ROUTER (roda ANTES dos skips humano/ponte): pedido explícito de humano ──
+    // Sintoma real (Cairo 21/07): cliente em modo=ponte/hibrido digita "quero falar
+    // com atendente"; skip de ponte cortava o fluxo antes do router de escalada
+    // (linha ~3405), então modo nunca virava humano e card não entrava na fila.
+    {
+      const _msgEsc = String(mensagem_texto || "").trim();
+      if (_msgEsc && (atendimento.modo === "ponte" || atendimento.modo === "hibrido") && matchesEscalation(_msgEsc)) {
+        console.log(`[ROUTER-PRE] Escalation keyword em modo=${atendimento.modo} — forçando handoff humano`);
+        const _cid = contato_id || atendimento.contato_id;
+        const { data: _ct } = await supabase.from("contatos").select("nome").eq("id", _cid).maybeSingle();
+        const _primEsc = (_ct?.nome || "").trim().split(/\s+/)[0] || "";
+        return await handleEscalation(
+          supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+          atendimento_id, _cid, _msgEsc, "keyword_pre_ponte", _primEsc
+        );
+      }
+    }
+
     // ── PRE-ROUTER: Retomar IA quando cliente digita receita após escalada ──
     // Caso Flávia (15/05/2026): IA escalou por OCR ilegível; cliente depois digitou
     // "Esférico OD -0,50 / OE -2,50". Antes, o gate `modo=humano` silenciava IA até
