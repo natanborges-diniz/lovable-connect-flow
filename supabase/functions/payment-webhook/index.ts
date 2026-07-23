@@ -145,6 +145,37 @@ serve(async (req) => {
       conciliadoComPrint = (count ?? 0) > 0;
     } catch (_) { /* noop */ }
 
+    // Idempotência: se já processamos este tid como comprovante, não regrava nem duplica comentário
+    const existingComprovante = (existingMeta.comprovante_pagamento || null) as Record<string, unknown> | null;
+    const gatewayId = tid || nsu || null;
+    const jaProcessado = !!(
+      status === "PAGO" &&
+      existingComprovante &&
+      gatewayId &&
+      existingComprovante.gateway_id === gatewayId
+    );
+
+    // Monta objeto estruturado do comprovante (lido pelo Messenger da loja)
+    const formaPag =
+      kind === "credit" ? "cartao_credito" :
+      kind === "debit"  ? "cartao_debito"  :
+      (existingMeta.forma_pagamento as string) || "cartao";
+
+    const comprovantePagamento = status === "PAGO" ? {
+      pago_em: redeDateTime || now.toISOString(),
+      valor_pago: valor ? Number(valor) : null,
+      forma: formaPag,
+      nsu: nsu || null,
+      tid: tid || null,
+      authorization: authorization || null,
+      last4: last4 || null,
+      installments: installments || null,
+      bandeira: bandeira,
+      kind: kind || null,
+      descricao: descricao || null,
+      gateway_id: gatewayId,
+    } : null;
+
     const updatedMeta = {
       ...existingMeta,
       tid: tid || null,
@@ -164,6 +195,7 @@ serve(async (req) => {
       payment_status: status,
       payment_confirmed_at: now.toISOString(),
       ...(conciliadoComPrint && status === "PAGO" ? { conciliado_com_print: true } : {}),
+      ...(comprovantePagamento ? { comprovante_pagamento: comprovantePagamento } : {}),
     };
 
     const updateData: Record<string, unknown> = { metadata: updatedMeta };
@@ -222,12 +254,11 @@ serve(async (req) => {
       metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments, brand: bandeira, card_bin: cardBin || null, kind: kind || null, rede_datetime: redeDateTime },
     });
 
-    // Comprovante "picote" entregue via app Atrium Messenger (notificações + comentário no ticket).
-    if (status === "PAGO") {
+    // Comprovante entregue DENTRO da própria SOL (Messenger da loja lê
+    // solicitacoes.metadata.comprovante_pagamento + solicitacao_comentarios).
+    // Não criamos mais demandas_loja no caminho feliz.
+    if (status === "PAGO" && !jaProcessado) {
       try {
-        const { data: contato } = await supabase
-          .from("contatos").select("id, nome, telefone").eq("id", solicitacao.contato_id).single();
-
         const dateStr = redeDate
           ? redeDate.split("-").reverse().join("/")
           : now.toLocaleDateString("pt-BR");
@@ -258,9 +289,35 @@ serve(async (req) => {
         receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
         receiptMsg += `💳 ${cartaoLinha ? `${cartaoLinha} ` : ""}**** ${last4Fmt} — ${installmentsFmt}x`;
 
-        // Nome da LOJA (nunca do cliente) — alias_loja/loja_nome no metadata.
-        const lojaNome = ((existingMeta.alias_loja as string) || (existingMeta.loja_nome as string) || contato?.nome || "Loja").trim();
+        // 1) Comentário na thread da SOL — Messenger renderiza junto do diálogo com o setor.
+        //    Idempotente por gateway_id no metadata do comentário.
+        const { data: comentExistente } = await supabase
+          .from("solicitacao_comentarios")
+          .select("id")
+          .eq("solicitacao_id", solicitacao.id)
+          .contains("metadata", { origem: "payment-webhook", gateway_id: gatewayId })
+          .maybeSingle();
 
+        if (!comentExistente) {
+          await supabase.from("solicitacao_comentarios").insert({
+            solicitacao_id: solicitacao.id,
+            tipo: "retorno_setor",
+            autor_nome: "Pagamento",
+            conteudo: receiptMsg,
+            metadata: {
+              origem: "payment-webhook",
+              gateway_id: gatewayId,
+              payment_link_id,
+              nsu,
+              tid,
+              valor: valor ? Number(valor) : null,
+              forma: formaPag,
+            },
+          });
+        }
+
+        // 2) Push/notificações para os usuários da loja.
+        const lojaNome = ((existingMeta.alias_loja as string) || (existingMeta.loja_nome as string) || "Loja").trim();
         const { data: dests } = await supabase
           .rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
         const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
@@ -276,95 +333,12 @@ serve(async (req) => {
           });
         }
 
-        // Comentário sistema no ticket (Messenger "Minhas demandas" lê daqui)
-        await supabase.from("solicitacao_comentarios").insert({
-          solicitacao_id: solicitacao.id,
-          tipo: "sistema",
-          autor_nome: "Sistema Financeiro",
-          conteudo: receiptMsg,
-        });
-
-        // ── Garante que a loja receba o CARD no Messenger via demandas_loja ──
-        // Se a solicitação não tem demanda vinculada (link criado direto pelo
-        // painel financeiro sem passar por demandas_loja), auto-cria uma
-        // demanda + mensagem para a loja receber o comprovante no app.
-        try {
-          let demandaId = (existingMeta.demanda_id as string) || null;
-
-          if (!demandaId) {
-            const { data: lojaInfo } = await supabase
-              .from("telefones_lojas")
-              .select("telefone, setor_destino_id")
-              .ilike("nome_loja", lojaNome)
-              .eq("ativo", true)
-              .maybeSingle();
-
-            if (lojaInfo?.telefone) {
-              const protocolo = `FIN-${new Date().getFullYear()}-${String(solicitacao.id).slice(0, 8)}`;
-              const { data: novaDem, error: novaDemErr } = await supabase
-                .from("demandas_loja")
-                .insert({
-                  protocolo,
-                  loja_nome: lojaNome,
-                  loja_telefone: lojaInfo.telefone,
-                  assunto: `Comprovante de pagamento — ${clienteName}`.slice(0, 120),
-                  pergunta: `Pagamento confirmado NSU ${nsuFmt} — ${valorFmt}`,
-                  status: "aberta",
-                  origem: "sistema",
-                  tipo_chave: "comprovante_pagamento",
-                  setor_destino_id: lojaInfo.setor_destino_id,
-                  solicitante_nome: "Sistema Financeiro",
-                  vista_pelo_operador: false,
-                  metadata: { solicitacao_id: solicitacao.id, auto_created_from: "payment-webhook", payment_link_id, no_auto_encerrar: true },
-                })
-                .select("id")
-                .single();
-
-              if (novaDemErr) {
-                console.error("[payment-webhook] auto-create demanda failed:", novaDemErr);
-              } else if (novaDem?.id) {
-                demandaId = novaDem.id;
-                // Backfill demanda_id no metadata da solicitação
-                await supabase.from("solicitacoes")
-                  .update({ metadata: { ...updatedMeta, demanda_id: demandaId } })
-                  .eq("id", solicitacao.id);
-              }
-            } else {
-              console.warn(`[payment-webhook] sem telefone cadastrado para loja "${lojaNome}" — demanda não criada`);
-            }
-          }
-
-          if (demandaId) {
-            await supabase.from("demanda_mensagens").insert({
-              demanda_id: demandaId,
-              direcao: "operador_para_loja",
-              autor_nome: "Sistema Financeiro",
-              conteudo: receiptMsg,
-              metadata: { tipo: "comprovante_pagamento", solicitacao_id: solicitacao.id, payment_link_id, nsu, tid },
-            });
-
-            // Reabre a demanda (mesmo que estivesse encerrada) e blinda contra auto-encerrar.
-            const { data: demExisting } = await supabase
-              .from("demandas_loja")
-              .select("metadata")
-              .eq("id", demandaId)
-              .maybeSingle();
-            const mergedMeta = { ...(demExisting?.metadata ?? {}), no_auto_encerrar: true, ultimo_comprovante_at: new Date().toISOString() };
-            await supabase.from("demandas_loja").update({
-              status: "aberta",
-              vista_pelo_operador: false,
-              encerrada_at: null,
-              metadata: mergedMeta,
-            }).eq("id", demandaId);
-          }
-        } catch (demErr) {
-          console.error("[payment-webhook] Failed to create/post demanda:", demErr);
-        }
-
-        console.log(`[payment-webhook] Picote entregue via app para ${list.length} destinatário(s) — loja "${lojaNome}"`);
+        console.log(`[payment-webhook] Comprovante gravado em SOL ${solicitacao.id} + ${list.length} notificação(ões) para loja "${lojaNome}"`);
       } catch (notifyErr) {
-        console.error("[payment-webhook] Failed to dispatch picote internally:", notifyErr);
+        console.error("[payment-webhook] Failed to write comprovante into SOL:", notifyErr);
       }
+    } else if (jaProcessado) {
+      console.log(`[payment-webhook] Duplicado ignorado (gateway_id=${gatewayId} já processado em SOL ${solicitacao.id})`);
     }
 
     console.log("[payment-webhook] Solicitação updated:", solicitacao.id, "→", targetColunaNome);
