@@ -23,9 +23,10 @@ serve(async (req) => {
     // de SLA (watchdog-demandas-loja) cuida do escalonamento e do solicitante decide encerrar.
     const { data: stale, error } = await supabase
       .from("demandas_loja")
-      .select("id, protocolo, numero_curto, updated_at, status")
+      .select("id, protocolo, numero_curto, updated_at, status, metadata")
       .eq("status", "respondida")
       .lt("updated_at", cutoff)
+      .or("metadata->>no_auto_encerrar.is.null,metadata->>no_auto_encerrar.eq.false")
       .order("updated_at", { ascending: true })
       .limit(50);
 
