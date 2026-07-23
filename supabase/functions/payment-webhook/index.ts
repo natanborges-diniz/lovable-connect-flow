@@ -343,11 +343,18 @@ serve(async (req) => {
               metadata: { tipo: "comprovante_pagamento", solicitacao_id: solicitacao.id, payment_link_id, nsu, tid },
             });
 
-            // Mantém status 'aberta' para que a loja veja o card no Messenger
-            // (auto-encerrar-demandas só fecha 'respondida'). A loja/operador encerra manualmente.
+            // Reabre a demanda (mesmo que estivesse encerrada) e blinda contra auto-encerrar.
+            const { data: demExisting } = await supabase
+              .from("demandas_loja")
+              .select("metadata")
+              .eq("id", demandaId)
+              .maybeSingle();
+            const mergedMeta = { ...(demExisting?.metadata ?? {}), no_auto_encerrar: true, ultimo_comprovante_at: new Date().toISOString() };
             await supabase.from("demandas_loja").update({
               status: "aberta",
               vista_pelo_operador: false,
+              encerrada_at: null,
+              metadata: mergedMeta,
             }).eq("id", demandaId);
           }
         } catch (demErr) {
