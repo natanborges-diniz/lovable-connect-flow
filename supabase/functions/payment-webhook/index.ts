@@ -309,12 +309,13 @@ serve(async (req) => {
                   loja_telefone: lojaInfo.telefone,
                   assunto: `Comprovante de pagamento — ${clienteName}`.slice(0, 120),
                   pergunta: `Pagamento confirmado NSU ${nsuFmt} — ${valorFmt}`,
-                  status: "respondida",
+                  status: "aberta",
                   origem: "sistema",
                   tipo_chave: "comprovante_pagamento",
                   setor_destino_id: lojaInfo.setor_destino_id,
                   solicitante_nome: "Sistema Financeiro",
-                  metadata: { solicitacao_id: solicitacao.id, auto_created_from: "payment-webhook", payment_link_id },
+                  vista_pelo_operador: false,
+                  metadata: { solicitacao_id: solicitacao.id, auto_created_from: "payment-webhook", payment_link_id, no_auto_encerrar: true },
                 })
                 .select("id")
                 .single();
@@ -336,15 +337,17 @@ serve(async (req) => {
           if (demandaId) {
             await supabase.from("demanda_mensagens").insert({
               demanda_id: demandaId,
-              direcao: "sistema",
+              direcao: "operador_para_loja",
               autor_nome: "Sistema Financeiro",
               conteudo: receiptMsg,
               metadata: { tipo: "comprovante_pagamento", solicitacao_id: solicitacao.id, payment_link_id, nsu, tid },
             });
 
+            // Mantém status 'aberta' para que a loja veja o card no Messenger
+            // (auto-encerrar-demandas só fecha 'respondida'). A loja/operador encerra manualmente.
             await supabase.from("demandas_loja").update({
-              status: "respondida",
-              ultima_mensagem_loja_at: now.toISOString(),
+              status: "aberta",
+              vista_pelo_operador: false,
             }).eq("id", demandaId);
           }
         } catch (demErr) {
