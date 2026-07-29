@@ -98,3 +98,6 @@ verify_jwt = true
 
 [functions.regua-disparo-aguardando-armacao]
 verify_jwt = false
+
+[functions.audit-ia-auto]
+verify_jwt = false
