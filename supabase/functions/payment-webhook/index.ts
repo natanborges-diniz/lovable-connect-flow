@@ -79,7 +79,12 @@ serve(async (req) => {
       payment_link_id, status, tid, authorization, valor, origem_ref,
       nsu, last4, installments, descricao, nome_cliente,
       brand, brandName, cardBin, kind, dateTime, date, time,
+      // Campos Pix (cob dinâmica BTG via OB)
+      metodo, txid, end_to_end_id, endToEndId, pagador_nome, pagador_documento,
     } = payload;
+
+    const isPix: boolean = metodo === "pix" || Boolean(txid);
+    const e2eId: string | null = end_to_end_id || endToEndId || null;
 
     const brandFromPayload: string | null = brand || brandName || null;
     const brandDerived: string | null = brandFromPayload ? null : resolveBrandFromBin(cardBin);
@@ -89,20 +94,33 @@ serve(async (req) => {
     const redeDate: string | null = date || (redeDateTime ? redeDateTime.slice(0, 10) : null);
     const redeTime: string | null = time || (redeDateTime ? redeDateTime.slice(11, 19) : null);
 
-    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, origem_ref, brand: bandeira, brand_origem: brandOrigem, kind, cardBin });
+    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, txid, e2e: e2eId, metodo: isPix ? "pix" : "cartao", origem_ref, brand: bandeira, brand_origem: brandOrigem, kind, cardBin });
     if (!payment_link_id) throw new Error("payment_link_id é obrigatório");
 
-    const { data: solicitacoes } = await supabase
+    // Lookup direto por metadata (robusto, independe de volume) + fallback legado
+    let solicitacao: { id: string; metadata: unknown; contato_id: string | null; pipeline_coluna_id: string | null } | null = null;
+    const { data: direta } = await supabase
       .from("solicitacoes")
       .select("id, metadata, contato_id, pipeline_coluna_id")
-      .eq("tipo", "link_pagamento")
+      .in("tipo", ["link_pagamento", "pix_pagamento"])
+      .eq("metadata->>payment_link_id", String(payment_link_id))
       .order("created_at", { ascending: false })
-      .limit(100);
+      .limit(1)
+      .maybeSingle();
+    solicitacao = (direta as typeof solicitacao) || null;
 
-    const solicitacao = (solicitacoes || []).find((s: any) => {
-      const meta = s.metadata as Record<string, unknown> | null;
-      return meta?.payment_link_id === payment_link_id;
-    });
+    if (!solicitacao) {
+      const { data: solicitacoes } = await supabase
+        .from("solicitacoes")
+        .select("id, metadata, contato_id, pipeline_coluna_id")
+        .in("tipo", ["link_pagamento", "pix_pagamento"])
+        .order("created_at", { ascending: false })
+        .limit(100);
+      solicitacao = ((solicitacoes || []).find((s: any) => {
+        const meta = s.metadata as Record<string, unknown> | null;
+        return meta?.payment_link_id === payment_link_id;
+      }) as typeof solicitacao) || null;
+    }
 
     if (!solicitacao) {
       console.warn("[payment-webhook] No solicitação found for payment_link_id:", payment_link_id);
@@ -112,7 +130,7 @@ serve(async (req) => {
     }
 
     let targetColunaNome: string | null = null;
-    if (status === "PAGO") targetColunaNome = "Link Pago";
+    if (status === "PAGO") targetColunaNome = isPix ? "Pix Pago" : "Link Pago";
     else if (status === "CANCELADO" || status === "EXPIRADO") targetColunaNome = "Cancelado";
 
     let colunaId: string | null = null;
@@ -120,14 +138,22 @@ serve(async (req) => {
       const { data: financeiroSetor } = await supabase
         .from("setores").select("id").eq("nome", "Financeiro").single();
       if (financeiroSetor) {
-        const { data: coluna } = await supabase
-          .from("pipeline_colunas")
-          .select("id")
-          .eq("setor_id", financeiroSetor.id)
-          .eq("nome", targetColunaNome)
-          .eq("ativo", true)
-          .single();
-        colunaId = coluna?.id || null;
+        const buscarColuna = async (nome: string) => {
+          const { data: coluna } = await supabase
+            .from("pipeline_colunas")
+            .select("id")
+            .eq("setor_id", financeiroSetor.id)
+            .eq("nome", nome)
+            .eq("ativo", true)
+            .maybeSingle();
+          return coluna?.id || null;
+        };
+        colunaId = await buscarColuna(targetColunaNome);
+        // Fallback: se "Pix Pago" ainda não existir no setor, usa "Link Pago"
+        if (!colunaId && targetColunaNome === "Pix Pago") {
+          targetColunaNome = "Link Pago";
+          colunaId = await buscarColuna("Link Pago");
+        }
       }
     }
 
@@ -146,8 +172,9 @@ serve(async (req) => {
     } catch (_) { /* noop */ }
 
     // Idempotência: se já processamos este tid como comprovante, não regrava nem duplica comentário
+    // Pix: usa e2e/txid como identificador do gateway (tid/nsu são de cartão).
     const existingComprovante = (existingMeta.comprovante_pagamento || null) as Record<string, unknown> | null;
-    const gatewayId = tid || nsu || null;
+    const gatewayId = tid || nsu || e2eId || txid || null;
     const jaProcessado = !!(
       status === "PAGO" &&
       existingComprovante &&
@@ -157,6 +184,7 @@ serve(async (req) => {
 
     // Monta objeto estruturado do comprovante (lido pelo Messenger da loja)
     const formaPag =
+      isPix             ? "pix"            :
       kind === "credit" ? "cartao_credito" :
       kind === "debit"  ? "cartao_debito"  :
       (existingMeta.forma_pagamento as string) || "cartao";
@@ -167,6 +195,10 @@ serve(async (req) => {
       forma: formaPag,
       nsu: nsu || null,
       tid: tid || null,
+      txid: txid || null,
+      end_to_end_id: e2eId,
+      pagador_nome: pagador_nome || null,
+      pagador_documento: pagador_documento || null,
       authorization: authorization || null,
       last4: last4 || null,
       installments: installments || null,
@@ -178,6 +210,11 @@ serve(async (req) => {
 
     const updatedMeta = {
       ...existingMeta,
+      metodo: isPix ? "pix" : "cartao",
+      txid: txid || (existingMeta.txid as string) || null,
+      end_to_end_id: e2eId,
+      pagador_nome: pagador_nome || null,
+      pagador_documento: pagador_documento || null,
       tid: tid || null,
       authorization: authorization || null,
       nsu: nsu || null,
@@ -229,6 +266,14 @@ serve(async (req) => {
         parcelas: installments || (existingMeta.parcelas ? Number(existingMeta.parcelas) : null),
         descricao: descricao || existingMeta.descricao as string || null,
         status: newStatus,
+        metodo: isPix ? "pix" : "cartao",
+        pix_txid: txid || (existingMeta.txid as string) || null,
+        pix_e2e_id: e2eId,
+        pix_pago_at: isPix && status === "PAGO" ? (redeDateTime || now.toISOString()) : null,
+        pagador_nome: pagador_nome || null,
+        pagador_documento: pagador_documento || null,
+        pix_copia_cola: (existingMeta.pix_copia_cola as string) || null,
+        pix_expira_at: (existingMeta.expira_em as string) || null,
         tid: tid || null,
         nsu: nsu || null,
         authorization_code: authorization || null,
@@ -247,11 +292,13 @@ serve(async (req) => {
       contato_id: solicitacao.contato_id,
       tipo: status === "PAGO" ? "pagamento_confirmado" : "pagamento_status_atualizado",
       descricao: status === "PAGO"
-        ? `Pagamento confirmado via link. TID: ${tid || "N/A"}${nsuLabel} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`
-        : `Status do link atualizado para ${status}`,
+        ? (isPix
+            ? `Pagamento Pix confirmado. TXID: ${txid || "N/A"}${e2eId ? ` | E2E: ${e2eId}` : ""} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`
+            : `Pagamento confirmado via link. TID: ${tid || "N/A"}${nsuLabel} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`)
+        : `Status ${isPix ? "do Pix" : "do link"} atualizado para ${status}`,
       referencia_tipo: "solicitacao",
       referencia_id: solicitacao.id,
-      metadata: { payment_link_id, tid, nsu, status, authorization, valor, last4, installments, brand: bandeira, card_bin: cardBin || null, kind: kind || null, rede_datetime: redeDateTime },
+      metadata: { payment_link_id, metodo: isPix ? "pix" : "cartao", txid: txid || null, end_to_end_id: e2eId, tid, nsu, status, authorization, valor, last4, installments, brand: bandeira, card_bin: cardBin || null, kind: kind || null, rede_datetime: redeDateTime },
     });
 
     // Comprovante entregue DENTRO da própria SOL (Messenger da loja lê
@@ -276,18 +323,35 @@ serve(async (req) => {
         const kindLabel = kind === "credit" ? "Crédito" : kind === "debit" ? "Débito" : "";
         const cartaoLinha = [bandeira, kindLabel].filter(Boolean).join(" ").trim();
 
-        let receiptMsg = `📩 *Comprovante de pagamento — ${clienteName}*\n\n`;
-        receiptMsg += `✅ *Pagamento Confirmado!*\n`;
-        receiptMsg += `💰 Valor: ${valorFmt}\n`;
-        if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
-        receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
-        receiptMsg += `🔑 *NSU: ${nsuFmt}*\n`;
-        receiptMsg += `   ↳ Use para baixa no sistema\n`;
-        receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
-        receiptMsg += `🆔 TID: ${tidFmt}\n`;
-        receiptMsg += `🔐 Autorização: ${authFmt}\n`;
-        receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
-        receiptMsg += `💳 ${cartaoLinha ? `${cartaoLinha} ` : ""}**** ${last4Fmt} — ${installmentsFmt}x`;
+        let receiptMsg: string;
+        if (isPix) {
+          const pagadorLinha = [pagador_nome, pagador_documento].filter(Boolean).join(" — ");
+          receiptMsg = `📩 *Comprovante de pagamento Pix — ${clienteName}*\n\n`;
+          receiptMsg += `✅ *Pagamento Pix Confirmado!*\n`;
+          receiptMsg += `💰 Valor: ${valorFmt}\n`;
+          if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
+          receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
+          receiptMsg += `🔑 *TXID: ${txid || "N/A"}*\n`;
+          receiptMsg += `   ↳ Use para baixa no sistema\n`;
+          receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
+          if (e2eId) receiptMsg += `🆔 E2E: ${e2eId}\n`;
+          if (pagadorLinha) receiptMsg += `👤 Pagador: ${pagadorLinha}\n`;
+          receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
+          receiptMsg += `💠 Pix (BTG) — confirmação automática`;
+        } else {
+          receiptMsg = `📩 *Comprovante de pagamento — ${clienteName}*\n\n`;
+          receiptMsg += `✅ *Pagamento Confirmado!*\n`;
+          receiptMsg += `💰 Valor: ${valorFmt}\n`;
+          if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
+          receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
+          receiptMsg += `🔑 *NSU: ${nsuFmt}*\n`;
+          receiptMsg += `   ↳ Use para baixa no sistema\n`;
+          receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
+          receiptMsg += `🆔 TID: ${tidFmt}\n`;
+          receiptMsg += `🔐 Autorização: ${authFmt}\n`;
+          receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
+          receiptMsg += `💳 ${cartaoLinha ? `${cartaoLinha} ` : ""}**** ${last4Fmt} — ${installmentsFmt}x`;
+        }
 
         // 1) Comentário na thread da SOL — Messenger renderiza junto do diálogo com o setor.
         //    Idempotente por gateway_id no metadata do comentário.
@@ -327,8 +391,8 @@ serve(async (req) => {
             usuario_id: d.user_id,
             setor_id: d.setor_id,
             tipo: "comprovante_pagamento",
-            titulo: `💳 Pagamento confirmado — ${clienteName}`,
-            mensagem: `Valor ${valorFmt} | NSU ${nsuFmt}`,
+            titulo: isPix ? `💠 Pix confirmado — ${clienteName}` : `💳 Pagamento confirmado — ${clienteName}`,
+            mensagem: isPix ? `Valor ${valorFmt} | TXID ${txid || "N/A"}` : `Valor ${valorFmt} | NSU ${nsuFmt}`,
             referencia_id: solicitacao.id,
           });
         }

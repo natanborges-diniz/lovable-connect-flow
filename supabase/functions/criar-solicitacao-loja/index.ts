@@ -227,7 +227,11 @@ serve(async (req) => {
 
     // ── Caso especial: link_pagamento via Optical Business ──
     let extraMetadata: Record<string, unknown> = {};
-    let respostaCliente: { url?: string; payment_link_id?: string; cliente_envio_status?: string; cliente_envio_erro?: string | null } = {};
+    let respostaCliente: {
+      url?: string; payment_link_id?: string;
+      cliente_envio_status?: string; cliente_envio_erro?: string | null;
+      txid?: string; pix_copia_cola?: string; qr_code_base64?: string; expira_em?: string;
+    } = {};
     let contatoClienteId: string | null = null;
     if (acao.endpoint === "payment-links") {
       if (!OB_URL || !OB_SECRET) {
@@ -415,6 +419,207 @@ serve(async (req) => {
       };
     }
 
+    // ── Caso especial: pix_pagamento (cob dinâmica BTG) via Optical Business ──
+    // Mesmo padrão do cartão: OB fala com o BTG, gera QR Code + copia-e-cola,
+    // e a confirmação volta automaticamente pelo payment-webhook.
+    if (acao.endpoint === "pix-charges") {
+      if (!OB_URL || !OB_SECRET) {
+        return new Response(JSON.stringify({ error: "Integração de pagamento não configurada" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!codEmpresa) {
+        return new Response(JSON.stringify({ error: `Loja "${nomeLoja}" sem cod_empresa cadastrado` }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      let obRes: Response;
+      try {
+        obRes = await fetch(`${OB_URL}/functions/v1/pix-charges`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-service-key": OB_SECRET },
+          body: JSON.stringify({
+            action: "criar",
+            cod_empresa: codEmpresa,
+            valor: dados.valor,
+            descricao: dados.descricao,
+            cliente_nome: dados.cliente || null,
+            expiracao_segundos: 86400, // 24h, igual ao link de cartão
+            origem: "ATRIUM_INFOCO",
+            origem_ref: user.id,
+          }),
+        });
+      } catch (netErr) {
+        console.error("[criar-solicitacao-loja] OB pix fetch network error:", netErr);
+        return new Response(JSON.stringify({
+          ok: false,
+          error: `Falha de rede ao contatar OB: ${netErr instanceof Error ? netErr.message : String(netErr)}`,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const obContentType = obRes.headers.get("content-type") || "";
+      const obRawText = await obRes.text();
+      console.log(`[criar-solicitacao-loja] OB pix response status=${obRes.status} ct=${obContentType} body=${obRawText.slice(0, 300)}`);
+
+      let obData: any = null;
+      if (obContentType.includes("application/json")) {
+        try { obData = JSON.parse(obRawText); } catch (_e) {
+          return new Response(JSON.stringify({
+            ok: false,
+            error: `OB retornou JSON inválido (status ${obRes.status}): ${obRawText.slice(0, 200)}`,
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      } else {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: `OB retornou ${obRes.status} (${obContentType || "sem content-type"}): ${obRawText.slice(0, 200)}`,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      if (!obRes.ok || obData?.error) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: `OB (${obRes.status}): ${obData?.error || obData?.message || "erro desconhecido"}`,
+          ob_status: obRes.status,
+          ob_payload: obData,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      respostaCliente = {
+        url: obData.url_pagamento || undefined,
+        payment_link_id: obData.id,
+        txid: obData.txid,
+        pix_copia_cola: obData.pix_copia_cola,
+        qr_code_base64: obData.qr_code_base64 || undefined, // só resposta ao app; não persiste
+        expira_em: obData.expira_em || undefined,
+      };
+      extraMetadata = {
+        payment_link_id: obData.id,
+        metodo: "pix",
+        txid: obData.txid,
+        pix_copia_cola: obData.pix_copia_cola,
+        url: obData.url_pagamento || null,
+        expira_em: obData.expira_em || null,
+      };
+
+      // ── Envio da cobrança ao cliente final via WhatsApp template ──
+      const rawTel = String(dados.cliente_whatsapp || "").replace(/\D/g, "");
+      const nomeClienteRaw = String(dados.cliente || "").trim();
+      let envioClienteStatus: "enviado" | "falhou" | "pulado" = "pulado";
+      let envioClienteErro: string | null = null;
+
+      if (rawTel.length >= 10 && nomeClienteRaw) {
+        const telNormalizado = rawTel.startsWith("55") ? rawTel : `55${rawTel}`;
+        const primeiroNome = nomeClienteRaw.split(/\s+/)[0] || nomeClienteRaw;
+
+        try {
+          const { data: contatoExist } = await supabase
+            .from("contatos")
+            .select("id, nome")
+            .eq("telefone", telNormalizado)
+            .maybeSingle();
+
+          contatoClienteId = contatoExist?.id ?? null;
+          if (!contatoClienteId) {
+            const { data: novoCont, error: ncErr } = await supabase
+              .from("contatos")
+              .insert({
+                nome: nomeClienteRaw,
+                telefone: telNormalizado,
+                tipo: "cliente",
+                metadata: {
+                  origem: "pix_pagamento_loja",
+                  loja_origem: nomeLoja,
+                  payment_link_id: obData.id,
+                },
+              })
+              .select("id")
+              .single();
+            if (ncErr) throw ncErr;
+            contatoClienteId = novoCont.id;
+          } else if (!contatoExist?.nome || contatoExist.nome.trim().length < 2) {
+            await supabase
+              .from("contatos")
+              .update({ nome: nomeClienteRaw })
+              .eq("id", contatoClienteId);
+          }
+
+          const valorNum = Number(String(dados.valor).replace(",", "."));
+          const valorFmt = Number.isFinite(valorNum)
+            ? valorNum.toFixed(2).replace(".", ",")
+            : String(dados.valor);
+
+          const protocolo = String(obData.id || "").slice(-8).toUpperCase() || "PIX";
+          // Param 3: página de pagamento hospedada (QR + copia-e-cola); fallback: o próprio copia-e-cola
+          const linkOuCodigo = obData.url_pagamento || obData.pix_copia_cola;
+
+          const tplRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${SERVICE}`,
+            },
+            body: JSON.stringify({
+              contato_id: contatoClienteId,
+              template_alias: "pix_pagamento_cliente",
+              template_params: [
+                protocolo,   // {{1}} protocolo
+                valorFmt,    // {{2}} valor
+                linkOuCodigo, // {{3}} link da página de pagamento
+              ],
+              language: "pt_BR",
+            }),
+          });
+          const tplJson = await tplRes.json().catch(() => ({}));
+          if (!tplRes.ok || tplJson?.status === "blocked_template_not_approved") {
+            envioClienteStatus = "falhou";
+            envioClienteErro = tplJson?.template_status
+              ? `template_${tplJson.template_status}`
+              : tplJson?.error || `http_${tplRes.status}`;
+          } else if (tplJson?.status === "sent") {
+            envioClienteStatus = "enviado";
+          } else {
+            envioClienteStatus = "falhou";
+            envioClienteErro = tplJson?.error || "resposta_inesperada";
+          }
+
+          await supabase.from("eventos_crm").insert({
+            contato_id: contatoClienteId,
+            tipo:
+              envioClienteStatus === "enviado"
+                ? "pix_pagamento_enviado_cliente"
+                : "pix_pagamento_envio_falhou",
+            descricao:
+              envioClienteStatus === "enviado"
+                ? `Cobrança Pix enviada para ${primeiroNome} (${nomeLoja})`
+                : `Falha ao enviar cobrança Pix: ${envioClienteErro}`,
+            metadata: {
+              payment_link_id: obData.id,
+              txid: obData.txid,
+              loja_nome: nomeLoja,
+              telefone_mascarado: telNormalizado.slice(0, 4) + "****" + telNormalizado.slice(-2),
+              erro: envioClienteErro,
+            },
+          });
+        } catch (e) {
+          console.error("[criar-solicitacao-loja] envio pix cliente falhou", e);
+          envioClienteStatus = "falhou";
+          envioClienteErro = e instanceof Error ? e.message : "erro_desconhecido";
+        }
+      }
+
+      respostaCliente = {
+        ...respostaCliente,
+        cliente_envio_status: envioClienteStatus,
+        cliente_envio_erro: envioClienteErro,
+      };
+      extraMetadata = {
+        ...extraMetadata,
+        cliente_whatsapp: rawTel,
+        cliente_envio_status: envioClienteStatus,
+      };
+    }
+
     // ── Resolve coluna destino (primeira do setor do fluxo) ──
     let colunaId: string | null = null;
     if ((fluxo as any).setor_destino_id) {
@@ -559,7 +764,7 @@ serve(async (req) => {
     });
 
     // ── Espelha em pagamentos_link (rastreabilidade financeira) ──
-    if (tipoSolicitacao === "link_pagamento" && (extraMetadata as any).payment_link_id) {
+    if (["link_pagamento", "pix_pagamento"].includes(tipoSolicitacao) && (extraMetadata as any).payment_link_id) {
       try {
         const phone = String((extraMetadata as any).cliente_whatsapp || "").replace(/\D/g, "");
         let contatoIdResolved: string | null = contatoClienteId || contatoId;
@@ -583,6 +788,10 @@ serve(async (req) => {
           descricao: (dados as any).descricao || null,
           status: envioOk ? "enviado" : "criado",
           link_url: (extraMetadata as any).url || null,
+          metodo: tipoSolicitacao === "pix_pagamento" ? "pix" : "cartao",
+          pix_txid: (extraMetadata as any).txid || null,
+          pix_copia_cola: (extraMetadata as any).pix_copia_cola || null,
+          pix_expira_at: (extraMetadata as any).expira_em || null,
           enviado_at: envioOk ? new Date().toISOString() : null,
           metadata: { ...dados, ...extraMetadata, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
         }, { onConflict: "payment_link_id" });
@@ -592,9 +801,9 @@ serve(async (req) => {
     }
 
     // ── Notificações in-app para o setor destino (canal único = app) ──
-    // Pula notificações para link_pagamento: fluxo 100% automático (gerar → aguardando → pago).
+    // Pula notificações para link_pagamento/pix_pagamento: fluxo 100% automático (gerar → aguardando → pago).
     const setorId = (fluxo as any).setor_destino_id;
-    if (setorId && tipoSolicitacao !== "link_pagamento") {
+    if (setorId && !["link_pagamento", "pix_pagamento"].includes(tipoSolicitacao)) {
       const { data: prof } = await supabase
         .from("profiles").select("id").eq("setor_id", setorId).eq("ativo", true);
       const titulo = `Nova solicitação: ${(fluxo as any).nome}`;
