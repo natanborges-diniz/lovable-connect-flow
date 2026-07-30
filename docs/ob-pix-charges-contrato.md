@@ -86,12 +86,14 @@ Alias já cadastrado no Atrium: `pix_pagamento_cliente` → `pix_pagamento_clien
 
 Sem template aprovado o envio falha graciosamente e a loja compartilha o QR manualmente — o resto do fluxo funciona normal.
 
-## 4) Pontos de atenção (produção BTG)
+## 4) Contrato BTG (confirmado na documentação oficial)
 
-- **Endpoint BTG**: implementado como `POST /{cnpj}/banking/instant-collections` com parsing defensivo do retorno (`instantCollectionId|collectionId|id`, `emv|qrCode|pixCopiaECola|brcode`, `txid|txId|transactionId`). **Confirmar o contrato exato no portal do BTG** na primeira chamada real — logs completos são gravados em caso de formato inesperado.
-- **Escopos OAuth**: adicionados `brn:btg:empresas:banking:collections`, `...instant-collections` e `...instant-collections.readonly` em `btg-auth` (grafia a confirmar no portal). **Empresas já autenticadas precisam reautorizar** para o token conter os novos escopos.
-- **Chave Pix**: coluna opcional `btg_contas_bancarias.chave_pix` (migration `20260730170000_pix_charges_btg.sql`) — enviada ao BTG quando preenchida.
-- **Webhook BTG**: garantir que a família `instant-collections.*` esteja habilitada no painel BTG apontando para o `btg-webhook` já existente.
+Fonte: developers.empresas.btgpactual.com → Banking → Cobranças → Pix cobrança dinâmico.
+
+- **Endpoint**: `POST {apiBase}/v1/companies/{cnpj}/pix-cash-in/instant-collections` com body `{ pixKey, expiresIn, amount: { value, allowCustomerChangeValue: false }, displayText, tags }`. Retorno traz `id`, `txId`, `emv` (copia-e-cola) e `location.url` (PNG do QR hospedado pelo BTG).
+- **Escopo OAuth**: `empresas.btgpactual.com/pix-cash-in` (criação/consulta + webhooks); `.readonly` para consulta. Configurado no `btg-auth` e no selo da tela BTG Validação. **Empresas precisam reautorizar** para o token ganhar o escopo — o selo "Re-autorizar: Pix dinâmico" indica quem falta.
+- **Chave Pix**: `pixKey` é **obrigatória** na criação — cadastrar `btg_contas_bancarias.chave_pix` por empresa (migration `20260730170000_pix_charges_btg.sql`). Sem chave, o `pix-charges` retorna erro claro.
+- **Webhook**: eventos `instant-collection.paid` (payload com `txId`, `paidAt`, `paidAmount`, `paidBy.name/taxId`) e `instant-collection.unlinked`. A família já está habilitada no painel BTG apontando pro `btg-webhook`.
 
 ## 5) Checklist de ativação
 
