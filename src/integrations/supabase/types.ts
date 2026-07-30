@@ -2228,6 +2228,8 @@ export type Database = {
           metadata: Json
           metodo: string
           nsu: string | null
+          pagador_documento: string | null
+          pagador_nome: string | null
           pago_at: string | null
           parcelas: number | null
           payment_link_id: string
@@ -2265,6 +2267,8 @@ export type Database = {
           metadata?: Json
           metodo?: string
           nsu?: string | null
+          pagador_documento?: string | null
+          pagador_nome?: string | null
           pago_at?: string | null
           parcelas?: number | null
           payment_link_id: string
@@ -2302,6 +2306,8 @@ export type Database = {
           metadata?: Json
           metodo?: string
           nsu?: string | null
+          pagador_documento?: string | null
+          pagador_nome?: string | null
           pago_at?: string | null
           parcelas?: number | null
           payment_link_id?: string
