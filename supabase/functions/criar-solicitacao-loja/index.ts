@@ -127,6 +127,9 @@ serve(async (req) => {
 
     const acao = (fluxo as any).acao_final || {};
     const tipoSolicitacao: string = acao.tipo_solicitacao || fluxoChave;
+    // Roteamento Pix imune a configuração: se o tipo é pix_pagamento, vai pro
+    // caminho Pix independentemente do acao_final.endpoint gravado no fluxo.
+    const isPixFluxo = tipoSolicitacao === "pix_pagamento" || fluxoChave === "pix_pagamento" || acao.endpoint === "pix-charges";
 
     // ── Gate "Gerar Boleto" exige Consulta de CPF aprovada ──
     let consultaCpfOrigem: any = null;
@@ -233,7 +236,7 @@ serve(async (req) => {
       txid?: string; pix_copia_cola?: string; qr_code_base64?: string; expira_em?: string;
     } = {};
     let contatoClienteId: string | null = null;
-    if (acao.endpoint === "payment-links") {
+    if (acao.endpoint === "payment-links" && !isPixFluxo) {
       if (!OB_URL || !OB_SECRET) {
         return new Response(JSON.stringify({ error: "Integração de pagamento não configurada" }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -422,7 +425,7 @@ serve(async (req) => {
     // ── Caso especial: pix_pagamento (cob dinâmica BTG) via Optical Business ──
     // Mesmo padrão do cartão: OB fala com o BTG, gera QR Code + copia-e-cola,
     // e a confirmação volta automaticamente pelo payment-webhook.
-    if (acao.endpoint === "pix-charges") {
+    if (isPixFluxo) {
       if (!OB_URL || !OB_SECRET) {
         return new Response(JSON.stringify({ error: "Integração de pagamento não configurada" }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -664,7 +667,7 @@ serve(async (req) => {
         canal_origem: "sistema",
         status: "em_atendimento",
         tipo: tipoSolicitacao,
-        metadata: { ...dados, ...extraMetadata, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger" },
+        metadata: { ...dados, ...extraMetadata, loja_nome: nomeLoja, alias_loja: nomeLoja, cod_empresa: codEmpresa, origem_app: "infoco_messenger", _endpoint_runtime: acao.endpoint || null, _fluxo_chave_runtime: fluxoChave, _pix_route: isPixFluxo },
         ...(colunaId ? { pipeline_coluna_id: colunaId } : {}),
       })
       .select("id")
