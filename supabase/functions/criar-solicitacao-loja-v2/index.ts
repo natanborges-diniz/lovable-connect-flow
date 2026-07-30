@@ -437,7 +437,7 @@ serve(async (req) => {
       }
       let obRes: Response;
       try {
-        obRes = await fetch(`${OB_URL}/functions/v1/pix-charges`, {
+        obRes = await fetch(`${OB_URL}/functions/v1/pix-charges-v2`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-service-key": OB_SECRET },
           body: JSON.stringify({
