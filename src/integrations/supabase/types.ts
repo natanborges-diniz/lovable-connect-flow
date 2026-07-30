@@ -2226,10 +2226,17 @@ export type Database = {
           link_url: string | null
           loja_nome: string | null
           metadata: Json
+          metodo: string
           nsu: string | null
           pago_at: string | null
           parcelas: number | null
           payment_link_id: string
+          pix_copia_cola: string | null
+          pix_e2e_id: string | null
+          pix_expira_at: string | null
+          pix_pago_at: string | null
+          pix_qrcode_url: string | null
+          pix_txid: string | null
           solicitacao_id: string | null
           status: string
           tid: string | null
@@ -2256,10 +2263,17 @@ export type Database = {
           link_url?: string | null
           loja_nome?: string | null
           metadata?: Json
+          metodo?: string
           nsu?: string | null
           pago_at?: string | null
           parcelas?: number | null
           payment_link_id: string
+          pix_copia_cola?: string | null
+          pix_e2e_id?: string | null
+          pix_expira_at?: string | null
+          pix_pago_at?: string | null
+          pix_qrcode_url?: string | null
+          pix_txid?: string | null
           solicitacao_id?: string | null
           status?: string
           tid?: string | null
@@ -2286,10 +2300,17 @@ export type Database = {
           link_url?: string | null
           loja_nome?: string | null
           metadata?: Json
+          metodo?: string
           nsu?: string | null
           pago_at?: string | null
           parcelas?: number | null
           payment_link_id?: string
+          pix_copia_cola?: string | null
+          pix_e2e_id?: string | null
+          pix_expira_at?: string | null
+          pix_pago_at?: string | null
+          pix_qrcode_url?: string | null
+          pix_txid?: string | null
           solicitacao_id?: string | null
           status?: string
           tid?: string | null
