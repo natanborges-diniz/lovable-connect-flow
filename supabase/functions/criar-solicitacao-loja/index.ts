@@ -550,8 +550,6 @@ serve(async (req) => {
             : String(dados.valor);
 
           const protocolo = String(obData.id || "").slice(-8).toUpperCase() || "PIX";
-          // Param 3: página de pagamento hospedada (QR + copia-e-cola); fallback: o próprio copia-e-cola
-          const linkOuCodigo = obData.url_pagamento || obData.pix_copia_cola;
 
           const tplRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp-template`, {
             method: "POST",
@@ -563,9 +561,10 @@ serve(async (req) => {
               contato_id: contatoClienteId,
               template_alias: "pix_pagamento_cliente",
               template_params: [
-                protocolo,   // {{1}} protocolo
-                valorFmt,    // {{2}} valor
-                linkOuCodigo, // {{3}} link da página de pagamento
+                protocolo,             // {{1}} protocolo
+                valorFmt,              // {{2}} valor
+                obData.pix_copia_cola, // {{3}} Pix copia-e-cola (pagamento direto no app do banco)
+                obData.url_pagamento || obData.pix_copia_cola, // {{4}} página com QR + status
               ],
               language: "pt_BR",
             }),
