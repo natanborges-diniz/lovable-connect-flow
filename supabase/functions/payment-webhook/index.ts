@@ -293,8 +293,8 @@ serve(async (req) => {
       tipo: status === "PAGO" ? "pagamento_confirmado" : "pagamento_status_atualizado",
       descricao: status === "PAGO"
         ? (isPix
-            ? `Pagamento Pix confirmado. TXID: ${txid || "N/A"}${e2eId ? ` | E2E: ${e2eId}` : ""} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`
-            : `Pagamento confirmado via link. TID: ${tid || "N/A"}${nsuLabel} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`)
+            ? `Pagamento Pix confirmado. TXID: ${txid || "N/A"}${e2eId ? ` | E2E: ${e2eId}` : ""} | Valor: R$ ${valor ? Number(valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "N/A"}`
+            : `Pagamento confirmado via link. TID: ${tid || "N/A"}${nsuLabel} | Valor: R$ ${valor ? Number(valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "N/A"}`)
         : `Status ${isPix ? "do Pix" : "do link"} atualizado para ${status}`,
       referencia_tipo: "solicitacao",
       referencia_id: solicitacao.id,
@@ -306,14 +306,21 @@ serve(async (req) => {
     // Não criamos mais demandas_loja no caminho feliz.
     if (status === "PAGO" && !jaProcessado) {
       try {
-        const dateStr = redeDate
-          ? redeDate.split("-").reverse().join("/")
-          : now.toLocaleDateString("pt-BR");
-        const timeStr = redeTime
-          ? redeTime.slice(0, 5)
-          : now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        // Horário sempre em Brasília: o runtime roda em UTC e o paidAt do BTG
+        // vem em UTC — formatar com timeZone evita comprovante com hora errada.
+        const TZ = "America/Sao_Paulo";
+        const dtRef = redeDateTime ? new Date(redeDateTime) : now;
+        const dtOk = !isNaN(dtRef.getTime());
+        const dateStr = date
+          ? String(date).split("-").reverse().join("/")
+          : (dtOk ? dtRef : now).toLocaleDateString("pt-BR", { timeZone: TZ });
+        const timeStr = time
+          ? String(time).slice(0, 5)
+          : (dtOk ? dtRef : now).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
         const clienteName = nome_cliente || "N/A";
-        const valorFmt = valor ? `R$ ${Number(valor).toFixed(2)}` : "N/A";
+        const valorFmt = valor
+          ? `R$ ${Number(valor).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : "N/A";
         const descFmt = descricao || "";
         const nsuFmt = nsu || "N/A";
         const tidFmt = tid || "N/A";
