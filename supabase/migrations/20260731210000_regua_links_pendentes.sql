@@ -1,10 +1,10 @@
 -- ═══════════════════════════════════════════════════════════════════
 -- Régua de links/Pix pendentes — dono da cobrança é a LOJA, não o Financeiro.
 --
--- Fase 1 (lembrete): cobrança não paga entre 4h e 24h de vida → notifica a
+-- Fase 1 (lembrete): cobrança não paga entre 4h e 48h de vida → notifica a
 --   loja ("cliente ainda não pagou — reforce"), uma única vez, com comentário
 --   na solicitação (visível no Messenger).
--- Fase 2 (expiração): não paga após 24h (ou metadata.expira_em vencido) →
+-- Fase 2 (expiração): não paga após 48h →
 --   encerra automaticamente: status cancelada, coluna Cancelado, arquivada
 --   (sai da Mesa do Financeiro), pagamentos_link → expirado, e a loja é
 --   avisada de que precisa gerar um novo link se ainda for cobrar.
@@ -25,6 +25,9 @@ DECLARE
   v_lembretes int := 0;
   v_expirados int := 0;
   v_loja text;
+  -- Prazos da régua (ajustáveis aqui num único lugar)
+  v_horas_lembrete constant int := 4;
+  v_horas_expira  constant int := 48;
 BEGIN
   SELECT pc.id INTO v_col_cancelado
   FROM pipeline_colunas pc
@@ -40,8 +43,8 @@ BEGIN
       AND COALESCE(s.metadata->>'payment_status','') <> 'PAGO'
       AND s.metadata->>'lembrete_loja_at' IS NULL
       AND s.metadata->>'expirado_at' IS NULL
-      AND s.created_at < now() - interval '4 hours'
-      AND s.created_at > now() - interval '24 hours'
+      AND s.created_at < now() - make_interval(hours => v_horas_lembrete)
+      AND s.created_at > now() - make_interval(hours => v_horas_expira)
     LIMIT 100
   LOOP
     v_loja := COALESCE(r.metadata->>'alias_loja', r.metadata->>'loja_nome');
@@ -53,7 +56,7 @@ BEGIN
     INSERT INTO solicitacao_comentarios (solicitacao_id, tipo, autor_nome, conteudo, metadata)
     VALUES (
       r.id, 'retorno_setor', 'Sistema Financeiro',
-      '⏳ O cliente ainda não concluiu o pagamento desta cobrança. A gestão da cobrança é da loja: reforce com o cliente ou gere uma nova. Ela expira automaticamente 24h após a criação. (aviso automático)',
+      '⏳ O cliente ainda não concluiu o pagamento desta cobrança. A gestão da cobrança é da loja: reforce com o cliente ou gere uma nova. Ela expira automaticamente 48h após a criação (o link em si pode ter validade menor — na dúvida, gere um novo). (aviso automático)',
       jsonb_build_object('origem','regua_links_pendentes','fase','lembrete')
     );
 
@@ -79,10 +82,7 @@ BEGIN
       AND s.status NOT IN ('concluida','cancelada')
       AND COALESCE(s.metadata->>'payment_status','') <> 'PAGO'
       AND s.metadata->>'expirado_at' IS NULL
-      AND COALESCE(
-            NULLIF(s.metadata->>'expira_em','')::timestamptz,
-            s.created_at + interval '24 hours'
-          ) < now()
+      AND s.created_at < now() - make_interval(hours => v_horas_expira)
     LIMIT 100
   LOOP
     v_loja := COALESCE(r.metadata->>'alias_loja', r.metadata->>'loja_nome');
@@ -104,7 +104,7 @@ BEGIN
     INSERT INTO solicitacao_comentarios (solicitacao_id, tipo, autor_nome, conteudo, metadata)
     VALUES (
       r.id, 'retorno_setor', 'Sistema Financeiro',
-      '⏰ Esta cobrança expirou sem pagamento (validade de 24h) e foi encerrada automaticamente. Se ainda precisar cobrar o cliente, gere um novo link ou Pix. (encerramento automático)',
+      '⏰ Esta cobrança expirou sem pagamento (prazo de 48h) e foi encerrada automaticamente. Se ainda precisar cobrar o cliente, gere um novo link ou Pix. (encerramento automático)',
       jsonb_build_object('origem','regua_links_pendentes','fase','expiracao')
     );
 
