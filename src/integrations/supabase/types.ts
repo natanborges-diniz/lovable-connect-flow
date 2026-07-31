@@ -3727,6 +3727,7 @@ export type Database = {
         Returns: boolean
       }
       pode_gerenciar_usuarios: { Args: { _uid: string }; Returns: boolean }
+      regua_links_pendentes: { Args: never; Returns: Json }
       regua_listar_pins_por_usuario: {
         Args: { p_aba?: string }
         Returns: {
