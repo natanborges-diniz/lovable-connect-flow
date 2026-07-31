@@ -1,0 +1,419 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-service-key",
+};
+
+// Resolve a bandeira do cartão a partir do BIN (6 primeiros dígitos).
+// Cobre os principais emissores BR; retorna null se não bater.
+function resolveBrandFromBin(binRaw: string | null | undefined): string | null {
+  if (!binRaw) return null;
+  const digits = String(binRaw).replace(/\D/g, "");
+  if (digits.length < 4) return null;
+  const bin6 = Number(digits.slice(0, 6));
+  const bin4 = Number(digits.slice(0, 4));
+  const bin2 = Number(digits.slice(0, 2));
+  const bin1 = Number(digits.slice(0, 1));
+
+  // Elo (faixas oficiais)
+  const eloRanges: Array<[number, number]> = [
+    [401178, 401179], [438935, 438935], [451416, 451416], [457393, 457393],
+    [457631, 457632], [504175, 504175], [506699, 506778], [509000, 509999],
+    [627780, 627780], [636297, 636297], [636368, 636368],
+    [650031, 650033], [650035, 650051], [650405, 650439], [650485, 650538],
+    [650541, 650598], [650700, 650718], [650720, 650727], [650901, 650920],
+    [651652, 651679], [655000, 655019], [655021, 655058],
+  ];
+  if (eloRanges.some(([a, b]) => bin6 >= a && bin6 <= b)) return "Elo";
+
+  // Hipercard
+  if (bin6 === 606282 || bin6 === 637095 || (bin6 >= 637568 && bin6 <= 637599)) return "Hipercard";
+
+  // Mastercard (51-55, 2221-2720)
+  if (bin2 >= 51 && bin2 <= 55) return "Mastercard";
+  if (bin4 >= 2221 && bin4 <= 2720) return "Mastercard";
+
+  // Visa
+  if (bin1 === 4) return "Visa";
+
+  // Amex
+  if (bin2 === 34 || bin2 === 37) return "Amex";
+
+  // Diners
+  if (bin2 === 36 || bin2 === 38) return "Diners";
+  if (bin4 >= 3000 && bin4 <= 3059) return "Diners";
+
+  // Discover
+  if (bin4 === 6011 || bin2 === 65) return "Discover";
+
+  // JCB
+  if (bin2 === 35) return "JCB";
+
+  // Aura (5067, 4576, 4011)
+  if (bin4 === 5067 || bin4 === 4576 || bin4 === 4011) return "Aura";
+
+  return null;
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const INTERNAL_SERVICE_SECRET = Deno.env.get("INTERNAL_SERVICE_SECRET");
+
+  const serviceKey = req.headers.get("x-service-key");
+  if (!serviceKey || serviceKey !== INTERNAL_SERVICE_SECRET) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  try {
+    const payload = await req.json();
+    const {
+      payment_link_id, status, tid, authorization, valor, origem_ref,
+      nsu, last4, installments, descricao, nome_cliente,
+      brand, brandName, cardBin, kind, dateTime, date, time,
+      // Campos Pix (cob dinâmica BTG via OB)
+      metodo, txid, end_to_end_id, endToEndId, pagador_nome, pagador_documento,
+    } = payload;
+
+    const isPix: boolean = metodo === "pix" || Boolean(txid);
+    const e2eId: string | null = end_to_end_id || endToEndId || null;
+
+    const brandFromPayload: string | null = brand || brandName || null;
+    const brandDerived: string | null = brandFromPayload ? null : resolveBrandFromBin(cardBin);
+    const bandeira: string | null = brandFromPayload || brandDerived;
+    const brandOrigem: string | null = brandFromPayload ? "webhook" : (brandDerived ? "derivado_bin" : null);
+    const redeDateTime: string | null = dateTime || null;
+    const redeDate: string | null = date || (redeDateTime ? redeDateTime.slice(0, 10) : null);
+    const redeTime: string | null = time || (redeDateTime ? redeDateTime.slice(11, 19) : null);
+
+    console.log("[payment-webhook] Received:", { payment_link_id, status, tid, nsu, txid, e2e: e2eId, metodo: isPix ? "pix" : "cartao", origem_ref, brand: bandeira, brand_origem: brandOrigem, kind, cardBin });
+    if (!payment_link_id) throw new Error("payment_link_id é obrigatório");
+
+    // Lookup direto por metadata (robusto, independe de volume) + fallback legado
+    let solicitacao: { id: string; metadata: unknown; contato_id: string | null; pipeline_coluna_id: string | null } | null = null;
+    const { data: direta } = await supabase
+      .from("solicitacoes")
+      .select("id, metadata, contato_id, pipeline_coluna_id")
+      .in("tipo", ["link_pagamento", "pix_pagamento"])
+      .eq("metadata->>payment_link_id", String(payment_link_id))
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    solicitacao = (direta as typeof solicitacao) || null;
+
+    if (!solicitacao) {
+      const { data: solicitacoes } = await supabase
+        .from("solicitacoes")
+        .select("id, metadata, contato_id, pipeline_coluna_id")
+        .in("tipo", ["link_pagamento", "pix_pagamento"])
+        .order("created_at", { ascending: false })
+        .limit(100);
+      solicitacao = ((solicitacoes || []).find((s: any) => {
+        const meta = s.metadata as Record<string, unknown> | null;
+        return meta?.payment_link_id === payment_link_id;
+      }) as typeof solicitacao) || null;
+    }
+
+    if (!solicitacao) {
+      console.warn("[payment-webhook] No solicitação found for payment_link_id:", payment_link_id);
+      return new Response(JSON.stringify({ received: true, processed: false, reason: "solicitacao_not_found" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let targetColunaNome: string | null = null;
+    if (status === "PAGO") targetColunaNome = isPix ? "Pix Pago" : "Link Pago";
+    else if (status === "CANCELADO" || status === "EXPIRADO") targetColunaNome = "Cancelado";
+
+    let colunaId: string | null = null;
+    if (targetColunaNome) {
+      const { data: financeiroSetor } = await supabase
+        .from("setores").select("id").eq("nome", "Financeiro").single();
+      if (financeiroSetor) {
+        const buscarColuna = async (nome: string) => {
+          const { data: coluna } = await supabase
+            .from("pipeline_colunas")
+            .select("id")
+            .eq("setor_id", financeiroSetor.id)
+            .eq("nome", nome)
+            .eq("ativo", true)
+            .maybeSingle();
+          return coluna?.id || null;
+        };
+        colunaId = await buscarColuna(targetColunaNome);
+        // Fallback: se "Pix Pago" ainda não existir no setor, usa "Link Pago"
+        if (!colunaId && targetColunaNome === "Pix Pago") {
+          targetColunaNome = "Link Pago";
+          colunaId = await buscarColuna("Link Pago");
+        }
+      }
+    }
+
+    const now = new Date();
+    const existingMeta = (solicitacao.metadata || {}) as Record<string, unknown>;
+
+    // Se já existe comprovante anexado pelo cliente, marca conciliação
+    let conciliadoComPrint = false;
+    try {
+      const { count } = await supabase
+        .from("solicitacao_anexos")
+        .select("id", { count: "exact", head: true })
+        .eq("solicitacao_id", solicitacao.id)
+        .eq("tipo", "comprovante_pagamento_cliente");
+      conciliadoComPrint = (count ?? 0) > 0;
+    } catch (_) { /* noop */ }
+
+    // Idempotência: se já processamos este tid como comprovante, não regrava nem duplica comentário
+    // Pix: usa e2e/txid como identificador do gateway (tid/nsu são de cartão).
+    const existingComprovante = (existingMeta.comprovante_pagamento || null) as Record<string, unknown> | null;
+    const gatewayId = tid || nsu || e2eId || txid || null;
+    const jaProcessado = !!(
+      status === "PAGO" &&
+      existingComprovante &&
+      gatewayId &&
+      existingComprovante.gateway_id === gatewayId
+    );
+
+    // Monta objeto estruturado do comprovante (lido pelo Messenger da loja)
+    const formaPag =
+      isPix             ? "pix"            :
+      kind === "credit" ? "cartao_credito" :
+      kind === "debit"  ? "cartao_debito"  :
+      (existingMeta.forma_pagamento as string) || "cartao";
+
+    const comprovantePagamento = status === "PAGO" ? {
+      pago_em: redeDateTime || now.toISOString(),
+      valor_pago: valor ? Number(valor) : null,
+      forma: formaPag,
+      nsu: nsu || null,
+      tid: tid || null,
+      txid: txid || null,
+      end_to_end_id: e2eId,
+      pagador_nome: pagador_nome || null,
+      pagador_documento: pagador_documento || null,
+      authorization: authorization || null,
+      last4: last4 || null,
+      installments: installments || null,
+      bandeira: bandeira,
+      kind: kind || null,
+      descricao: descricao || null,
+      gateway_id: gatewayId,
+    } : null;
+
+    const updatedMeta = {
+      ...existingMeta,
+      metodo: isPix ? "pix" : "cartao",
+      txid: txid || (existingMeta.txid as string) || null,
+      end_to_end_id: e2eId,
+      pagador_nome: pagador_nome || null,
+      pagador_documento: pagador_documento || null,
+      tid: tid || null,
+      authorization: authorization || null,
+      nsu: nsu || null,
+      last4: last4 || null,
+      installments: installments || null,
+      descricao: descricao || null,
+      nome_cliente: nome_cliente || null,
+      brand: bandeira,
+      brand_origem: brandOrigem,
+      card_bin: cardBin || null,
+      kind: kind || null,
+      rede_datetime: redeDateTime,
+      rede_date: redeDate,
+      rede_time: redeTime,
+      payment_status: status,
+      payment_confirmed_at: now.toISOString(),
+      ...(conciliadoComPrint && status === "PAGO" ? { conciliado_com_print: true } : {}),
+      ...(comprovantePagamento ? { comprovante_pagamento: comprovantePagamento } : {}),
+    };
+
+    const updateData: Record<string, unknown> = { metadata: updatedMeta };
+    if (colunaId) updateData.pipeline_coluna_id = colunaId;
+    if (status === "PAGO") updateData.status = "concluida";
+
+    await supabase.from("solicitacoes").update(updateData).eq("id", solicitacao.id);
+
+    // Espelha em pagamentos_link (fonte de verdade financeira)
+    try {
+      const newStatus = status === "PAGO" ? "pago"
+                      : status === "CANCELADO" ? "estornado"
+                      : status === "EXPIRADO" ? "expirado"
+                      : "enviado";
+      const phone = String(existingMeta.cliente_whatsapp || "").replace(/\D/g, "");
+      let contatoIdResolved: string | null = solicitacao.contato_id || null;
+      if (!contatoIdResolved && phone) {
+        const { data: c } = await supabase.from("contatos").select("id").eq("telefone", phone).maybeSingle();
+        contatoIdResolved = c?.id || null;
+      }
+      await supabase.from("pagamentos_link").upsert({
+        payment_link_id,
+        solicitacao_id: solicitacao.id,
+        contato_id: contatoIdResolved,
+        loja_nome: (existingMeta.alias_loja as string)?.replace(/^DINIZ\s+/i, "Diniz ") || null,
+        cod_empresa: existingMeta.cod_empresa as string || null,
+        alias_loja: existingMeta.alias_loja as string || null,
+        cliente_nome: nome_cliente || existingMeta.cliente as string || null,
+        cliente_telefone: phone || null,
+        valor: valor ? Number(valor) : (existingMeta.valor ? Number(String(existingMeta.valor).replace(/[^0-9.]/g,"")) : null),
+        parcelas: installments || (existingMeta.parcelas ? Number(existingMeta.parcelas) : null),
+        descricao: descricao || existingMeta.descricao as string || null,
+        status: newStatus,
+        metodo: isPix ? "pix" : "cartao",
+        pix_txid: txid || (existingMeta.txid as string) || null,
+        pix_e2e_id: e2eId,
+        pix_pago_at: isPix && status === "PAGO" ? (redeDateTime || now.toISOString()) : null,
+        pagador_nome: pagador_nome || null,
+        pagador_documento: pagador_documento || null,
+        pix_copia_cola: (existingMeta.pix_copia_cola as string) || null,
+        pix_expira_at: (existingMeta.expira_em as string) || null,
+        tid: tid || null,
+        nsu: nsu || null,
+        authorization_code: authorization || null,
+        last4: last4 || null,
+        link_url: existingMeta.url as string || null,
+        pago_at: status === "PAGO" ? (redeDateTime || now.toISOString()) : null,
+        enviado_at: existingMeta.enviado_at as string || null,
+        metadata: updatedMeta,
+      }, { onConflict: "payment_link_id" });
+    } catch (mirrorErr) {
+      console.error("[payment-webhook] Failed mirror pagamentos_link:", mirrorErr);
+    }
+
+    const nsuLabel = nsu ? ` | NSU: ${nsu}` : "";
+    await supabase.from("eventos_crm").insert({
+      contato_id: solicitacao.contato_id,
+      tipo: status === "PAGO" ? "pagamento_confirmado" : "pagamento_status_atualizado",
+      descricao: status === "PAGO"
+        ? (isPix
+            ? `Pagamento Pix confirmado. TXID: ${txid || "N/A"}${e2eId ? ` | E2E: ${e2eId}` : ""} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`
+            : `Pagamento confirmado via link. TID: ${tid || "N/A"}${nsuLabel} | Valor: R$ ${valor ? Number(valor).toFixed(2) : "N/A"}`)
+        : `Status ${isPix ? "do Pix" : "do link"} atualizado para ${status}`,
+      referencia_tipo: "solicitacao",
+      referencia_id: solicitacao.id,
+      metadata: { payment_link_id, metodo: isPix ? "pix" : "cartao", txid: txid || null, end_to_end_id: e2eId, tid, nsu, status, authorization, valor, last4, installments, brand: bandeira, card_bin: cardBin || null, kind: kind || null, rede_datetime: redeDateTime },
+    });
+
+    // Comprovante entregue DENTRO da própria SOL (Messenger da loja lê
+    // solicitacoes.metadata.comprovante_pagamento + solicitacao_comentarios).
+    // Não criamos mais demandas_loja no caminho feliz.
+    if (status === "PAGO" && !jaProcessado) {
+      try {
+        const dateStr = redeDate
+          ? redeDate.split("-").reverse().join("/")
+          : now.toLocaleDateString("pt-BR");
+        const timeStr = redeTime
+          ? redeTime.slice(0, 5)
+          : now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const clienteName = nome_cliente || "N/A";
+        const valorFmt = valor ? `R$ ${Number(valor).toFixed(2)}` : "N/A";
+        const descFmt = descricao || "";
+        const nsuFmt = nsu || "N/A";
+        const tidFmt = tid || "N/A";
+        const authFmt = authorization || "N/A";
+        const last4Fmt = last4 || "****";
+        const installmentsFmt = installments || 1;
+        const kindLabel = kind === "credit" ? "Crédito" : kind === "debit" ? "Débito" : "";
+        const cartaoLinha = [bandeira, kindLabel].filter(Boolean).join(" ").trim();
+
+        let receiptMsg: string;
+        if (isPix) {
+          const pagadorLinha = [pagador_nome, pagador_documento].filter(Boolean).join(" — ");
+          receiptMsg = `📩 *Comprovante de pagamento Pix — ${clienteName}*\n\n`;
+          receiptMsg += `✅ *Pagamento Pix Confirmado!*\n`;
+          receiptMsg += `💰 Valor: ${valorFmt}\n`;
+          if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
+          receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
+          receiptMsg += `🔑 *TXID: ${txid || "N/A"}*\n`;
+          receiptMsg += `   ↳ Use para baixa no sistema\n`;
+          receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
+          if (e2eId) receiptMsg += `🆔 E2E: ${e2eId}\n`;
+          if (pagadorLinha) receiptMsg += `👤 Pagador: ${pagadorLinha}\n`;
+          receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
+          receiptMsg += `💠 Pix (BTG) — confirmação automática`;
+        } else {
+          receiptMsg = `📩 *Comprovante de pagamento — ${clienteName}*\n\n`;
+          receiptMsg += `✅ *Pagamento Confirmado!*\n`;
+          receiptMsg += `💰 Valor: ${valorFmt}\n`;
+          if (descFmt) receiptMsg += `📋 ${descFmt}\n`;
+          receiptMsg += `\n━━━━━━━━━━━━━━━━━━\n`;
+          receiptMsg += `🔑 *NSU: ${nsuFmt}*\n`;
+          receiptMsg += `   ↳ Use para baixa no sistema\n`;
+          receiptMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
+          receiptMsg += `🆔 TID: ${tidFmt}\n`;
+          receiptMsg += `🔐 Autorização: ${authFmt}\n`;
+          receiptMsg += `📅 ${dateStr} às ${timeStr}\n`;
+          receiptMsg += `💳 ${cartaoLinha ? `${cartaoLinha} ` : ""}**** ${last4Fmt} — ${installmentsFmt}x`;
+        }
+
+        // 1) Comentário na thread da SOL — Messenger renderiza junto do diálogo com o setor.
+        //    Idempotente por gateway_id no metadata do comentário.
+        const { data: comentExistente } = await supabase
+          .from("solicitacao_comentarios")
+          .select("id")
+          .eq("solicitacao_id", solicitacao.id)
+          .contains("metadata", { origem: "payment-webhook", gateway_id: gatewayId })
+          .maybeSingle();
+
+        if (!comentExistente) {
+          await supabase.from("solicitacao_comentarios").insert({
+            solicitacao_id: solicitacao.id,
+            tipo: "retorno_setor",
+            autor_nome: "Pagamento",
+            conteudo: receiptMsg,
+            metadata: {
+              origem: "payment-webhook",
+              gateway_id: gatewayId,
+              payment_link_id,
+              nsu,
+              tid,
+              valor: valor ? Number(valor) : null,
+              forma: formaPag,
+            },
+          });
+        }
+
+        // 2) Push/notificações para os usuários da loja.
+        const lojaNome = ((existingMeta.alias_loja as string) || (existingMeta.loja_nome as string) || "Loja").trim();
+        const { data: dests } = await supabase
+          .rpc("resolver_destinatarios_loja", { _loja_nome: lojaNome });
+        const list = (dests || []) as Array<{ user_id: string; setor_id: string | null }>;
+
+        for (const d of list) {
+          await supabase.from("notificacoes").insert({
+            usuario_id: d.user_id,
+            setor_id: d.setor_id,
+            tipo: "comprovante_pagamento",
+            titulo: isPix ? `💠 Pix confirmado — ${clienteName}` : `💳 Pagamento confirmado — ${clienteName}`,
+            mensagem: isPix ? `Valor ${valorFmt} | TXID ${txid || "N/A"}` : `Valor ${valorFmt} | NSU ${nsuFmt}`,
+            referencia_id: solicitacao.id,
+          });
+        }
+
+        console.log(`[payment-webhook] Comprovante gravado em SOL ${solicitacao.id} + ${list.length} notificação(ões) para loja "${lojaNome}"`);
+      } catch (notifyErr) {
+        console.error("[payment-webhook] Failed to write comprovante into SOL:", notifyErr);
+      }
+    } else if (jaProcessado) {
+      console.log(`[payment-webhook] Duplicado ignorado (gateway_id=${gatewayId} já processado em SOL ${solicitacao.id})`);
+    }
+
+    console.log("[payment-webhook] Solicitação updated:", solicitacao.id, "→", targetColunaNome);
+
+    return new Response(JSON.stringify({
+      received: true, processed: true, solicitacao_id: solicitacao.id, coluna: targetColunaNome,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  } catch (e) {
+    console.error("[payment-webhook] Error:", e);
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
