@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
 import PipelineFinanceiro from "./pages/PipelineFinanceiro";
+import MesaFinanceiro from "./pages/MesaFinanceiro";
 import PagamentosLink from "./pages/PagamentosLink";
 import PipelineAgendamentos from "./pages/PipelineAgendamentos";
 import PipelineTI from "./pages/PipelineTI";
@@ -53,7 +54,9 @@ const App = () => (
               <Route path="/crm/conversas" element={<Atendimentos />} />
               <Route path="/crm/contatos" element={<Contatos />} />
               <Route path="/crm/contatos/:id" element={<ContatoDetalhe />} />
-              <Route path="/financeiro" element={<PipelineFinanceiro />} />
+              <Route path="/financeiro" element={<MesaFinanceiro />} />
+              {/* Rota escondida: kanban antigo (sem entrada de menu) */}
+              <Route path="/financeiro/kanban" element={<PipelineFinanceiro />} />
               <Route path="/financeiro/pagamentos" element={<PagamentosLink />} />
               <Route path="/lojas" element={<PipelineAgendamentos />} />
               <Route path="/ti" element={<PipelineTI />} />
