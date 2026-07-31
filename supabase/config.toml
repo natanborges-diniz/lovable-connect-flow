@@ -101,3 +101,6 @@ verify_jwt = false
 
 [functions.audit-ia-auto]
 verify_jwt = false
+
+[functions.renovar-cobranca-v1]
+verify_jwt = false
