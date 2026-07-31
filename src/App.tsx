@@ -22,6 +22,7 @@ import Mensagens from "./pages/Mensagens";
 import ReguaNovaVenda from "./pages/ReguaNovaVenda";
 import CashbackAuditoria from "./pages/CashbackAuditoria";
 import CashbackDashboard from "./pages/CashbackDashboard";
+import FunilDashboard from "./pages/FunilDashboard";
 import RelatorioDisparos from "./pages/RelatorioDisparos";
 
 import Demandas from "./pages/Demandas";
@@ -50,6 +51,7 @@ const App = () => (
             <Route path="/somente-messenger" element={<ProtectedRoute><SomenteMessenger /></ProtectedRoute>} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/funil" element={<FunilDashboard />} />
               <Route path="/crm" element={<Pipeline />} />
               <Route path="/crm/conversas" element={<Atendimentos />} />
               <Route path="/crm/contatos" element={<Contatos />} />

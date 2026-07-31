@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, ListTodo, Settings,
   Kanban, DollarSign, CalendarDays,
   Brain, Building2, Store, Zap, MessageSquare, Monitor, Timer, LifeBuoy, Headset, Pin, ShieldAlert, Package,
-  ChevronLeft, ChevronRight, BarChart3, Gift, ShieldCheck, PlusCircle
+  ChevronLeft, ChevronRight, BarChart3, Gift, ShieldCheck, PlusCircle, Filter
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NavLink } from "@/components/NavLink";
@@ -42,6 +42,7 @@ const moduleMenus: Record<ModuleKey, MenuSection[]> = {
       label: "Visão Geral",
       items: [
         { title: "Dashboard", url: "/", icon: LayoutDashboard },
+        { title: "Funil de Vendas", url: "/funil", icon: Filter },
       ],
     },
   ],
