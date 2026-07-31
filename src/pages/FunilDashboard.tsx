@@ -29,12 +29,16 @@ interface EtapaFunil { etapa: string; n: number; valor?: number }
 interface LojaRow {
   loja: string; agendados: number; compareceram: number; no_show: number;
   vendas: number; valor_vendas: number; pct_comparecimento: number; pct_conversao_visita: number;
+  // v2: separa o no-show real do "loja não informou nada" (data já passada, sem resposta)
+  vencidos?: number; sem_registro?: number; no_show_total?: number; pct_falta_total?: number;
 }
 interface FonteRow { fonte: string; contatos: number; qualificados: number; agendaram: number; venderam: number; valor: number }
 interface SerieRow { dia: string; contatos: number; agendamentos: number; vendas: number; valor: number }
 interface FunilKpis {
   contatos: number; vendas: number; valor_vendas: number; ticket_medio: number;
   conv_geral_pct: number; no_show_pct: number; faturamento_validado: number;
+  // v2
+  no_show?: number; sem_registro?: number; falta_total_pct?: number;
 }
 interface FunilDashboardData {
   funil: EtapaFunil[];
@@ -426,7 +430,16 @@ export default function FunilDashboard() {
             <Kpi title="Conversão geral" value={fmtPct(k!.conv_geral_pct)} hint="contato → venda" tone={Number(k!.conv_geral_pct) >= 10 ? "ok" : "warn"} />
             <Kpi title="Valor vendido (funil)" value={fmtBRL(k!.valor_vendas)} />
             <Kpi title="Ticket médio" value={fmtBRL(k!.ticket_medio)} />
-            <Kpi title="No-show" value={fmtPct(k!.no_show_pct)} hint="agendou e não compareceu" tone={Number(k!.no_show_pct) > 20 ? "bad" : "warn"} />
+            <Kpi
+              title="No-show + sem registro"
+              value={fmtPct(k!.falta_total_pct ?? k!.no_show_pct)}
+              hint={
+                k!.sem_registro != null
+                  ? `${fmtN(k!.no_show ?? 0)} no-show real · ${fmtN(k!.sem_registro)} sem resposta da loja`
+                  : "agendou e não compareceu"
+              }
+              tone={Number(k!.falta_total_pct ?? k!.no_show_pct) > 30 ? "bad" : "warn"}
+            />
             <Kpi
               title="Faturamento validado (ERP)"
               value={fmtBRL(k!.faturamento_validado)}
@@ -584,6 +597,8 @@ export default function FunilDashboard() {
                       <SortableHead label="Compareceram" colKey="compareceram" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="% Comparec." colKey="pct_comparecimento" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="No-show" colKey="no_show" sort={sort} onSort={onSort} className="text-right" />
+                      <SortableHead label="Sem registro" colKey="sem_registro" sort={sort} onSort={onSort} className="text-right" />
+                      <SortableHead label="% Falta total" colKey="pct_falta_total" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="Vendas" colKey="vendas" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="% Visita→Venda" colKey="pct_conversao_visita" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="Valor" colKey="valor_vendas" sort={sort} onSort={onSort} className="text-right" />
@@ -592,7 +607,7 @@ export default function FunilDashboard() {
                   <TableBody>
                     {lojasOrdenadas.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center text-muted-foreground py-6">Sem dados no período</TableCell>
+                        <TableCell colSpan={10} className="text-center text-muted-foreground py-6">Sem dados no período</TableCell>
                       </TableRow>
                     )}
                     {lojasOrdenadas.map((r) => (
@@ -607,6 +622,14 @@ export default function FunilDashboard() {
                           <Badge variant={Number(r.no_show) > 0 ? "destructive" : "outline"} className="text-[11px]">
                             {fmtN(r.no_show)}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-right text-xs">
+                          <Badge variant={Number(r.sem_registro ?? 0) > 0 ? "secondary" : "outline"} className="text-[11px]" title="Agendamentos com data já passada em que a loja não marcou nem comparecimento nem falta">
+                            {fmtN(r.sem_registro ?? 0)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className={`text-right text-xs ${Number(r.pct_falta_total ?? 0) > 50 ? "text-red-600 font-medium" : ""}`}>
+                          {r.pct_falta_total != null ? fmtPct(r.pct_falta_total) : "—"}
                         </TableCell>
                         <TableCell className="text-right text-xs">{fmtN(r.vendas)}</TableCell>
                         <TableCell className={`text-right text-xs ${clsVsMedia(r.pct_conversao_visita, mediaConvVisita)}`}>
