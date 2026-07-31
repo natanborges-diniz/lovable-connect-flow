@@ -285,7 +285,20 @@ export default function MesaFinanceiro() {
     return map;
   }, [colunas]);
 
-  const stageOf = (sol: any): Stage => stageOfColuna(colunaById.get(sol.pipeline_coluna_id) ?? null);
+  const stageOf = (sol: any): Stage => {
+    const porColuna = stageOfColuna(colunaById.get(sol.pipeline_coluna_id) ?? null);
+    // Fluxos 100% automáticos (link cartão e Pix) nunca "requerem ação" do
+    // operador: se a coluna não mapear para um estágio conhecido (ex.: card
+    // antigo em "Novo"), eles ficam em Aguardando pagamento — ou encerrados,
+    // conforme o status da solicitação.
+    const TIPOS_AUTOMATICOS = ["link_pagamento", "pix_pagamento"];
+    if (porColuna === "REQUER_ACAO" && TIPOS_AUTOMATICOS.includes(sol.tipo)) {
+      if (sol.status === "concluida") return "CONCLUIDO";
+      if (sol.status === "cancelada") return "CANCELADO";
+      return "AGUARDANDO_PAGAMENTO";
+    }
+    return porColuna;
+  };
 
   // Base (respeita só o toggle de arquivados) — usada nos KPIs
   const baseSolicitacoes = useMemo(
