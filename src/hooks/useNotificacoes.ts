@@ -17,7 +17,14 @@ export function useNotificacoes() {
         .order("created_at", { ascending: false })
         .limit(200);
       if (error) throw error;
-      return data as Array<{
+      // A RLS libera leitura por setor, então sem este filtro cada pessoa
+      // vê também as CÓPIAS dos colegas (1 notificação por membro do setor
+      // = N linhas idênticas no painel). Mostramos apenas: as do próprio
+      // usuário + broadcasts de setor sem dono (usuario_id nulo).
+      const minhas = (data || []).filter(
+        (n: { usuario_id: string | null }) => !n.usuario_id || n.usuario_id === user!.id
+      );
+      return minhas as Array<{
         id: string;
         usuario_id: string | null;
         setor_id: string | null;
