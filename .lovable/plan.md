@@ -1,65 +1,25 @@
-# Fila humana não recebe cards escalados a partir de modo=ponte
+# Régua de links/Pix pendentes
 
-## Diagnóstico (confirmado no banco)
+Aplicar a migration `20260731210000_regua_links_pendentes.sql` exatamente como está no repositório, sem alterar nenhum arquivo.
 
-Caso Cairo (contato `ea2c593f…`, atendimento `5d6ccfa5…`):
-- Cliente digitou **"Quero falar com atendente"** às 14:40:08.
-- Atendimento está em `modo = 'ponte'`, sem `atendente_user_id`, sem `atendente_nome`.
-- A fila humana em `src/pages/Pipeline.tsx` (linha 397) filtra por `at?.modo === "humano"` → card não aparece.
+## O que ela faz
 
-Causa raiz em `supabase/functions/ai-triage/index.ts`:
+- **Fase 1 — lembrete (4h a 24h sem pagamento):** comentário automático na solicitação (visível no Messenger) + notificação para os usuários da loja, uma única vez.
+- **Fase 2 — expiração (após 24h ou `expira_em` vencido):** solicitação vira `cancelada`, vai para a coluna Cancelado do Financeiro, é arquivada, o `pagamentos_link` vira `expirado`, e a loja é avisada para gerar nova cobrança se necessário.
+- **Agendamento:** `pg_cron` de hora em hora, no minuto 10.
 
-```text
-linha 3285: if (atendimento.modo === "ponte") { return skipped; }
-linha 3405: if (matchesEscalation(currentMsg)) { handleEscalation(...) }
-```
+## Verificações já feitas
 
-O router de escalada (`matchesEscalation` → `handleEscalation`, que faz `UPDATE modo='humano'`) fica **depois** do skip de ponte. Toda mensagem em modo ponte é descartada antes de checar palavras-chave de escalada. Resultado: `modo` permanece `ponte` para sempre.
+- `resolver_destinatarios_loja` existe.
+- Colunas usadas existem (`pagamentos_link.expirado_at/status/solicitacao_id`, `solicitacao_comentarios`, `notificacoes`).
+- Coluna "Cancelado" do setor Financeiro existe e está ativa.
+- A função `regua_links_pendentes` ainda não existe e o job `regua-links-pendentes` ainda não está agendado.
 
-## Correção
+## Atenção — impacto na primeira execução
 
-Adicionar um **pre-router de escalada** logo antes dos skips de `humano`/`ponte` em `ai-triage/index.ts` (por volta da linha 3141, antes do bloco "PRE-ROUTER: Retomar IA quando cliente digita receita após escalada"):
+Hoje há **39 cobranças** em aberto com mais de 24h que serão canceladas/arquivadas e **1** que receberá lembrete já na primeira rodada (dentro de até 1 hora). Isso é o comportamento pretendido da régua, mas é uma limpeza retroativa em massa. Se preferir, posso rodar a migration e só depois agendar o cron, ou fazer a primeira limpeza de forma controlada.
 
-```ts
-{
-  const _msgEsc = String(mensagem_texto || "").trim();
-  if (_msgEsc
-      && (atendimento.modo === "ponte" || atendimento.modo === "hibrido")
-      && matchesEscalation(_msgEsc)) {
-    const { data: _ct } = await supabase
-      .from("contatos").select("nome")
-      .eq("id", contato_id || atendimento.contato_id).maybeSingle();
-    const _prim = (_ct?.nome || "").trim().split(/\s+/)[0] || "";
-    return await handleEscalation(
-      supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-      atendimento_id, contato_id || atendimento.contato_id,
-      _msgEsc, "keyword_pre_ponte", _prim,
-    );
-  }
-}
-```
+## Passos
 
-`handleEscalation` já:
-- envia mensagem canônica ao cliente (ou aviso fora do expediente),
-- faz `UPDATE atendimentos SET modo='humano'`,
-- dispara `summarize-atendimento`,
-- registra `eventos_crm.tipo='escalonamento_humano'`.
-
-Com isso, o card entra imediatamente na "Fila de Atendimento Humano" do CRM.
-
-## Saneamento do caso Cairo
-
-Rodar 1x manualmente:
-
-```sql
-UPDATE atendimentos SET modo='humano'
- WHERE id='5d6ccfa5-8e68-4cfd-b34e-4ee18b4e75f6';
-```
-
-Não é preciso reenviar mensagem — o cliente já recebeu "Vou te conectar com um Consultor…" às 14:42.
-
-## Fora de escopo (mantido igual)
-
-- Não altero o filtro do `Pipeline.tsx` — a fila é `modo=humano` por design (ponte = operador atende via app externo, não deve poluir a fila).
-- Não altero `handleEscalation`.
-- Não mexo em outros modos (`ia` continua caindo no router original da linha 3405; `humano` continua no bloco de retomada por receita).
+1. Executar a migration completa (função + `cron.schedule`).
+2. Confirmar que a função foi criada e o job `regua-links-pendentes` está ativo em `cron.job`.
