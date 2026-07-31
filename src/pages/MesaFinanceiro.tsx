@@ -365,14 +365,18 @@ export default function MesaFinanceiro() {
     g.CONCLUIDO.sort(newestFirst);
     g.CANCELADO.sort(newestFirst);
 
-    // Encerrados: por padrão só os de hoje; com o switch ligado mostra tudo carregado
-    if (!mostrarEncerrados) {
+    // Encerrados: por padrão só os de hoje; com o switch ligado mostra tudo.
+    // Exceção: quando há busca/filtro ativo, o usuário está PROCURANDO algo —
+    // mostramos tudo que casa, inclusive encerrados antigos (senão "Consulta
+    // CPF" aprovada ontem, por exemplo, some do resultado e parece bug).
+    const filtroAtivo = search.trim() !== "" || tipoFilter !== "todos" || lojaFilter !== "todas";
+    if (!mostrarEncerrados && !filtroAtivo) {
       g.CONCLUIDO = g.CONCLUIDO.filter((s: any) => isToday(refDate(s)));
       g.CANCELADO = g.CANCELADO.filter((s: any) => isToday(refDate(s)));
     }
     return g;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, mostrarEncerrados, colunaById]);
+  }, [filtered, mostrarEncerrados, search, tipoFilter, lojaFilter, colunaById]);
 
   const selected = useMemo(() => {
     if (!selectedId) return null;
