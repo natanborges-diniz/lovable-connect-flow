@@ -31,6 +31,8 @@ interface LojaRow {
   vendas: number; valor_vendas: number; pct_comparecimento: number; pct_conversao_visita: number;
   // v2: separa o no-show real do "loja não informou nada" (data já passada, sem resposta)
   vencidos?: number; sem_registro?: number; no_show_total?: number; pct_falta_total?: number;
+  // v4: a linha soma o total (futuros + cancel/reag + compareceram + no-show + sem registro)
+  futuros?: number; cancel_reag?: number;
 }
 interface FonteRow { fonte: string; contatos: number; qualificados: number; agendaram: number; venderam: number; valor: number }
 interface SerieRow { dia: string; contatos: number; agendamentos: number; vendas: number; valor: number }
@@ -39,6 +41,8 @@ interface FunilKpis {
   conv_geral_pct: number; no_show_pct: number; faturamento_validado: number;
   // v2
   no_show?: number; sem_registro?: number; falta_total_pct?: number;
+  // v4
+  vencidos?: number; futuros?: number; cancel_reag?: number;
 }
 interface FunilDashboardData {
   funil: EtapaFunil[];
@@ -435,7 +439,7 @@ export default function FunilDashboard() {
               value={fmtPct(k!.falta_total_pct ?? k!.no_show_pct)}
               hint={
                 k!.sem_registro != null
-                  ? `${fmtN(k!.no_show ?? 0)} no-show real · ${fmtN(k!.sem_registro)} sem resposta da loja`
+                  ? `${fmtN(k!.no_show ?? 0)} no-show real · ${fmtN(k!.sem_registro)} sem resposta da loja${k!.vencidos != null ? ` · sobre ${fmtN(k!.vencidos)} vencidas` : ""}`
                   : "agendou e não compareceu"
               }
               tone={Number(k!.falta_total_pct ?? k!.no_show_pct) > 30 ? "bad" : "warn"}
@@ -585,7 +589,8 @@ export default function FunilDashboard() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Desempenho por loja</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Verde/vermelho: percentual acima/abaixo da média das lojas ({fmtPct(mediaComparecimento)} comparecimento · {fmtPct(mediaConvVisita)} conversão visita→venda).
+                  Taxas calculadas sobre as visitas <strong>vencidas</strong> (data já passada) — futuros ficam de fora.
+                  Verde/vermelho: acima/abaixo da média das lojas ({fmtPct(mediaComparecimento)} comparecimento · {fmtPct(mediaConvVisita)} conversão visita→venda).
                 </p>
               </CardHeader>
               <CardContent className="overflow-x-auto">
@@ -594,6 +599,8 @@ export default function FunilDashboard() {
                     <TableRow>
                       <SortableHead label="Loja" colKey="loja" sort={sort} onSort={onSort} />
                       <SortableHead label="Agendados" colKey="agendados" sort={sort} onSort={onSort} className="text-right" />
+                      <SortableHead label="Futuros" colKey="futuros" sort={sort} onSort={onSort} className="text-right" />
+                      <SortableHead label="Cancel/Reag" colKey="cancel_reag" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="Compareceram" colKey="compareceram" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="% Comparec." colKey="pct_comparecimento" sort={sort} onSort={onSort} className="text-right" />
                       <SortableHead label="No-show" colKey="no_show" sort={sort} onSort={onSort} className="text-right" />
@@ -607,13 +614,15 @@ export default function FunilDashboard() {
                   <TableBody>
                     {lojasOrdenadas.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={10} className="text-center text-muted-foreground py-6">Sem dados no período</TableCell>
+                        <TableCell colSpan={12} className="text-center text-muted-foreground py-6">Sem dados no período</TableCell>
                       </TableRow>
                     )}
                     {lojasOrdenadas.map((r) => (
                       <TableRow key={r.loja}>
                         <TableCell className="text-xs font-medium">{r.loja}</TableCell>
                         <TableCell className="text-right text-xs">{fmtN(r.agendados)}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground" title="Visitas com data ainda no futuro — fora das taxas">{fmtN(r.futuros ?? 0)}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground" title="Cancelados ou reagendados — desfecho conhecido, fora das taxas de falta">{fmtN(r.cancel_reag ?? 0)}</TableCell>
                         <TableCell className="text-right text-xs">{fmtN(r.compareceram)}</TableCell>
                         <TableCell className={`text-right text-xs ${clsVsMedia(r.pct_comparecimento, mediaComparecimento)}`}>
                           {fmtPct(r.pct_comparecimento)}
