@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import {
   Plus, Search, Clock, CreditCard, FileText, DollarSign, ShieldCheck,
   Archive, ArchiveRestore, Pencil, ChevronDown, Inbox, Store, CheckCircle2,
-  XCircle, AlertTriangle, Hourglass, ArrowRightLeft, KanbanSquare, Phone,
+  XCircle, AlertTriangle, Hourglass, ArrowRightLeft, KanbanSquare, Phone, X,
 } from "lucide-react";
 
 // Componentes compartilhados (reuso integral — mesmos do PipelineFinanceiro)
@@ -46,9 +46,12 @@ import { useAuth } from "@/hooks/useAuth";
 
 type Stage = "REQUER_ACAO" | "AGUARDANDO_LOJA" | "AGUARDANDO_PAGAMENTO" | "CONCLUIDO" | "CANCELADO";
 
-const NOMES_CONCLUIDO = ["Pago", "Link Pago", "Pix Pago", "PIX Confirmado", "Consulta CPF Aprovado", "Concluído"];
+// "Boleto Enviado" conta como CONCLUÍDO: sem confirmação automática de boleto,
+// a tarefa do setor é criar e enviar — enviado, está cumprida (não fica
+// pendurada em "Aguardando pagamento" para sempre).
+const NOMES_CONCLUIDO = ["Pago", "Link Pago", "Pix Pago", "PIX Confirmado", "Consulta CPF Aprovado", "Concluído", "Boleto Enviado"];
 const NOMES_CANCELADO = ["Cancelado", "PIX Não Confirmado", "Consulta CPF Reprovada", "Estorno Solicitado"];
-const NOMES_AGUARDANDO_PAGAMENTO = ["Link Enviado", "Aguardando Pagamento", "Pix Enviado", "Boleto Enviado"];
+const NOMES_AGUARDANDO_PAGAMENTO = ["Link Enviado", "Aguardando Pagamento", "Pix Enviado"];
 const NOMES_AGUARDANDO_LOJA = ["Dados Incompletos"];
 
 const norm = (s: string) => s.trim().toLowerCase();
@@ -593,6 +596,11 @@ export default function MesaFinanceiro() {
                                 selected={sol.id === selectedId}
                                 showStaleBadge={showStaleBadge}
                                 onSelect={() => handleSelect(sol)}
+                                onCancelar={
+                                  sol.status !== "concluida" && sol.status !== "cancelada"
+                                    ? () => setCancelDialogId(sol.id)
+                                    : undefined
+                                }
                               />
                             ))}
                           </ul>
@@ -863,13 +871,14 @@ function KpiCard({ label, value, sub, tone }: { label: string; value: string; su
 /* ------------------------------------------------------------------ */
 
 function FilaItem({
-  sol, coluna, selected, showStaleBadge, onSelect,
+  sol, coluna, selected, showStaleBadge, onSelect, onCancelar,
 }: {
   sol: any;
   coluna: PipelineColuna | null;
   selected: boolean;
   showStaleBadge: boolean;
   onSelect: () => void;
+  onCancelar?: () => void;
 }) {
   const horas = horasParado(sol);
   const staleCls = horas > 24
@@ -900,6 +909,19 @@ function FilaItem({
           <span className="flex-1" />
           {valor != null && (
             <span className="text-xs font-semibold shrink-0">{brl(valor)}</span>
+          )}
+          {onCancelar && (
+            <span
+              role="button"
+              tabIndex={0}
+              title="Cancelar solicitação"
+              aria-label="Cancelar solicitação"
+              onClick={(e) => { e.stopPropagation(); onCancelar(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onCancelar(); } }}
+              className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-red-600 hover:bg-red-500/10 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
