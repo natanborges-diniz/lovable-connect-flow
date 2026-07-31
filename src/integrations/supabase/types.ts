@@ -3603,6 +3603,15 @@ export type Database = {
         }
         Returns: undefined
       }
+      funil_dashboard: {
+        Args: {
+          _ate: string
+          _de: string
+          _fontes?: string[]
+          _lojas?: string[]
+        }
+        Returns: Json
+      }
       get_menu_opcoes_para_cargo:
         | {
             Args: { _cargo: string; _parent_id: string; _tipo_bot: string }
