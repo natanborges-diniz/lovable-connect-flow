@@ -852,19 +852,23 @@ serve(async (req) => {
         }
 
         if (semAtendente && teveRetomadaRecente && !humanoJaRespondeu) {
+          // Consultoria Jul/2026: modo híbrido REMOVIDO. Handoff abandonado +
+          // cliente respondeu ao template → devolve o lead à IA de forma
+          // explícita (modo='ia'). A trava anti-conflito do ai-triage cobre a
+          // corrida com operador que responda logo em seguida.
           await supabase.from("atendimentos").update({
-            modo: "hibrido",
+            modo: "ia",
             metadata: { ...(atFull?.metadata as any || {}), recuperacao_humano: null },
             updated_at: new Date().toISOString(),
           }).eq("id", atendimentoId);
-          atendimentoModo = "hibrido"; // cai no branch da IA logo abaixo
+          atendimentoModo = "ia"; // cai no branch da IA logo abaixo
           await supabase.from("eventos_crm").insert({
             contato_id: contato.id,
             tipo: "reativacao_ia_pos_retomada",
-            descricao: "Cliente respondeu após template de retomada — IA reativada (modo híbrido)",
+            descricao: "Cliente respondeu após template de retomada — atendimento devolvido à IA",
             metadata: { template_anterior: recH?.template_usado, topico: recH?.topico },
           });
-          console.log(`[REATIVACAO-IA] ${contato.id}: humano órfão → híbrido após resposta a ${recH?.template_usado || "retomada"}`);
+          console.log(`[REATIVACAO-IA] ${contato.id}: humano órfão → IA após resposta a ${recH?.template_usado || "retomada"}`);
         } else if (recH?.tentativas) {
           // Cliente respondeu mas há atendente humano ativo (ou já houve resposta
           // humana manual): apenas zera o contador pra próxima vez que ficar em
@@ -914,7 +918,7 @@ serve(async (req) => {
           media_url: storedMediaUrl,
         }).catch((e) => console.error("Bridge mensageria failed:", e))
       );
-    } else if (atendimentoModo === "ia" || atendimentoModo === "hibrido") {
+    } else if (atendimentoModo === "ia") {
       runInBackground(
         triggerAiTriage(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimentoId, contato.id, phone, text, {
           tipo_conteudo: tipoConteudo,

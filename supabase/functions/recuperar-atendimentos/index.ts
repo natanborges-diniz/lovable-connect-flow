@@ -175,10 +175,19 @@ async function escalarHumano(
   row: { atendimento_id: string; contato_id: string; setor_id: string | null },
   mensagemDesculpas: string | null,
 ) {
-  // Atualiza modo=humano
+  // Atualiza modo=humano — preservando o metadata existente (Consultoria Jul/2026:
+  // antes sobrescrevia o objeto inteiro e apagava resumo_ia, receita_pending etc.)
+  const { data: atMetaRow } = await supabase
+    .from("atendimentos")
+    .select("metadata")
+    .eq("id", row.atendimento_id)
+    .maybeSingle();
   await supabase
     .from("atendimentos")
-    .update({ modo: "humano", metadata: { recuperacao_orfao_at: new Date().toISOString() } })
+    .update({
+      modo: "humano",
+      metadata: { ...((atMetaRow?.metadata as Record<string, unknown>) || {}), recuperacao_orfao_at: new Date().toISOString() },
+    })
     .eq("id", row.atendimento_id);
 
   // Sobe prioridade na solicitacao

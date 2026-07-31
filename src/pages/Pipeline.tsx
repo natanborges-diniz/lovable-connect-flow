@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/select";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
-  MessageSquare, Send, Loader2, Sparkles, FileText, AlertTriangle, RefreshCw, Image as ImageIcon, ExternalLink,
+  MessageSquare, Send, Loader2, FileText, AlertTriangle, RefreshCw, Image as ImageIcon, ExternalLink,
   Pin, Paperclip, Glasses, CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -96,12 +96,22 @@ export default function Pipeline() {
   const { data: atendimentosAtivos } = useQuery({
     queryKey: ["atendimentos_modos"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("atendimentos")
-        .select("id, contato_id, modo, status")
-        .neq("status", "encerrado");
-      if (error) throw error;
-      return data as { id: string; contato_id: string; modo: string; status: string }[];
+      // Consultoria Jul/2026: paginação — sem ela o PostgREST trunca em 1.000
+      // linhas e atendimentos deixam de aparecer na fila humana.
+      const PAGE = 1000;
+      const all: { id: string; contato_id: string; modo: string; status: string }[] = [];
+      for (let page = 0; ; page++) {
+        const { data, error } = await supabase
+          .from("atendimentos")
+          .select("id, contato_id, modo, status")
+          .neq("status", "encerrado")
+          .order("created_at", { ascending: false })
+          .range(page * PAGE, page * PAGE + PAGE - 1);
+        if (error) throw error;
+        all.push(...((data ?? []) as { id: string; contato_id: string; modo: string; status: string }[]));
+        if (!data || data.length < PAGE) break;
+      }
+      return all;
     },
   });
   const atendimentoByContato = new Map((atendimentosAtivos || []).map((a) => [a.contato_id, a]));
@@ -576,10 +586,6 @@ export default function Pipeline() {
                                               atInfo.modo === "ia" ? (
                                                 <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-primary/50 text-primary">
                                                   <Bot className="h-2.5 w-2.5" /> IA
-                                                </Badge>
-                                              ) : atInfo.modo === "hibrido" ? (
-                                                <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-yellow-500/50 text-yellow-600 dark:text-yellow-400">
-                                                  <Sparkles className="h-2.5 w-2.5" /> IA Monitorando
                                                 </Badge>
                                               ) : (
                                                 <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-warning/50 text-warning">

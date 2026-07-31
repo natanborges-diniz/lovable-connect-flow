@@ -30,6 +30,7 @@ const MENU_TRIAGEM_ITENS: Array<{ id: string; titulo: string; descricao: string 
   { id: "status_pedido", titulo: "🔍 Status do pedido",  descricao: "Consultar OS / óculos pronto" },
   { id: "duvida",        titulo: "💬 Tirar uma dúvida",  descricao: "Produtos / serviços" },
   { id: "reclamacao",    titulo: "⚠️ Reclamação",        descricao: "Falar com a equipe" },
+  { id: "manutencao",    titulo: "🔧 Manutenção/Armação", descricao: "Conserto, ajuste ou consulta" },
   { id: "cashback_ver",  titulo: "💳 Meu cashback",      descricao: "Consultar seu saldo" },
 ];
 
@@ -458,11 +459,18 @@ function detectExpectedReplyAction(expectedReply: unknown, text: string): string
   if (!stage || !t) return null;
 
   if (stage === "menu_triagem") {
+    if (/\b(manutencao|manutenção|conserto|consertar|ajuste|ajustar|solda|soldar|parafuso|plaqueta|apertar|haste quebrada|arrumar)\b/.test(t)) return "manutencao";
     if (/\b(orcamento|orçamento|preco|preço|valor|cotacao|cotação|multifocal|lente|lentes|oculos|óculos)\b/.test(t)) return "orcamento";
     if (/\b(agendar|agendamento|marcar|visita|horario|horário)\b/.test(t)) return "agendar";
     if (/\b(status|pedido|os|oculos pronto|óculos pronto|pronto)\b/.test(t)) return "status_pedido";
     if (/\b(reclamacao|reclamação|problema|insatisfeito|insatisfacao|insatisfação)\b/.test(t)) return "reclamacao";
     if (/\b(duvida|dúvida|pergunta|ajuda|explica|explicacao|explicação)\b/.test(t)) return "duvida";
+    return null;
+  }
+
+  if (stage === "manutencao_opcao") {
+    if (/\b(agendar|agenda|loja|visita|marcar|presencial|ir ai|ir aí)\b/.test(t)) return "manutencao_agendar";
+    if (/\b(consultor|atendente|humano|falar|pessoa|alguem|alguém)\b/.test(t)) return "manutencao_consultor";
     return null;
   }
 
@@ -1226,7 +1234,7 @@ function cleanBase64(base64String: string): string {
   return cleaned.replace(/\s/g, "");
 }
 
-function imageContentFromBase64(base64String: string, mimeType: string): any | null {
+function imageContentFromBase64(base64String: string, mimeType: string, detail: "high" | "low" = "high"): any | null {
   const rawMime = String(mimeType || "image/jpeg").split(";")[0].trim().toLowerCase();
   const normalizedMime = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
   const supportedMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -1243,7 +1251,9 @@ function imageContentFromBase64(base64String: string, mimeType: string): any | n
 
   return {
     type: "image_url",
-    image_url: { url: `data:${normalizedMime};base64,${cleaned}`, detail: "high" },
+    // Consultoria Jul/2026: detail "high" (~1.100 tokens/imagem) só para a imagem
+    // do turno atual (OCR); imagens antigas do histórico entram em "low".
+    image_url: { url: `data:${normalizedMime};base64,${cleaned}`, detail },
   };
 }
 
@@ -1778,7 +1788,9 @@ async function classifyIntent(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5",
+        // Consultoria Jul/2026: classificação em 10 rótulos com saída de 120
+        // tokens não precisa do gpt-5 completo — mini faz o mesmo por ~1/5 do custo.
+        model: "openai/gpt-5-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
@@ -3030,7 +3042,7 @@ serve(async (req) => {
     // regex/LLM. IDs que começam com "loja:" são tratados como escolha de loja.
     // IDs não mapeados caem no fluxo normal (LLM recebe o título como texto).
     // ─────────────────────────────────────────────────────────────────────────
-    if (incomingButtonId && (atendimento.modo === "ia" || atendimento.modo === "hibrido")) {
+    if (incomingButtonId && atendimento.modo === "ia") {
       try {
         const _atMeta = (atendimento.metadata as Record<string, any>) || {};
         const handled = await routeButtonClick({
@@ -3060,7 +3072,7 @@ serve(async (req) => {
       const _CONF_RE = /^(?:\s*)(?:✅|👍|👌|👏|🙌)?\s*(?:sim|s|ok|okay|okey|confirmo|confirmado|confirma|confirmada|pode confirmar|pode ser|combinado|positivo|isso|é isso|eh isso|estarei|estarei lá|vou sim|vou|tô indo|to indo|estou indo|beleza|blz|perfeito|👍|✅)(?:[!.\s✅👍👌🙌]*)$/i;
       const _isEmojiOnly = /^[\s✅👍👌👏🙌]+$/.test(_msgConf);
       if (
-        (atendimento.modo === "ia" || atendimento.modo === "hibrido") &&
+        atendimento.modo === "ia" &&
         _msgConf &&
         (_CONF_RE.test(_msgConf) || _isEmojiOnly)
       ) {
@@ -3303,6 +3315,37 @@ serve(async (req) => {
     if (atendimento.modo === "ponte") {
       return jsonResponse({ status: "skipped", reason: "modo ponte (operado via mensageria interna)" });
     }
+
+    // ── TRAVA ANTI-CONFLITO IA×HUMANO (Consultoria Jul/2026) ────────────────
+    // Se um operador humano respondeu neste atendimento nos últimos 10 minutos
+    // (mesmo sem o modo ter sido trocado — corrida com o app), a IA se cala.
+    // Substitui a "proteção" que o modo híbrido nunca ofereceu.
+    try {
+      const _guardaBots = new Set(["Assistente IA", "Gael", "Sistema", "Bot Lojas", "Recuperação", "Recuperacao"]);
+      const { data: _recentesOut } = await supabase
+        .from("mensagens")
+        .select("remetente_nome, created_at")
+        .eq("atendimento_id", atendimento_id)
+        .eq("direcao", "outbound")
+        .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString())
+        .limit(20);
+      const _humanoAtivo = Array.isArray(_recentesOut) && _recentesOut.some((m: any) => {
+        const nome = String(m.remetente_nome || "").trim();
+        return nome && !_guardaBots.has(nome) && !/template|bot|\bia\b/i.test(nome);
+      });
+      if (_humanoAtivo) {
+        console.log("[GUARDA-HUMANO] Operador humano respondeu há <10min — IA silenciada para evitar conflito");
+        await supabase.from("eventos_crm").insert({
+          contato_id: atendimento.contato_id, tipo: "ia_suprimida_humano_ativo",
+          descricao: "IA suprimida — operador humano ativo nos últimos 10 minutos",
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).then(() => undefined, () => undefined);
+        return jsonResponse({ status: "skipped", reason: "operador humano ativo (<10min)" });
+      }
+    } catch (e) {
+      console.warn("[GUARDA-HUMANO] verificação falhou — seguindo fluxo normal", e);
+    }
+
     // Suppress IA on demand-mirror atendimentos (created by criar-demanda-loja)
     const _atMeta = (atendimento.metadata as Record<string, any>) || {};
     if (_atMeta.suprimir_ia === true || _atMeta.atendimento_demanda === true) {
@@ -3392,7 +3435,9 @@ serve(async (req) => {
       return jsonResponse({ status: "skipped", reason: "lock-cas — concurrent execution blocked" });
     }
 
-    const isHibrido = atendimento.modo === "hibrido";
+    // Consultoria Jul/2026: modo híbrido REMOVIDO (CHECK constraint no banco).
+    // Constante mantida como false para neutralizar todas as guardas legadas.
+    const isHibrido = false as boolean;
     const contatoId = contato_id || atendimento.contato_id;
     const currentMsg = mensagem_texto || "";
 
@@ -4023,7 +4068,7 @@ serve(async (req) => {
       );
       if (
         _ultRecente && _orcamentoRecente && _PRECO_INVERTIDO_RE.test(_msgPxLow) &&
-        (atendimento.modo === "ia" || atendimento.modo === "hibrido")
+        atendimento.modo === "ia"
       ) {
         console.log("[ROUTER] Reclamação de inversão de preço detectada — re-cotando deterministicamente");
         try {
@@ -4074,7 +4119,7 @@ serve(async (req) => {
       if (
         _lojaLocalRE.test(String(mensagem_texto || "")) &&
         !_lojaLocalBlocked &&
-        (atendimento.modo === "ia" || atendimento.modo === "hibrido")
+        atendimento.modo === "ia"
       ) {
         const _savedCity = atendimentoMeta?.loja_local_cidade as string | undefined;
         if (_savedCity) {
@@ -4093,9 +4138,13 @@ serve(async (req) => {
     // Guards: modo humano / 1ª msg / imagem / expected_reply ativo → skip (economiza custo).
     // O resultado é coletado e logado DEPOIS do LLM principal resolver (ver Step 12 abaixo).
     let _shadowP: Promise<ShadowResult | null> | null = null;
+    // Consultoria Jul/2026: shadow classifier DESLIGADO — era 100% telemetria
+    // (não altera roteamento) e custava 1 chamada gpt-5-mini por turno.
+    const SHADOW_CLASSIFIER_ENABLED = false;
     if (
+      SHADOW_CLASSIFIER_ENABLED &&
       LOVABLE_API_KEY &&
-      (atendimento.modo === "ia" || atendimento.modo === "hibrido") &&
+      atendimento.modo === "ia" &&
       !atendimentoMeta?.expected_reply &&
       inboundCount > 1 &&
       !((allMsgs.filter((m: any) => m.direcao === "inbound").slice(-1)[0]?.tipo_conteudo || "text") === "image") &&
@@ -4421,6 +4470,8 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         ? `Recebi sua imagem, ${_np || "amigo(a)"}! 🙌 Pra esse tipo de consulta vou te conectar com um Consultor pra confirmar disponibilidade e valor certinho, tá?`
         : mensagemEscaladaForaHorario(_np);
       await sendWhatsApp(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, respNaoReceita);
+      // FIX Consultoria Jul/2026: antes este caminho prometia humano mas NÃO
+      // setava modo='humano' — cliente ficava esperando um consultor nunca acionado.
       await supabase.from("eventos_crm").insert({
         contato_id: contatoId,
         tipo: "imagem_nao_receita_escalada",
@@ -4428,8 +4479,57 @@ O cliente JÁ informou que está em **${clienteLoc.regiaoTexto || "região atend
         metadata: { last_inbound: lastInboundText.slice(0, 200), recent_inbound: recentInboundText.slice(0, 300) },
         referencia_tipo: "atendimento", referencia_id: atendimento_id,
       }).then(() => undefined, () => undefined);
-      console.log("[IMG-NAO-RECEITA] Imagem sem intenção de receita — escalando humano, pulando OCR");
-      return jsonResponse({ status: "ok", tools_used: ["imagem_nao_receita_escalada"], intencao: "duvida_produto", precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
+      await escalarParaHumano({
+        supabase, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        atendimentoId: atendimento_id, contatoId,
+        motivo: "imagem_produto_armacao",
+        descricao: "Cliente enviou foto de produto/armação — encaminhado para consultor",
+        emitirEvento: false, // evento próprio 'imagem_nao_receita_escalada' já inserido acima
+      });
+      console.log("[IMG-NAO-RECEITA] Imagem sem intenção de receita — escalado para humano (modo setado), pulando OCR");
+      return jsonResponse({ status: "ok", tools_used: ["imagem_nao_receita_escalada"], intencao: "duvida_produto", precisa_humano: true, pipeline_coluna_sugerida: "Novo Contato", modo: "humano" });
+    }
+
+    // ── CLASSIFICAÇÃO DE IMAGEM AMBÍGUA (Consultoria Jul/2026) ──────────────
+    // Imagem sem legenda (ou legenda vaga): NÃO assumir que é receita.
+    // Pergunta com botões — 1 clique resolve o que antes era adivinhado por regex.
+    // Se o cliente clicar "É minha receita", o clique cai no pipeline normal e o
+    // OCR forçado roda como antes (o título do botão contém "receita").
+    try {
+      const _imgClassifAskedAt = (atendimentoMeta as any)?.imagem_classificacao_enviada_at
+        ? Date.parse((atendimentoMeta as any).imagem_classificacao_enviada_at) : 0;
+      const _imgClassifRecente = _imgClassifAskedAt > 0 && (Date.now() - _imgClassifAskedAt) < 30 * 60_000;
+      const _temContextoReceita =
+        RECEITA_SIGNAL_RE.test(recentInboundText) ||
+        (atendimentoMeta as any)?.aguardando_receita_foto === true ||
+        (atendimentoMeta as any)?.expected_reply === "receita_foto";
+      if (
+        lastIsImage && !incomingButtonId && !_temContextoReceita &&
+        !clienteNaoReceitaIntent && !_imgClassifRecente && !isConsultaOsActive
+      ) {
+        await sendInteractive(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, atendimento_id, {
+          type: "button",
+          texto: "Recebi sua imagem! 🙌 Só me confirma o que é, pra eu te ajudar certinho:",
+          botoes: [
+            { id: "img_receita", titulo: "📋 Minha receita" },
+            { id: "img_armacao", titulo: "👓 Armação/produto" },
+            { id: "img_comprovante", titulo: "💳 Comprovante" },
+          ],
+        });
+        await supabase.from("atendimentos").update({
+          metadata: { ...(atendimentoMeta as any || {}), imagem_classificacao_enviada_at: new Date().toISOString() },
+        }).eq("id", atendimento_id);
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId, tipo: "imagem_classificacao_solicitada",
+          descricao: "Imagem sem contexto de receita — botões de classificação enviados",
+          metadata: { last_inbound: lastInboundText.slice(0, 200) },
+          referencia_tipo: "atendimento", referencia_id: atendimento_id,
+        }).then(() => undefined, () => undefined);
+        console.log("[IMG-CLASSIF] Imagem ambígua — botões de classificação enviados, pulando OCR neste turno");
+        return jsonResponse({ status: "ok", tools_used: ["imagem_classificacao_solicitada"], intencao: "outro", precisa_humano: false, pipeline_coluna_sugerida: "Novo Contato", modo: atendimento.modo });
+      }
+    } catch (e) {
+      console.warn("[IMG-CLASSIF] guarda falhou — seguindo fluxo normal", e);
     }
 
 
@@ -6022,8 +6122,16 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
           const inlineBase64 = isCurrentImage ? media?.inline_base64 : null;
           const inlineMime = isCurrentImage ? media?.mime_type : null;
 
+          // Consultoria Jul/2026: imagem ANTIGA do histórico com receita já
+          // confirmada não precisa voltar ao modelo em bytes (~1.100 tokens/turno).
+          // Substitui por placeholder de texto e economiza download + visão.
+          if (!isCurrentImage && hasValidReceitas) {
+            messages.push({ role, content: `${imageCaption}\n[imagem anterior — receita já lida e confirmada no sistema]` });
+            continue;
+          }
+
           if (inlineBase64 && inlineMime) {
-            imageContent = imageContentFromBase64(inlineBase64, inlineMime);
+            imageContent = imageContentFromBase64(inlineBase64, inlineMime, isCurrentImage ? "high" : "low");
             if (imageContent) console.log(`[MEDIA] Image delivered via inline_base64 (ctx index ${i})`);
           }
 
@@ -6629,15 +6737,30 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
         const hasOrcamentoOculosRecente = !!recentOrcamento && /(DNZ|DMAX|HOYA|ESSILOR|ZEISS|VARILUX|EYEZEN|KODAK|R\$\s*\d)/i.test(recentOrcamento);
         if (brandMatch && hasValidReceitas && hasOrcamentoOculosRecente) {
           const marca = brandMatch[1].toLowerCase();
-          // Map family→brand quando aplicável
-          const brandFilter = /varilux|eyezen|crizal|stellest/i.test(marca) ? "ESSILOR"
-            : /transitions/i.test(marca) ? "ESSILOR"
-            : marca.toUpperCase();
+          // Consultoria Jul/2026: a busca agora cobre brand+family+treatment,
+          // então "Varilux"/"Crizal"/"Eyezen"/"Stellest" podem ser passados
+          // diretamente (mais específico que mapear tudo para ESSILOR).
+          const brandFilter = /transitions/i.test(marca) ? "ESSILOR" : marca.toUpperCase();
           messages.push({
             role: "system",
             content: `[SISTEMA: REFINAMENTO POR MARCA APÓS ORÇAMENTO] O cliente JÁ recebeu um orçamento de óculos e agora está perguntando se temos a marca "${brandMatch[1]}" (filtro/refinamento — NÃO é loop nem ambiguidade). AÇÃO OBRIGATÓRIA: chame consultar_lentes AGORA passando preferencia_marca="${brandFilter}" e os valores da receita mais recente. Apresente 2-3 opções dessa marca com nome da família (ex: Varilux Comfort, Varilux XR Design) e valores. Se não houver opções compatíveis dessa marca para o grau, diga isso explicitamente e ofereça alternativas equivalentes em outra marca premium. PROIBIDO escalar para humano. PROIBIDO repetir o orçamento anterior.`,
           });
           console.log(`[LOOP-DETECTOR] Brand refinement intercepted (${brandFilter}) — forcing consultar_lentes instead of escalation`);
+        } else if (
+          // ── GUARDA ANTI-FALSO-POSITIVO (Consultoria Jul/2026) ──────────────
+          // O loop é detectado sobre as SAÍDAS da IA — mas se a ÚLTIMA mensagem
+          // do cliente é uma resposta direta e objetiva (horário, data, número,
+          // sim/ok, nome de cidade curta), punir com menu genérico descarta
+          // contexto legítimo (caso "As 19:00" → escalado, e2be44d3 → 3 reinícios).
+          // Nesses casos, deixa o LLM processar a resposta normalmente.
+          /^(\s*(as|às|dia|amanh[aã]|hoje|sim|s|ok|pode ser|isso|meio[- ]dia)\b[\s\S]{0,30}|\s*\d{1,2}([:h]\d{0,2})?\s*(hs?|horas?)?\s*)$/i.test(lastInboundText.trim())
+          && lastInboundText.trim().length <= 30
+        ) {
+          messages.push({
+            role: "system",
+            content: "[SISTEMA: LOOP DETECTADO, MAS A ÚLTIMA MENSAGEM DO CLIENTE É UMA RESPOSTA DIRETA (horário/data/confirmação/valor curto). NÃO repita a pergunta anterior e NÃO envie menu. PROCESSE a resposta do cliente e avance o fluxo (ex.: confirme o horário informado, prossiga a etapa).]",
+          });
+          console.log(`[LOOP-DETECTOR] Última inbound é resposta direta ("${lastInboundText.slice(0, 40)}") — pulando menu/escala, seguindo LLM`);
         } else {
           // Menu suave: se já enviou menu recentemente (< 5min), aí sim escala.
           const _loopMenuAt = (atendimentoMeta as any)?.loop_menu_enviado_at;
@@ -6651,7 +6774,13 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
               metadata: { similarity: loopCheck.similarity, last_inbound: lastInboundText.substring(0, 200) },
               referencia_tipo: "atendimento", referencia_id: atendimento_id,
             });
-            await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+            await escalarParaHumano({
+              supabase, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+              atendimentoId: atendimento_id, contatoId,
+              motivo: "loop_ia_sem_intent",
+              descricao: "Loop de IA sem intenção clara — encaminhado para humano",
+              emitirEvento: false, // evento 'loop_ia_escalado' já inserido acima
+            });
             const escMsg = isHorarioHumano()
               ? "Vou chamar alguém da equipe pra te ajudar melhor com isso, tá? 😊"
               : mensagemEscaladaForaHorario(_np);
@@ -8541,7 +8670,13 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
             referencia_id: atendimento_id,
           });
 
-          await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimento_id);
+          await escalarParaHumano({
+            supabase, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+            atendimentoId: atendimento_id, contatoId,
+            motivo: "loop_pos_llm",
+            descricao: "Anti-loop pós-LLM — encaminhado para humano",
+            emitirEvento: false, // evento 'loop_ia_pos_llm_jaccard' já inserido acima
+          });
 
           const _np4 = (contatoNomeAtual || "").split(/\s+/)[0] || "";
           const escMsg4 = isHorarioHumano()
@@ -8768,8 +8903,14 @@ APÓS RESPONDER: ofereça UMA opção natural de próximo passo — agendar visi
     const contatoUpdates: any = { ultimo_contato_at: new Date().toISOString() };
 
     if (precisa_humano) {
-      // Human escalation: do NOT move the contact to a different column.
-      // The contact stays where it is; intervention is managed via atendimentos.modo = 'humano'.
+      // Consultoria Jul/2026: escalação move o card para a fila visível
+      // "Atendimento Humano" do CRM Vendas (antes ficava invisível no kanban).
+      // Contatos corporativos (loja/colaborador) permanecem no setor deles.
+      const _isCorpEsc = ["loja", "colaborador"].includes(contatoTipo);
+      const colFilaHumana = !_isCorpEsc
+        ? colunas.find((c: any) => c.nome === COLUNA_FILA_HUMANA && c.setor_id === null)
+        : null;
+      if (colFilaHumana) contatoUpdates.pipeline_coluna_id = colFilaHumana.id;
     } else if (pipeline_coluna !== "Novo Contato") {
       // Filter columns by contact type to avoid cross-sector assignment
       const isCorporate = ["loja", "colaborador"].includes(contatoTipo);
@@ -8981,25 +9122,62 @@ async function runConsultarLentes(
   };
   const categories = categoryMap[rxType] || [rxType];
 
-  let query = supabase
-    .from("pricing_table_lentes")
-    .select("*")
-    .eq("active", true)
-    .in("category", categories)
-    .gt("price_brl", 0)
-    .lte("sphere_min", worstSphere)
-    .gte("sphere_max", worstSphere)
-    .lte("cylinder_min", worstCylinder)
-    .gte("cylinder_max", worstCylinder);
+  // ── Consultoria Jul/2026 — 3 correções anti-exclusão de produto ────────────
+  // (1) Marca pesquisada em brand OU family OU treatment: "Varilux"/"Crizal"
+  //     vivem em family/treatment com brand="Essilor" — o ilike só em brand
+  //     retornava zero. (2) LIMIT 60 por priority cortava linhas premium do pool
+  //     antes da diversificação por faixas → limit 300 (o funil de faixas abaixo
+  //     escolhe as 6 exibidas). (3) Marca pedida sem compatibilidade de grau →
+  //     re-consulta sem o filtro e oferece equivalentes em vez de silenciar.
+  const sanitizeMarca = (m: string) => String(m).replace(/[%,()."']/g, "").trim();
+  const buildLensQuery = (marca: string | null) => {
+    let q = supabase
+      .from("pricing_table_lentes")
+      .select("*")
+      .eq("active", true)
+      .in("category", categories)
+      .gt("price_brl", 0)
+      .lte("sphere_min", worstSphere)
+      .gte("sphere_max", worstSphere)
+      .lte("cylinder_min", worstCylinder)
+      .gte("cylinder_max", worstCylinder);
+    if (rxType === "progressive" && maxAdd !== null) {
+      q = q.lte("add_min", maxAdd).gte("add_max", maxAdd);
+    }
+    if (args?.filtro_blue === true) q = q.eq("blue", true);
+    if (args?.filtro_photo === true) q = q.eq("photo", true);
+    if (marca) q = q.or(`brand.ilike.%${marca}%,family.ilike.%${marca}%,treatment.ilike.%${marca}%`);
+    return q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(300);
+  };
 
-  if (rxType === "progressive" && maxAdd !== null) {
-    query = query.lte("add_min", maxAdd).gte("add_max", maxAdd);
+  const marcaPref = args?.preferencia_marca ? sanitizeMarca(args.preferencia_marca) : null;
+  let { data: lensesRaw } = await buildLensQuery(marcaPref);
+
+  let marcaSemOpcoes: string | null = null;
+  if ((!lensesRaw || lensesRaw.length === 0) && marcaPref) {
+    const retry = await buildLensQuery(null);
+    if (!retry.data || retry.data.length === 0) {
+      // Gap real de grade (nenhuma marca cobre): libera o fallback de estimativa
+      // (guard G2 abaixo pulava estimativa quando havia preferencia_marca).
+      args = { ...args, preferencia_marca: undefined };
+    }
+    if (retry.data && retry.data.length > 0) {
+      lensesRaw = retry.data;
+      marcaSemOpcoes = args.preferencia_marca;
+      args = { ...args, preferencia_marca: undefined }; // diversificação normal por faixas
+      try {
+        await supabase.from("eventos_crm").insert({
+          contato_id: contatoId,
+          tipo: "consultar_lentes_marca_sem_opcoes",
+          descricao: `Marca "${marcaSemOpcoes}" sem opções para o grau — equivalentes oferecidos`,
+          metadata: { marca: marcaSemOpcoes, rx_type: rxType, sphere: worstSphere, cylinder: worstCylinder, add: maxAdd },
+          referencia_tipo: atendimentoId ? "atendimento" : null,
+          referencia_id: atendimentoId || null,
+        });
+      } catch (_) { /* telemetria best-effort */ }
+      console.log(`[QUOTE] Marca "${marcaSemOpcoes}" sem compatibilidade — oferecendo equivalentes (${retry.data.length} SKUs)`);
+    }
   }
-  if (args?.filtro_blue === true) query = query.eq("blue", true);
-  if (args?.filtro_photo === true) query = query.eq("photo", true);
-  if (args?.preferencia_marca) query = query.ilike("brand", `%${args.preferencia_marca}%`);
-
-  const { data: lensesRaw } = await query.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(60);
 
   // ── Visão monocular: 1 lente apenas → divide preços por 2 ──
   const isMonocular = rxMeta?.monocular === true;
@@ -9207,6 +9385,10 @@ async function runConsultarLentes(
   const oeDisp = oe?.blind ? "—" : `${oe.sphere ?? "—"}/${oe.cylinder ?? "—"}`;
   const monoNota = isMonocular ? `_💡 Valores já considerando apenas 1 lente (visão monocular — ${rxMeta.eye_used === "od" ? "OD" : "OE"})._\n\n` : "";
   let quoteMsg = `🔍 *Opções de lentes para o seu grau:*\nOD ${odDisp} | OE ${oeDisp}${hasAddition ? ` | Ad: +${maxAdd}` : ""}\n\n${monoNota}`;
+  // Consultoria Jul/2026: marca pedida sem compatibilidade → transparência + equivalentes
+  if (marcaSemOpcoes) {
+    quoteMsg = `Da *${marcaSemOpcoes}* não encontrei opções compatíveis com o seu grau 😕 Mas separei alternativas equivalentes de outras linhas:\n\n` + quoteMsg;
+  }
 
   // ---- Diversificação por marca + 3 faixas ----
   // Quando o cliente fixou marca, mantém comportamento legado (sem diversificar)
@@ -10958,8 +11140,83 @@ async function routeButtonClick(args: {
       return true;
     case "reclamacao":
       await sendWhatsApp(supabaseUrl, serviceKey, atId, "Sinto muito que algo não saiu como esperado 😟 Já estou chamando um responsável pra te atender.");
-      await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atId);
       await supabase.from("eventos_crm").insert({ contato_id: atendimento.contato_id, tipo: "reclamacao_cliente", descricao: "Botão Reclamação — escalado", referencia_tipo: "atendimento", referencia_id: atId });
+      await escalarParaHumano({
+        supabase, supabaseUrl, serviceKey,
+        atendimentoId: atId, contatoId: atendimento.contato_id,
+        motivo: "reclamacao_cliente",
+        descricao: "Botão Reclamação — cliente pediu falar com a equipe",
+      });
+      return true;
+    // ── Manutenção / Consulta de Armação (Consultoria Jul/2026) ──
+    case "manutencao": {
+      await sendInteractive(supabaseUrl, serviceKey, atId, {
+        type: "button",
+        texto: "Ajustes, limpeza e manutenção são feitos direto na loja pela nossa equipe 🔧 Como prefere?",
+        botoes: [
+          { id: "manutencao_agendar",   titulo: "📅 Agendar na loja" },
+          { id: "manutencao_consultor", titulo: "🤝 Falar c/ consultor" },
+        ],
+      });
+      await patchMeta({ intent_detected: "manutencao_armacao", expected_reply: "manutencao_opcao" });
+      await supabase.from("eventos_crm").insert({
+        contato_id: atendimento.contato_id, tipo: "manutencao_armacao_menu",
+        descricao: "Botão Manutenção/Armação — opções enviadas",
+        referencia_tipo: "atendimento", referencia_id: atId,
+      }).then(() => undefined, () => undefined);
+      return true;
+    }
+    case "manutencao_agendar":
+      await patchMeta({ expected_reply: null });
+      await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
+      return true;
+    case "manutencao_consultor": {
+      const dentroM = isHorarioHumano();
+      const { data: ctM } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+      const _npM = (ctM?.nome || "").trim().split(/\s+/)[0] || "";
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, dentroM
+        ? "Combinado! Já acionei um Consultor pra cuidar da sua manutenção/armação. Ele te chama em breve 🤝"
+        : mensagemEscaladaForaHorario(_npM));
+      await patchMeta({ expected_reply: null });
+      await escalarParaHumano({
+        supabase, supabaseUrl, serviceKey,
+        atendimentoId: atId, contatoId: atendimento.contato_id,
+        motivo: "manutencao_armacao",
+        descricao: "Botão Manutenção/Armação — cliente pediu consultor",
+      });
+      return true;
+    }
+    // ── Classificação de imagem ambígua (Consultoria Jul/2026) ──
+    case "img_receita":
+      // Não retorna true: cai no pipeline normal — o título do botão contém
+      // "receita", o que ativa o contexto de OCR forçado no fluxo padrão.
+      await patchMeta({ aguardando_receita_foto: true, imagem_classificacao_enviada_at: null });
+      return false;
+    case "img_armacao": {
+      const dentroI = isHorarioHumano();
+      const { data: ctI } = await supabase.from("contatos").select("nome").eq("id", atendimento.contato_id).maybeSingle();
+      const _npI = (ctI?.nome || "").trim().split(/\s+/)[0] || "";
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, dentroI
+        ? "Entendi! 👓 Pra armação/produto vou te conectar com um Consultor pra confirmar disponibilidade e valores, tá?"
+        : mensagemEscaladaForaHorario(_npI));
+      await patchMeta({ expected_reply: null, imagem_classificacao_enviada_at: null });
+      await escalarParaHumano({
+        supabase, supabaseUrl, serviceKey,
+        atendimentoId: atId, contatoId: atendimento.contato_id,
+        motivo: "imagem_produto_armacao",
+        descricao: "Imagem classificada pelo cliente como armação/produto — encaminhado para consultor",
+      });
+      return true;
+    }
+    case "img_comprovante":
+      await sendWhatsApp(supabaseUrl, serviceKey, atId, "Recebi seu comprovante! 🙌 Já encaminhei pro nosso Financeiro conferir e te confirmo em breve, tá bom?");
+      await patchMeta({ expected_reply: null, imagem_classificacao_enviada_at: null, comprovante_cliente_confirmado_at: new Date().toISOString() });
+      await escalarParaHumano({
+        supabase, supabaseUrl, serviceKey,
+        atendimentoId: atId, contatoId: atendimento.contato_id,
+        motivo: "comprovante_pagamento_imagem",
+        descricao: "Imagem classificada pelo cliente como comprovante de pagamento — conferência manual",
+      });
       return true;
     case "agendar":
       await sendListaLojas(supabase, supabaseUrl, serviceKey, atId);
@@ -11522,6 +11779,69 @@ async function sendEnderecosLojas(supabase: any, supabaseUrl: string, serviceKey
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ESCALAÇÃO UNIFICADA (Consultoria Jul/2026)
+// Todo caminho que promete atendimento humano ao cliente DEVE passar por aqui.
+// Garante, em ordem: (1) card movido para a coluna "Atendimento Humano" do CRM
+// Vendas, (2) modo='humano' (dispara o trigger de notificação do banco),
+// (3) resumo automático para o atendente, (4) evento padrão 'escalonamento_humano'.
+// ─────────────────────────────────────────────────────────────────────────────
+const COLUNA_FILA_HUMANA = "Atendimento Humano";
+
+async function escalarParaHumano(opts: {
+  supabase: any; supabaseUrl: string; serviceKey: string;
+  atendimentoId: string; contatoId: string;
+  motivo: string;
+  descricao?: string;
+  metadataExtra?: Record<string, any>;
+  moverCard?: boolean;      // default true; false p/ fluxos corporativos (ex.: consulta_os)
+  emitirEvento?: boolean;   // default true; false quando o chamador insere evento próprio
+}): Promise<void> {
+  const { supabase, supabaseUrl, serviceKey, atendimentoId, contatoId } = opts;
+
+  // 1) Move o card para a fila visível do CRM Vendas (antes do modo, para o
+  //    resolvedor de destinatários enxergar a coluna correta).
+  try {
+    const updates: Record<string, any> = { ultimo_contato_at: new Date().toISOString() };
+    if (opts.moverCard !== false) {
+      const { data: colFila } = await supabase
+        .from("pipeline_colunas").select("id")
+        .eq("nome", COLUNA_FILA_HUMANA).is("setor_id", null).eq("ativo", true)
+        .limit(1).maybeSingle();
+      if (colFila?.id) updates.pipeline_coluna_id = colFila.id;
+    }
+    await supabase.from("contatos").update(updates).eq("id", contatoId);
+  } catch (_) { /* best effort */ }
+
+  // 2) Hard handoff — pausa a IA e dispara o trigger de notificação (push/toast).
+  await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimentoId);
+
+  // 3) Resumo automático para o atendente (best effort).
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/summarize-atendimento`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ atendimento_id: atendimentoId }),
+    });
+  } catch (_) { /* best effort */ }
+
+  // 4) Evento padrão — alimenta métricas, auditoria e a fila.
+  if (opts.emitirEvento !== false) {
+    const dentro = isHorarioHumano();
+    await supabase.from("eventos_crm").insert({
+      contato_id: contatoId, tipo: "escalonamento_humano",
+      descricao: opts.descricao || `Escalonamento para humano (${opts.motivo})`,
+      metadata: {
+        motivo: opts.motivo,
+        fora_horario: !dentro,
+        proxima_abertura: dentro ? null : proximaAberturaHumana(),
+        ...(opts.metadataExtra || {}),
+      },
+      referencia_tipo: "atendimento", referencia_id: atendimentoId,
+    }).then(() => undefined, () => undefined);
+  }
+}
+
 async function handleEscalation(
   supabase: any, supabaseUrl: string, serviceKey: string,
   atendimentoId: string, contatoId: string, mensagem: string, trigger: string,
@@ -11537,29 +11857,11 @@ async function handleEscalation(
 
   await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, resposta);
 
-  // Hard handoff: pause IA completely until operator re-enables it.
-  await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimentoId);
-
-  await supabase.from("contatos").update({ ultimo_contato_at: new Date().toISOString() }).eq("id", contatoId);
-
-  // Auto-generate summary for the human operator
-  try {
-    await fetch(`${supabaseUrl}/functions/v1/summarize-atendimento`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ atendimento_id: atendimentoId }),
-    });
-  } catch (_) { /* best effort */ }
-
-  await supabase.from("eventos_crm").insert({
-    contato_id: contatoId, tipo: "escalonamento_humano",
+  await escalarParaHumano({
+    supabase, supabaseUrl, serviceKey, atendimentoId, contatoId,
+    motivo: trigger,
     descricao: `Escalonamento (${trigger}): cliente pediu Consultor${dentroExpediente ? "" : " — fora do expediente"}`,
-    metadata: {
-      trigger, motivo: trigger, mensagem,
-      fora_horario: !dentroExpediente,
-      proxima_abertura: dentroExpediente ? null : proximaAberturaHumana(),
-    },
-    referencia_tipo: "atendimento", referencia_id: atendimentoId,
+    metadataExtra: { trigger, mensagem },
   });
 
   return jsonResponse({
@@ -11575,25 +11877,12 @@ async function handleNonClientEscalation(
 ) {
   await sendWhatsApp(supabaseUrl, serviceKey, atendimentoId, mensagem);
 
-  // Set modo to humano (not hibrido) — this is NOT a client, operator takes full control
-  await supabase.from("atendimentos").update({ modo: "humano" }).eq("id", atendimentoId);
-
-  await supabase.from("contatos").update({ ultimo_contato_at: new Date().toISOString() }).eq("id", contatoId);
-
-  // Auto-generate summary for the operator
-  try {
-    await fetch(`${supabaseUrl}/functions/v1/summarize-atendimento`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ atendimento_id: atendimentoId }),
-    });
-  } catch (_) { /* best effort */ }
-
-  await supabase.from("eventos_crm").insert({
-    contato_id: contatoId, tipo: "escalonamento_humano",
+  // NOT a client — operator takes full control; card não vai pra fila de vendas.
+  await escalarParaHumano({
+    supabase, supabaseUrl, serviceKey, atendimentoId, contatoId,
+    motivo: trigger, moverCard: false,
     descricao: `Escalonamento automático (${trigger}): contato não-cliente detectado`,
-    metadata: { trigger, motivo: trigger, tipo_contato: trigger, mensagem },
-    referencia_tipo: "atendimento", referencia_id: atendimentoId,
+    metadataExtra: { trigger, tipo_contato: trigger, mensagem },
   });
 
   return jsonResponse({

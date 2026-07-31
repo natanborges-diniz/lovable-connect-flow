@@ -81,11 +81,18 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], mon
   }
   if (filtros?.filtro_blue) q = q.eq("blue", true);
   if (filtros?.filtro_photo) q = q.eq("photo", true);
-  if (filtros?.preferencia_marca) q = q.ilike("brand", `%${filtros.preferencia_marca}%`);
+  // Consultoria Jul/2026: marca pesquisada em brand OU family OU treatment —
+  // "Varilux"/"Crizal" ficam em family/treatment com brand="Essilor".
+  if (filtros?.preferencia_marca) {
+    const _m = String(filtros.preferencia_marca).replace(/[%,()."']/g, "").trim();
+    if (_m) q = q.or(`brand.ilike.%${_m}%,family.ilike.%${_m}%,treatment.ilike.%${_m}%`);
+  }
   if (filtros?.material_policarbonato) q = q.or("family.ilike.%airwear%,family.ilike.%policar%,index_name.ilike.%1.59%");
   if (filtros?.preco_max) q = q.lte("price_brl", filtros.preco_max);
 
-  const { data: lensesRaw, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(80);
+  // Consultoria Jul/2026: limit 80→300 — o corte por priority deixava linhas
+  // premium (Varilux etc.) fora do pool antes da partição em faixas.
+  const { data: lensesRaw, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(300);
   if (error) return { erro: error.message };
   if (!lensesRaw?.length) return { erro: "Nenhuma lente do catálogo cobre essa combinação. Tente afrouxar filtros ou usar estimativa." };
   // Visão monocular → 1 lente, divide preços por 2.
@@ -270,11 +277,14 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNa
 async function buscarCatalogoLivre(supabase: any, filtros: Body["filtros"]) {
   let q = supabase.from("pricing_table_lentes").select("brand,family,category,index_name,treatment,blue,photo,price_brl")
     .eq("active", true).gt("price_brl", 0);
-  if (filtros?.preferencia_marca) q = q.ilike("brand", `%${filtros.preferencia_marca}%`);
+  if (filtros?.preferencia_marca) {
+    const _m = String(filtros.preferencia_marca).replace(/[%,()."']/g, "").trim();
+    if (_m) q = q.or(`brand.ilike.%${_m}%,family.ilike.%${_m}%,treatment.ilike.%${_m}%`);
+  }
   if (filtros?.filtro_blue) q = q.eq("blue", true);
   if (filtros?.filtro_photo) q = q.eq("photo", true);
   if (filtros?.preco_max) q = q.lte("price_brl", filtros.preco_max);
-  const { data, error } = await q.order("price_brl", { ascending: true }).limit(50);
+  const { data, error } = await q.order("price_brl", { ascending: true }).limit(100);
   if (error) return { erro: error.message };
   return {
     faixas: { economica: [], intermediaria: [], premium: [] },

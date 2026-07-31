@@ -7,13 +7,23 @@ export function useContatos(filters?: { tipo?: TipoContato; search?: string; est
   return useQuery({
     queryKey: ["contatos", filters],
     queryFn: async () => {
-      let query = supabase.from("contatos").select("*").order("created_at", { ascending: false });
-      if (filters?.tipo) query = query.eq("tipo", filters.tipo);
-      if (filters?.estagio) query = query.eq("estagio", filters.estagio);
-      if (filters?.search) query = query.or(`nome.ilike.%${filters.search}%,email.ilike.%${filters.search}%,telefone.ilike.%${filters.search}%`);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
+      // Consultoria Jul/2026: paginação explícita — sem ela o PostgREST trunca
+      // em 1.000 linhas e contatos antigos somem silenciosamente da fila do CRM.
+      const PAGE = 1000;
+      const all: any[] = [];
+      for (let page = 0; ; page++) {
+        let query = supabase.from("contatos").select("*")
+          .order("created_at", { ascending: false })
+          .range(page * PAGE, page * PAGE + PAGE - 1);
+        if (filters?.tipo) query = query.eq("tipo", filters.tipo);
+        if (filters?.estagio) query = query.eq("estagio", filters.estagio);
+        if (filters?.search) query = query.or(`nome.ilike.%${filters.search}%,email.ilike.%${filters.search}%,telefone.ilike.%${filters.search}%`);
+        const { data: pageData, error: pageError } = await query;
+        if (pageError) throw pageError;
+        all.push(...(pageData ?? []));
+        if (!pageData || pageData.length < PAGE) break;
+      }
+      return all;
     },
   });
 }

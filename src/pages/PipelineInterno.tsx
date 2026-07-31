@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Phone, Mail, Clock, Plus, Pencil, Trash2, Check, X, Search, GripVertical, Bot, User,
-  MessageSquare, Sparkles, Headset,
+  MessageSquare, Headset,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -317,10 +317,6 @@ export default function PipelineInterno() {
                                                     atInfo.modo === "ia" ? (
                                                       <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-primary/50 text-primary">
                                                         <Bot className="h-2.5 w-2.5" /> IA
-                                                      </Badge>
-                                                    ) : atInfo.modo === "hibrido" ? (
-                                                      <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-yellow-500/50 text-yellow-600 dark:text-yellow-400">
-                                                        <Sparkles className="h-2.5 w-2.5" /> IA Monitor
                                                       </Badge>
                                                     ) : (
                                                       <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 border-warning/50 text-warning">

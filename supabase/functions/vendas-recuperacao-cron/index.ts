@@ -270,7 +270,7 @@ async function processContato(
   // ─────────────────────────────────────────────────────────────
   // MODO HUMANO/HÍBRIDO — cadência via templates Meta (>24h janela)
   // ─────────────────────────────────────────────────────────────
-  if (atendimento.modo === "humano" || atendimento.modo === "hibrido") {
+  if (atendimento.modo === "humano") {
     return await processHumano(
       supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
       contato, atendimento, colNome, perdidosCol, now,
