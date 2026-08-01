@@ -103,13 +103,21 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], mon
   let eco: any[] = [], inter: any[] = [], prem: any[] = [];
 
   if (filtros?.preferencia_marca) {
-    const e = sorted[0];
-    const p = sorted[sorted.length - 1];
-    const midIdx = Math.floor(sorted.length / 2);
-    const m = sorted.length >= 3 ? sorted[midIdx] : null;
-    eco = [e];
-    if (m && m.id !== e.id && m.id !== p.id && Number(m.price_brl) > Number(e.price_brl)) inter = [m];
-    if (p.id !== e.id && Number(p.price_brl) > Number(e.price_brl)) prem = [p];
+    // Consultoria Jul/2026: marca fixada agora particiona o pool da marca em
+    // 3 faixas por percentil com até 2 opções cada (antes: só 1 por faixa —
+    // "cheapest/mid/priciest" — que colapsava a lista pro operador).
+    const n = sorted.length;
+    if (n <= 3) {
+      eco = sorted.slice(0, 1);
+      inter = sorted.slice(1, 2);
+      prem = sorted.slice(2, 3);
+    } else {
+      const i1 = Math.max(1, Math.floor(n / 3));
+      const i2 = Math.max(i1 + 1, Math.floor((2 * n) / 3));
+      eco = sorted.slice(0, i1).slice(0, 2);
+      inter = sorted.slice(i1, i2).slice(0, 2);
+      prem = sorted.slice(i2).slice(0, 2);
+    }
   } else {
     const p1 = Number(sorted[Math.floor(sorted.length / 3)]?.price_brl ?? 0);
     const p2 = Number(sorted[Math.floor((2 * sorted.length) / 3)]?.price_brl ?? 0);
@@ -368,7 +376,25 @@ Deno.serve(async (req) => {
     let filtros = body.filtros || {};
     if (body.query_natural) {
       const nl = await extrairFiltrosNL(body.query_natural);
+      // Fallback determinístico: se o extrator LLM não achou marca, tenta regex
+      // direto no texto (funciona sem LOVABLE_API_KEY e cobre falhas do extrator).
+      if (!nl.preferencia_marca) {
+        const m = body.query_natural.match(/\b(varilux|eyezen|crizal|stellest|kodak|transitions|hoya|zeiss|dnz|dmax|essilor)\b/i);
+        if (m) nl.preferencia_marca = m[1];
+      }
       filtros = { ...nl, ...filtros };
+      // Consultoria Jul/2026: se o campo Marca traz o guarda-chuva "Essilor" mas a
+      // instrução cita uma linha específica (Varilux, Kodak, Crizal...), a linha
+      // específica vence — caso Fran 31/07: "Marca: Essilor + descrição Varilux"
+      // descartava o Varilux e devolvia o catálogo Essilor inteiro.
+      if (
+        nl.preferencia_marca &&
+        filtros.preferencia_marca &&
+        /^essilor$/i.test(String(filtros.preferencia_marca).trim()) &&
+        !/^essilor$/i.test(String(nl.preferencia_marca).trim())
+      ) {
+        filtros = { ...filtros, preferencia_marca: nl.preferencia_marca };
+      }
     }
 
     let result: any;
