@@ -59,6 +59,21 @@ function deriveRxStats(rx?: Rx) {
   return { od, oe, sph, cyl, add, worstSphere, worstCyl, maxAdd, rxType, hasAdd: add.length > 0 };
 }
 
+// Busca por termo livre: quebra em palavras e exige TODAS (AND entre tokens),
+// cada token casando em qualquer uma das colunas (OR interno).
+// Ex.: "Varilux Stylis" → (…ilike %Varilux%) AND (…ilike %Stylis%).
+function applyTokenSearch(q: any, termo: string, cols: string[]) {
+  const tokens = String(termo || "")
+    .replace(/[%,()"'*]/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+  for (const t of tokens) {
+    q = q.or(cols.map((c) => `${c}.ilike.%${t}%`).join(","));
+  }
+  return q;
+}
+
 async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], monocular = false) {
   const s = deriveRxStats(rx);
   if (!s.sph.length) return { erro: "Receita sem esférico. Edite os valores no painel pra buscar." };
@@ -81,11 +96,11 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], mon
   }
   if (filtros?.filtro_blue) q = q.eq("blue", true);
   if (filtros?.filtro_photo) q = q.eq("photo", true);
-  // Consultoria Jul/2026: marca pesquisada em brand OU family OU treatment —
-  // "Varilux"/"Crizal" ficam em family/treatment com brand="Essilor".
+  // Ago/2026: termo pesquisado em brand OU family OU treatment OU index_name,
+  // com AND entre palavras — "Varilux"/"Crizal" ficam em family/treatment e
+  // materiais como "Stylis 1.67" ficam em index_name.
   if (filtros?.preferencia_marca) {
-    const _m = String(filtros.preferencia_marca).replace(/[%,()."']/g, "").trim();
-    if (_m) q = q.or(`brand.ilike.%${_m}%,family.ilike.%${_m}%,treatment.ilike.%${_m}%`);
+    q = applyTokenSearch(q, filtros.preferencia_marca, ["brand", "family", "treatment", "index_name"]);
   }
   if (filtros?.material_policarbonato) q = q.or("family.ilike.%airwear%,family.ilike.%policar%,index_name.ilike.%1.59%");
   if (filtros?.preco_max) q = q.lte("price_brl", filtros.preco_max);
@@ -217,8 +232,7 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNa
   else q = q.eq("is_toric", false);
   if (filtros?.descarte) q = q.eq("descarte", filtros.descarte);
   if (marca) {
-    const safe = marca.replace(/[%,()]/g, "");
-    q = q.or(`fornecedor.ilike.%${safe}%,produto.ilike.%${safe}%`);
+    q = applyTokenSearch(q, marca, ["fornecedor", "produto"]);
   }
 
   const { data: lc, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(80);
@@ -286,8 +300,7 @@ async function buscarCatalogoLivre(supabase: any, filtros: Body["filtros"]) {
   let q = supabase.from("pricing_table_lentes").select("brand,family,category,index_name,treatment,blue,photo,price_brl")
     .eq("active", true).gt("price_brl", 0);
   if (filtros?.preferencia_marca) {
-    const _m = String(filtros.preferencia_marca).replace(/[%,()."']/g, "").trim();
-    if (_m) q = q.or(`brand.ilike.%${_m}%,family.ilike.%${_m}%,treatment.ilike.%${_m}%`);
+    q = applyTokenSearch(q, filtros.preferencia_marca, ["brand", "family", "treatment", "index_name"]);
   }
   if (filtros?.filtro_blue) q = q.eq("blue", true);
   if (filtros?.filtro_photo) q = q.eq("photo", true);
@@ -316,7 +329,7 @@ async function extrairFiltrosNL(query: string): Promise<Body["filtros"]> {
         model: "google/gemini-3-flash-preview",
         temperature: 0,
         messages: [
-          { role: "system", content: "Extraia filtros de busca de lentes a partir do texto do operador. Devolva JSON estrito com chaves opcionais: preferencia_marca (string: Varilux, DNZ, DMAX, HOYA, ZEISS, Essilor, Kodak), filtro_blue (bool, se citar 'blue'/'azul'/'tela'), filtro_photo (bool, se citar 'foto'/'transitions'), material_policarbonato (bool, se citar '3 peças'/'policarbonato'/'airwear'/'parafuso'), descarte ('diaria'|'quinzenal'|'mensal'), is_toric (bool, se citar 'tórica'/'astigmatismo alto'), preco_max (number, se citar limite). Nada além do JSON." },
+          { role: "system", content: "Extraia filtros de busca de lentes a partir do texto do operador. Devolva JSON estrito com chaves opcionais: preferencia_marca (string livre: pode combinar marca, família, tratamento e material/índice — ex.: 'Varilux Stylis', 'Varilux XR Pro Crizal', 'Hoya 1.67', 'Stylis 1.74', 'Airwear', 'Orma', 'DNZ'; mantenha as palavras que o operador citou, sem inventar), filtro_blue (bool, se citar 'blue'/'azul'/'tela'), filtro_photo (bool, se citar 'foto'/'transitions'/'fotossensível'), material_policarbonato (bool, se citar '3 peças'/'policarbonato'/'airwear'/'parafuso'), descarte ('diaria'|'quinzenal'|'mensal'), is_toric (bool, se citar 'tórica'/'astigmatismo alto'), preco_max (number, se citar limite). Nada além do JSON." },
           { role: "user", content: query },
         ],
       }),
