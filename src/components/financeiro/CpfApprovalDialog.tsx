@@ -402,11 +402,11 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   };
 
   const handleDownloadDoc = async () => {
-    if (!meta.documento_url) return;
+    if (!docUrl) return;
     try {
       const { data, error } = await supabase.storage
         .from("cpf-documentos")
-        .createSignedUrl(meta.documento_url, 3600);
+        .createSignedUrl(docUrl, 3600);
       if (error) throw error;
       window.open(data.signedUrl, "_blank");
     } catch (err: any) {
@@ -542,7 +542,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           {/* Solicitar autorização de exceção */}
           {((alreadyProcessed && meta.resultado_consulta === "reprovado") || isDadosIncompletos) && !meta.autorizacao_excecao && (
             <div className="space-y-2">
-              {!meta.documento_url && (
+              {!docUrl && (
                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
                   <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300">
                     <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -600,7 +600,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                 variant="outline"
                 className="w-full border-primary/40 text-primary hover:bg-primary/5"
                 onClick={() => setExcecaoOpen(true)}
-                disabled={!meta.documento_url || uploading}
+                disabled={!docUrl || uploading}
               >
                 <Shield className="h-4 w-4 mr-1" />
                 Solicitar autorização de exceção
@@ -641,7 +641,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           )}
 
           {/* Existing document */}
-          {meta.documento_url && (
+          {docUrl && (
             <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-primary" />
@@ -832,7 +832,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           dados_incompletos: meta.dados_incompletos_labels,
           observacao_dados_incompletos: meta.observacao_dados_incompletos,
           justificativa_interna: meta.justificativa_interna,
-          documento_url: meta.documento_url,
+          documento_url: docUrl,
         }}
         motivoPadrao={
           meta.resultado_consulta === "reprovado"
