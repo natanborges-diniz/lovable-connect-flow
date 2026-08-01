@@ -60,6 +60,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const [justificativa, setJustificativa] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [localDocUrl, setLocalDocUrl] = useState<string | null>(null);
   const [action, setAction] = useState<"aprovar" | "reprovar" | "dados_incompletos" | null>(null);
   const [showDadosIncompletos, setShowDadosIncompletos] = useState(false);
   const [dadosSelecionados, setDadosSelecionados] = useState<string[]>([]);
