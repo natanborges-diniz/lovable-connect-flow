@@ -329,7 +329,7 @@ async function extrairFiltrosNL(query: string): Promise<Body["filtros"]> {
         model: "google/gemini-3-flash-preview",
         temperature: 0,
         messages: [
-          { role: "system", content: "Extraia filtros de busca de lentes a partir do texto do operador. Devolva JSON estrito com chaves opcionais: preferencia_marca (string: Varilux, DNZ, DMAX, HOYA, ZEISS, Essilor, Kodak), filtro_blue (bool, se citar 'blue'/'azul'/'tela'), filtro_photo (bool, se citar 'foto'/'transitions'), material_policarbonato (bool, se citar '3 peças'/'policarbonato'/'airwear'/'parafuso'), descarte ('diaria'|'quinzenal'|'mensal'), is_toric (bool, se citar 'tórica'/'astigmatismo alto'), preco_max (number, se citar limite). Nada além do JSON." },
+          { role: "system", content: "Extraia filtros de busca de lentes a partir do texto do operador. Devolva JSON estrito com chaves opcionais: preferencia_marca (string livre: pode combinar marca, família, tratamento e material/índice — ex.: 'Varilux Stylis', 'Varilux XR Pro Crizal', 'Hoya 1.67', 'Stylis 1.74', 'Airwear', 'Orma', 'DNZ'; mantenha as palavras que o operador citou, sem inventar), filtro_blue (bool, se citar 'blue'/'azul'/'tela'), filtro_photo (bool, se citar 'foto'/'transitions'/'fotossensível'), material_policarbonato (bool, se citar '3 peças'/'policarbonato'/'airwear'/'parafuso'), descarte ('diaria'|'quinzenal'|'mensal'), is_toric (bool, se citar 'tórica'/'astigmatismo alto'), preco_max (number, se citar limite). Nada além do JSON." },
           { role: "user", content: query },
         ],
       }),
