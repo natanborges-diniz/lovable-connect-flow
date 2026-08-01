@@ -59,6 +59,21 @@ function deriveRxStats(rx?: Rx) {
   return { od, oe, sph, cyl, add, worstSphere, worstCyl, maxAdd, rxType, hasAdd: add.length > 0 };
 }
 
+// Busca por termo livre: quebra em palavras e exige TODAS (AND entre tokens),
+// cada token casando em qualquer uma das colunas (OR interno).
+// Ex.: "Varilux Stylis" → (…ilike %Varilux%) AND (…ilike %Stylis%).
+function applyTokenSearch(q: any, termo: string, cols: string[]) {
+  const tokens = String(termo || "")
+    .replace(/[%,()."'*]/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+  for (const t of tokens) {
+    q = q.or(cols.map((c) => `${c}.ilike.%${t}%`).join(","));
+  }
+  return q;
+}
+
 async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], monocular = false) {
   const s = deriveRxStats(rx);
   if (!s.sph.length) return { erro: "Receita sem esférico. Edite os valores no painel pra buscar." };
