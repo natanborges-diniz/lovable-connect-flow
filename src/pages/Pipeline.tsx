@@ -1183,9 +1183,11 @@ const ChatView = forwardRef<ChatViewHandle, { atendimentoId: string; contatoNome
           if (!uid) throw new Error("Sessão expirada. Faça login novamente.");
           const ext = attachment.name.split(".").pop()?.toLowerCase() || "jpg";
           const path = `${uid}/atendimentos/${atendimentoId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-          const { error: upErr } = await supabase.storage
-            .from("mensagens-anexos")
-            .upload(path, attachment, { contentType: attachment.type, upsert: false });
+          const { error: upErr } = await withTimeout(
+            supabase.storage
+              .from("mensagens-anexos")
+              .upload(path, attachment, { contentType: attachment.type, upsert: false })
+          ).catch((e) => ({ error: e as any }));
           setUploadingAttachment(false);
           if (upErr) throw new Error("Falha no upload: " + upErr.message);
           const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
