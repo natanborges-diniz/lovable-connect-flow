@@ -171,8 +171,8 @@ serve(async (req) => {
         });
       }
       const idadeDias = (Date.now() - new Date(consulta.created_at).getTime()) / 86400000;
-      if (idadeDias > 60) {
-        return new Response(JSON.stringify({ error: "Consulta expirada (mais de 60 dias).", code: "CONSULTA_EXPIRADA" }), {
+      if (idadeDias > 30) {
+        return new Response(JSON.stringify({ error: "Consulta expirada (mais de 30 dias).", code: "CONSULTA_EXPIRADA" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
