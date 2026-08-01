@@ -399,6 +399,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
     setShowDadosIncompletos(false);
     setDadosSelecionados([]);
     setObservacaoIncompletos("");
+    setLocalDocUrl(null);
   };
 
   const handleDownloadDoc = async () => {
