@@ -90,8 +90,10 @@ export function ConfirmarPixDialog({ solicitacao, open, onOpenChange, colunas }:
     if (!user) throw new Error("Sessão expirada — faça login novamente.");
     const ext = evidencia.name.split(".").pop() || "bin";
     const path = `${user.id}/financeiro/${solicitacao.id}/${Date.now()}-pix-confirm.${ext}`;
-    const { error: upErr } = await supabase.storage
-      .from("mensagens-anexos").upload(path, evidencia, { contentType: evidencia.type, upsert: false });
+    const { error: upErr } = await withTimeout(
+      supabase.storage
+        .from("mensagens-anexos").upload(path, evidencia, { contentType: evidencia.type, upsert: false })
+    );
     if (upErr) throw upErr;
     const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
     return { url: pub.publicUrl, nome: evidencia.name, mime: evidencia.type || null, storage_path: path };
