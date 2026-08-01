@@ -232,8 +232,7 @@ async function buscarLC(supabase: any, rx: Rx, filtros: Body["filtros"], queryNa
   else q = q.eq("is_toric", false);
   if (filtros?.descarte) q = q.eq("descarte", filtros.descarte);
   if (marca) {
-    const safe = marca.replace(/[%,()]/g, "");
-    q = q.or(`fornecedor.ilike.%${safe}%,produto.ilike.%${safe}%`);
+    q = applyTokenSearch(q, marca, ["fornecedor", "produto"]);
   }
 
   const { data: lc, error } = await q.order("priority", { ascending: true }).order("price_brl", { ascending: true }).limit(80);
