@@ -242,11 +242,14 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       if (file) {
         const ext = file.name.split(".").pop() || "pdf";
         const path = `${solicitacao.id}/${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("cpf-documentos")
-          .upload(path, file, { contentType: file.type });
+        const { error: uploadError } = await withTimeout(
+          supabase.storage
+            .from("cpf-documentos")
+            .upload(path, file, { contentType: file.type })
+        );
         if (uploadError) throw uploadError;
         documentoUrl = path;
+        setLocalDocUrl(path);
       }
 
       const targetColName = tipo === "aprovar" ? "Consulta CPF Aprovado" : "Consulta CPF Reprovada";
