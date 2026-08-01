@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import { toast } from "sonner";
 import { Loader2, FileCheck, Receipt, Upload, FileText, X, RefreshCw } from "lucide-react";
 

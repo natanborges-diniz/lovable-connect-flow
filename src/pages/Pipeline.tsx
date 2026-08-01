@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import { toast } from "sonner";
 import { useMensagens, useCreateMensagem } from "@/hooks/useAtendimentos";
 

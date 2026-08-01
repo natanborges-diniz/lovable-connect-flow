@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, Upload, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import { useLojas } from "@/hooks/useLojas";
 import { useCreateConfirmacaoEstoque } from "@/hooks/useConfirmacoesEstoque";
 import { toast } from "sonner";
