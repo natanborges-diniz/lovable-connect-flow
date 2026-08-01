@@ -1,25 +1,46 @@
-# Régua de links/Pix pendentes
+# Copiloto: busca por "Varilux Stylis" não encontra nada
 
-Aplicar a migration `20260731210000_regua_links_pendentes.sql` exatamente como está no repositório, sem alterar nenhum arquivo.
+## O que foi verificado
 
-## O que ela faz
+- Não existe nenhuma linha em `pricing_table_lentes` com "Stylis" em `family` ou `treatment` (0 resultados).
+- "Stylis" não é família — é o **material/índice** da Essilor. No catálogo oficial (`essilor_pvc_abr2026_expandido.json`) aparece como "Stylis 1.67" / "Stylis 1.74", mas no banco está gravado como código: `S156`, `S167`, `S174` (96 linhas ativas).
+- A busca do copiloto (`buscar-lentes-operador`) procura o termo **apenas** em `brand`, `family` e `treatment` — nunca em `index_name`. E procura a frase inteira: "Varilux Stylis" vira um único `ilike '%Varilux Stylis%'`, que nunca casa, mesmo se o material estivesse legível.
+- Efeito colateral do mesmo problema: qualquer busca com duas palavras ("XR Pro Crizal", "Comfort Airwear") já falha hoje.
 
-- **Fase 1 — lembrete (4h a 24h sem pagamento):** comentário automático na solicitação (visível no Messenger) + notificação para os usuários da loja, uma única vez.
-- **Fase 2 — expiração (após 24h ou `expira_em` vencido):** solicitação vira `cancelada`, vai para a coluna Cancelado do Financeiro, é arquivada, o `pagamentos_link` vira `expirado`, e a loja é avisada para gerar nova cobrança se necessário.
-- **Agendamento:** `pg_cron` de hora em hora, no minuto 10.
+## O que fazer
 
-## Verificações já feitas
+### 1. Normalizar o material no banco (migration)
 
-- `resolver_destinatarios_loja` existe.
-- Colunas usadas existem (`pagamentos_link.expirado_at/status/solicitacao_id`, `solicitacao_comentarios`, `notificacoes`).
-- Coluna "Cancelado" do setor Financeiro existe e está ativa.
-- A função `regua_links_pendentes` ainda não existe e o job `regua-links-pendentes` ainda não está agendado.
+Traduzir os códigos Essilor para o nome comercial usado pelo cliente e pelo vendedor:
 
-## Atenção — impacto na primeira execução
+```text
+S156 -> Stylis 1.56
+S167 -> Stylis 1.67
+S174 -> Stylis 1.74
+Orma -> Orma 1.50
+Airwear -> Airwear 1.59
+Poli -> Policarbonato 1.59
+```
 
-Hoje há **39 cobranças** em aberto com mais de 24h que serão canceladas/arquivadas e **1** que receberá lembrete já na primeira rodada (dentro de até 1 hora). Isso é o comportamento pretendido da régua, mas é uma limpeza retroativa em massa. Se preferir, posso rodar a migration e só depois agendar o cron, ou fazer a primeira limpeza de forma controlada.
+Isso já faz "Stylis" aparecer na mensagem formatada ao cliente (hoje sai "Varilux XR Pro™ S167 Crizal", passa a sair "Varilux XR Pro™ Stylis 1.67 Crizal").
 
-## Passos
+Os códigos opacos da DMax (`1.56_A56`, `1.59_Poli`, `1.67_F67`…) ficam para uma segunda rodada, com confirmação de qual tratamento cada sufixo representa.
 
-1. Executar a migration completa (função + `cron.schedule`).
-2. Confirmar que a função foi criada e o job `regua-links-pendentes` está ativo em `cron.job`.
+### 2. Buscar também pelo material e por múltiplas palavras (edge function)
+
+Em `supabase/functions/buscar-lentes-operador/index.ts`, nos modos Óculos e Catálogo:
+
+- Quebrar o termo digitado em palavras e exigir **todas** elas (AND entre tokens), cada token casando em `brand` OR `family` OR `treatment` OR `index_name`.
+- "Varilux Stylis" passa a devolver as lentes Varilux em material Stylis; "Varilux" sozinho continua devolvendo tudo como hoje.
+- Mesma lógica aplicada ao modo Lentes de contato (`fornecedor`, `produto`).
+
+### 3. Extração em linguagem natural
+
+Ampliar o prompt do extrator NL para reconhecer material/índice ("stylis", "airwear", "orma", "1.67", "1.74", "policarbonato") e devolver junto do termo de marca, em vez de só a lista fixa de marcas.
+
+## Detalhes técnicos
+
+- Migration: `UPDATE public.pricing_table_lentes SET index_name = ... WHERE brand = 'Essilor' AND index_name IN (...)` — só rótulo, sem mexer em preço, faixa de grau ou `active`.
+- A busca continua sendo somente leitura; nada é gravado em atendimento, metadata ou mensagens.
+- `runConsultarLentes` do `ai-triage` não é alterado; ele lê `index_name` só para exibir, então herda o rótulo novo sem risco de regressão de filtro.
+- Redeploy necessário: `buscar-lentes-operador`.
