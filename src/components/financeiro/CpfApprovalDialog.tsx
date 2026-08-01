@@ -568,15 +568,20 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                         try {
                           const ext = f.name.split(".").pop() || "pdf";
                           const path = `${solicitacao.id}/${Date.now()}.${ext}`;
-                          const { error: upErr } = await supabase.storage
-                            .from("cpf-documentos")
-                            .upload(path, f, { contentType: f.type });
+                          const { error: upErr } = await withTimeout(
+                            supabase.storage
+                              .from("cpf-documentos")
+                              .upload(path, f, { contentType: f.type })
+                          );
                           if (upErr) throw upErr;
-                          const { error: updErr } = await supabase
-                            .from("solicitacoes")
-                            .update({ metadata: { ...meta, documento_url: path, documento_path: path } })
-                            .eq("id", solicitacao.id);
+                          const { error: updErr } = await withTimeout(
+                            supabase
+                              .from("solicitacoes")
+                              .update({ metadata: { ...meta, documento_url: path, documento_path: path } })
+                              .eq("id", solicitacao.id)
+                          );
                           if (updErr) throw updErr;
+                          setLocalDocUrl(path);
                           toast.success("Documento anexado.");
                           queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
                         } catch (err: any) {
