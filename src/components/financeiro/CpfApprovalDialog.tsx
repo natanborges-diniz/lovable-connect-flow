@@ -90,9 +90,33 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const valorEntrada = meta.valor_entrada != null ? Number(meta.valor_entrada) : null;
   const valorFinanciado = meta.valor_financiado != null ? Number(meta.valor_financiado) : null;
 
-  const existingDocUrl = meta.documento_url || null;
+  // Documento: prioriza o que já veio do banco, mas cai no estado local logo após
+  // o upload — assim a UI não depende do refetch da lista (que difere entre o
+  // kanban antigo e a mesa nova) para sair do estado "anexando".
+  const docUrl: string | null = meta.documento_url || localDocUrl;
+  const existingDocUrl = docUrl;
+
+  // Rede pode pendurar a promise (sessão expirada, upload travado): sem um teto
+  // de tempo o spinner fica girando para sempre.
+  const withTimeout = async <T,>(p: PromiseLike<T>, ms = 60000): Promise<T> => {
+    let timer: any;
+    try {
+      return await Promise.race([
+        Promise.resolve(p),
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("tempo esgotado (verifique sua conexão e tente novamente)")),
+            ms
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const findColuna = (nome: string) => colunas.find((c) => c.nome === nome);
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
