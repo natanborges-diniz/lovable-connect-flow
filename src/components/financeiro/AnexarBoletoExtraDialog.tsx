@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import { toast } from "sonner";
 import { Loader2, Paperclip, Upload, X } from "lucide-react";
 
@@ -42,8 +43,10 @@ export function AnexarBoletoExtraDialog({ solicitacaoId, open, onOpenChange, onS
         const f = files[i];
         const ext = f.name.split(".").pop() || "bin";
         const path = `${user.id}/financeiro/${solicitacaoId}/extras/${Date.now()}-${i}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from("mensagens-anexos").upload(path, f, { contentType: f.type, upsert: false });
+        const { error: upErr } = await withTimeout(
+          supabase.storage
+            .from("mensagens-anexos").upload(path, f, { contentType: f.type, upsert: false })
+        );
         if (upErr) throw upErr;
         const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
         anexos.push({

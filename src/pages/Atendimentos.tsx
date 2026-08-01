@@ -29,6 +29,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { StatusAtendimento } from "@/types/database";
@@ -299,9 +300,11 @@ function AtendimentoDetail({ id, onStatusChange }: { id: string; onStatusChange:
           if (!uid) throw new Error("Sessão expirada. Faça login novamente.");
           const ext = attachment.name.split(".").pop()?.toLowerCase() || "jpg";
           const path = `${uid}/atendimentos/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-          const { error: upErr } = await supabase.storage
-            .from("mensagens-anexos")
-            .upload(path, attachment, { contentType: attachment.type, upsert: false });
+          const { error: upErr } = await withTimeout(
+            supabase.storage
+              .from("mensagens-anexos")
+              .upload(path, attachment, { contentType: attachment.type, upsert: false })
+          ).catch((e) => ({ error: e as any }));
           setUploadingAttachment(false);
           if (upErr) throw new Error("Falha no upload: " + upErr.message);
           const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);

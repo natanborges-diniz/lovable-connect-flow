@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import {
   Dialog,
   DialogContent,
@@ -79,9 +80,11 @@ export function AcionarLojaDialog({ open, onOpenChange, atendimentoId, onCreated
       if (anexo) {
         const ext = anexo.name.split(".").pop()?.toLowerCase() || "bin";
         const path = `demandas/${new Date().getFullYear()}/${crypto.randomUUID()}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from("mensagens-anexos")
-          .upload(path, anexo, { contentType: anexo.type, upsert: false });
+        const { error: upErr } = await withTimeout(
+          supabase.storage
+            .from("mensagens-anexos")
+            .upload(path, anexo, { contentType: anexo.type, upsert: false })
+        );
         if (upErr) throw new Error("Falha no upload: " + upErr.message);
         const { data: pub } = supabase.storage.from("mensagens-anexos").getPublicUrl(path);
         anexo_url = pub.publicUrl;

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -95,25 +96,6 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   // kanban antigo e a mesa nova) para sair do estado "anexando".
   const docUrl: string | null = meta.documento_url || localDocUrl;
   const existingDocUrl = docUrl;
-
-  // Rede pode pendurar a promise (sessão expirada, upload travado): sem um teto
-  // de tempo o spinner fica girando para sempre.
-  const withTimeout = async <T,>(p: PromiseLike<T>, ms = 60000): Promise<T> => {
-    let timer: any;
-    try {
-      return await Promise.race([
-        Promise.resolve(p),
-        new Promise<T>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("tempo esgotado (verifique sua conexão e tente novamente)")),
-            ms
-          );
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  };
 
   const findColuna = (nome: string) => colunas.find((c) => c.nome === nome);
 

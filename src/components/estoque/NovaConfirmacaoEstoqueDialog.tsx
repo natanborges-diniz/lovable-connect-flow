@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, Upload, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { withTimeout } from "@/lib/upload";
 import { useLojas } from "@/hooks/useLojas";
 import { useCreateConfirmacaoEstoque } from "@/hooks/useConfirmacoesEstoque";
 import { toast } from "sonner";
@@ -44,7 +45,9 @@ export function NovaConfirmacaoEstoqueDialog({ open, onOpenChange }: Props) {
     try {
       const ext = file.name.split(".").pop() || "jpg";
       const path = `${new Date().getFullYear()}/${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage.from("estoque-confirmacoes").upload(path, file, { upsert: false });
+      const { error } = await withTimeout(
+        supabase.storage.from("estoque-confirmacoes").upload(path, file, { upsert: false })
+      );
       if (error) throw error;
       const { data } = supabase.storage.from("estoque-confirmacoes").getPublicUrl(path);
       setFotoUrl(data.publicUrl);
