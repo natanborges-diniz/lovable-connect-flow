@@ -60,6 +60,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const [justificativa, setJustificativa] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [localDocUrl, setLocalDocUrl] = useState<string | null>(null);
   const [action, setAction] = useState<"aprovar" | "reprovar" | "dados_incompletos" | null>(null);
   const [showDadosIncompletos, setShowDadosIncompletos] = useState(false);
   const [dadosSelecionados, setDadosSelecionados] = useState<string[]>([]);
@@ -89,9 +90,33 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
   const valorEntrada = meta.valor_entrada != null ? Number(meta.valor_entrada) : null;
   const valorFinanciado = meta.valor_financiado != null ? Number(meta.valor_financiado) : null;
 
-  const existingDocUrl = meta.documento_url || null;
+  // Documento: prioriza o que já veio do banco, mas cai no estado local logo após
+  // o upload — assim a UI não depende do refetch da lista (que difere entre o
+  // kanban antigo e a mesa nova) para sair do estado "anexando".
+  const docUrl: string | null = meta.documento_url || localDocUrl;
+  const existingDocUrl = docUrl;
+
+  // Rede pode pendurar a promise (sessão expirada, upload travado): sem um teto
+  // de tempo o spinner fica girando para sempre.
+  const withTimeout = async <T,>(p: PromiseLike<T>, ms = 60000): Promise<T> => {
+    let timer: any;
+    try {
+      return await Promise.race([
+        Promise.resolve(p),
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("tempo esgotado (verifique sua conexão e tente novamente)")),
+            ms
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const findColuna = (nome: string) => colunas.find((c) => c.nome === nome);
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -217,11 +242,14 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       if (file) {
         const ext = file.name.split(".").pop() || "pdf";
         const path = `${solicitacao.id}/${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("cpf-documentos")
-          .upload(path, file, { contentType: file.type });
+        const { error: uploadError } = await withTimeout(
+          supabase.storage
+            .from("cpf-documentos")
+            .upload(path, file, { contentType: file.type })
+        );
         if (uploadError) throw uploadError;
         documentoUrl = path;
+        setLocalDocUrl(path);
       }
 
       const targetColName = tipo === "aprovar" ? "Consulta CPF Aprovado" : "Consulta CPF Reprovada";
@@ -371,14 +399,15 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
     setShowDadosIncompletos(false);
     setDadosSelecionados([]);
     setObservacaoIncompletos("");
+    setLocalDocUrl(null);
   };
 
   const handleDownloadDoc = async () => {
-    if (!meta.documento_url) return;
+    if (!docUrl) return;
     try {
       const { data, error } = await supabase.storage
         .from("cpf-documentos")
-        .createSignedUrl(meta.documento_url, 3600);
+        .createSignedUrl(docUrl, 3600);
       if (error) throw error;
       window.open(data.signedUrl, "_blank");
     } catch (err: any) {
@@ -514,7 +543,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           {/* Solicitar autorização de exceção */}
           {((alreadyProcessed && meta.resultado_consulta === "reprovado") || isDadosIncompletos) && !meta.autorizacao_excecao && (
             <div className="space-y-2">
-              {!meta.documento_url && (
+              {!docUrl && (
                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
                   <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300">
                     <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -540,15 +569,20 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                         try {
                           const ext = f.name.split(".").pop() || "pdf";
                           const path = `${solicitacao.id}/${Date.now()}.${ext}`;
-                          const { error: upErr } = await supabase.storage
-                            .from("cpf-documentos")
-                            .upload(path, f, { contentType: f.type });
+                          const { error: upErr } = await withTimeout(
+                            supabase.storage
+                              .from("cpf-documentos")
+                              .upload(path, f, { contentType: f.type })
+                          );
                           if (upErr) throw upErr;
-                          const { error: updErr } = await supabase
-                            .from("solicitacoes")
-                            .update({ metadata: { ...meta, documento_url: path, documento_path: path } })
-                            .eq("id", solicitacao.id);
+                          const { error: updErr } = await withTimeout(
+                            supabase
+                              .from("solicitacoes")
+                              .update({ metadata: { ...meta, documento_url: path, documento_path: path } })
+                              .eq("id", solicitacao.id)
+                          );
                           if (updErr) throw updErr;
+                          setLocalDocUrl(path);
                           toast.success("Documento anexado.");
                           queryClient.invalidateQueries({ queryKey: ["solicitacoes_financeiro"] });
                         } catch (err: any) {
@@ -567,7 +601,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                 variant="outline"
                 className="w-full border-primary/40 text-primary hover:bg-primary/5"
                 onClick={() => setExcecaoOpen(true)}
-                disabled={!meta.documento_url || uploading}
+                disabled={!docUrl || uploading}
               >
                 <Shield className="h-4 w-4 mr-1" />
                 Solicitar autorização de exceção
@@ -608,7 +642,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           )}
 
           {/* Existing document */}
-          {meta.documento_url && (
+          {docUrl && (
             <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-primary" />
@@ -799,7 +833,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           dados_incompletos: meta.dados_incompletos_labels,
           observacao_dados_incompletos: meta.observacao_dados_incompletos,
           justificativa_interna: meta.justificativa_interna,
-          documento_url: meta.documento_url,
+          documento_url: docUrl,
         }}
         motivoPadrao={
           meta.resultado_consulta === "reprovado"
