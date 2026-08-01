@@ -64,7 +64,7 @@ function deriveRxStats(rx?: Rx) {
 // Ex.: "Varilux Stylis" → (…ilike %Varilux%) AND (…ilike %Stylis%).
 function applyTokenSearch(q: any, termo: string, cols: string[]) {
   const tokens = String(termo || "")
-    .replace(/[%,()."'*]/g, " ")
+    .replace(/[%,()"'*]/g, " ")
     .split(/\s+/)
     .map((t) => t.trim())
     .filter((t) => t.length >= 2);
