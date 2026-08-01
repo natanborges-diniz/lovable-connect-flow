@@ -96,11 +96,11 @@ async function buscarOculos(supabase: any, rx: Rx, filtros: Body["filtros"], mon
   }
   if (filtros?.filtro_blue) q = q.eq("blue", true);
   if (filtros?.filtro_photo) q = q.eq("photo", true);
-  // Consultoria Jul/2026: marca pesquisada em brand OU family OU treatment —
-  // "Varilux"/"Crizal" ficam em family/treatment com brand="Essilor".
+  // Ago/2026: termo pesquisado em brand OU family OU treatment OU index_name,
+  // com AND entre palavras — "Varilux"/"Crizal" ficam em family/treatment e
+  // materiais como "Stylis 1.67" ficam em index_name.
   if (filtros?.preferencia_marca) {
-    const _m = String(filtros.preferencia_marca).replace(/[%,()."']/g, "").trim();
-    if (_m) q = q.or(`brand.ilike.%${_m}%,family.ilike.%${_m}%,treatment.ilike.%${_m}%`);
+    q = applyTokenSearch(q, filtros.preferencia_marca, ["brand", "family", "treatment", "index_name"]);
   }
   if (filtros?.material_policarbonato) q = q.or("family.ilike.%airwear%,family.ilike.%policar%,index_name.ilike.%1.59%");
   if (filtros?.preco_max) q = q.lte("price_brl", filtros.preco_max);
