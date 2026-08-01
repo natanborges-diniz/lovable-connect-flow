@@ -300,8 +300,7 @@ async function buscarCatalogoLivre(supabase: any, filtros: Body["filtros"]) {
   let q = supabase.from("pricing_table_lentes").select("brand,family,category,index_name,treatment,blue,photo,price_brl")
     .eq("active", true).gt("price_brl", 0);
   if (filtros?.preferencia_marca) {
-    const _m = String(filtros.preferencia_marca).replace(/[%,()."']/g, "").trim();
-    if (_m) q = q.or(`brand.ilike.%${_m}%,family.ilike.%${_m}%,treatment.ilike.%${_m}%`);
+    q = applyTokenSearch(q, filtros.preferencia_marca, ["brand", "family", "treatment", "index_name"]);
   }
   if (filtros?.filtro_blue) q = q.eq("blue", true);
   if (filtros?.filtro_photo) q = q.eq("photo", true);
