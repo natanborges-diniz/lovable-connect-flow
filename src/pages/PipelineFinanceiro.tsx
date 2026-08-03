@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Link } from "react-router-dom";
 import {
-  Plus, Pencil, Trash2, Check, X, Search, GripVertical,
+  Plus, Pencil, Trash2, Check, X, Search, GripVertical, LayoutList,
   CreditCard, FileText, Clock, DollarSign, ShieldCheck, Zap, Archive, ArchiveRestore,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
