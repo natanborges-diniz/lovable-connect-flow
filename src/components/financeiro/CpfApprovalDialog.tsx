@@ -19,6 +19,7 @@ import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { SolicitarAutorizacaoDialog } from "./SolicitarAutorizacaoDialog";
 import { SolicitacaoThreadPanel } from "./SolicitacaoThreadPanel";
+import { useAuth } from "@/hooks/useAuth";
 import { Shield } from "lucide-react";
 
 interface CpfApprovalDialogProps {
@@ -58,6 +59,7 @@ export { EntryPercentageBadge };
 
 export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: CpfApprovalDialogProps) {
   const queryClient = useQueryClient();
+  const { user, profile } = useAuth() as any;
   const [justificativa, setJustificativa] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
