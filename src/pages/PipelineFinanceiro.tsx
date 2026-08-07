@@ -692,7 +692,9 @@ export default function PipelineFinanceiro() {
                   )}
                 </DialogDescription>
               </DialogHeader>
+              <ResponsavelSolicitacao solicitacao={selectedSolicitacao} />
               <div className="space-y-2 text-sm">
+
                 {selectedSolicitacao.contato && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Contato</span>
