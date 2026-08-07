@@ -145,9 +145,13 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false },
   });
 
+  // Consultoria Ago/2026: janela parametrizável via ?days=N (default 30, máx 90)
+  const _url = new URL(req.url);
+  const windowDays = Math.min(90, Math.max(1, Number(_url.searchParams.get("days")) || 30));
+
   const result: ExtractionResult = {
     extracted_at: new Date().toISOString(),
-    extractions: {},
+    extractions: { window_days: windowDays },
     errors: [],
   };
 
@@ -177,9 +181,9 @@ Deno.serve(async (req: Request) => {
     return data;
   }, result);
 
-  await runExtraction("metricas", async () => extractMetrics(supabase), result);
+  await runExtraction("metricas", async () => extractMetrics(supabase, windowDays), result);
 
-  await runExtraction("amostra", async () => extractAmostra(supabase), result);
+  await runExtraction("amostra", async () => extractAmostra(supabase, windowDays), result);
 
   return new Response(JSON.stringify(result, null, 2), {
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -204,8 +208,8 @@ async function runExtraction(
 
 // ── extractMetrics ────────────────────────────────────────────────────────────
 
-async function extractMetrics(supabase: SupabaseClient) {
-  const ha30dias = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+async function extractMetrics(supabase: SupabaseClient, windowDays = 30) {
+  const ha30dias = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
   const ha7dias = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   // 3.1 — Taxa de escalada (filtra por data em ambas as queries, cruza em memória)
@@ -574,8 +578,8 @@ interface AtClassified extends AtRow {
   pipeline_coluna_final: string | null;
 }
 
-async function extractAmostra(supabase: SupabaseClient) {
-  const ha30dias = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+async function extractAmostra(supabase: SupabaseClient, windowDays = 30) {
+  const ha30dias = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
 
   // 1. Atendimentos finalizados (SEM join ia_auditorias — FK não declarada na migration)
   const atendimentos = await fetchAllPaged<{
