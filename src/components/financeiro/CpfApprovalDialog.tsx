@@ -19,6 +19,7 @@ import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { SolicitarAutorizacaoDialog } from "./SolicitarAutorizacaoDialog";
 import { SolicitacaoThreadPanel } from "./SolicitacaoThreadPanel";
+import { useAuth } from "@/hooks/useAuth";
 import { Shield } from "lucide-react";
 
 interface CpfApprovalDialogProps {
@@ -58,6 +59,7 @@ export { EntryPercentageBadge };
 
 export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: CpfApprovalDialogProps) {
   const queryClient = useQueryClient();
+  const { user, profile } = useAuth() as any;
   const [justificativa, setJustificativa] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -237,6 +239,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       const targetColName = tipo === "aprovar" ? "Consulta CPF Aprovado" : "Consulta CPF Reprovada";
       const targetCol = findColuna(targetColName);
 
+      const analistaNome = profile?.nome || user?.email || "Operador";
       const updatedMetadata = {
         ...meta,
         documento_path: file ? `${solicitacao.id}/${Date.now()}.${file.name.split(".").pop() || "pdf"}` : meta.documento_path,
@@ -244,6 +247,8 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         resultado_consulta: tipo === "aprovar" ? "aprovado" : "reprovado",
         justificativa_interna: justificativa || null,
         data_analise: new Date().toISOString(),
+        analista_id: user?.id ?? null,
+        analista_nome: analistaNome,
       };
 
       const updatePayload: any = {
@@ -273,6 +278,20 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
           metadata: updatedMetadata,
         });
       }
+
+      // Rastreabilidade: quem aprovou/reprovou (timeline do card)
+      await supabase.from("pipeline_card_eventos").insert({
+        entidade: "solicitacao",
+        entidade_id: solicitacao.id,
+        tipo: tipo === "aprovar" ? "cpf_aprovado" : "cpf_reprovado",
+        descricao: tipo === "aprovar"
+          ? `${analistaNome} aprovou a consulta de CPF de ${nomeCliente}`
+          : `${analistaNome} reprovou a consulta de CPF de ${nomeCliente}${justificativa ? `. Motivo: ${justificativa}` : ""}`,
+        usuario_id: user?.id ?? null,
+        usuario_nome: analistaNome,
+      } as any);
+
+
 
       if (targetCol) {
         try {
@@ -326,7 +345,8 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
             .insert({
               solicitacao_id: solicitacao.id,
               tipo: "retorno_setor",
-              autor_nome: "Financeiro",
+              autor_id: user?.id ?? null,
+              autor_nome: `Financeiro · ${analistaNome}`,
               conteudo: mensagem,
             } as any)
             .select();
@@ -513,6 +533,11 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
                 : <XCircle className="h-5 w-5" />}
               <span className="font-medium">
                 {meta.resultado_consulta === "aprovado" ? "CPF Aprovado" : "CPF Reprovado"}
+              </span>
+              <span className="text-xs">
+                {meta.analista_nome
+                  ? `· por ${meta.analista_nome}`
+                  : "· analista não registrado (legado)"}
               </span>
               {meta.data_analise && (
                 <span className="text-xs ml-auto">

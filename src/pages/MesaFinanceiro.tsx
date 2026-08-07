@@ -40,7 +40,6 @@ import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/Ed
 import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { BoletoConsultaOrigem } from "@/components/financeiro/BoletoConsultaOrigem";
-import { ResponsavelSolicitacao } from "@/components/financeiro/ResponsavelSolicitacao";
 
 /* ------------------------------------------------------------------ */
 /* Mapeamento coluna → estágio                                         */
@@ -679,7 +678,6 @@ export default function MesaFinanceiro() {
                   )}
                 </div>
 
-                <ResponsavelSolicitacao solicitacao={selected} onChanged={invalidate} />
 
 
 
