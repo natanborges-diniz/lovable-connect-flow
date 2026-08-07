@@ -33,6 +33,8 @@ const ICON_MAP: Record<string, React.ElementType> = {
   boleto_revisao_concluida: CheckCircle2,
   boleto_anexo_extra: Paperclip,
   boleto_envio_bloqueado: ShieldAlert,
+  cpf_aprovado: CheckCircle2,
+  cpf_reprovado: Ban,
 };
 
 const COLOR_MAP: Record<string, string> = {
