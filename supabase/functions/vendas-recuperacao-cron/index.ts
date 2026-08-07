@@ -489,6 +489,10 @@ async function processContato(
           headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             atendimento_id: atendimento.id,
+            // Ago/2026: remetente explícito — sem ele o send-whatsapp gravava
+            // "Operador" e a mensagem automática parecia humana, ativando a
+            // trava anti-conflito da IA (cliente respondia e ficava sem resposta).
+            remetente_nome: "Sistema",
             interactive: {
               type: "button",
               texto: "Quer dar continuidade?",
