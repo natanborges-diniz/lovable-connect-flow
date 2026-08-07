@@ -56,6 +56,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSearchParams } from "react-router-dom";
 import { SolicitacaoThreadPanel } from "@/components/financeiro/SolicitacaoThreadPanel";
 import { BoletoConsultaOrigem } from "@/components/financeiro/BoletoConsultaOrigem";
+import { ResponsavelSolicitacao } from "@/components/financeiro/ResponsavelSolicitacao";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
