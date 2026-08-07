@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, Play } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { CronsSaudeCard } from "@/components/relatorios/CronsSaudeCard";
+
 
 type Fonte = "armacao_codetapa15" | "ingestao_entregas" | "ingestao_aniv" | "reconciliacao_vendas";
 
