@@ -239,6 +239,7 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
       const targetColName = tipo === "aprovar" ? "Consulta CPF Aprovado" : "Consulta CPF Reprovada";
       const targetCol = findColuna(targetColName);
 
+      const analistaNome = profile?.nome || user?.email || "Operador";
       const updatedMetadata = {
         ...meta,
         documento_path: file ? `${solicitacao.id}/${Date.now()}.${file.name.split(".").pop() || "pdf"}` : meta.documento_path,
@@ -246,6 +247,8 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         resultado_consulta: tipo === "aprovar" ? "aprovado" : "reprovado",
         justificativa_interna: justificativa || null,
         data_analise: new Date().toISOString(),
+        analista_id: user?.id ?? null,
+        analista_nome: analistaNome,
       };
 
       const updatePayload: any = {
