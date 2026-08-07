@@ -866,6 +866,10 @@ export default function PipelineFinanceiro() {
                         </span>
                       </div>
 
+                      <BoletoConsultaOrigem consultaCpfId={selectedSolicitacao.metadata?.consulta_cpf_id as string | undefined} />
+
+
+
                       {/* Projeção das parcelas */}
                       {Array.isArray(selectedSolicitacao.metadata?.boleto_parcelas_projecao) && selectedSolicitacao.metadata.boleto_parcelas_projecao.length > 0 && (
                         <div className="pt-2 border-t border-dashed border-amber-300">
