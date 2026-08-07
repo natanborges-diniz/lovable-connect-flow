@@ -146,8 +146,12 @@ Deno.serve(async (req: Request) => {
   });
 
   // Consultoria Ago/2026: janela parametrizável via ?days=N (default 30, máx 90)
+  // e extração seletiva via ?only=metricas|amostra|auditorias|system_prompt
+  // (para cada chamada caber no timeout de clientes HTTP).
   const _url = new URL(req.url);
   const windowDays = Math.min(90, Math.max(1, Number(_url.searchParams.get("days")) || 30));
+  const only = (_url.searchParams.get("only") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const wants = (name: string) => only.length === 0 || only.includes(name);
 
   const result: ExtractionResult = {
     extracted_at: new Date().toISOString(),
@@ -155,7 +159,7 @@ Deno.serve(async (req: Request) => {
     errors: [],
   };
 
-  await runExtraction("system_prompt", async () => {
+  if (wants("system_prompt")) await runExtraction("system_prompt", async () => {
     const { data, error } = await supabase
       .from("configuracoes_ia")
       .select("chave, valor, updated_at")
@@ -166,7 +170,7 @@ Deno.serve(async (req: Request) => {
     return data;
   }, result);
 
-  await runExtraction("auditorias", async () => {
+  if (wants("auditorias")) await runExtraction("auditorias", async () => {
     const { data, error } = await supabase
       .from("ia_auditorias")
       .select(`
@@ -181,9 +185,9 @@ Deno.serve(async (req: Request) => {
     return data;
   }, result);
 
-  await runExtraction("metricas", async () => extractMetrics(supabase, windowDays), result);
+  if (wants("metricas")) await runExtraction("metricas", async () => extractMetrics(supabase, windowDays), result);
 
-  await runExtraction("amostra", async () => extractAmostra(supabase, windowDays), result);
+  if (wants("amostra")) await runExtraction("amostra", async () => extractAmostra(supabase, windowDays), result);
 
   return new Response(JSON.stringify(result, null, 2), {
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -421,31 +425,36 @@ async function extractMetrics(supabase: SupabaseClient, windowDays = 30) {
       return { total_atendimentos_amostrados: 0, mediana_seg: null, p90_seg: null, p99_seg: null };
     }
 
-    const sample = atendimentos.slice(0, 500);
+    // Ago/2026: paralelizado em lotes de 12 (antes: sequencial → timeout).
+    const sample = atendimentos.slice(0, 300);
     const gaps: number[] = [];
-    for (const at of sample) {
-      const { data: msgs } = await supabase
-        .from("mensagens")
-        .select("direcao, created_at, remetente_nome")
-        .eq("atendimento_id", at.id)
-        .order("created_at", { ascending: true })
-        .limit(20);
+    for (let i = 0; i < sample.length; i += 12) {
+      const lote = sample.slice(i, i + 12);
+      const resultados = await Promise.all(lote.map((at) =>
+        supabase
+          .from("mensagens")
+          .select("direcao, created_at, remetente_nome")
+          .eq("atendimento_id", at.id)
+          .order("created_at", { ascending: true })
+          .limit(20)
+      ));
+      for (const { data: msgs } of resultados) {
+        if (!msgs || msgs.length < 2) continue;
+        const firstInbound = msgs.find((m: { direcao: string }) => m.direcao === "inbound");
+        if (!firstInbound) continue;
+        const firstOutboundIA = msgs.find((m: { direcao: string; created_at: string; remetente_nome: string | null }) =>
+          m.direcao === "outbound" &&
+          new Date(m.created_at).getTime() > new Date((firstInbound as { created_at: string }).created_at).getTime() &&
+          ["Assistente IA", "Gael"].includes(String(m.remetente_nome || ""))
+        );
+        if (!firstOutboundIA) continue;
 
-      if (!msgs || msgs.length < 2) continue;
-      const firstInbound = msgs.find((m: { direcao: string }) => m.direcao === "inbound");
-      if (!firstInbound) continue;
-      const firstOutboundIA = msgs.find((m: { direcao: string; created_at: string; remetente_nome: string | null }) =>
-        m.direcao === "outbound" &&
-        new Date(m.created_at).getTime() > new Date((firstInbound as { created_at: string }).created_at).getTime() &&
-        ["Assistente IA", "Gael"].includes(String(m.remetente_nome || ""))
-      );
-      if (!firstOutboundIA) continue;
-
-      const gapSeg = Math.round(
-        (new Date((firstOutboundIA as { created_at: string }).created_at).getTime() -
-          new Date((firstInbound as { created_at: string }).created_at).getTime()) / 1000
-      );
-      if (gapSeg >= 0 && gapSeg < 3600 * 24) gaps.push(gapSeg);
+        const gapSeg = Math.round(
+          (new Date((firstOutboundIA as { created_at: string }).created_at).getTime() -
+            new Date((firstInbound as { created_at: string }).created_at).getTime()) / 1000
+        );
+        if (gapSeg >= 0 && gapSeg < 3600 * 24) gaps.push(gapSeg);
+      }
     }
 
     gaps.sort((a, b) => a - b);
@@ -474,32 +483,38 @@ async function extractMetrics(supabase: SupabaseClient, windowDays = 30) {
       return { total_eventos_escalonamento: 0, total_gaps_validos: 0, mediana_seg: null, p90_seg: null };
     }
 
-    const sample = escalEvents.slice(0, 300);
+    // Ago/2026: paralelizado em lotes de 12 (antes: sequencial → timeout).
+    const sample = escalEvents.slice(0, 200);
     const BOTS = new Set(["Assistente IA", "Gael", "Sistema", "Bot Lojas", "Recuperação"]);
     const gaps: number[] = [];
 
-    for (const ev of sample) {
-      const { data: msgs } = await supabase
-        .from("mensagens")
-        .select("direcao, created_at, remetente_nome")
-        .eq("atendimento_id", ev.referencia_id)
-        .eq("direcao", "outbound")
-        .gte("created_at", ev.created_at)
-        .order("created_at", { ascending: true })
-        .limit(20);
+    for (let i = 0; i < sample.length; i += 12) {
+      const lote = sample.slice(i, i + 12);
+      const resultados = await Promise.all(lote.map((ev) =>
+        supabase
+          .from("mensagens")
+          .select("direcao, created_at, remetente_nome")
+          .eq("atendimento_id", ev.referencia_id)
+          .eq("direcao", "outbound")
+          .gte("created_at", ev.created_at)
+          .order("created_at", { ascending: true })
+          .limit(20)
+          .then((r: any) => ({ ev, msgs: r.data }))
+      ));
+      for (const { ev, msgs } of resultados) {
+        if (!msgs) continue;
+        const firstHumana = msgs.find((m: { remetente_nome: string | null }) => {
+          const nome = String(m.remetente_nome || "").trim();
+          return nome.length > 0 && !BOTS.has(nome);
+        });
+        if (!firstHumana) continue;
 
-      if (!msgs) continue;
-      const firstHumana = msgs.find((m: { remetente_nome: string | null }) => {
-        const nome = String(m.remetente_nome || "").trim();
-        return nome.length > 0 && !BOTS.has(nome);
-      });
-      if (!firstHumana) continue;
-
-      const gapSeg = Math.round(
-        (new Date((firstHumana as { created_at: string }).created_at).getTime() -
-          new Date(ev.created_at).getTime()) / 1000
-      );
-      if (gapSeg >= 0 && gapSeg < 3600 * 72) gaps.push(gapSeg);
+        const gapSeg = Math.round(
+          (new Date((firstHumana as { created_at: string }).created_at).getTime() -
+            new Date(ev.created_at).getTime()) / 1000
+        );
+        if (gapSeg >= 0 && gapSeg < 3600 * 72) gaps.push(gapSeg);
+      }
     }
 
     gaps.sort((a, b) => a - b);
