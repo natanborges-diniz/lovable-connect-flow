@@ -3387,19 +3387,40 @@ serve(async (req) => {
       console.log("[DEBOUNCE] No response found, proceeding as fallback");
     }
 
-    // Anti-duplicate: check if an outbound was sent in the last 10s (even without lock)
+    // Anti-duplicate: outbound recente (<10s) NÃO pode descartar a mensagem do cliente.
+    // Caso Kamila (06/08): cliente respondeu 5s após a IA e a mensagem foi engolida.
+    // Agora: espera o restante da janela e só aborta se OUTRA execução responder nesse
+    // meio-tempo (outbound novo, posterior ao que já existia).
     const { data: veryRecentOut } = await supabase
       .from("mensagens")
-      .select("id")
+      .select("id, created_at")
       .eq("atendimento_id", atendimento_id)
       .eq("direcao", "outbound")
       .gte("created_at", new Date(now - 10_000).toISOString())
+      .order("created_at", { ascending: false })
       .limit(1);
 
     if (!forceMode && veryRecentOut?.length) {
-      console.log("[DEBOUNCE] Outbound sent <10s ago, skipping to prevent duplicate");
-      return jsonResponse({ status: "skipped", reason: "debounce — recent outbound <10s" });
+      const _lastOutAt = new Date(veryRecentOut[0].created_at as string).getTime();
+      const _waitMs = Math.max(0, Math.min(10_000, 10_000 - (Date.now() - _lastOutAt)));
+      if (_waitMs > 0) {
+        console.log(`[DEBOUNCE] Outbound <10s — aguardando ${_waitMs}ms antes de processar (não descarta)`);
+        await new Promise((r) => setTimeout(r, _waitMs));
+      }
+      const { data: newerOut } = await supabase
+        .from("mensagens")
+        .select("id")
+        .eq("atendimento_id", atendimento_id)
+        .eq("direcao", "outbound")
+        .gt("created_at", veryRecentOut[0].created_at as string)
+        .limit(1);
+      if (newerOut?.length) {
+        console.log("[DEBOUNCE] Outra execução já respondeu — abortando");
+        return jsonResponse({ status: "skipped", reason: "debounce — already answered by concurrent run" });
+      }
+      console.log("[DEBOUNCE] Nenhuma resposta concorrente — seguindo com o processamento");
     }
+
 
     // ── Set lock — CAS atômico via coluna ia_lock_at ────────────────────────
     // UPDATE … WHERE id=$1 AND (ia_lock_at IS NULL OR ia_lock_at < agora-TTL)
