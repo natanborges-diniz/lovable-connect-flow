@@ -39,6 +39,7 @@ import { CardTimeline } from "@/components/pipeline/CardTimeline";
 import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
 import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { BoletoConsultaOrigem } from "@/components/financeiro/BoletoConsultaOrigem";
 
 /* ------------------------------------------------------------------ */
 /* Mapeamento coluna → estágio                                         */
