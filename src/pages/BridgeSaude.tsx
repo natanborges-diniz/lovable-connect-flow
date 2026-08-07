@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, Play } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { CronsSaudeCard } from "@/components/relatorios/CronsSaudeCard";
+
 
 type Fonte = "armacao_codetapa15" | "ingestao_entregas" | "ingestao_aniv" | "reconciliacao_vendas";
 
@@ -99,8 +101,11 @@ export default function BridgeSaude() {
         }
       />
 
+      <CronsSaudeCard />
+
       <Card className="p-4 overflow-x-auto">
         <table className="w-full text-xs">
+
           <thead>
             <tr>
               <th className="text-left py-2 pr-3 sticky left-0 bg-card">Fonte</th>

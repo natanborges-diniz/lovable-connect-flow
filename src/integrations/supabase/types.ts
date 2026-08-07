@@ -1043,6 +1043,63 @@ export type Database = {
         }
         Relationships: []
       }
+      cron_registry: {
+        Row: {
+          ativo: boolean
+          body: Json
+          created_at: string
+          fn: string
+          jobname: string
+          schedule: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          body?: Json
+          created_at?: string
+          fn: string
+          jobname: string
+          schedule: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          body?: Json
+          created_at?: string
+          fn?: string
+          jobname?: string
+          schedule?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      cron_saude_log: {
+        Row: {
+          acao: string
+          created_at: string
+          detalhe: Json
+          id: string
+          jobname: string
+          motivo: string | null
+        }
+        Insert: {
+          acao: string
+          created_at?: string
+          detalhe?: Json
+          id?: string
+          jobname: string
+          motivo?: string | null
+        }
+        Update: {
+          acao?: string
+          created_at?: string
+          detalhe?: Json
+          id?: string
+          jobname?: string
+          motivo?: string | null
+        }
+        Relationships: []
+      }
       demanda_mensagens: {
         Row: {
           anexo_mime: string | null
@@ -3533,6 +3590,10 @@ export type Database = {
         }
         Returns: Json
       }
+      chamar_edge_function: {
+        Args: { body?: Json; fn: string }
+        Returns: number
+      }
       contato_kpis: { Args: { _contato_id: string }; Returns: Json }
       contato_timeline: {
         Args: {
@@ -3552,6 +3613,7 @@ export type Database = {
           titulo: string
         }[]
       }
+      crons_saude: { Args: never; Returns: Json }
       desanitize_corporate_contact: {
         Args: { _telefone: string }
         Returns: Json
@@ -3769,6 +3831,7 @@ export type Database = {
         }
         Returns: Json
       }
+      reparar_crons: { Args: never; Returns: Json }
       resolve_responsavel_setor: {
         Args: { _setor_id: string }
         Returns: string
