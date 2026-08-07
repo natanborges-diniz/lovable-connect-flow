@@ -534,6 +534,11 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
               <span className="font-medium">
                 {meta.resultado_consulta === "aprovado" ? "CPF Aprovado" : "CPF Reprovado"}
               </span>
+              <span className="text-xs">
+                {meta.analista_nome
+                  ? `· por ${meta.analista_nome}`
+                  : "· analista não registrado (legado)"}
+              </span>
               {meta.data_analise && (
                 <span className="text-xs ml-auto">
                   em {format(new Date(meta.data_analise), "dd/MM/yyyy HH:mm", { locale: ptBR })}

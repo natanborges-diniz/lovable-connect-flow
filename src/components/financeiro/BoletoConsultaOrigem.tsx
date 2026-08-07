@@ -55,6 +55,9 @@ export function BoletoConsultaOrigem({ consultaCpfId, onOpenConsulta }: Props) {
           {dataAnalise
             ? ` · aprovada em ${format(new Date(dataAnalise), "dd/MM/yyyy", { locale: ptBR })}`
             : ""}
+          {meta.analista_nome
+            ? ` por ${meta.analista_nome}`
+            : " · analista não registrado (legado)"}
         </button>
       )}
     </div>
