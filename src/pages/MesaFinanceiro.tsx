@@ -678,6 +678,10 @@ export default function MesaFinanceiro() {
                   )}
                 </div>
 
+                <ResponsavelSolicitacao solicitacao={selected} onChanged={invalidate} />
+
+
+
                 {/* Campos base */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
                   {selected.contato && (
