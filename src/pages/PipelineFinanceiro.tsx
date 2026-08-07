@@ -55,6 +55,7 @@ import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/Ed
 import { useAuth } from "@/hooks/useAuth";
 import { useSearchParams } from "react-router-dom";
 import { SolicitacaoThreadPanel } from "@/components/financeiro/SolicitacaoThreadPanel";
+import { BoletoConsultaOrigem } from "@/components/financeiro/BoletoConsultaOrigem";
 
 export default function PipelineFinanceiro() {
   const [search, setSearch] = useState("");
@@ -865,6 +866,10 @@ export default function PipelineFinanceiro() {
                             : "📱 Digital — anexar PDF"}
                         </span>
                       </div>
+
+                      <BoletoConsultaOrigem consultaCpfId={selectedSolicitacao.metadata?.consulta_cpf_id as string | undefined} />
+
+
 
                       {/* Projeção das parcelas */}
                       {Array.isArray(selectedSolicitacao.metadata?.boleto_parcelas_projecao) && selectedSolicitacao.metadata.boleto_parcelas_projecao.length > 0 && (

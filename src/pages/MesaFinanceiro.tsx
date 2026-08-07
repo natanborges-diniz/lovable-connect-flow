@@ -39,6 +39,7 @@ import { CardTimeline } from "@/components/pipeline/CardTimeline";
 import { EditCardInfoDialog, type EditableField } from "@/components/pipeline/EditCardInfoDialog";
 import { CreateCardDialog } from "@/components/pipeline/CreateCardDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { BoletoConsultaOrigem } from "@/components/financeiro/BoletoConsultaOrigem";
 
 /* ------------------------------------------------------------------ */
 /* Mapeamento coluna → estágio                                         */
@@ -1130,6 +1131,8 @@ function DetalheBlocos({ sol }: { sol: any }) {
                   : "📱 Digital — anexar PDF"}
               </span>
             </div>
+
+            <BoletoConsultaOrigem consultaCpfId={m.consulta_cpf_id as string | undefined} />
 
             {Array.isArray(m.boleto_parcelas_projecao) && m.boleto_parcelas_projecao.length > 0 && (
               <div className="pt-2 border-t border-dashed border-amber-300">

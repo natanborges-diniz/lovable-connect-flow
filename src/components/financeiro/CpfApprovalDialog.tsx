@@ -613,7 +613,10 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
             <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 text-blue-700 border border-blue-500/30">
               <FileText className="h-5 w-5" />
               <div className="flex flex-col">
-                <span className="font-medium text-sm">Boleto já gerado a partir desta consulta</span>
+                <span className="font-medium text-sm">
+                  Boleto já gerado a partir desta consulta
+                  {meta.boleto_protocolo ? ` — ${meta.boleto_protocolo}` : ""}
+                </span>
                 {meta.boleto_gerado_at && (
                   <span className="text-xs">
                     em {format(new Date(meta.boleto_gerado_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
