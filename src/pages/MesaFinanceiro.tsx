@@ -1132,6 +1132,8 @@ function DetalheBlocos({ sol }: { sol: any }) {
               </span>
             </div>
 
+            <BoletoConsultaOrigem consultaCpfId={m.consulta_cpf_id as string | undefined} />
+
             {Array.isArray(m.boleto_parcelas_projecao) && m.boleto_parcelas_projecao.length > 0 && (
               <div className="pt-2 border-t border-dashed border-amber-300">
                 <p className="text-[10px] font-semibold text-amber-800 uppercase mb-1.5">Parcelas a gerar</p>
