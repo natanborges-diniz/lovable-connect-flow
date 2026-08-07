@@ -3613,6 +3613,7 @@ export type Database = {
           titulo: string
         }[]
       }
+      crons_saude: { Args: never; Returns: Json }
       desanitize_corporate_contact: {
         Args: { _telefone: string }
         Returns: Json
