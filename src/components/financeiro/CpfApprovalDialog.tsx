@@ -279,6 +279,20 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
         });
       }
 
+      // Rastreabilidade: quem aprovou/reprovou (timeline do card)
+      await supabase.from("pipeline_card_eventos").insert({
+        entidade: "solicitacao",
+        entidade_id: solicitacao.id,
+        tipo: tipo === "aprovar" ? "cpf_aprovado" : "cpf_reprovado",
+        descricao: tipo === "aprovar"
+          ? `${analistaNome} aprovou a consulta de CPF de ${nomeCliente}`
+          : `${analistaNome} reprovou a consulta de CPF de ${nomeCliente}${justificativa ? `. Motivo: ${justificativa}` : ""}`,
+        usuario_id: user?.id ?? null,
+        usuario_nome: analistaNome,
+      } as any);
+
+
+
       if (targetCol) {
         try {
           await supabase.functions.invoke("pipeline-automations", {
@@ -331,7 +345,8 @@ export function CpfApprovalDialog({ solicitacao, open, onOpenChange, colunas }: 
             .insert({
               solicitacao_id: solicitacao.id,
               tipo: "retorno_setor",
-              autor_nome: "Financeiro",
+              autor_id: user?.id ?? null,
+              autor_nome: `Financeiro · ${analistaNome}`,
               conteudo: mensagem,
             } as any)
             .select();
