@@ -49,6 +49,8 @@ const COLOR_MAP: Record<string, string> = {
   boleto_revisao_concluida: "text-emerald-600",
   boleto_anexo_extra: "text-blue-600",
   boleto_envio_bloqueado: "text-destructive",
+  cpf_aprovado: "text-emerald-600",
+  cpf_reprovado: "text-destructive",
 };
 
 export function CardTimeline({
