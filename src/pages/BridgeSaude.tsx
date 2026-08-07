@@ -101,8 +101,11 @@ export default function BridgeSaude() {
         }
       />
 
+      <CronsSaudeCard />
+
       <Card className="p-4 overflow-x-auto">
         <table className="w-full text-xs">
+
           <thead>
             <tr>
               <th className="text-left py-2 pr-3 sticky left-0 bg-card">Fonte</th>
