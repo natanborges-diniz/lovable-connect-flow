@@ -3151,23 +3151,26 @@ serve(async (req) => {
       console.warn("[OS-PRESKIP] falhou:", (e as Error)?.message);
     }
 
-    // ── PRE-ROUTER (roda ANTES dos skips humano/ponte): pedido explícito de humano ──
+    // ── PRE-ROUTER (roda ANTES dos skips humano/ponte E do debounce): pedido explícito de humano ──
     // Sintoma real (Cairo 21/07): cliente em modo=ponte/hibrido digita "quero falar
-    // com atendente"; skip de ponte cortava o fluxo antes do router de escalada
-    // (linha ~3405), então modo nunca virava humano e card não entrava na fila.
+    // com atendente"; skip de ponte cortava o fluxo antes do router de escalada.
+    // Sintoma real (Kamila 06/08): em modo=ia o cliente respondeu "Falar com atendente"
+    // 5s após a IA responder — o debounce "outbound <10s" descartava a mensagem antes
+    // do router de escalada. Agora roda em QUALQUER modo (exceto já-humano).
     {
       const _msgEsc = String(mensagem_texto || "").trim();
-      if (_msgEsc && (atendimento.modo === "ponte" || atendimento.modo === "hibrido") && matchesEscalation(_msgEsc)) {
+      if (_msgEsc && atendimento.modo !== "humano" && matchesEscalation(_msgEsc)) {
         console.log(`[ROUTER-PRE] Escalation keyword em modo=${atendimento.modo} — forçando handoff humano`);
         const _cid = contato_id || atendimento.contato_id;
         const { data: _ct } = await supabase.from("contatos").select("nome").eq("id", _cid).maybeSingle();
         const _primEsc = (_ct?.nome || "").trim().split(/\s+/)[0] || "";
         return await handleEscalation(
           supabase, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-          atendimento_id, _cid, _msgEsc, "keyword_pre_ponte", _primEsc
+          atendimento_id, _cid, _msgEsc, "keyword_pre_router", _primEsc
         );
       }
     }
+
 
     // ── PRE-ROUTER: Retomar IA quando cliente digita receita após escalada ──
     // Caso Flávia (15/05/2026): IA escalou por OCR ilegível; cliente depois digitou
